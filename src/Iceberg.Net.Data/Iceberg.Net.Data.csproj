@@ -7,5 +7,6 @@
     <PackageReference Include="ParquetSharp" />
     <ProjectReference Include="../Iceberg.Net.Avro/Iceberg.Net.Avro.csproj" />
     <ProjectReference Include="../Iceberg.Net.Catalog/Iceberg.Net.Catalog.csproj" />
+    <ProjectReference Include="../Iceberg.Net.Puffin/Iceberg.Net.Puffin.csproj" />
   </ItemGroup>
 </Project>

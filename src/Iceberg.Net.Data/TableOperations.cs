@@ -4,6 +4,7 @@ using Iceberg.Net.Catalog;
 using Iceberg.Net.Manifests;
 using Iceberg.Net.Metadata;
 using Iceberg.Net.Partitioning;
+using Iceberg.Net.Puffin;
 using Iceberg.Net.Types;
 
 namespace Iceberg.Net.Data;
@@ -20,25 +21,19 @@ public static class TableScan
         return ManifestCodec.ReadManifestList(await table.IO.ReadAllAsync(snapshot.ManifestList, ct)).Manifests;
     }
 
-    /// <summary>
-    /// Plan the live data files of a snapshot (default: current). Phase-0 scope: tables with delete files
-    /// (merge-on-read) are refused rather than silently returning deleted rows.
-    /// </summary>
+    private static Snapshot? Resolve(TableMetadata m, long? snapshotId) =>
+        snapshotId is { } id ? m.SnapshotById(id) ?? throw new ArgumentException($"Unknown snapshot {id}") : m.CurrentSnapshot;
+
+    /// <summary>Plan the live data files of a snapshot (default: current).</summary>
     public static async Task<IReadOnlyList<ScanTask>> PlanFilesAsync(Table table, long? snapshotId = null, Func<DataFile, bool>? filter = null, CancellationToken ct = default)
     {
         var m = table.Metadata;
-        var snapshot = snapshotId is { } id ? m.SnapshotById(id) ?? throw new ArgumentException($"Unknown snapshot {id}") : m.CurrentSnapshot;
+        var snapshot = Resolve(m, snapshotId);
         if (snapshot is null) return [];
 
         var tasks = new List<ScanTask>();
-        foreach (var manifest in await ManifestsAsync(table, snapshot, ct))
+        foreach (var manifest in (await ManifestsAsync(table, snapshot, ct)).Where(mf => mf.Content == ManifestContent.Data))
         {
-            if (manifest.Content == ManifestContent.Deletes)
-            {
-                if (manifest.AddedFilesCount + manifest.ExistingFilesCount > 0)
-                    throw new NotSupportedException("Merge-on-read delete files are not supported by the phase-0 reader");
-                continue;
-            }
             var spec = m.SpecById(manifest.PartitionSpecId);
             var contents = ManifestCodec.ReadManifest(await table.IO.ReadAllAsync(manifest.ManifestPath, ct), spec, m.CurrentSchema, manifest);
             foreach (var e in contents.Entries)
@@ -51,14 +46,29 @@ public static class TableScan
         return tasks;
     }
 
-    /// <summary>Read all rows of a snapshot, projected onto the current schema (by field ID).</summary>
+    /// <summary>The delete files (v2 position deletes, v3 deletion vectors) of a snapshot.</summary>
+    public static async Task<DeleteIndex> DeletesAsync(Table table, long? snapshotId = null, CancellationToken ct = default)
+    {
+        var snapshot = Resolve(table.Metadata, snapshotId);
+        return snapshot is null ? await DeleteIndex.LoadAsync(table, [], ct) : await DeleteIndex.LoadAsync(table, await ManifestsAsync(table, snapshot, ct), ct);
+    }
+
+    /// <summary>
+    /// Read all rows of a snapshot, projected onto the current schema (by field ID), with position deletes
+    /// and deletion vectors applied (merge-on-read). Equality deletes are refused.
+    /// </summary>
     public static async Task<List<object?[]>> ReadAllAsync(Table table, long? snapshotId = null, CancellationToken ct = default)
     {
+        var deletes = await DeletesAsync(table, snapshotId, ct);
+        var mapping = NameMapping.ForTable(table.Metadata.Properties);
         var rows = new List<object?[]>();
         foreach (var task in await PlanFilesAsync(table, snapshotId, null, ct))
         {
             if (task.File.FileFormat != "PARQUET") throw new NotSupportedException($"{task.File.FileFormat} data files are not supported");
-            rows.AddRange(await ParquetFiles.ReadAsync(table.IO, task.File.FilePath, table.Schema, ct));
+            var fileRows = await ParquetFiles.ReadAsync(table.IO, task.File.FilePath, table.Schema, mapping, ct);
+            var deleted = deletes.IsEmpty ? null : await deletes.DeletedPositionsAsync(task.File, task.DataSequenceNumber, ct);
+            if (deleted is null) rows.AddRange(fileRows);
+            else rows.AddRange(fileRows.Where((_, pos) => !deleted.Contains(pos)));
         }
         return rows;
     }
@@ -123,7 +133,12 @@ public sealed class SnapshotProducer
     private readonly Dictionary<string, string> _extraSummary = [];
     private string? _writtenManifest;
     private ManifestFile? _writtenManifestFile;
+    /// <summary>Files written by failed attempts (deleted after a successful commit unless the winner references them).</summary>
     private readonly List<string> _staleArtifacts = [];
+    /// <summary>Files written by the current attempt (kept if it commits).</summary>
+    private readonly List<string> _attemptArtifacts = [];
+    private Dictionary<string, RoaringPositionBitmap>? _rowDeletes;
+    private bool _convertPositionDeletes;
 
     private SnapshotProducer(Table table) => _table = table;
 
@@ -136,6 +151,32 @@ public sealed class SnapshotProducer
     /// <summary>Remove whole data files without adding any (a metadata-only delete).</summary>
     public static SnapshotProducer DeleteFiles(Table table, Func<DataFile, bool> deleteWhere) =>
         new(table) { _deleteWhere = deleteWhere, _operation = Operations.Delete };
+
+    /// <summary>
+    /// Merge-on-read row delete: mark <paramref name="positions"/> (0-based row positions) of the given data
+    /// files as deleted. v2 tables get one position delete file per data file; v3 tables get deletion
+    /// vectors in a Puffin file, merged with any existing DV or v2 position deletes for the same data file
+    /// (the spec allows at most one DV per data file).
+    /// </summary>
+    public static SnapshotProducer DeleteRows(Table table, IReadOnlyDictionary<string, IEnumerable<long>> positions)
+    {
+        var producer = new SnapshotProducer(table) { _operation = Operations.Delete, _rowDeletes = new(StringComparer.Ordinal) };
+        foreach (var (file, pos) in positions)
+        {
+            var bm = new RoaringPositionBitmap();
+            bm.AddRange(pos);
+            producer._rowDeletes[file] = bm;
+        }
+        return producer;
+    }
+
+    /// <summary>
+    /// The v2 → v3 "Puffin converter": fold every v2 position delete file (and any existing DV) into one
+    /// deletion vector per data file and remove the position delete files. The table's rows do not
+    /// change, so the snapshot operation is <c>replace</c>. Requires a v3 table.
+    /// </summary>
+    public static SnapshotProducer ConvertPositionDeletesToDeletionVectors(Table table) =>
+        new(table) { _operation = Operations.Replace, _convertPositionDeletes = true };
 
     public SnapshotProducer AddFiles(IEnumerable<DataFile> files)
     {
@@ -167,11 +208,14 @@ public sealed class SnapshotProducer
                     new MetadataUpdate.AddSnapshot(snapshot),
                     new MetadataUpdate.SetSnapshotRef(SnapshotRef.Main, SnapshotRef.Branch(snapshot.SnapshotId)),
                 ], ct);
+                _attemptArtifacts.Clear();
                 await CleanupAsync(ct);
                 return snapshot;
             }
             catch (CommitFailedException) when (attempt < policy.NumRetries)
             {
+                _staleArtifacts.AddRange(_attemptArtifacts);
+                _attemptArtifacts.Clear();
                 var wait = Math.Min(policy.MaxWaitMs, policy.MinWaitMs * (1 << Math.Min(attempt, 20)));
                 await Task.Delay(wait + Random.Shared.Next(wait / 10 + 1), ct);
                 await _table.RefreshAsync(ct);
@@ -198,14 +242,25 @@ public sealed class SnapshotProducer
 
         var manifests = new List<ManifestFile>();
         long deletedFiles = 0, deletedRecords = 0, deletedSize = 0;
+        var parentManifests = parent is null ? [] : await TableScan.ManifestsAsync(_table, parent, ct);
+
+        // 0. Row-level deletes / conversion: decide which delete files to add and which to remove.
+        var deleteChange = _rowDeletes is not null || _convertPositionDeletes
+            ? await PlanDeleteChangeAsync(parent, parentManifests, commitUuid, ct)
+            : DeleteChange.None;
 
         // 1. Carry forward (or rewrite, when deleting) the parent's manifests.
         if (parent is not null)
         {
             var rewriteIndex = 0;
-            foreach (var manifest in await TableScan.ManifestsAsync(_table, parent, ct))
+            foreach (var manifest in parentManifests)
             {
-                if (_deleteWhere is null || manifest.Content == ManifestContent.Deletes)
+                if (manifest.Content == ManifestContent.Deletes)
+                {
+                    manifests.Add(await RewriteDeleteManifestAsync(manifest, deleteChange.Removed, snapshotId, sequenceNumber, $"{metaDir}/{commitUuid}-d{rewriteIndex++}.avro", ct));
+                    continue;
+                }
+                if (_deleteWhere is null)
                 {
                     manifests.Add(manifest);
                     continue;
@@ -227,9 +282,19 @@ public sealed class SnapshotProducer
                 deletedRecords += matched.Sum(e => e.DataFile.RecordCount);
                 deletedSize += matched.Sum(e => e.DataFile.FileSizeInBytes);
                 var path = $"{metaDir}/{commitUuid}-m{rewriteIndex++}.avro";
-                manifests.Add(await WriteManifestAsync(path, spec, rewritten, snapshotId, sequenceNumber, ct));
-                _staleArtifacts.Add(path);
+                manifests.Add(await WriteManifestAsync(path, spec, ManifestContent.Data, rewritten, snapshotId, sequenceNumber, ct));
+                _attemptArtifacts.Add(path);
             }
+        }
+
+        // 1b. New delete files: one delete manifest per partition spec.
+        var deleteManifestIndex = 0;
+        foreach (var group in deleteChange.Added.GroupBy(f => f.SpecId))
+        {
+            var path = $"{metaDir}/{commitUuid}-m-deletes{deleteManifestIndex++}.avro";
+            var entries = group.Select(f => new ManifestEntry(ManifestEntryStatus.Added, null, null, null, f)).ToList();
+            manifests.Add(await WriteManifestAsync(path, m.SpecById(group.Key), ManifestContent.Deletes, entries, snapshotId, sequenceNumber, ct));
+            _attemptArtifacts.Add(path);
         }
 
         // 2. One new manifest for added files, written once and reused across retries.
@@ -240,7 +305,7 @@ public sealed class SnapshotProducer
                 _writtenManifest = $"{metaDir}/{commitUuid}-m-added.avro";
                 // Null snapshot ID and sequence numbers: inherited from the manifest list, so this file is valid for any attempt.
                 var entries = _added.Select(f => new ManifestEntry(ManifestEntryStatus.Added, null, null, null, f)).ToList();
-                _writtenManifestFile = await WriteManifestAsync(_writtenManifest, m.DefaultSpec, entries, snapshotId, sequenceNumber, ct);
+                _writtenManifestFile = await WriteManifestAsync(_writtenManifest, m.DefaultSpec, ManifestContent.Data, entries, snapshotId, sequenceNumber, ct);
             }
             manifests.Insert(0, _writtenManifestFile! with { SequenceNumber = sequenceNumber, MinSequenceNumber = sequenceNumber, AddedSnapshotId = snapshotId });
         }
@@ -262,7 +327,7 @@ public sealed class SnapshotProducer
 
         var listPath = $"{metaDir}/snap-{snapshotId}-1-{commitUuid}.avro";
         await _table.IO.WriteAsync(listPath, ManifestCodec.WriteManifestList(m.FormatVersion, snapshotId, parent?.SnapshotId, sequenceNumber, manifests, firstRowId), overwrite: false, ct);
-        _staleArtifacts.Add(listPath);
+        _attemptArtifacts.Add(listPath);
 
         var operation = _operation == Operations.Overwrite && deletedFiles == 0 ? Operations.Append : _operation;
         return new Snapshot
@@ -273,16 +338,134 @@ public sealed class SnapshotProducer
             TimestampMs = DateTimeOffset.UtcNow.ToUnixTimeMilliseconds(),
             ManifestList = listPath,
             SchemaId = m.CurrentSchemaId,
-            Summary = Summary(operation, parent, deletedFiles, deletedRecords, deletedSize),
+            Summary = Summary(operation, parent, deletedFiles, deletedRecords, deletedSize, deleteChange),
             FirstRowId = firstRowId,
             AddedRows = addedRows,
         };
     }
 
-    private async Task<ManifestFile> WriteManifestAsync(string path, PartitionSpec spec, IReadOnlyList<ManifestEntry> entries, long snapshotId, long sequenceNumber, CancellationToken ct)
+    /// <summary>Delete files to add and (path, content offset) keys of live delete files to remove.</summary>
+    private sealed record DeleteChange(IReadOnlyList<DataFile> Added, IReadOnlySet<(string Path, long? Offset)> Removed, IReadOnlyList<DataFile> RemovedFiles)
+    {
+        public static readonly DeleteChange None = new([], new HashSet<(string, long?)>(), []);
+    }
+
+    private async Task<DeleteChange> PlanDeleteChangeAsync(Snapshot? parent, IReadOnlyList<ManifestFile> parentManifests, Guid commitUuid, CancellationToken ct)
     {
         var m = _table.Metadata;
-        var bytes = ManifestCodec.WriteManifest(m.FormatVersion, m.CurrentSchema, spec, ManifestContent.Data, entries);
+        if (_convertPositionDeletes && m.FormatVersion < 3) throw new NotSupportedException("Converting position deletes to deletion vectors requires a v3 table");
+        if (parent is null)
+        {
+            if (_rowDeletes is { Count: > 0 }) throw new ValidationException("Cannot delete rows from a table with no snapshot");
+            return DeleteChange.None;
+        }
+
+        var index = await DeleteIndex.LoadAsync(_table, parentManifests, ct);
+        var live = (await TableScan.PlanFilesAsync(_table, parent.SnapshotId, null, ct)).ToDictionary(t => t.File.FilePath, StringComparer.Ordinal);
+        var targets = new Dictionary<string, RoaringPositionBitmap>(StringComparer.Ordinal);
+        foreach (var (path, bm) in _rowDeletes ?? [])
+        {
+            // Re-validated on every attempt: a concurrent commit may have removed the data file.
+            if (!live.ContainsKey(path)) throw new ValidationException($"Cannot delete rows from {path}: it is not a live data file in snapshot {parent.SnapshotId}");
+            var copy = new RoaringPositionBitmap();
+            copy.Or(bm);
+            targets[path] = copy;
+        }
+
+        var removed = new HashSet<(string, long?)>();
+        var removedFiles = new List<DataFile>();
+        void Remove(DataFile f)
+        {
+            if (removed.Add((f.FilePath, f.ContentOffset))) removedFiles.Add(f);
+        }
+
+        if (m.FormatVersion >= 3)
+        {
+            if (_convertPositionDeletes)
+            {
+                foreach (var pd in index.All.Where(e => !e.IsDeletionVector))
+                {
+                    foreach (var (dataPath, positions) in await index.PositionDeletesAsync(pd.File.FilePath))
+                    {
+                        // Dangling deletes (data file already removed) or deletes older than the data file are dropped.
+                        if (!live.TryGetValue(dataPath, out var task) || pd.DataSequenceNumber < task.DataSequenceNumber) continue;
+                        if (!targets.TryGetValue(dataPath, out var bm)) targets[dataPath] = bm = new RoaringPositionBitmap();
+                        bm.Or(positions);
+                    }
+                    Remove(pd.File);
+                }
+            }
+
+            foreach (var (dataPath, bm) in targets)
+            {
+                var task = live[dataPath];
+                // At most one DV per data file: fold the existing DV (or applicable v2 position deletes) in.
+                if (index.DeletionVectorFor(dataPath) is { } existing)
+                {
+                    bm.Or(await index.ReadDeletionVectorAsync(existing.File, ct));
+                    Remove(existing.File);
+                }
+                else if (await index.DeletedPositionsAsync(task.File, task.DataSequenceNumber, ct) is { } older)
+                {
+                    bm.Or(older);
+                }
+            }
+            if (targets.Count == 0) return new DeleteChange([], removed, removedFiles);
+
+            var ordered = targets.OrderBy(t => t.Key, StringComparer.Ordinal).ToList();
+            var written = PuffinFile.Write(ordered.Select(t => DeletionVector.ToBlob(t.Key, t.Value)));
+            var location = $"{DataDir(m)}/{commitUuid:N}-deletes.puffin";
+            await _table.IO.WriteAsync(location, written.Bytes, overwrite: false, ct);
+            _attemptArtifacts.Add(location);
+            var added = ordered.Select((t, i) => new DataFile
+            {
+                Content = FileContent.PositionDeletes,
+                FilePath = location,
+                FileFormat = "PUFFIN",
+                SpecId = live[t.Key].File.SpecId,
+                Partition = live[t.Key].File.Partition,
+                RecordCount = t.Value.Cardinality,
+                FileSizeInBytes = written.Bytes.Length,
+                ReferencedDataFile = t.Key,
+                ContentOffset = written.Blobs[i].Offset,
+                ContentSizeInBytes = written.Blobs[i].Length,
+            }).ToList();
+            return new DeleteChange(added, removed, removedFiles);
+        }
+
+        // v2: one position delete file per data file.
+        var v2Added = new List<DataFile>();
+        foreach (var (dataPath, bm) in targets.OrderBy(t => t.Key, StringComparer.Ordinal))
+        {
+            var data = live[dataPath].File;
+            var location = $"{DataDir(m)}/{commitUuid:N}-{v2Added.Count:D5}-deletes.parquet";
+            v2Added.Add(await PositionDeleteFiles.WriteAsync(_table.IO, location, data.SpecId, data.Partition, bm.Positions().Select(p => (dataPath, p)), ct));
+            _attemptArtifacts.Add(location);
+        }
+        return new DeleteChange(v2Added, removed, removedFiles);
+    }
+
+    private static string DataDir(TableMetadata m) => m.Property("write.data.path", $"{m.Location}/data").TrimEnd('/');
+
+    private async Task<ManifestFile> RewriteDeleteManifestAsync(ManifestFile manifest, IReadOnlySet<(string Path, long? Offset)> removed, long snapshotId, long sequenceNumber, string path, CancellationToken ct)
+    {
+        if (removed.Count == 0) return manifest;
+        var m = _table.Metadata;
+        var spec = m.SpecById(manifest.PartitionSpecId);
+        var entries = ManifestCodec.ReadManifest(await _table.IO.ReadAllAsync(manifest.ManifestPath, ct), spec, m.CurrentSchema, manifest).Entries
+            .Where(e => e.Status != ManifestEntryStatus.Deleted).ToList();
+        if (!entries.Any(e => removed.Contains((e.DataFile.FilePath, e.DataFile.ContentOffset)))) return manifest;
+        var rewritten = entries.Select(e => removed.Contains((e.DataFile.FilePath, e.DataFile.ContentOffset))
+            ? e with { Status = ManifestEntryStatus.Deleted, SnapshotId = snapshotId }
+            : e with { Status = ManifestEntryStatus.Existing }).ToList();
+        _attemptArtifacts.Add(path);
+        return await WriteManifestAsync(path, spec, ManifestContent.Deletes, rewritten, snapshotId, sequenceNumber, ct);
+    }
+
+    private async Task<ManifestFile> WriteManifestAsync(string path, PartitionSpec spec, ManifestContent content, IReadOnlyList<ManifestEntry> entries, long snapshotId, long sequenceNumber, CancellationToken ct)
+    {
+        var m = _table.Metadata;
+        var bytes = ManifestCodec.WriteManifest(m.FormatVersion, m.CurrentSchema, spec, content, entries);
         await _table.IO.WriteAsync(path, bytes, overwrite: false, ct);
         var partitionType = spec.PartitionType(m.CurrentSchema);
         var live = entries.Where(e => e.Status != ManifestEntryStatus.Deleted).ToList();
@@ -291,7 +474,7 @@ public sealed class SnapshotProducer
             ManifestPath = path,
             ManifestLength = bytes.Length,
             PartitionSpecId = spec.SpecId,
-            Content = ManifestContent.Data,
+            Content = content,
             SequenceNumber = sequenceNumber,
             MinSequenceNumber = entries.Select(e => e.SequenceNumber ?? sequenceNumber).DefaultIfEmpty(sequenceNumber).Min(),
             AddedSnapshotId = snapshotId,
@@ -323,7 +506,7 @@ public sealed class SnapshotProducer
         }).ToList();
     }
 
-    private Dictionary<string, string> Summary(string operation, Snapshot? parent, long deletedFiles, long deletedRecords, long deletedSize)
+    private Dictionary<string, string> Summary(string operation, Snapshot? parent, long deletedFiles, long deletedRecords, long deletedSize, DeleteChange deletes)
     {
         static long Prev(Snapshot? p, string key) => p?.Summary.TryGetValue(key, out var v) == true && long.TryParse(v, CultureInfo.InvariantCulture, out var n) ? n : 0;
         string S(long v) => v.ToString(CultureInfo.InvariantCulture);
@@ -339,8 +522,8 @@ public sealed class SnapshotProducer
             ["total-data-files"] = S(Prev(parent, "total-data-files") + _added.Count - deletedFiles),
             ["total-records"] = S(Prev(parent, "total-records") + addedRecords - deletedRecords),
             ["total-files-size"] = S(Prev(parent, "total-files-size") + addedSize - deletedSize),
-            ["total-delete-files"] = S(Prev(parent, "total-delete-files")),
-            ["total-position-deletes"] = S(Prev(parent, "total-position-deletes")),
+            ["total-delete-files"] = S(Prev(parent, "total-delete-files") + deletes.Added.Count - deletes.RemovedFiles.Count),
+            ["total-position-deletes"] = S(Prev(parent, "total-position-deletes") + deletes.Added.Sum(f => f.RecordCount) - deletes.RemovedFiles.Sum(f => f.RecordCount)),
             ["total-equality-deletes"] = S(Prev(parent, "total-equality-deletes")),
             ["engine-name"] = "iceberg-net",
         };
@@ -349,6 +532,20 @@ public sealed class SnapshotProducer
             summary["deleted-data-files"] = S(deletedFiles);
             summary["deleted-records"] = S(deletedRecords);
             summary["removed-files-size"] = S(deletedSize);
+        }
+        if (deletes.Added.Count > 0)
+        {
+            summary["added-delete-files"] = S(deletes.Added.Count);
+            summary["added-position-deletes"] = S(deletes.Added.Sum(f => f.RecordCount));
+            var dvs = deletes.Added.Count(f => f.FileFormat == "PUFFIN");
+            if (dvs > 0) summary["added-dvs"] = S(dvs);
+        }
+        if (deletes.RemovedFiles.Count > 0)
+        {
+            summary["removed-delete-files"] = S(deletes.RemovedFiles.Count);
+            summary["removed-position-deletes"] = S(deletes.RemovedFiles.Sum(f => f.RecordCount));
+            var dvs = deletes.RemovedFiles.Count(f => f.FileFormat == "PUFFIN");
+            if (dvs > 0) summary["removed-dvs"] = S(dvs);
         }
         foreach (var (k, v) in _extraSummary) summary[k] = v;
         return summary;
@@ -367,6 +564,9 @@ public sealed class SnapshotProducer
         _staleArtifacts.Clear();
     }
 }
+
+/// <summary>A commit's preconditions no longer hold on the current table (not retryable, unlike <see cref="CommitFailedException"/>).</summary>
+public sealed class ValidationException(string message) : Exception(message);
 
 public static class Maintenance
 {

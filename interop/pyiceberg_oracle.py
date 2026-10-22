@@ -6,6 +6,8 @@ Commands (all output is JSON on stdout so the C# suite can assert on it):
     write <catalog> <table> <rows>   create (or replace) a partitioned table and append rows
     read <catalog> <table>           print row count, rows, snapshot summary and spec details
     read-metadata <metadata.json>    same, for a table addressed only by its metadata file
+    puffin-fixtures <out_dir>        reference Theta sketches (datasketches) and deletion vectors (pyroaring)
+    inspect-puffin <file.puffin>     decode a Puffin file with PyIceberg + datasketches and report contents
 
 <catalog> is "glue" or "rest". Endpoints and credentials come from the same environment
 variables the C# regression suite reads (see docs/regression-suite.md), so both sides
@@ -15,10 +17,13 @@ always talk to the same emulator or AWS account.
 from __future__ import annotations
 
 import datetime as dt
+import decimal
 import json
 import os
 import shutil
 import sys
+import uuid
+import zlib
 from pathlib import Path
 from typing import Any
 
@@ -114,6 +119,10 @@ def env_catalog(kind: str) -> Catalog:
 def to_jsonable(value: Any) -> Any:
     if isinstance(value, dt.datetime):
         return int(value.timestamp() * 1_000_000)
+    if isinstance(value, dt.date):
+        return value.isoformat()
+    if isinstance(value, (uuid.UUID, decimal.Decimal)):
+        return str(value)
     return value
 
 
@@ -207,6 +216,128 @@ def cmd_fixtures(out_dir: Path) -> dict[str, Any]:
     return result
 
 
+DV_MAGIC = bytes([0xD1, 0xD3, 0x39, 0x64])
+
+
+def dv_blob(positions: list[int], run_optimize: bool) -> bytes:
+    """deletion-vector-v1 framing around a Roaring64 portable bitmap, built independently of PyIceberg."""
+    from pyroaring import BitMap
+
+    by_key: dict[int, list[int]] = {}
+    for p in positions:
+        by_key.setdefault(p >> 32, []).append(p & 0xFFFFFFFF)
+    vector = len(by_key).to_bytes(8, "little")
+    for key in sorted(by_key):
+        bm = BitMap(by_key[key])
+        if run_optimize:
+            bm.run_optimize()
+        vector += key.to_bytes(4, "little") + bm.serialize()
+    body = DV_MAGIC + vector
+    crc = zlib.crc32(body).to_bytes(4, "big")
+    return len(body).to_bytes(4, "big") + body + crc
+
+
+def puffin(blobs: list[tuple[dict[str, Any], bytes]]) -> bytes:
+    out = b"PFA1"
+    metadata = []
+    for meta, payload in blobs:
+        metadata.append(meta | {"offset": len(out), "length": len(payload)})
+        out += payload
+    footer = json.dumps(
+        {"blobs": metadata, "properties": {"created-by": "oracle"}}
+    ).encode()
+    return (
+        out + b"PFA1" + footer + len(footer).to_bytes(4, "little") + bytes(4) + b"PFA1"
+    )
+
+
+def cmd_puffin_fixtures(out_dir: Path) -> dict[str, Any]:
+    from datasketches import update_theta_sketch
+
+    out_dir.mkdir(parents=True, exist_ok=True)
+    expected: dict[str, Any] = {"theta": {}, "dv": {}}
+    for name, values in {
+        "empty": [],
+        "single": ["iceberg"],
+        "exact3": ["v0", "v1", "v2"],
+        "est10k": [f"v{i}" for i in range(10_000)],
+    }.items():
+        sketch = update_theta_sketch()
+        for v in values:
+            sketch.update(v)
+        compact = sketch.compact()
+        (out_dir / f"theta-{name}.bin").write_bytes(compact.serialize())
+        expected["theta"][name] = {
+            "estimate": compact.get_estimate(),
+            "retained": compact.num_retained,
+            "theta64": compact.theta64,
+            "distinct": len(set(values)),
+        }
+
+    ranges = [
+        (0, 1),
+        (5, 6),
+        (70_000, 70_001),
+        (100_000, 110_000),
+        ((1 << 32) + 3, (1 << 32) + 4),
+    ]
+    positions = [p for start, end in ranges for p in range(start, end)]
+    blobs = []
+    for i, run_optimize in enumerate([False, True]):
+        data_file = f"s3://bucket/data/file-{i}.parquet"
+        blobs.append(
+            (
+                {
+                    "type": "deletion-vector-v1",
+                    "fields": [2147483545],
+                    "snapshot-id": -1,
+                    "sequence-number": -1,
+                    "properties": {
+                        "referenced-data-file": data_file,
+                        "cardinality": str(len(positions)),
+                    },
+                },
+                dv_blob(positions, run_optimize),
+            )
+        )
+    (out_dir / "dv.puffin").write_bytes(puffin(blobs))
+    expected["dv"] = {"ranges": ranges, "cardinality": len(positions), "files": 2}
+    (out_dir / "expected.json").write_text(json.dumps(expected, indent=2) + "\n")
+    return expected
+
+
+def cmd_inspect_puffin(location: str) -> dict[str, Any]:
+    from datasketches import compact_theta_sketch
+    from pyiceberg.table.deletion_vector import deletion_vectors_from_puffin_file
+    from pyiceberg.table.puffin import PuffinFile
+
+    raw = Path(location).read_bytes()
+    pf = PuffinFile(raw)
+    result: dict[str, Any] = {"blobs": [], "deletion_vectors": {}}
+    for blob in pf.footer.blobs:
+        payload = pf.get_blob_payload(blob)
+        info: dict[str, Any] = {
+            "type": blob.type,
+            "fields": blob.fields,
+            "properties": blob.properties,
+        }
+        if blob.type == "apache-datasketches-theta-v1":
+            sketch = compact_theta_sketch.deserialize(payload)
+            info |= {"estimate": sketch.get_estimate(), "retained": sketch.num_retained}
+        if blob.type == "deletion-vector-v1":
+            length = int.from_bytes(payload[:4], "big")
+            info["crc_ok"] = zlib.crc32(payload[4 : 4 + length]) == int.from_bytes(
+                payload[4 + length : 8 + length], "big"
+            )
+        result["blobs"].append(info)
+    if any(b.type == "deletion-vector-v1" for b in pf.footer.blobs):
+        for dv in deletion_vectors_from_puffin_file(pf):
+            result["deletion_vectors"][dv.referenced_data_file] = (
+                dv.to_vector().to_pylist()
+            )
+    return result
+
+
 def main(argv: list[str]) -> None:
     match argv:
         case ["fixtures", out]:
@@ -217,6 +348,10 @@ def main(argv: list[str]) -> None:
             result = describe(env_catalog(kind), identifier)
         case ["read-metadata", location]:
             result = describe_table(StaticTable.from_metadata(location))
+        case ["puffin-fixtures", out]:
+            result = cmd_puffin_fixtures(Path(out))
+        case ["inspect-puffin", location]:
+            result = cmd_inspect_puffin(location)
         case _:
             raise SystemExit(__doc__)
     json.dump(result, sys.stdout)

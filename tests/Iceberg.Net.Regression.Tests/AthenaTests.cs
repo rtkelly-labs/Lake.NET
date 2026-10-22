@@ -80,10 +80,24 @@ public sealed class AthenaTests
 
             var table = await catalog.LoadTableAsync(new TableIdentifier(Namespace.Of(ns), "t"));
             Assert.Equal(2, table.Metadata.FormatVersion);
-            // Phase-0 reader refuses merge-on-read rather than returning deleted rows; this pins that contract
-            // until position-delete support lands (docs/roadmap.md, milestone M2).
-            await Assert.ThrowsAsync<NotSupportedException>(() => TableScan.ReadAllAsync(table));
+            // Athena's position delete files are applied (merge-on-read): row 2 is gone.
+            Assert.Equal([1L, 3L], (await TableScan.ReadAllAsync(table)).Select(r => (long)r[0]!).Order());
             Assert.Equal(3, (await TableScan.ReadAllAsync(table, table.Metadata.CurrentSnapshot!.ParentSnapshotId)).Count);
+            Assert.Contains((await TableScan.DeletesAsync(table)).All, e => !e.IsDeletionVector);
+
+            // We write on top of Athena's deletes, and Athena still reads the result.
+            // Delete id = 1 by position, found by reading Athena's data files directly.
+            var target = new Dictionary<string, IEnumerable<long>>();
+            foreach (var task in await TableScan.PlanFilesAsync(table))
+            {
+                var fileRows = await ParquetFiles.ReadAsync(table.IO, task.File.FilePath, table.Schema);
+                var pos = fileRows.FindIndex(r => (long)r[0]! == 1);
+                if (pos >= 0) target[task.File.FilePath] = [pos];
+            }
+            await SnapshotProducer.DeleteRows(table, target).CommitAsync();
+            Assert.Equal([3L], (await TableScan.ReadAllAsync(table)).Select(r => (long)r[0]!));
+            var count = await QueryAsync($"SELECT count(*) FROM \"{ns}\".t");
+            Assert.Equal("1", count.Single()[0]);
         }
         finally
         {

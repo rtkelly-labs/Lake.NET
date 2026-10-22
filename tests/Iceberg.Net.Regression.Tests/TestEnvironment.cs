@@ -30,6 +30,8 @@ public sealed class TestEnvironment
     public string? SkipReason { get; }
     public string? RestSkipReason { get; }
     public string? OracleSkipReason { get; }
+    /// <summary>Oracle availability for tests that only use the local filesystem (no emulator or AWS).</summary>
+    public string? LocalOracleSkipReason { get; }
     public string? AthenaSkipReason { get; }
 
     private static string? Env(string name) => Environment.GetEnvironmentVariable(name) is { Length: > 0 } v ? v : null;
@@ -70,7 +72,8 @@ public sealed class TestEnvironment
         }
 
         Environment.SetEnvironmentVariable("ICEBERG_WAREHOUSE", Warehouse);
-        OracleSkipReason = SkipReason ?? (OracleCommand() is null ? "PyIceberg oracle unavailable: set ICEBERG_PYTHON to an interpreter with interop/pyproject.toml installed, or install uv" : null);
+        LocalOracleSkipReason = OracleCommand() is null ? "PyIceberg oracle unavailable: set ICEBERG_PYTHON to an interpreter with interop/pyproject.toml installed, or install uv" : null;
+        OracleSkipReason = SkipReason ?? LocalOracleSkipReason;
         if (required && SkipReason is not null) throw new InvalidOperationException($"ICEBERG_REQUIRE_TARGET=1 but: {SkipReason}");
     }
 
@@ -151,5 +154,6 @@ public static class Require
     public static void Target() => Skip.If(TestEnvironment.Current.SkipReason is not null, TestEnvironment.Current.SkipReason);
     public static void Catalog(string kind) => Skip.If(TestEnvironment.Current.CatalogSkipReason(kind) is not null, TestEnvironment.Current.CatalogSkipReason(kind));
     public static void Oracle() => Skip.If(TestEnvironment.Current.OracleSkipReason is not null, TestEnvironment.Current.OracleSkipReason);
+    public static void LocalOracle() => Skip.If(TestEnvironment.Current.LocalOracleSkipReason is not null, TestEnvironment.Current.LocalOracleSkipReason);
     public static void Athena() => Skip.If(TestEnvironment.Current.AthenaSkipReason is not null, TestEnvironment.Current.AthenaSkipReason);
 }

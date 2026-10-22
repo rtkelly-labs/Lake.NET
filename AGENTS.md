@@ -9,6 +9,8 @@ Self-contained C# port of Apache Iceberg. Keep it that way: no references to cod
 | Adding or changing a catalog | [docs/catalogs.md](docs/catalogs.md) — every catalog must pass `CatalogConformanceTests` |
 | Running tests (spec / emulation / AWS) | [docs/regression-suite.md](docs/regression-suite.md) |
 | Emulator gaps and shims | [docs/emulation.md](docs/emulation.md) |
+| Deletes, deletion vectors, Puffin, statistics | [docs/puffin.md](docs/puffin.md) |
+| Adopting files from other Parquet writers (Parquet.SourceGenerator) | [docs/parquet-sourcegenerator.md](docs/parquet-sourcegenerator.md) |
 
 ## Commands
 
@@ -19,6 +21,7 @@ Self-contained C# port of Apache Iceberg. Keep it that way: no references to cod
 | Start emulators | `./emulation/up.sh` |
 | Regression (emulation) | `ICEBERG_PYTHON=<python with interop deps> dotnet test tests/Iceberg.Net.Regression.Tests` |
 | Regenerate PyIceberg fixtures | `uv run --project interop python -I interop/pyiceberg_oracle.py fixtures tests/Iceberg.Net.Spec.Tests/fixtures/pyiceberg` |
+| Regenerate Puffin/DataSketches/Roaring fixtures | `uv run --project interop python -I interop/pyiceberg_oracle.py puffin-fixtures tests/Iceberg.Net.Spec.Tests/fixtures/puffin` |
 | Python lint/format (repo rules) | from repo root: `uv run ruff check iceberg-dotnet && uv run ruff format iceberg-dotnet` |
 
 ## Rules

@@ -21,7 +21,7 @@ Legend: ✅ implemented and tested · 🟡 partial · ⬜ not started · — not
 
 | Section | v1 | v2 | v3 | Status | Tests |
 |---|---|---|---|---|---|
-| Primitive types (boolean … binary) | ✓ | ✓ | ✓ | ✅ model + JSON; 🟡 Parquet I/O lacks decimal, uuid, fixed | `MetadataSpecTests` |
+| Primitive types (boolean … binary) | ✓ | ✓ | ✓ | ✅ model + JSON + Parquet I/O incl. decimal (write P≤18) and uuid; 🟡 fixed not in Parquet I/O | `MetadataSpecTests`, `NameMappingAndImportTests` |
 | `timestamp_ns`, `timestamptz_ns` | | | ✓ | ✅ model, JSON, transforms, Parquet I/O | `TransformSpecTests` |
 | `variant` | | | ✓ | 🟡 model + JSON only (no shredding/encoding) | `MetadataSpecTests` |
 | `geometry`, `geography` (CRS, algorithm) | | | ✓ | 🟡 model + JSON only (WKB I/O and bounds not done) | `MetadataSpecTests` |
@@ -31,7 +31,7 @@ Legend: ✅ implemented and tested · 🟡 partial · ⬜ not started · — not
 | Identifier field IDs (required, non-float) | ✓ | ✓ | ✓ | ✅ | `MetadataSpecTests` |
 | Schema evolution & type promotion (int→long, float→double, decimal widening, v3 date→timestamp, unknown→any) | ✓ | ✓ | ✓ | ✅ rules; 🟡 no `UpdateSchema` builder API yet (callers build the new schema) | `MetadataSpecTests`, `LocalTableTests` |
 | Column projection by field ID | ✓ | ✓ | ✓ | ✅ (name fallback only when a file has no IDs) | `PyIcebergFixtureTests` |
-| Name mapping (`schema.name-mapping.default`) | ✓ | ✓ | ✓ | ⬜ | |
+| Name mapping (`schema.name-mapping.default`) | ✓ | ✓ | ✓ | ✅ top-level columns, aliases for renames | `NameMappingAndImportTests` |
 | Reserved field IDs / metadata columns (`_file`, `_pos`, `_row_id`, …) | ✓ | ✓ | ✓ | ⬜ | |
 
 ### Partitioning and sorting
@@ -71,10 +71,10 @@ Legend: ✅ implemented and tested · 🟡 partial · ⬜ not started · — not
 
 | Section | Status | Notes |
 |---|---|---|
-| Position delete files (v2) | ⬜ | reader refuses MoR tables rather than returning deleted rows (`AthenaTests` pins this) |
-| Equality delete files (v2) | ⬜ | v4 bans writing new ones; read support still required |
-| Deletion vectors (v3, Puffin `deletion-vector-v1`) | ⬜ | needs Roaring64 portable codec ([libraries](libraries.md#roaring-bitmaps-and-deletion-vectors)) |
-| Delete applicability by sequence number | ⬜ | `ScanTask.DataSequenceNumber` already carried |
+| Position delete files (v2) | ✅ read + write (one file per data file) | `RowDeleteTests`, `PuffinCrossEngineTests` (PyIceberg applies ours), `AthenaTests` (we apply Athena's) |
+| Equality delete files (v2) | ⬜ | scans refuse them explicitly; v4 bans writing new ones, read support still required |
+| Deletion vectors (v3, Puffin `deletion-vector-v1`) | ✅ read + write; one DV per data file (merged on later deletes and concurrent retries); v2 → v3 converter | `PuffinSpecTests`, `RowDeleteTests`, `PuffinCrossEngineTests` — see [puffin.md](puffin.md) |
+| Delete applicability by sequence number; DV supersedes position deletes | ✅ | `RowDeleteTests.Deletion_vector_applies_only_to_older_data` |
 | Row lineage: `next-row-id`, snapshot `first-row-id`/`added-rows`, manifest and file `first_row_id` | ✅ assignment and inheritance | `StateManagementTests`, `LocalTableTests`, `CatalogConformanceTests` |
 | Row lineage metadata columns `_row_id`, `_last_updated_sequence_number` | ⬜ | |
 | Table encryption keys, snapshot `key-id` | 🟡 metadata only | |
@@ -87,7 +87,7 @@ Legend: ✅ implemented and tested · 🟡 partial · ⬜ not started · — not
 | `current-snapshot-id`: -1 for v1/v2, `null` for v3 (as Java ≥1.9) | ✅ | `MetadataSpecTests` |
 | Refs (branches, tags, retention fields); implied `main` when `refs` absent | ✅ | `MetadataSpecTests`, `StateManagementTests` |
 | Snapshot log / metadata log (trimmed by `write.metadata.previous-versions-max`) | ✅ | `StateManagementTests` |
-| Statistics / partition statistics file entries | ✅ metadata only | `MetadataSpecTests` |
+| Statistics / partition statistics file entries | ✅ metadata; NDV statistics files written (`PuffinStatistics`) | `MetadataSpecTests`, `RowDeleteTests` |
 | Metadata file naming `{version:05d}-{uuid}.metadata.json`, gzip read | ✅ | `LocalTableTests` |
 | Commit protocol: atomic pointer swap, never overwrite metadata | ✅ | `CommitProtocolTests`, `EmulatorFidelityTests` |
 | Format version upgrade (no downgrade) | ✅ | `StateManagementTests` |
@@ -116,9 +116,9 @@ Legend: ✅ implemented and tested · 🟡 partial · ⬜ not started · — not
 
 | Item | Status |
 |---|---|
-| Puffin container (magic, footer JSON, lz4/zstd blobs) | ⬜ |
-| `apache-datasketches-theta-v1` | ⬜ (no mature .NET DataSketches; see libraries) |
-| `deletion-vector-v1` | ⬜ |
+| Puffin container (magic, footer JSON, blobs) | ✅ uncompressed + zstd blobs; LZ4 footers rejected |
+| `apache-datasketches-theta-v1` | ✅ compact serial v3, verified against Apache DataSketches; NDV statistics files via `set-statistics` |
+| `deletion-vector-v1` | ✅ Roaring64 portable (array/bitmap written, runs read), CRC-32 |
 | View metadata v1 | ⬜ |
 
 ## How to extend this page

@@ -7,8 +7,18 @@ namespace Iceberg.Net.Types;
 /// An Iceberg decimal. System.Decimal tops out at 28-29 significant digits, but Iceberg allows precision 38,
 /// so values are carried as an unscaled BigInteger plus scale.
 /// </summary>
-public readonly record struct IcebergDecimal(BigInteger Unscaled, int Scale)
+public readonly record struct IcebergDecimal(BigInteger Unscaled, int Scale) : IComparable<IcebergDecimal>, IComparable
 {
+    /// <summary>Numeric comparison, aligning scales first (bounds within a column always share one scale).</summary>
+    public int CompareTo(IcebergDecimal other)
+    {
+        if (Scale == other.Scale) return Unscaled.CompareTo(other.Unscaled);
+        var s = Math.Max(Scale, other.Scale);
+        return (Unscaled * BigInteger.Pow(10, s - Scale)).CompareTo(other.Unscaled * BigInteger.Pow(10, s - other.Scale));
+    }
+
+    public int CompareTo(object? obj) => obj is IcebergDecimal d ? CompareTo(d) : throw new ArgumentException("Not an IcebergDecimal");
+
     public static IcebergDecimal FromDecimal(decimal value, int scale)
     {
         var scaled = decimal.Round(value * Pow10Decimal(scale), 0, MidpointRounding.ToEven);

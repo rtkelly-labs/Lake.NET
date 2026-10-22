@@ -1,0 +1,54 @@
+{
+  "theta": {
+    "empty": {
+      "estimate": 0.0,
+      "retained": 0,
+      "theta64": 9223372036854775807,
+      "distinct": 0
+    },
+    "single": {
+      "estimate": 1.0,
+      "retained": 1,
+      "theta64": 9223372036854775807,
+      "distinct": 1
+    },
+    "exact3": {
+      "estimate": 3.0,
+      "retained": 3,
+      "theta64": 9223372036854775807,
+      "distinct": 3
+    },
+    "est10k": {
+      "estimate": 9943.6959348612,
+      "retained": 5300,
+      "theta64": 4916066633126856247,
+      "distinct": 10000
+    }
+  },
+  "dv": {
+    "ranges": [
+      [
+        0,
+        1
+      ],
+      [
+        5,
+        6
+      ],
+      [
+        70000,
+        70001
+      ],
+      [
+        100000,
+        110000
+      ],
+      [
+        4294967299,
+        4294967300
+      ]
+    ],
+    "cardinality": 10004,
+    "files": 2
+  }
+}

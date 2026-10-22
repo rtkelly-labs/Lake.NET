@@ -9,13 +9,14 @@ a failure instead.
 
 | Tier | Project / class | Needs | What it proves | Runtime |
 |---|---|---|---|---|
-| **L0 spec** | `Iceberg.Net.Spec.Tests` | nothing | Spec vectors (Appendix B/D, truncate), metadata v1/v2/v3 JSON, state machine, Avro/manifest codecs, local end-to-end with in-memory catalog, commit-protocol failure handling, **reading committed PyIceberg-written tables** | ~1 s |
+| **L0 spec** | `Iceberg.Net.Spec.Tests` | nothing | Spec vectors (Appendix B/D, truncate), metadata v1/v2/v3 JSON, state machine, Avro/manifest codecs, local end-to-end with in-memory catalog, commit-protocol failure handling, **reading committed PyIceberg-written tables**, Puffin/DV/Theta against DataSketches + pyroaring reference bytes, row deletes and the v2→v3 converter, name mapping and import | ~1 s |
 | **L1 catalog conformance** | `CatalogConformanceTests` | S3 + Glue (moto or AWS); REST catalog | Identical scenarios against Glue (client-side commit) and the Java REST fixture (server-side commit): lifecycle, round trip, 4 concurrent writers, stale requirements, overwrite + evolution + time travel, rename/register/drop, v3 row lineage | ~10 s |
 | **L1 fidelity** | `EmulatorFidelityTests` | S3 + Glue | The storage/catalog guarantees commits rely on (conditional create, Glue VersionId); same assertions in both modes | ~1 s |
 | **L2 cross-engine** | `CrossEngineTests` | L1 + PyIceberg oracle | C# writes → PyIceberg reads (rows, values, spec, summary) and PyIceberg writes → C# reads, re-partitions identically, appends → PyIceberg reads | ~5 s |
-| **L3 AWS-only** | `AthenaTests` | AWS + Athena workgroup | Athena reads our tables (counts, sums, partition pruning on our transforms); we read Athena-written tables (and refuse MoR snapshots until supported) | minutes |
+| **L2 local cross-engine** | `PuffinCrossEngineTests`, `SourceGeneratorInteropTests` | PyIceberg oracle only (local filesystem) | PyIceberg applies our position deletes and DVs, reads converted tables; DataSketches reads our NDV blobs; Parquet.SourceGenerator files are adopted and read by PyIceberg; generator gaps pinned | ~5 s |
+| **L3 AWS-only** | `AthenaTests` | AWS + Athena workgroup | Athena reads our tables (counts, sums, partition pruning on our transforms); we read Athena-written tables including its position deletes, delete on top, and Athena reads the result | minutes |
 
-Current results (emulation): **L0 90/90**, **L1+L2 21/21**, L3 skipped (requires AWS).
+Current results (emulation): **L0 111/111**, **L1+L2 32/32**, L3 skipped (requires AWS).
 
 ## Environment variables
 

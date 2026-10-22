@@ -12,7 +12,8 @@ namespace Iceberg.Net.Data;
 /// Parquet data files with Iceberg field IDs. Rows are <c>object?[]</c> aligned to the schema's top-level
 /// columns, holding physical Iceberg values (int days for date, long micros for time/timestamp, long nanos
 /// for timestamp_ns, string, byte[], bool, int, long, float, double).
-/// Phase-0 scope: flat schemas of those primitives; nested, decimal and uuid columns are rejected.
+/// <see cref="IcebergDecimal"/> for decimal and <see cref="Guid"/> for uuid.
+/// Scope: flat schemas; nested and fixed columns are rejected, decimals are written with precision ≤ 18.
 /// </summary>
 public static class ParquetFiles
 {
@@ -34,6 +35,10 @@ public static class ParquetFiles
             TypeId.TimestampTzNs => new PrimitiveNode(f.Name, rep, LogicalType.Timestamp(true, TimeUnit.Nanos), PhysicalType.Int64, fieldId: f.Id),
             TypeId.String => new PrimitiveNode(f.Name, rep, LogicalType.String(), PhysicalType.ByteArray, fieldId: f.Id),
             TypeId.Binary => new PrimitiveNode(f.Name, rep, LogicalType.None(), PhysicalType.ByteArray, fieldId: f.Id),
+            TypeId.Uuid => new PrimitiveNode(f.Name, rep, LogicalType.Uuid(), PhysicalType.FixedLenByteArray, 16, f.Id),
+            // Iceberg: decimals with precision ≤ 9 as INT32, ≤ 18 as INT64 (fixed for larger precisions; not written yet).
+            TypeId.Decimal when f.Type is DecimalType { Precision: <= 9 } d => new PrimitiveNode(f.Name, rep, LogicalType.Decimal(d.Precision, d.Scale), PhysicalType.Int32, fieldId: f.Id),
+            TypeId.Decimal when f.Type is DecimalType { Precision: <= 18 } d => new PrimitiveNode(f.Name, rep, LogicalType.Decimal(d.Precision, d.Scale), PhysicalType.Int64, fieldId: f.Id),
             _ => throw new NotSupportedException($"Column {f.Name}: {f.Type} is not supported by the phase-0 Parquet writer"),
         };
     }
@@ -113,6 +118,20 @@ public static class ParquetFiles
             case TypeId.Binary:
                 using (var w = col.LogicalWriter<byte[]?>()) w.WriteBatch(values.Select(v => (byte[]?)v).ToArray());
                 break;
+            case TypeId.Uuid when f.Required:
+                using (var w = col.LogicalWriter<Guid>()) w.WriteBatch(values.Select(v => v is Guid g ? g : throw new ArgumentException($"Required column {f.Name} contains nulls")).ToArray());
+                break;
+            case TypeId.Uuid:
+                using (var w = col.LogicalWriter<Guid?>()) w.WriteBatch(values.Select(v => (Guid?)v).ToArray());
+                break;
+            case TypeId.Decimal:
+                var scale = ((DecimalType)f.Type).Scale;
+                var unscaled = values.Select(v => v is IcebergDecimal d
+                    ? d.Scale == scale ? (object)d.Unscaled : throw new ArgumentException($"Column {f.Name}: value scale {d.Scale} != {scale}")
+                    : null).ToArray();
+                if (((DecimalType)f.Type).Precision <= 9) Write<int>(col, f, unscaled.Select(u => u is null ? null : (object)(int)(System.Numerics.BigInteger)u).ToArray());
+                else Write<long>(col, f, unscaled.Select(u => u is null ? null : (object)(long)(System.Numerics.BigInteger)u).ToArray());
+                break;
             default: throw new NotSupportedException(f.Type.ToString());
         }
     }
@@ -138,7 +157,11 @@ public static class ParquetFiles
     /// what the table's <c>schema.name-mapping.default</c> would formalise.
     /// Columns absent from the file (added by schema evolution) read as their initial-default or null.
     /// </summary>
-    public static async Task<List<object?[]>> ReadAsync(IFileIO io, string location, Schema projection, CancellationToken ct = default)
+    public static async Task<List<object?[]>> ReadAsync(IFileIO io, string location, Schema projection, CancellationToken ct = default) =>
+        await ReadAsync(io, location, projection, null, ct);
+
+    /// <param name="mapping">Resolves columns of files written without field IDs; defaults to current column names.</param>
+    public static async Task<List<object?[]>> ReadAsync(IFileIO io, string location, Schema projection, NameMapping? mapping, CancellationToken ct = default)
     {
         var bytes = await io.ReadAllAsync(location, ct);
         using var input = new ManagedRandomAccessFile(new MemoryStream(bytes));
@@ -161,7 +184,9 @@ public static class ParquetFiles
         {
             var f = projection.Columns[c];
             if (!f.Type.IsPrimitive) throw new NotSupportedException($"Nested column {f.Name} is not supported by the phase-0 reader");
-            var found = byFieldId.TryGetValue(f.Id, out var colIndex) || (byFieldId.Count == 0 && byName.TryGetValue(f.Name, out colIndex));
+            var colIndex = -1;
+            var found = byFieldId.TryGetValue(f.Id, out colIndex)
+                || (byFieldId.Count == 0 && (mapping?.NamesFor(f.Id) is { Count: > 0 } names ? names : [f.Name]).Any(n => byName.TryGetValue(n, out colIndex)));
             if (!found)
             {
                 var def = Defaults.ToValue(f.Type, f.InitialDefault);
@@ -198,8 +223,20 @@ public static class ParquetFiles
         TypeId.Double => col.LogicalReaderOverride<double?>().ReadAll(n).Select(v => (object?)v).ToArray(),
         TypeId.String => col.LogicalReader<string?>().ReadAll(n).Select(v => (object?)v).ToArray(),
         TypeId.Binary => col.LogicalReader<byte[]?>().ReadAll(n).Select(v => (object?)v).ToArray(),
+        TypeId.Uuid => ReadStruct<Guid>(col, n),
+        TypeId.Decimal when col.ColumnDescriptor.PhysicalType == PhysicalType.Int32 =>
+            col.LogicalReaderOverride<int?>().ReadAll(n).Select(v => v is null ? null : (object?)new IcebergDecimal(v.Value, ((DecimalType)type).Scale)).ToArray(),
+        TypeId.Decimal when col.ColumnDescriptor.PhysicalType == PhysicalType.Int64 =>
+            col.LogicalReaderOverride<long?>().ReadAll(n).Select(v => v is null ? null : (object?)new IcebergDecimal(v.Value, ((DecimalType)type).Scale)).ToArray(),
+        TypeId.Decimal => ReadStruct<decimal>(col, n).Select(v => v is decimal d ? (object?)IcebergDecimal.FromDecimal(d, ((DecimalType)type).Scale) : null).ToArray(),
         _ => throw new NotSupportedException($"Reading {type} is not supported yet"),
     };
+
+    /// <summary>ParquetSharp's non-override logical readers require <c>T</c> for required columns and <c>T?</c> for optional ones.</summary>
+    private static object?[] ReadStruct<T>(ColumnReader col, int n) where T : struct =>
+        col.ColumnDescriptor.MaxDefinitionLevel == 0
+            ? col.LogicalReader<T>().ReadAll(n).Select(v => (object?)v).ToArray()
+            : col.LogicalReader<T?>().ReadAll(n).Select(v => (object?)v).ToArray();
 }
 
 /// <summary>Column metrics computed from the written values (independent of Parquet statistics).</summary>
@@ -228,7 +265,9 @@ internal sealed record Metrics(
                 m.NanCounts[f.Id] = present.Count(v => v is double d ? double.IsNaN(d) : float.IsNaN((float)v));
                 present = present.Where(v => v is double d ? !double.IsNaN(d) : !float.IsNaN((float)v)).ToList();
             }
-            if (present.Count == 0 || f.Type.TypeId == TypeId.Binary) continue;
+            // Bounds are optional. Omit them where CLR ordering is not Iceberg's (uuid is compared as unsigned
+            // big-endian bytes; Guid.CompareTo is not) and for binary, rather than risk wrong pruning.
+            if (present.Count == 0 || f.Type.TypeId is TypeId.Binary or TypeId.Uuid) continue;
             if (f.Type.TypeId == TypeId.String && present.Any(v => ((string)v).EnumerateRunes().Count() > StringBoundLimit)) continue;
             var comparer = Comparer<object>.Create((a, b) => a is string sa ? string.CompareOrdinal(sa, (string)b) : ((IComparable)a).CompareTo(b));
             m.Lower[f.Id] = Conversions.ToBytes(f.Type, present.Min(comparer)!);

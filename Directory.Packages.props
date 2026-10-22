@@ -4,6 +4,11 @@
     <!-- Avro is a small in-house codec (Apache.Avro cannot parse logical types on fixed; see docs/libraries.md) -->
     <!-- ParquetSharp (Arrow C++ wrapper) over Parquet.Net: field IDs on group nodes are required for nested Iceberg columns -->
     <PackageVersion Include="ParquetSharp" Version="25.0.1.1" />
+    <!-- Puffin blob codec (zstd); lz4 is not implemented -->
+    <PackageVersion Include="ZstdSharp.Port" Version="0.8.6" />
+    <!-- Interop target: rtkelly-labs/Parquet.SourceGenerator (Roslyn generator over Parquet.Net), used only by tests -->
+    <PackageVersion Include="Parquet.SourceGenerator" Version="0.0.3" />
+    <PackageVersion Include="Parquet.Net" Version="6.1.0" />
     <!-- AWS -->
     <PackageVersion Include="AWSSDK.S3" Version="4.0.6" />
     <PackageVersion Include="AWSSDK.Glue" Version="4.0.6" />
