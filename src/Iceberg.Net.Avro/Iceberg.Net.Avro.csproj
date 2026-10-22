@@ -1,0 +1,9 @@
+<Project Sdk="Microsoft.NET.Sdk">
+  <PropertyGroup>
+    <RootNamespace>Iceberg.Net.Avro</RootNamespace>
+    <Description>Iceberg manifest and manifest-list Avro encoding (format v1/v2/v3).</Description>
+  </PropertyGroup>
+  <ItemGroup>
+    <ProjectReference Include="../Iceberg.Net.Core/Iceberg.Net.Core.csproj" />
+  </ItemGroup>
+</Project>

@@ -1,0 +1,12 @@
+[project]
+name = "iceberg-net-interop"
+version = "0.0.0"
+description = "Reference implementations (PyIceberg, moto) used by the .NET Iceberg port's interop and emulation tests"
+requires-python = ">=3.12"
+dependencies = [
+  "pyiceberg[pyarrow,glue,sql-sqlite,pyiceberg-core]==0.12.0",
+  "moto[server]==5.2.4",
+]
+
+[tool.uv]
+package = false

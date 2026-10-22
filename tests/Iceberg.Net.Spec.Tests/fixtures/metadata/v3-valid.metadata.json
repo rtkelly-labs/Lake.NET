@@ -1,0 +1,55 @@
+{
+  "format-version": 3,
+  "table-uuid": "5f3b2a10-2b8c-4f0e-9c5e-6a3a6e5c9d01",
+  "location": "s3://bucket/v3",
+  "last-sequence-number": 1,
+  "last-updated-ms": 1700000000000,
+  "last-column-id": 6,
+  "current-schema-id": 0,
+  "schemas": [
+    {
+      "type": "struct",
+      "schema-id": 0,
+      "fields": [
+        {"id": 1, "name": "id", "required": true, "type": "long"},
+        {"id": 2, "name": "ts", "required": false, "type": "timestamptz_ns"},
+        {"id": 3, "name": "payload", "required": false, "type": "variant"},
+        {"id": 4, "name": "loc", "required": false, "type": "geography(OGC:CRS84, karney)"},
+        {"id": 5, "name": "added_later", "required": true, "type": "int", "initial-default": 7, "write-default": 7},
+        {"id": 6, "name": "placeholder", "required": false, "type": "unknown"}
+      ]
+    }
+  ],
+  "default-spec-id": 0,
+  "partition-specs": [{"spec-id": 0, "fields": [{"name": "ts_day", "transform": "day", "source-id": 2, "field-id": 1000}]}],
+  "last-partition-id": 1000,
+  "default-sort-order-id": 0,
+  "sort-orders": [{"order-id": 0, "fields": []}],
+  "properties": {},
+  "current-snapshot-id": 1,
+  "refs": {"main": {"snapshot-id": 1, "type": "branch"}, "audit": {"snapshot-id": 1, "type": "tag", "max-ref-age-ms": 86400000}},
+  "snapshots": [
+    {
+      "snapshot-id": 1,
+      "timestamp-ms": 1700000000000,
+      "sequence-number": 1,
+      "summary": {"operation": "append"},
+      "manifest-list": "s3://bucket/v3/metadata/snap-1.avro",
+      "first-row-id": 0,
+      "added-rows": 30
+    }
+  ],
+  "next-row-id": 30,
+  "encryption-keys": [{"key-id": "k1", "encrypted-key-metadata": "AAEC", "encrypted-by-id": "kms-1"}],
+  "snapshot-log": [{"snapshot-id": 1, "timestamp-ms": 1700000000000}],
+  "metadata-log": [{"metadata-file": "s3://bucket/v3/metadata/00000-a.metadata.json", "timestamp-ms": 1699999999000}],
+  "statistics": [
+    {
+      "snapshot-id": 1,
+      "statistics-path": "s3://bucket/v3/metadata/stats.puffin",
+      "file-size-in-bytes": 413,
+      "file-footer-size-in-bytes": 42,
+      "blob-metadata": [{"type": "apache-datasketches-theta-v1", "snapshot-id": 1, "sequence-number": 1, "fields": [1], "properties": {"ndv": "30"}}]
+    }
+  ]
+}

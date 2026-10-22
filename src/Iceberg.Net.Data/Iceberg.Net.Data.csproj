@@ -1,0 +1,11 @@
+<Project Sdk="Microsoft.NET.Sdk">
+  <PropertyGroup>
+    <RootNamespace>Iceberg.Net.Data</RootNamespace>
+    <Description>Table operations: scan planning, Parquet data files, append commits.</Description>
+  </PropertyGroup>
+  <ItemGroup>
+    <PackageReference Include="ParquetSharp" />
+    <ProjectReference Include="../Iceberg.Net.Avro/Iceberg.Net.Avro.csproj" />
+    <ProjectReference Include="../Iceberg.Net.Catalog/Iceberg.Net.Catalog.csproj" />
+  </ItemGroup>
+</Project>

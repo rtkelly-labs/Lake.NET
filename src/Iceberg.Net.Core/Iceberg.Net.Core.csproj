@@ -1,0 +1,6 @@
+<Project Sdk="Microsoft.NET.Sdk">
+  <PropertyGroup>
+    <RootNamespace>Iceberg.Net</RootNamespace>
+    <Description>Apache Iceberg table spec model: types, schemas, transforms, partitioning, snapshots, table metadata and its JSON serialisation.</Description>
+  </PropertyGroup>
+</Project>

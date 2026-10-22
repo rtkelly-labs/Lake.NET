@@ -1,0 +1,335 @@
+using System.Globalization;
+using System.Text;
+using System.Text.RegularExpressions;
+using Iceberg.Net.IO;
+using Iceberg.Net.Json;
+using Iceberg.Net.Metadata;
+using Iceberg.Net.Partitioning;
+using Iceberg.Net.Types;
+
+namespace Iceberg.Net.Catalog;
+
+public sealed record Namespace(IReadOnlyList<string> Levels)
+{
+    public static Namespace Of(params string[] levels) => new(levels);
+    public override string ToString() => string.Join('.', Levels);
+    public bool Equals(Namespace? other) => other is not null && Levels.SequenceEqual(other.Levels);
+    public override int GetHashCode() => Levels.Aggregate(0, (h, l) => HashCode.Combine(h, l));
+}
+
+public sealed record TableIdentifier(Namespace Namespace, string Name)
+{
+    public static TableIdentifier Of(string ns, string name) => new(Namespace.Of(ns.Split('.')), name);
+    public override string ToString() => $"{Namespace}.{Name}";
+}
+
+public class NoSuchTableException(string message) : Exception(message);
+public class NoSuchNamespaceException(string message) : Exception(message);
+public class AlreadyExistsException(string message) : Exception(message);
+
+/// <summary>A commit request: preconditions plus changes, the same shape as REST <c>CommitTableRequest</c>.</summary>
+public sealed record TableCommit(TableIdentifier Identifier, IReadOnlyList<UpdateRequirement> Requirements, IReadOnlyList<MetadataUpdate> Updates);
+
+public sealed record CreateTableRequest(
+    TableIdentifier Identifier,
+    Schema Schema,
+    PartitionSpec? Spec = null,
+    SortOrder? SortOrder = null,
+    string? Location = null,
+    IReadOnlyDictionary<string, string>? Properties = null,
+    int FormatVersion = TableMetadata.DefaultFormatVersion);
+
+public interface ICatalog : IDisposable
+{
+    string Name { get; }
+    IFileIO FileIO { get; }
+
+    Task CreateNamespaceAsync(Namespace ns, IReadOnlyDictionary<string, string>? properties = null, CancellationToken ct = default);
+    Task<IReadOnlyList<Namespace>> ListNamespacesAsync(Namespace? parent = null, CancellationToken ct = default);
+    Task<bool> NamespaceExistsAsync(Namespace ns, CancellationToken ct = default);
+    Task DropNamespaceAsync(Namespace ns, CancellationToken ct = default);
+
+    Task<IReadOnlyList<TableIdentifier>> ListTablesAsync(Namespace ns, CancellationToken ct = default);
+    Task<Table> CreateTableAsync(CreateTableRequest request, CancellationToken ct = default);
+    Task<Table> LoadTableAsync(TableIdentifier id, CancellationToken ct = default);
+    Task<bool> TableExistsAsync(TableIdentifier id, CancellationToken ct = default);
+    Task<Table> RegisterTableAsync(TableIdentifier id, string metadataLocation, CancellationToken ct = default);
+    Task RenameTableAsync(TableIdentifier from, TableIdentifier to, CancellationToken ct = default);
+    /// <summary>Drop the catalog entry. With <paramref name="purge"/>, also delete metadata files (data files are left to maintenance jobs).</summary>
+    Task DropTableAsync(TableIdentifier id, bool purge = false, CancellationToken ct = default);
+
+    /// <summary>
+    /// Atomically validate <see cref="TableCommit.Requirements"/> against current metadata and apply
+    /// <see cref="TableCommit.Updates"/>. Throws <see cref="CommitFailedException"/> on conflict (safe to
+    /// refresh and retry) or <see cref="CommitStateUnknownException"/> when the outcome is unknown.
+    /// </summary>
+    Task<TableMetadata> CommitTableAsync(TableCommit commit, CancellationToken ct = default);
+}
+
+/// <summary>A loaded table: identity, current metadata, and the catalog/FileIO to change it.</summary>
+public sealed class Table(ICatalog catalog, TableIdentifier identifier, TableMetadata metadata, IFileIO io)
+{
+    public ICatalog Catalog { get; } = catalog;
+    public TableIdentifier Identifier { get; } = identifier;
+    public TableMetadata Metadata { get; private set; } = metadata;
+    public IFileIO IO { get; } = io;
+
+    public Schema Schema => Metadata.CurrentSchema;
+    public PartitionSpec Spec => Metadata.DefaultSpec;
+    public string Location => Metadata.Location;
+    public string? MetadataLocation => Metadata.MetadataFileLocation;
+
+    public async Task<Table> RefreshAsync(CancellationToken ct = default)
+    {
+        Metadata = (await Catalog.LoadTableAsync(Identifier, ct)).Metadata;
+        return this;
+    }
+
+    public async Task<TableMetadata> CommitAsync(IReadOnlyList<UpdateRequirement> requirements, IReadOnlyList<MetadataUpdate> updates, CancellationToken ct = default)
+    {
+        Metadata = await Catalog.CommitTableAsync(new TableCommit(Identifier, requirements, updates), ct);
+        return Metadata;
+    }
+
+    public Task<TableMetadata> SetPropertiesAsync(IReadOnlyDictionary<string, string> props, CancellationToken ct = default) =>
+        CommitAsync([new UpdateRequirement.AssertTableUuid(Metadata.TableUuid)], [new MetadataUpdate.SetProperties(props)], ct);
+
+    /// <summary>Add (or switch to an existing equivalent) schema; asserts the current schema has not moved.</summary>
+    public Task<TableMetadata> UpdateSchemaAsync(Schema newSchema, CancellationToken ct = default) =>
+        CommitAsync(
+            [new UpdateRequirement.AssertCurrentSchemaId(Metadata.CurrentSchemaId), new UpdateRequirement.AssertLastAssignedFieldId(Metadata.LastColumnId)],
+            [new MetadataUpdate.AddSchema(newSchema), new MetadataUpdate.SetCurrentSchema(MetadataUpdate.LastAdded)],
+            ct);
+}
+
+/// <summary>
+/// Base for catalogs that store a pointer to the current metadata file (Glue, Hive, JDBC, in-memory).
+/// The client does all metadata work; the catalog only provides an atomic compare-and-swap of the pointer.
+/// </summary>
+public abstract partial class MetastoreCatalog(string name, IFileIO io) : ICatalog
+{
+    public string Name { get; } = name;
+    public IFileIO FileIO { get; } = io;
+    protected Func<long> Clock { get; init; } = () => DateTimeOffset.UtcNow.ToUnixTimeMilliseconds();
+
+    public abstract Task CreateNamespaceAsync(Namespace ns, IReadOnlyDictionary<string, string>? properties = null, CancellationToken ct = default);
+    public abstract Task<IReadOnlyList<Namespace>> ListNamespacesAsync(Namespace? parent = null, CancellationToken ct = default);
+    public abstract Task<bool> NamespaceExistsAsync(Namespace ns, CancellationToken ct = default);
+    public abstract Task DropNamespaceAsync(Namespace ns, CancellationToken ct = default);
+    public abstract Task<IReadOnlyList<TableIdentifier>> ListTablesAsync(Namespace ns, CancellationToken ct = default);
+    public abstract Task RenameTableAsync(TableIdentifier from, TableIdentifier to, CancellationToken ct = default);
+
+    /// <summary>Current metadata pointer, or null when the table does not exist.</summary>
+    protected abstract Task<string?> CurrentMetadataLocationAsync(TableIdentifier id, CancellationToken ct);
+
+    /// <summary>
+    /// Atomically point the table at <paramref name="newLocation"/> if it still points at
+    /// <paramref name="expectedLocation"/> (null = create). Throw <see cref="CommitFailedException"/> on a
+    /// lost race; let other exceptions escape (they become <see cref="CommitStateUnknownException"/>).
+    /// </summary>
+    protected abstract Task SwapMetadataLocationAsync(TableIdentifier id, string? expectedLocation, string newLocation, TableMetadata metadata, CancellationToken ct);
+
+    protected abstract Task RemoveTableEntryAsync(TableIdentifier id, CancellationToken ct);
+
+    /// <summary>Default table location: <c>{warehouse}/{ns}.db/{table}</c> (the Hive/Glue convention Athena also uses).</summary>
+    protected abstract Task<string> DefaultTableLocationAsync(TableIdentifier id, CancellationToken ct);
+
+    public async Task<Table> CreateTableAsync(CreateTableRequest r, CancellationToken ct = default)
+    {
+        if (!await NamespaceExistsAsync(r.Identifier.Namespace, ct)) throw new NoSuchNamespaceException($"Namespace {r.Identifier.Namespace} does not exist");
+        if (await CurrentMetadataLocationAsync(r.Identifier, ct) is not null) throw new AlreadyExistsException($"Table {r.Identifier} already exists");
+        var location = r.Location ?? await DefaultTableLocationAsync(r.Identifier, ct);
+        var fresh = TableMetadata.NewTable(r.Schema, r.Spec, r.SortOrder, location, r.Properties, r.FormatVersion, Clock);
+        var metadata = await WriteAndSwapAsync(r.Identifier, null, loc => fresh with { MetadataFileLocation = loc }, ct);
+        return new Table(this, r.Identifier, metadata, FileIO);
+    }
+
+    public async Task<Table> LoadTableAsync(TableIdentifier id, CancellationToken ct = default)
+    {
+        var location = await CurrentMetadataLocationAsync(id, ct) ?? throw new NoSuchTableException($"Table {id} does not exist");
+        return new Table(this, id, await ReadMetadataAsync(location, ct), FileIO);
+    }
+
+    public async Task<bool> TableExistsAsync(TableIdentifier id, CancellationToken ct = default) => await CurrentMetadataLocationAsync(id, ct) is not null;
+
+    public async Task<Table> RegisterTableAsync(TableIdentifier id, string metadataLocation, CancellationToken ct = default)
+    {
+        if (await CurrentMetadataLocationAsync(id, ct) is not null) throw new AlreadyExistsException($"Table {id} already exists");
+        var metadata = await ReadMetadataAsync(metadataLocation, ct);
+        await SwapMetadataLocationAsync(id, null, metadataLocation, metadata, ct);
+        return new Table(this, id, metadata, FileIO);
+    }
+
+    public async Task DropTableAsync(TableIdentifier id, bool purge = false, CancellationToken ct = default)
+    {
+        var location = await CurrentMetadataLocationAsync(id, ct) ?? throw new NoSuchTableException($"Table {id} does not exist");
+        var metadata = purge ? await ReadMetadataAsync(location, ct) : null;
+        await RemoveTableEntryAsync(id, ct);
+        if (metadata is not null)
+        {
+            foreach (var old in metadata.MetadataLog.Select(l => l.MetadataFile).Append(location))
+                await TryDeleteAsync(old, ct);
+        }
+    }
+
+    public async Task<TableMetadata> CommitTableAsync(TableCommit commit, CancellationToken ct = default)
+    {
+        var currentLocation = await CurrentMetadataLocationAsync(commit.Identifier, ct);
+        var current = currentLocation is null ? null : await ReadMetadataAsync(currentLocation, ct);
+        foreach (var req in commit.Requirements) req.Validate(current);
+        if (current is null) throw new NoSuchTableException($"Table {commit.Identifier} does not exist");
+
+        var builder = TableMetadataBuilder.From(current, Clock).ApplyAll(commit.Updates);
+        if (builder.Changes.Count == 0) return current;
+        return await WriteAndSwapAsync(commit.Identifier, current, builder.Build, ct);
+    }
+
+    /// <summary>Write the next metadata file (never overwriting), then CAS the catalog pointer to it.</summary>
+    private async Task<TableMetadata> WriteAndSwapAsync(TableIdentifier id, TableMetadata? @base, Func<string, TableMetadata> build, CancellationToken ct)
+    {
+        // build is pure, so call it once to learn the (possibly changed) location and again to stamp the file name.
+        var newLocation = NewMetadataLocation(build(""), @base?.MetadataFileLocation);
+        var updated = build(newLocation);
+
+        await FileIO.WriteAsync(newLocation, Encoding.UTF8.GetBytes(MetadataJson.Write(updated)), overwrite: false, ct);
+        try
+        {
+            await SwapMetadataLocationAsync(id, @base?.MetadataFileLocation, newLocation, updated, ct);
+        }
+        catch (CommitFailedException)
+        {
+            // We definitely lost: the new file is unreferenced and safe to remove.
+            await TryDeleteAsync(newLocation, ct);
+            throw;
+        }
+        catch (Exception e) when (e is not OperationCanceledException)
+        {
+            // We may have won. Never delete the file: a reader may already be following the pointer.
+            throw new CommitStateUnknownException($"Commit to {id} failed with an unknown outcome; check {newLocation}", e);
+        }
+        return updated;
+    }
+
+    protected async Task<TableMetadata> ReadMetadataAsync(string location, CancellationToken ct)
+    {
+        var bytes = await FileIO.ReadAllAsync(location, ct);
+        if (location.EndsWith(".gz", StringComparison.Ordinal))
+        {
+            using var gz = new System.IO.Compression.GZipStream(new MemoryStream(bytes), System.IO.Compression.CompressionMode.Decompress);
+            using var ms = new MemoryStream();
+            await gz.CopyToAsync(ms, ct);
+            bytes = ms.ToArray();
+        }
+        return MetadataJson.Read(Encoding.UTF8.GetString(bytes), location);
+    }
+
+    [GeneratedRegex(@"/(\d+)-[0-9a-fA-F-]+\.metadata\.json(\.gz)?$")]
+    private static partial Regex VersionRe();
+
+    /// <summary><c>{location}/metadata/{version:00000}-{uuid}.metadata.json</c>, the Java/PyIceberg naming.</summary>
+    public static string NewMetadataLocation(TableMetadata m, string? previous)
+    {
+        var version = 0;
+        if (previous is not null && VersionRe().Match(previous) is { Success: true } match)
+            version = int.Parse(match.Groups[1].Value, CultureInfo.InvariantCulture) + 1;
+        var dir = m.Property("write.metadata.path", $"{m.Location}/metadata").TrimEnd('/');
+        return $"{dir}/{version:D5}-{Guid.NewGuid()}.metadata.json";
+    }
+
+    private async Task TryDeleteAsync(string location, CancellationToken ct)
+    {
+        try { await FileIO.DeleteAsync(location, ct); }
+        catch (Exception e) when (e is not OperationCanceledException) { /* best effort: orphan cleanup will find it */ }
+    }
+
+    public virtual void Dispose() => FileIO.Dispose();
+}
+
+/// <summary>Process-local catalog with a CAS pointer per table. The reference for catalog conformance tests.</summary>
+public sealed class InMemoryCatalog(string warehouse, IFileIO? io = null, string name = "memory") : MetastoreCatalog(name, io ?? new LocalFileIO())
+{
+    private readonly Dictionary<Namespace, Dictionary<string, string>> _namespaces = [];
+    private readonly Dictionary<TableIdentifier, string> _tables = [];
+    private readonly object _lock = new();
+
+    public override Task CreateNamespaceAsync(Namespace ns, IReadOnlyDictionary<string, string>? properties = null, CancellationToken ct = default)
+    {
+        lock (_lock)
+        {
+            if (!_namespaces.TryAdd(ns, new Dictionary<string, string>(properties ?? new Dictionary<string, string>())))
+                throw new AlreadyExistsException($"Namespace {ns} already exists");
+        }
+        return Task.CompletedTask;
+    }
+
+    public override Task<IReadOnlyList<Namespace>> ListNamespacesAsync(Namespace? parent = null, CancellationToken ct = default)
+    {
+        lock (_lock)
+        {
+            var depth = parent?.Levels.Count ?? 0;
+            IReadOnlyList<Namespace> result = _namespaces.Keys
+                .Where(n => n.Levels.Count == depth + 1 && (parent is null || n.Levels.Take(depth).SequenceEqual(parent.Levels)))
+                .ToList();
+            return Task.FromResult(result);
+        }
+    }
+
+    public override Task<bool> NamespaceExistsAsync(Namespace ns, CancellationToken ct = default)
+    {
+        lock (_lock) return Task.FromResult(_namespaces.ContainsKey(ns));
+    }
+
+    public override Task DropNamespaceAsync(Namespace ns, CancellationToken ct = default)
+    {
+        lock (_lock)
+        {
+            if (_tables.Keys.Any(t => t.Namespace.Equals(ns))) throw new InvalidOperationException($"Namespace {ns} is not empty");
+            _namespaces.Remove(ns);
+        }
+        return Task.CompletedTask;
+    }
+
+    public override Task<IReadOnlyList<TableIdentifier>> ListTablesAsync(Namespace ns, CancellationToken ct = default)
+    {
+        lock (_lock) return Task.FromResult<IReadOnlyList<TableIdentifier>>(_tables.Keys.Where(t => t.Namespace.Equals(ns)).ToList());
+    }
+
+    public override Task RenameTableAsync(TableIdentifier from, TableIdentifier to, CancellationToken ct = default)
+    {
+        lock (_lock)
+        {
+            if (!_tables.Remove(from, out var loc)) throw new NoSuchTableException($"Table {from} does not exist");
+            if (!_tables.TryAdd(to, loc))
+            {
+                _tables[from] = loc;
+                throw new AlreadyExistsException($"Table {to} already exists");
+            }
+        }
+        return Task.CompletedTask;
+    }
+
+    protected override Task<string?> CurrentMetadataLocationAsync(TableIdentifier id, CancellationToken ct)
+    {
+        lock (_lock) return Task.FromResult(_tables.GetValueOrDefault(id));
+    }
+
+    protected override Task SwapMetadataLocationAsync(TableIdentifier id, string? expected, string newLocation, TableMetadata metadata, CancellationToken ct)
+    {
+        lock (_lock)
+        {
+            var current = _tables.GetValueOrDefault(id);
+            if (current != expected) throw new CommitFailedException($"Table {id} metadata moved from {expected ?? "(none)"} to {current ?? "(none)"}");
+            _tables[id] = newLocation;
+        }
+        return Task.CompletedTask;
+    }
+
+    protected override Task RemoveTableEntryAsync(TableIdentifier id, CancellationToken ct)
+    {
+        lock (_lock) _tables.Remove(id);
+        return Task.CompletedTask;
+    }
+
+    protected override Task<string> DefaultTableLocationAsync(TableIdentifier id, CancellationToken ct) =>
+        Task.FromResult($"{warehouse.TrimEnd('/')}/{string.Join('/', id.Namespace.Levels)}.db/{id.Name}");
+}

@@ -1,0 +1,11 @@
+<Project Sdk="Microsoft.NET.Sdk">
+  <PropertyGroup>
+    <RootNamespace>Iceberg.Net.Catalog</RootNamespace>
+    <Description>Catalog abstraction plus in-memory, AWS Glue and Iceberg REST catalog clients.</Description>
+  </PropertyGroup>
+  <ItemGroup>
+    <PackageReference Include="AWSSDK.Glue" />
+    <ProjectReference Include="../Iceberg.Net.Core/Iceberg.Net.Core.csproj" />
+    <ProjectReference Include="../Iceberg.Net.IO/Iceberg.Net.IO.csproj" />
+  </ItemGroup>
+</Project>
