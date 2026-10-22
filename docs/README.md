@@ -7,6 +7,8 @@
 | [state-management.md](state-management.md) | What Iceberg's release history taught about table state (sequence numbers, row lineage, unknown commits, idempotency, isolation, maintenance) and where we stand |
 | [ports-and-engines.md](ports-and-engines.md) | Other implementations (Java, PyIceberg, Go, Rust, C++, .NET attempts) and reference engines (Spark runtime, Athena, Trino, Flink, DuckDB, Snowflake) |
 | [catalogs.md](catalogs.md) | Integration challenges for each catalog provider: Glue, Glue/S3 Tables REST, Polaris, Unity, Nessie, Lakekeeper, Gravitino, Hive, JDBC, DynamoDB |
+| [write-modes.md](write-modes.md) | Insert, upsert by key, group key replacement, deletes — and the copy-on-write / position / equality delete mechanisms |
+| [upstream/parquet-net-group-field-ids.md](upstream/parquet-net-group-field-ids.md) | Draft Parquet.Net issue + verified minimal patch for field IDs on struct/list/map |
 | [puffin.md](puffin.md) | Puffin files, deletion vectors, Theta sketches, the v2→v3 position-delete converter, NDV statistics |
 | [parquet-sourcegenerator.md](parquet-sourcegenerator.md) | Using Parquet.SourceGenerator as a typed Iceberg write path: measured gaps and where to fix each |
 | [libraries.md](libraries.md) | Libraries under the hood (Avro, Parquet, ORC, compression, Roaring/DVs, Puffin, sketches, Arrow, SigV4) and CLR type pitfalls |

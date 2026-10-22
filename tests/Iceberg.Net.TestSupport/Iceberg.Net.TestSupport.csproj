@@ -1,0 +1,14 @@
+<Project Sdk="Microsoft.NET.Sdk">
+  <PropertyGroup>
+    <IsPackable>false</IsPackable>
+    <RootNamespace>Iceberg.Net.TestSupport</RootNamespace>
+    <Description>Shared test environment (emulation/AWS targets) and the PyIceberg oracle runner.</Description>
+  </PropertyGroup>
+  <ItemGroup>
+    <PackageReference Include="Xunit.SkippableFact" />
+    <PackageReference Include="xunit" />
+  </ItemGroup>
+  <ItemGroup>
+    <ProjectReference Include="../../src/Iceberg.Net.Data/Iceberg.Net.Data.csproj" />
+  </ItemGroup>
+</Project>

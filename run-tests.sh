@@ -9,6 +9,7 @@ mode="${1:-emulation}"
 
 dotnet test tests/Iceberg.Net.Spec.Tests --nologo
 [[ "$mode" == "spec" ]] && exit 0
+dotnet test tests/Iceberg.Net.Behaviour.Tests --nologo
 
 if [[ "$mode" == "emulation" ]]; then
   export ICEBERG_TEST_TARGET=emulation

@@ -66,7 +66,7 @@ fail and move into the compatible model.
 | Iceberg schema from the model | **generator** | emit `public static string IcebergSchemaJson` (field IDs, required/optional, types) so `CreateTableAsync` can be driven by the model — no hand-written `Schema` | M |
 | Per-file Iceberg metrics without a re-read | **generator** | expose written column stats (value/null/NaN counts, min/max) per file from the generated writer; `ParquetImport` currently re-reads the file to compute them | M |
 | NDV sketches at write time (Puffin) | **generator** + this library | an optional per-column hook fed with Iceberg single-value bytes during write → `ThetaSketch.Update`; produces Puffin statistics with no second scan | M |
-| Field IDs on nested groups | **Parquet.Net upstream** | add `FieldId` to `StructField`/`ListField`/`MapField` (only `DataField` has it in 6.1) | M (upstream PR) |
+| Field IDs on nested groups | **Parquet.Net upstream** | lift `FieldId` to `Field` and emit/read it for struct/list/map — drafted issue + verified 19-line patch: [upstream/parquet-net-group-field-ids.md](upstream/parquet-net-group-field-ids.md) | S (upstream PR) |
 | `timestamp_ns` | **Parquet.Net upstream** | a nanosecond `DateTimeFormat` / logical-type override for `DataField<long>` | S–M (upstream) |
 | Decimal precision > 28 | generator + upstream | `System.Decimal` limit; would need a `BigInteger`-backed member type (Parquet.Net's plain encoder can't encode `BigInteger` today — generator rejects it with PARQ006) | M |
 

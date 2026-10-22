@@ -1,10 +1,11 @@
+using Xunit;
 using System.Diagnostics;
 using System.Net.Sockets;
 using System.Text.Json.Nodes;
 using Iceberg.Net.Catalog;
 using Iceberg.Net.IO;
 
-namespace Iceberg.Net.Regression.Tests;
+namespace Iceberg.Net.TestSupport;
 
 public enum Target { Emulation, Aws }
 

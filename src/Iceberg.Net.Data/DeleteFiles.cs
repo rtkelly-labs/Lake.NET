@@ -43,6 +43,24 @@ public static class PositionDeleteFiles
     }
 }
 
+/// <summary>
+/// Equality delete files: Parquet holding the key values of deleted rows, columns carrying the table's field IDs
+/// and recorded in the manifest's <c>equality_ids</c>. Cheap to write (no scan of existing data) but every later
+/// read pays to apply them; Athena/Trino/Spark read them, PyIceberg 0.12 refuses tables that have them, and v4
+/// forbids writing new ones.
+/// </summary>
+public static class EqualityDeleteFiles
+{
+    public static async Task<DataFile> WriteAsync(IFileIO io, string location, int specId, IReadOnlyList<object?> partition,
+        IReadOnlyList<NestedField> keyFields, IEnumerable<object?[]> keys, CancellationToken ct = default)
+    {
+        var schema = new Schema(0, keyFields);
+        var distinct = keys.GroupBy(k => EqualityKey.Encode(keyFields, i => k[i]), StringComparer.Ordinal).Select(g => g.First()).ToList();
+        var file = await ParquetFiles.WriteAsync(io, location, schema, specId, partition, distinct, ct);
+        return file with { Content = FileContent.EqualityDeletes, EqualityIds = keyFields.Select(f => f.Id).ToList() };
+    }
+}
+
 /// <summary>A live delete file in a snapshot, with the data sequence number that decides what it applies to.</summary>
 public sealed record DeleteEntry(DataFile File, long DataSequenceNumber, ManifestFile Manifest)
 {
@@ -50,27 +68,60 @@ public sealed record DeleteEntry(DataFile File, long DataSequenceNumber, Manifes
 }
 
 /// <summary>
+/// Equality-key encoding: a row matches an equality delete when the values of the delete's equality columns
+/// are equal, with null matching null (spec "Equality Delete Files"). Values are compared through their
+/// single-value binary serialization so promoted widths (int read as long) and byte arrays compare correctly.
+/// </summary>
+public static class EqualityKey
+{
+    public static string Encode(IReadOnlyList<NestedField> fields, Func<int, object?> valueOf)
+    {
+        var parts = new string[fields.Count];
+        for (var i = 0; i < fields.Count; i++)
+        {
+            var v = valueOf(i);
+            parts[i] = v is null ? "\u0000" : Convert.ToBase64String(Conversions.ToBytes(fields[i].Type, Normalise(fields[i].Type, v)));
+        }
+        return string.Join('|', parts);
+    }
+
+    private static object Normalise(IcebergType type, object v) => (type.TypeId, v) switch
+    {
+        (TypeId.Long or TypeId.Timestamp or TypeId.TimestampTz or TypeId.Time, int i) => (long)i,
+        (TypeId.Double, float f) => (double)f,
+        _ => v,
+    };
+}
+
+/// <summary>
 /// The delete files of a snapshot, indexed for planning. Applicability rules (spec "Scan Planning"):
 /// a position delete or DV applies to a data file when its data sequence number is ≥ the data file's;
 /// when a data file has a DV, position delete files for it are ignored (v3: the DV already folds them in).
-/// Equality deletes are not supported yet and make planning fail rather than return deleted rows.
+/// An equality delete applies when its data sequence number is strictly greater than the data file's (so a
+/// delete and an insert of the same key in one commit keep the new row) and it is in the data file's
+/// partition, or is unpartitioned (global).
 /// </summary>
 public sealed class DeleteIndex
 {
     private readonly Dictionary<string, DeleteEntry> _dvs = new(StringComparer.Ordinal);
     private readonly List<DeleteEntry> _positionFiles = [];
+    private readonly List<DeleteEntry> _equalityFiles = [];
+    private readonly Dictionary<string, Task<HashSet<string>>> _equalityCache = new(StringComparer.Ordinal);
+    private TableMetadata _metadata = null!;
     private readonly Dictionary<string, Task<IReadOnlyDictionary<string, RoaringPositionBitmap>>> _positionCache = new(StringComparer.Ordinal);
     private readonly Dictionary<string, Task<PuffinFile.Contents>> _puffinCache = new(StringComparer.Ordinal);
     private readonly IFileIO _io;
 
     private DeleteIndex(IFileIO io) => _io = io;
 
+    /// <summary>Position deletes and deletion vectors (equality deletes are in <see cref="EqualityDeletes"/>).</summary>
     public IReadOnlyList<DeleteEntry> All => [.. _dvs.Values, .. _positionFiles];
-    public bool IsEmpty => _dvs.Count == 0 && _positionFiles.Count == 0;
+    public IReadOnlyList<DeleteEntry> EqualityDeletes => _equalityFiles;
+    public bool IsEmpty => _dvs.Count == 0 && _positionFiles.Count == 0 && _equalityFiles.Count == 0;
 
     public static async Task<DeleteIndex> LoadAsync(Table table, IReadOnlyList<ManifestFile> manifests, CancellationToken ct = default)
     {
-        var index = new DeleteIndex(table.IO);
+        var index = new DeleteIndex(table.IO) { _metadata = table.Metadata };
         var m = table.Metadata;
         foreach (var manifest in manifests.Where(mf => mf.Content == ManifestContent.Deletes))
         {
@@ -81,7 +132,9 @@ public sealed class DeleteIndex
                 switch (e.DataFile.Content)
                 {
                     case FileContent.EqualityDeletes:
-                        throw new NotSupportedException("Equality delete files are not supported yet");
+                        if (e.DataFile.EqualityIds is not { Count: > 0 }) throw new FormatException($"Equality delete file {e.DataFile.FilePath} has no equality_ids");
+                        index._equalityFiles.Add(entry);
+                        break;
                     case FileContent.PositionDeletes when entry.IsDeletionVector:
                         var target = e.DataFile.ReferencedDataFile ?? throw new FormatException("Deletion vector without referenced_data_file");
                         if (!index._dvs.TryAdd(target, entry))
@@ -114,6 +167,54 @@ public sealed class DeleteIndex
             (result ??= new RoaringPositionBitmap()).Or(bm);
         }
         return result;
+    }
+
+    /// <summary>
+    /// A predicate over (position, projected row) that is true for rows deleted by any applicable delete
+    /// file, or null when nothing applies to <paramref name="dataFile"/>. Equality columns must be top-level
+    /// columns of <paramref name="projection"/>.
+    /// </summary>
+    public async Task<Func<long, object?[], bool>?> RowFilterAsync(DataFile dataFile, long dataSequenceNumber, Schema projection, CancellationToken ct = default)
+    {
+        var positions = await DeletedPositionsAsync(dataFile, dataSequenceNumber, ct);
+        var equality = new List<(int[] Columns, IReadOnlyList<NestedField> Fields, HashSet<string> Keys)>();
+        foreach (var group in _equalityFiles.Where(e => AppliesTo(e, dataFile, dataSequenceNumber)).GroupBy(e => string.Join(',', e.File.EqualityIds!.Order())))
+        {
+            var ids = group.First().File.EqualityIds!.Order().ToList();
+            var columns = ids.Select(id => projection.Columns.ToList().FindIndex(c => c.Id == id)).ToArray();
+            if (columns.Any(c => c < 0)) throw new NotSupportedException($"Equality deletes on columns [{string.Join(',', ids)}] must be top-level columns of the projection");
+            var fields = columns.Select(c => projection.Columns[c]).ToList();
+            var keys = new HashSet<string>(StringComparer.Ordinal);
+            foreach (var e in group) keys.UnionWith(await EqualityKeysAsync(e.File, fields));
+            equality.Add((columns, fields, keys));
+        }
+        if (positions is null && equality.Count == 0) return null;
+        return (pos, row) => (positions?.Contains(pos) ?? false)
+            || equality.Any(eq => eq.Keys.Contains(EqualityKey.Encode(eq.Fields, i => row[eq.Columns[i]])));
+    }
+
+    private bool AppliesTo(DeleteEntry delete, DataFile data, long dataSequenceNumber)
+    {
+        if (delete.DataSequenceNumber <= dataSequenceNumber) return false;
+        var deleteSpec = _metadata.SpecById(delete.File.SpecId);
+        if (deleteSpec.IsUnpartitioned) return true;
+        return delete.File.SpecId == data.SpecId && delete.File.Partition.SequenceEqual(data.Partition);
+    }
+
+    private Task<HashSet<string>> EqualityKeysAsync(DataFile file, IReadOnlyList<NestedField> fields)
+    {
+        lock (_equalityCache)
+        {
+            if (!_equalityCache.TryGetValue(file.FilePath, out var task))
+                _equalityCache[file.FilePath] = task = LoadEqualityKeysAsync(file, fields);
+            return task;
+        }
+    }
+
+    private async Task<HashSet<string>> LoadEqualityKeysAsync(DataFile file, IReadOnlyList<NestedField> fields)
+    {
+        var rows = await ParquetFiles.ReadAsync(_io, file.FilePath, new Schema(0, fields));
+        return rows.Select(r => EqualityKey.Encode(fields, i => r[i])).ToHashSet(StringComparer.Ordinal);
     }
 
     /// <summary>All positions a v2 position delete file records, grouped by data file.</summary>

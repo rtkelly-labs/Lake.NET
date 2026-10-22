@@ -14,9 +14,10 @@ a failure instead.
 | **L1 fidelity** | `EmulatorFidelityTests` | S3 + Glue | The storage/catalog guarantees commits rely on (conditional create, Glue VersionId); same assertions in both modes | ~1 s |
 | **L2 cross-engine** | `CrossEngineTests` | L1 + PyIceberg oracle | C# writes → PyIceberg reads (rows, values, spec, summary) and PyIceberg writes → C# reads, re-partitions identically, appends → PyIceberg reads | ~5 s |
 | **L2 local cross-engine** | `PuffinCrossEngineTests`, `SourceGeneratorInteropTests` | PyIceberg oracle only (local filesystem) | PyIceberg applies our position deletes and DVs, reads converted tables; DataSketches reads our NDV blobs; Parquet.SourceGenerator files are adopted and read by PyIceberg; generator gaps pinned | ~5 s |
+| **BDD** | `Iceberg.Net.Behaviour.Tests` (Reqnroll) | PyIceberg oracle for the cross-engine steps (they skip without it) | Gherkin specification of write modes × delete mechanisms × format versions, concurrency and v2→v3 conversion | ~10 s |
 | **L3 AWS-only** | `AthenaTests` | AWS + Athena workgroup | Athena reads our tables (counts, sums, partition pruning on our transforms); we read Athena-written tables including its position deletes, delete on top, and Athena reads the result | minutes |
 
-Current results (emulation): **L0 111/111**, **L1+L2 32/32**, L3 skipped (requires AWS).
+Current results (emulation): **L0 147/147**, **L1+L2 37/37**, **BDD 39/39**, L3 skipped (requires AWS).
 
 ## Environment variables
 

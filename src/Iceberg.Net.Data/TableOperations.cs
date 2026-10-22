@@ -54,8 +54,8 @@ public static class TableScan
     }
 
     /// <summary>
-    /// Read all rows of a snapshot, projected onto the current schema (by field ID), with position deletes
-    /// and deletion vectors applied (merge-on-read). Equality deletes are refused.
+    /// Read all rows of a snapshot, projected onto the current schema (by field ID), with position deletes,
+    /// deletion vectors and equality deletes applied (merge-on-read).
     /// </summary>
     public static async Task<List<object?[]>> ReadAllAsync(Table table, long? snapshotId = null, CancellationToken ct = default)
     {
@@ -66,9 +66,9 @@ public static class TableScan
         {
             if (task.File.FileFormat != "PARQUET") throw new NotSupportedException($"{task.File.FileFormat} data files are not supported");
             var fileRows = await ParquetFiles.ReadAsync(table.IO, task.File.FilePath, table.Schema, mapping, ct);
-            var deleted = deletes.IsEmpty ? null : await deletes.DeletedPositionsAsync(task.File, task.DataSequenceNumber, ct);
-            if (deleted is null) rows.AddRange(fileRows);
-            else rows.AddRange(fileRows.Where((_, pos) => !deleted.Contains(pos)));
+            var isDeleted = deletes.IsEmpty ? null : await deletes.RowFilterAsync(task.File, task.DataSequenceNumber, table.Schema, ct);
+            if (isDeleted is null) rows.AddRange(fileRows);
+            else rows.AddRange(fileRows.Where((row, pos) => !isDeleted(pos, row)));
         }
         return rows;
     }
@@ -129,7 +129,11 @@ public sealed class SnapshotProducer
     private readonly Table _table;
     private readonly List<DataFile> _added = [];
     private Func<DataFile, bool>? _deleteWhere;
-    private string _operation = Operations.Append;
+    /// <summary>Null = derive from what the snapshot does (append / delete / overwrite).</summary>
+    private string? _operation = Operations.Append;
+    private readonly HashSet<string> _removePaths = new(StringComparer.Ordinal);
+    private readonly List<DataFile> _addedDeleteFiles = [];
+    private int? _retries;
     private readonly Dictionary<string, string> _extraSummary = [];
     private string? _writtenManifest;
     private ManifestFile? _writtenManifestFile;
@@ -178,6 +182,44 @@ public sealed class SnapshotProducer
     public static SnapshotProducer ConvertPositionDeletesToDeletionVectors(Table table) =>
         new(table) { _operation = Operations.Replace, _convertPositionDeletes = true };
 
+    /// <summary>
+    /// A general row-level change committed as one snapshot: any mix of added data files, removed data files
+    /// (copy-on-write), position deletes / DVs and equality delete files. The operation is derived
+    /// (<c>append</c>, <c>delete</c> or <c>overwrite</c>).
+    /// </summary>
+    public static SnapshotProducer RowDelta(Table table) => new(table) { _operation = null };
+
+    /// <summary>Remove these data files (copy-on-write); DVs that reference them are removed in the same commit.</summary>
+    public SnapshotProducer RemoveDataFiles(IEnumerable<string> paths)
+    {
+        _removePaths.UnionWith(paths);
+        var previous = _deleteWhere;
+        _deleteWhere = f => _removePaths.Contains(f.FilePath) || (previous?.Invoke(f) ?? false);
+        return this;
+    }
+
+    public SnapshotProducer DeletePositions(string dataFile, IEnumerable<long> positions)
+    {
+        _rowDeletes ??= new(StringComparer.Ordinal);
+        if (!_rowDeletes.TryGetValue(dataFile, out var bm)) _rowDeletes[dataFile] = bm = new RoaringPositionBitmap();
+        bm.AddRange(positions);
+        return this;
+    }
+
+    /// <summary>Add pre-written delete files (e.g. equality deletes).</summary>
+    public SnapshotProducer AddDeleteFiles(IEnumerable<DataFile> files)
+    {
+        _addedDeleteFiles.AddRange(files);
+        return this;
+    }
+
+    /// <summary>Override <c>commit.retry.num-retries</c>; 0 makes a conflict surface as <see cref="CommitFailedException"/> so the caller can re-plan.</summary>
+    public SnapshotProducer WithRetries(int retries)
+    {
+        _retries = retries;
+        return this;
+    }
+
     public SnapshotProducer AddFiles(IEnumerable<DataFile> files)
     {
         _added.AddRange(files);
@@ -193,6 +235,7 @@ public sealed class SnapshotProducer
     public async Task<Snapshot> CommitAsync(CancellationToken ct = default)
     {
         var policy = CommitRetryPolicy.From(_table.Metadata);
+        if (_retries is { } r) policy = policy with { NumRetries = r };
         for (var attempt = 0; ; attempt++)
         {
             try
@@ -245,7 +288,7 @@ public sealed class SnapshotProducer
         var parentManifests = parent is null ? [] : await TableScan.ManifestsAsync(_table, parent, ct);
 
         // 0. Row-level deletes / conversion: decide which delete files to add and which to remove.
-        var deleteChange = _rowDeletes is not null || _convertPositionDeletes
+        var deleteChange = _rowDeletes is not null || _convertPositionDeletes || _addedDeleteFiles.Count > 0 || _deleteWhere is not null
             ? await PlanDeleteChangeAsync(parent, parentManifests, commitUuid, ct)
             : DeleteChange.None;
 
@@ -329,7 +372,15 @@ public sealed class SnapshotProducer
         await _table.IO.WriteAsync(listPath, ManifestCodec.WriteManifestList(m.FormatVersion, snapshotId, parent?.SnapshotId, sequenceNumber, manifests, firstRowId), overwrite: false, ct);
         _attemptArtifacts.Add(listPath);
 
-        var operation = _operation == Operations.Overwrite && deletedFiles == 0 ? Operations.Append : _operation;
+        var deletesSomething = deletedFiles > 0 || deleteChange.Added.Count > 0;
+        var operation = _operation switch
+        {
+            null when !deletesSomething => Operations.Append,
+            null when _added.Count == 0 => Operations.Delete,
+            null => Operations.Overwrite,
+            Operations.Overwrite when deletedFiles == 0 => Operations.Append,
+            _ => _operation,
+        };
         return new Snapshot
         {
             SnapshotId = snapshotId,
@@ -357,7 +408,7 @@ public sealed class SnapshotProducer
         if (parent is null)
         {
             if (_rowDeletes is { Count: > 0 }) throw new ValidationException("Cannot delete rows from a table with no snapshot");
-            return DeleteChange.None;
+            return _addedDeleteFiles.Count > 0 ? new DeleteChange(_addedDeleteFiles, new HashSet<(string, long?)>(), []) : DeleteChange.None;
         }
 
         var index = await DeleteIndex.LoadAsync(_table, parentManifests, ct);
@@ -377,6 +428,17 @@ public sealed class SnapshotProducer
         void Remove(DataFile f)
         {
             if (removed.Add((f.FilePath, f.ContentOffset))) removedFiles.Add(f);
+        }
+
+        // Data files removed in this commit take their deletion vectors with them (no dangling DVs).
+        if (_deleteWhere is not null)
+        {
+            foreach (var (path, task) in live)
+            {
+                if (!_deleteWhere(task.File)) continue;
+                if (targets.ContainsKey(path)) throw new ValidationException($"{path} cannot be both removed and position-deleted in one commit");
+                if (index.DeletionVectorFor(path) is { } dv) Remove(dv.File);
+            }
         }
 
         if (m.FormatVersion >= 3)
@@ -410,7 +472,7 @@ public sealed class SnapshotProducer
                     bm.Or(older);
                 }
             }
-            if (targets.Count == 0) return new DeleteChange([], removed, removedFiles);
+            if (targets.Count == 0) return new DeleteChange(_addedDeleteFiles, removed, removedFiles);
 
             var ordered = targets.OrderBy(t => t.Key, StringComparer.Ordinal).ToList();
             var written = PuffinFile.Write(ordered.Select(t => DeletionVector.ToBlob(t.Key, t.Value)));
@@ -430,7 +492,7 @@ public sealed class SnapshotProducer
                 ContentOffset = written.Blobs[i].Offset,
                 ContentSizeInBytes = written.Blobs[i].Length,
             }).ToList();
-            return new DeleteChange(added, removed, removedFiles);
+            return new DeleteChange([.. added, .. _addedDeleteFiles], removed, removedFiles);
         }
 
         // v2: one position delete file per data file.
@@ -442,7 +504,7 @@ public sealed class SnapshotProducer
             v2Added.Add(await PositionDeleteFiles.WriteAsync(_table.IO, location, data.SpecId, data.Partition, bm.Positions().Select(p => (dataPath, p)), ct));
             _attemptArtifacts.Add(location);
         }
-        return new DeleteChange(v2Added, removed, removedFiles);
+        return new DeleteChange([.. v2Added, .. _addedDeleteFiles], removed, removedFiles);
     }
 
     private static string DataDir(TableMetadata m) => m.Property("write.data.path", $"{m.Location}/data").TrimEnd('/');
@@ -523,8 +585,8 @@ public sealed class SnapshotProducer
             ["total-records"] = S(Prev(parent, "total-records") + addedRecords - deletedRecords),
             ["total-files-size"] = S(Prev(parent, "total-files-size") + addedSize - deletedSize),
             ["total-delete-files"] = S(Prev(parent, "total-delete-files") + deletes.Added.Count - deletes.RemovedFiles.Count),
-            ["total-position-deletes"] = S(Prev(parent, "total-position-deletes") + deletes.Added.Sum(f => f.RecordCount) - deletes.RemovedFiles.Sum(f => f.RecordCount)),
-            ["total-equality-deletes"] = S(Prev(parent, "total-equality-deletes")),
+            ["total-position-deletes"] = S(Prev(parent, "total-position-deletes") + PositionRecords(deletes.Added) - PositionRecords(deletes.RemovedFiles)),
+            ["total-equality-deletes"] = S(Prev(parent, "total-equality-deletes") + EqualityRecords(deletes.Added) - EqualityRecords(deletes.RemovedFiles)),
             ["engine-name"] = "iceberg-net",
         };
         if (deletedFiles > 0)
@@ -536,20 +598,25 @@ public sealed class SnapshotProducer
         if (deletes.Added.Count > 0)
         {
             summary["added-delete-files"] = S(deletes.Added.Count);
-            summary["added-position-deletes"] = S(deletes.Added.Sum(f => f.RecordCount));
+            if (PositionRecords(deletes.Added) > 0) summary["added-position-deletes"] = S(PositionRecords(deletes.Added));
+            if (EqualityRecords(deletes.Added) > 0) summary["added-equality-deletes"] = S(EqualityRecords(deletes.Added));
             var dvs = deletes.Added.Count(f => f.FileFormat == "PUFFIN");
             if (dvs > 0) summary["added-dvs"] = S(dvs);
         }
         if (deletes.RemovedFiles.Count > 0)
         {
             summary["removed-delete-files"] = S(deletes.RemovedFiles.Count);
-            summary["removed-position-deletes"] = S(deletes.RemovedFiles.Sum(f => f.RecordCount));
+            if (PositionRecords(deletes.RemovedFiles) > 0) summary["removed-position-deletes"] = S(PositionRecords(deletes.RemovedFiles));
+            if (EqualityRecords(deletes.RemovedFiles) > 0) summary["removed-equality-deletes"] = S(EqualityRecords(deletes.RemovedFiles));
             var dvs = deletes.RemovedFiles.Count(f => f.FileFormat == "PUFFIN");
             if (dvs > 0) summary["removed-dvs"] = S(dvs);
         }
         foreach (var (k, v) in _extraSummary) summary[k] = v;
         return summary;
     }
+
+    private static long PositionRecords(IEnumerable<DataFile> files) => files.Where(f => f.Content == FileContent.PositionDeletes).Sum(f => f.RecordCount);
+    private static long EqualityRecords(IEnumerable<DataFile> files) => files.Where(f => f.Content == FileContent.EqualityDeletes).Sum(f => f.RecordCount);
 
     /// <summary>After a successful commit, delete manifests/lists from failed attempts that the winning snapshot does not reference.</summary>
     private async Task CleanupAsync(CancellationToken ct)

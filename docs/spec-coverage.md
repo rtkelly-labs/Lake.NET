@@ -72,7 +72,7 @@ Legend: ✅ implemented and tested · 🟡 partial · ⬜ not started · — not
 | Section | Status | Notes |
 |---|---|---|
 | Position delete files (v2) | ✅ read + write (one file per data file) | `RowDeleteTests`, `PuffinCrossEngineTests` (PyIceberg applies ours), `AthenaTests` (we apply Athena's) |
-| Equality delete files (v2) | ⬜ | scans refuse them explicitly; v4 bans writing new ones, read support still required |
+| Equality delete files (v2) | ✅ read + write (key-based upsert/delete; sequence-number and partition applicability; null matches null) | `TableMutationTests`, Behaviour features; PyIceberg refuses them (pinned) |
 | Deletion vectors (v3, Puffin `deletion-vector-v1`) | ✅ read + write; one DV per data file (merged on later deletes and concurrent retries); v2 → v3 converter | `PuffinSpecTests`, `RowDeleteTests`, `PuffinCrossEngineTests` — see [puffin.md](puffin.md) |
 | Delete applicability by sequence number; DV supersedes position deletes | ✅ | `RowDeleteTests.Deletion_vector_applies_only_to_older_data` |
 | Row lineage: `next-row-id`, snapshot `first-row-id`/`added-rows`, manifest and file `first_row_id` | ✅ assignment and inheritance | `StateManagementTests`, `LocalTableTests`, `CatalogConformanceTests` |

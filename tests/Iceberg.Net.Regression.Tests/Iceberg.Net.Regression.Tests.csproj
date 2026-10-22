@@ -15,6 +15,7 @@
   </ItemGroup>
   <ItemGroup>
     <ProjectReference Include="../../src/Iceberg.Net.Data/Iceberg.Net.Data.csproj" />
+    <ProjectReference Include="../Iceberg.Net.TestSupport/Iceberg.Net.TestSupport.csproj" />
   </ItemGroup>
   <ItemGroup>
     <Using Include="Xunit" />

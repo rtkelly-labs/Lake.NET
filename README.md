@@ -22,15 +22,15 @@ No production-grade .NET Iceberg library exists today (see [docs/ports-and-engin
 | Table metadata | v1 read, v2/v3 read+write, full update/requirement state machine (REST-shaped), metadata & snapshot logs, refs, row lineage |
 | Manifests | In-house Avro codec; manifest + manifest list read (v1–v3) and write (v2–v3), field-ID resolution, sequence-number and `first_row_id` inheritance |
 | Data | ParquetSharp data files with field IDs and column metrics (incl. decimal, uuid); scan planning; append, copy-on-write overwrite, file delete; metadata-only snapshot expiry |
-| Row-level deletes | Merge-on-read reads and writes: v2 position delete files, v3 deletion vectors (one per data file, merged), v2→v3 converter |
+| Write modes | Pure insert, upsert by key, group key replacement, delete by key / predicate / whole files — each one atomic snapshot, re-planned on conflict ([docs/write-modes.md](docs/write-modes.md)) |
+| Delete mechanisms | Copy-on-write, v2 position delete files, v3 deletion vectors (one per data file, merged), equality deletes; v2→v3 converter |
 | Puffin | Container, `deletion-vector-v1` (Roaring64), `apache-datasketches-theta-v1`; NDV statistics files |
 | Foreign Parquet | `ParquetImport` adopts files from other writers (e.g. Parquet.SourceGenerator) via name mapping and type validation |
 | Catalogs | In-memory, AWS Glue (VersionId optimistic lock), Iceberg REST (OAuth2/bearer, config merge, vended credentials, idempotency keys) |
 | Storage | Local and S3 FileIO (conditional create via `If-None-Match`) |
 | Proven interop | Reads PyIceberg-written tables; PyIceberg reads ours (incl. our deletes and DVs); Java REST reference server accepts our commits; DataSketches reads our sketches |
 
-Not yet: equality deletes, expressions & pruning (so deletes are by position), nested Parquet columns, ORC,
-views, SigV4 REST. See [docs/roadmap.md](docs/roadmap.md).
+Not yet: expressions & pruning (mutations scan every live file), nested Parquet columns, ORC, views, SigV4 REST. See [docs/roadmap.md](docs/roadmap.md).
 
 ## Layout
 
@@ -45,7 +45,9 @@ iceberg-dotnet/
 │   └── Iceberg.Net.Data      Parquet files, scans, deletes, snapshot producers, import, statistics
 ├── tests/
 │   ├── Iceberg.Net.Spec.Tests        L0: spec vectors, state machine, PyIceberg fixtures (no network)
-│   └── Iceberg.Net.Regression.Tests  L1–L3: emulation or AWS, same code
+│   ├── Iceberg.Net.Regression.Tests  L1–L3: emulation or AWS, same code
+│   ├── Iceberg.Net.Behaviour.Tests   BDD: Gherkin (Reqnroll) specification of write modes and deletes
+│   └── Iceberg.Net.TestSupport       shared target selection and PyIceberg oracle
 ├── interop/        PyIceberg oracle used by the cross-engine tests
 ├── emulation/      docker compose: moto (+ fidelity shims) and the Iceberg REST fixture
 └── docs/           design, research and runbooks (start at docs/README.md)
