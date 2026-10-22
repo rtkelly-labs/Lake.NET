@@ -246,7 +246,7 @@ public abstract partial class MetastoreCatalog(string name, IFileIO io) : ICatal
 }
 
 /// <summary>Process-local catalog with a CAS pointer per table. The reference for catalog conformance tests.</summary>
-public sealed class InMemoryCatalog(string warehouse, IFileIO? io = null, string name = "memory") : MetastoreCatalog(name, io ?? new LocalFileIO())
+public class InMemoryCatalog(string warehouse, IFileIO? io = null, string name = "memory") : MetastoreCatalog(name, io ?? new LocalFileIO())
 {
     private readonly Dictionary<Namespace, Dictionary<string, string>> _namespaces = [];
     private readonly Dictionary<TableIdentifier, string> _tables = [];

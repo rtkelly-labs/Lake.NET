@@ -267,6 +267,8 @@ public sealed class RestCatalog : ICatalog
         if (_token is not null) req.Headers.Authorization = new AuthenticationHeaderValue("Bearer", _token);
         if (_options.AccessDelegation is not null) req.Headers.Add("X-Iceberg-Access-Delegation", _options.AccessDelegation);
         if (body is not null) req.Content = new StringContent(body.ToJsonString(), Encoding.UTF8, "application/json");
+        // Spec 1.11+: lets a server deduplicate a mutation it already applied; servers that predate it ignore the header.
+        if (method != HttpMethod.Get && method != HttpMethod.Head) req.Headers.Add("Idempotency-Key", Guid.NewGuid().ToString());
 
         HttpResponseMessage resp;
         try
@@ -292,8 +294,8 @@ public sealed class RestCatalog : ICatalog
                 HttpStatusCode.NotFound => new NoSuchNamespaceException(message),
                 HttpStatusCode.Conflict when conflict is not null => conflict(message),
                 HttpStatusCode.Unauthorized or HttpStatusCode.Forbidden => new UnauthorizedAccessException(message),
-                // The spec: on commit, 500/502/504 mean the commit may or may not have been applied.
-                HttpStatusCode.InternalServerError or HttpStatusCode.BadGateway or HttpStatusCode.GatewayTimeout when commit =>
+                // On commit, 500/502/503/504 mean the commit may or may not have been applied (Java 1.10: #13352, #13619).
+                HttpStatusCode.InternalServerError or HttpStatusCode.BadGateway or HttpStatusCode.ServiceUnavailable or HttpStatusCode.GatewayTimeout when commit =>
                     new CommitStateUnknownException(message),
                 _ => new HttpRequestException($"{method} {path} failed: {message}", null, resp.StatusCode),
             };

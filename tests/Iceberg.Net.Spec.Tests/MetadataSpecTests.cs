@@ -73,6 +73,18 @@ public class MetadataSpecTests
         Assert.Equal(MetadataJson.Write(m), MetadataJson.Write(MetadataJson.Read(written.ToJsonString())));
     }
 
+    [Theory]
+    [InlineData(2, "-1")]
+    [InlineData(3, "null")]
+    public void Empty_table_current_snapshot_id_matches_java(int formatVersion, string expected)
+    {
+        var m = TableMetadata.NewTable(new Schema(NestedField.Require(1, "id", PrimitiveType.Long)), null, null, "s3://b/t", formatVersion: formatVersion);
+        var json = JsonNode.Parse(MetadataJson.Write(m))!.AsObject();
+        Assert.True(json.ContainsKey("current-snapshot-id"));
+        Assert.Equal(expected, json["current-snapshot-id"]?.ToJsonString() ?? "null");
+        Assert.Null(MetadataJson.Read(json.ToJsonString()).CurrentSnapshotId);
+    }
+
     [Fact]
     public void Unknown_format_version_is_rejected() =>
         Assert.Throws<NotSupportedException>(() => MetadataJson.Read("""{"format-version": 9, "location": "x", "last-updated-ms": 0, "last-column-id": 0}"""));

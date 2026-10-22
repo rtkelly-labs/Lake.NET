@@ -1,0 +1,25 @@
+#!/usr/bin/env bash
+# Run the test tiers. Usage:
+#   ./run-tests.sh spec          L0: pure spec tests (no network)
+#   ./run-tests.sh emulation     L0 + L1/L2 against local emulators (starts them if needed)
+#   ./run-tests.sh aws           L0 + L1/L2/L3 against AWS (needs ICEBERG_WAREHOUSE etc.; see docs/regression-suite.md)
+set -euo pipefail
+cd "$(dirname "$0")"
+mode="${1:-emulation}"
+
+dotnet test tests/Iceberg.Net.Spec.Tests --nologo
+[[ "$mode" == "spec" ]] && exit 0
+
+if [[ "$mode" == "emulation" ]]; then
+  export ICEBERG_TEST_TARGET=emulation
+  curl -fs http://localhost:5000/moto-api/ >/dev/null 2>&1 || ./emulation/up.sh
+elif [[ "$mode" == "aws" ]]; then
+  export ICEBERG_TEST_TARGET=aws
+  : "${ICEBERG_WAREHOUSE:?set ICEBERG_WAREHOUSE=s3://bucket/prefix}"
+else
+  echo "unknown mode $mode" >&2; exit 2
+fi
+
+# Fail rather than skip when the chosen target is unreachable.
+export ICEBERG_REQUIRE_TARGET=1
+dotnet test tests/Iceberg.Net.Regression.Tests --nologo

@@ -1,0 +1,36 @@
+# Full-emulation stack for the regression suite. See ../docs/regression-suite.md.
+#   moto  - AWS emulator: S3 (incl. conditional writes) + Glue Data Catalog + STS, one endpoint,
+#           started through moto_server.py so the Glue fidelity shims (docs/emulation.md) apply
+#   rest  - apache/iceberg-rest-fixture: the Iceberg project's own REST catalog test server
+#           (Java reference implementation, JDBC-backed) storing metadata in moto's S3
+name: iceberg-dotnet-emulation
+services:
+  moto:
+    image: motoserver/moto:5.2.4
+    ports: ["5000:5000"]
+    volumes: ["./moto_server.py:/shim/moto_server.py:ro"]
+    entrypoint: ["python", "-I", "/shim/moto_server.py", "--port", "5000"]
+    healthcheck:
+      test: ["CMD", "python", "-c", "import urllib.request; urllib.request.urlopen('http://localhost:5000/moto-api/')"]
+      interval: 2s
+      retries: 30
+
+  bucket:
+    image: motoserver/moto:5.2.4
+    depends_on:
+      moto: { condition: service_healthy }
+    entrypoint: ["python", "-c", "import boto3; boto3.client('s3', endpoint_url='http://moto:5000', region_name='eu-west-1', aws_access_key_id='test', aws_secret_access_key='test').create_bucket(Bucket='iceberg-regression', CreateBucketConfiguration={'LocationConstraint': 'eu-west-1'})"]
+
+  rest:
+    image: apache/iceberg-rest-fixture:1.10.0
+    depends_on:
+      bucket: { condition: service_completed_successfully }
+    ports: ["8181:8181"]
+    environment:
+      AWS_ACCESS_KEY_ID: test
+      AWS_SECRET_ACCESS_KEY: test
+      AWS_REGION: eu-west-1
+      CATALOG_WAREHOUSE: s3://iceberg-regression/rest-warehouse
+      CATALOG_IO__IMPL: org.apache.iceberg.aws.s3.S3FileIO
+      CATALOG_S3_ENDPOINT: http://moto:5000
+      CATALOG_S3_PATH__STYLE__ACCESS: "true"

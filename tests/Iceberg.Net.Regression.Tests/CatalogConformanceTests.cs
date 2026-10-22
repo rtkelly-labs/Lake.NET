@@ -1,0 +1,192 @@
+using Iceberg.Net.Catalog;
+using Iceberg.Net.Data;
+using Iceberg.Net.Metadata;
+using Iceberg.Net.Partitioning;
+using Iceberg.Net.Types;
+
+namespace Iceberg.Net.Regression.Tests;
+
+/// <summary>
+/// One behavioural contract, run against every catalog implementation. Adding a catalog (Nessie,
+/// Polaris, S3 Tables, ...) means adding it to <see cref="Catalogs"/>; the contract must not fork.
+/// </summary>
+[Trait("Category", "Regression")]
+public sealed class CatalogConformanceTests
+{
+    public static TheoryData<string> Catalogs => new() { "glue", "rest" };
+
+    public static readonly Schema Schema = new(
+        NestedField.Require(1, "id", PrimitiveType.Long),
+        NestedField.Optional(2, "name", PrimitiveType.String),
+        NestedField.Optional(3, "amount", PrimitiveType.Double),
+        NestedField.Optional(4, "event_ts", PrimitiveType.TimestampTz),
+        NestedField.Optional(5, "region", PrimitiveType.String),
+        NestedField.Optional(6, "qty", PrimitiveType.Int));
+
+    public static PartitionSpec Spec => PartitionSpec.BuilderFor(Schema).Day("event_ts").Bucket("id", 4).Identity("region").Build();
+
+    public static List<object?[]> Rows(int start, int count)
+    {
+        var baseTs = IcebergTime.MicrosFromTimestamp(new DateTime(2024, 1, 1, 0, 0, 0, DateTimeKind.Utc));
+        return Enumerable.Range(start, count).Select(i => new object?[]
+        {
+            (long)i, i % 7 == 0 ? null : $"name-{i}", i * 1.5, baseTs + i * 5L * 3_600_000_000L, i % 2 == 0 ? "eu" : "us", i % 10,
+        }).ToList();
+    }
+
+    private sealed class Scope(ICatalog catalog, Namespace ns) : IAsyncDisposable
+    {
+        public ICatalog Catalog { get; } = catalog;
+        public Namespace Ns { get; } = ns;
+        public TableIdentifier Id(string name) => new(Ns, name);
+
+        public async ValueTask DisposeAsync()
+        {
+            try
+            {
+                foreach (var t in await Catalog.ListTablesAsync(Ns)) await Catalog.DropTableAsync(t, purge: true);
+                await Catalog.DropNamespaceAsync(Ns);
+            }
+            finally
+            {
+                Catalog.Dispose();
+            }
+        }
+    }
+
+    private static async Task<Scope> ScopeAsync(string kind, string purpose)
+    {
+        var catalog = await TestEnvironment.Current.CatalogAsync(kind);
+        var ns = Namespace.Of(TestEnvironment.Current.NewNamespace($"{kind}_{purpose}"));
+        await catalog.CreateNamespaceAsync(ns);
+        return new Scope(catalog, ns);
+    }
+
+    [SkippableTheory]
+    [MemberData(nameof(Catalogs))]
+    public async Task Namespace_lifecycle(string kind)
+    {
+        Require.Catalog(kind);
+        await using var s = await ScopeAsync(kind, "ns");
+        Assert.True(await s.Catalog.NamespaceExistsAsync(s.Ns));
+        Assert.Contains(s.Ns, await s.Catalog.ListNamespacesAsync());
+        await Assert.ThrowsAsync<AlreadyExistsException>(() => s.Catalog.CreateNamespaceAsync(s.Ns));
+        Assert.False(await s.Catalog.NamespaceExistsAsync(Namespace.Of(s.Ns.Levels[0] + "_missing")));
+    }
+
+    [SkippableTheory]
+    [MemberData(nameof(Catalogs))]
+    public async Task Create_append_read_round_trip(string kind)
+    {
+        Require.Catalog(kind);
+        await using var s = await ScopeAsync(kind, "rt");
+        var table = await s.Catalog.CreateTableAsync(new CreateTableRequest(s.Id("events"), Schema, Spec));
+        Assert.Equal(1000, table.Spec.Fields[0].FieldId);
+        Assert.Null(table.Metadata.CurrentSnapshot);
+
+        var snap = await SnapshotProducer.Append(table).AddFiles(await TableWriter.WriteAsync(table, Rows(0, 40))).CommitAsync();
+        var loaded = await s.Catalog.LoadTableAsync(s.Id("events"));
+        Assert.Equal(snap.SnapshotId, loaded.Metadata.CurrentSnapshotId);
+        Assert.Equal(40, (await TableScan.ReadAllAsync(loaded)).Count);
+        Assert.Contains(s.Id("events"), await s.Catalog.ListTablesAsync(s.Ns));
+        Assert.True(await loaded.IO.ExistsAsync(loaded.MetadataLocation!));
+    }
+
+    [SkippableTheory]
+    [MemberData(nameof(Catalogs))]
+    public async Task Concurrent_commits_serialise_through_the_catalog(string kind)
+    {
+        Require.Catalog(kind);
+        await using var s = await ScopeAsync(kind, "cc");
+        var created = await s.Catalog.CreateTableAsync(new CreateTableRequest(s.Id("t"), Schema, Spec));
+
+        // Several writers start from the same base; every one must land exactly once.
+        const int writers = 4;
+        var tables = await Task.WhenAll(Enumerable.Range(0, writers).Select(_ => s.Catalog.LoadTableAsync(created.Identifier)));
+        var files = await Task.WhenAll(tables.Select((t, i) => TableWriter.WriteAsync(t, Rows(i * 10, 10))));
+        await Task.WhenAll(tables.Select((t, i) => SnapshotProducer.Append(t).AddFiles(files[i]).CommitAsync()));
+
+        var final = await s.Catalog.LoadTableAsync(created.Identifier);
+        Assert.Equal(writers, final.Metadata.Snapshots.Count);
+        Assert.Equal(writers, final.Metadata.LastSequenceNumber);
+        Assert.Equal(Enumerable.Range(0, writers * 10).Select(i => (long)i), (await TableScan.ReadAllAsync(final)).Select(r => (long)r[0]!).Order());
+        // Snapshot chain is linear: each parent is the previous snapshot.
+        Assert.Equal(writers, final.Metadata.Ancestors(final.Metadata.CurrentSnapshotId).Count());
+    }
+
+    [SkippableTheory]
+    [MemberData(nameof(Catalogs))]
+    public async Task Stale_requirements_are_rejected(string kind)
+    {
+        Require.Catalog(kind);
+        await using var s = await ScopeAsync(kind, "req");
+        var a = await s.Catalog.CreateTableAsync(new CreateTableRequest(s.Id("t"), Schema));
+        var b = await s.Catalog.LoadTableAsync(a.Identifier);
+        await a.UpdateSchemaAsync(new Schema(0, [.. Schema.Columns, NestedField.Optional(7, "x", PrimitiveType.String)]));
+        await Assert.ThrowsAsync<CommitFailedException>(() =>
+            b.UpdateSchemaAsync(new Schema(0, [.. Schema.Columns, NestedField.Optional(7, "y", PrimitiveType.Long)])));
+        await Assert.ThrowsAsync<CommitFailedException>(() =>
+            b.CommitAsync([new UpdateRequirement.AssertTableUuid(Guid.NewGuid())], [new MetadataUpdate.SetProperties(new Dictionary<string, string> { ["k"] = "v" })]));
+    }
+
+    [SkippableTheory]
+    [MemberData(nameof(Catalogs))]
+    public async Task Overwrite_schema_evolution_and_time_travel(string kind)
+    {
+        Require.Catalog(kind);
+        await using var s = await ScopeAsync(kind, "evo");
+        var t = await s.Catalog.CreateTableAsync(new CreateTableRequest(s.Id("t"), Schema, Spec));
+        var first = await SnapshotProducer.Append(t).AddFiles(await TableWriter.WriteAsync(t, Rows(0, 20))).CommitAsync();
+        await SnapshotProducer.Overwrite(t, f => (string?)f.Partition[2] == "us").CommitAsync();
+        Assert.Equal(10, (await TableScan.ReadAllAsync(t)).Count);
+
+        await t.UpdateSchemaAsync(new Schema(0, [.. Schema.Columns, NestedField.Optional(7, "note", PrimitiveType.String)]));
+        var more = Rows(100, 4).Select(r => r.Append("late").ToArray()).ToList();
+        await SnapshotProducer.Append(t).AddFiles(await TableWriter.WriteAsync(t, more)).CommitAsync();
+
+        var loaded = await s.Catalog.LoadTableAsync(t.Identifier);
+        var rows = await TableScan.ReadAllAsync(loaded);
+        Assert.Equal(14, rows.Count);
+        Assert.Equal(4, rows.Count(r => (string?)r[6] == "late"));
+        Assert.Equal(20, (await TableScan.ReadAllAsync(loaded, first.SnapshotId)).Count);
+        // create, append, overwrite, add-schema, append: five metadata files, four in the log.
+        Assert.True(loaded.Metadata.MetadataLog.Count >= 4, $"metadata-log has {loaded.Metadata.MetadataLog.Count} entries");
+    }
+
+    [SkippableTheory]
+    [MemberData(nameof(Catalogs))]
+    public async Task Rename_register_and_drop(string kind)
+    {
+        Require.Catalog(kind);
+        await using var s = await ScopeAsync(kind, "ren");
+        var t = await s.Catalog.CreateTableAsync(new CreateTableRequest(s.Id("a"), Schema));
+        await SnapshotProducer.Append(t).AddFiles(await TableWriter.WriteAsync(t, Rows(0, 3))).CommitAsync();
+
+        await s.Catalog.RenameTableAsync(s.Id("a"), s.Id("b"));
+        Assert.False(await s.Catalog.TableExistsAsync(s.Id("a")));
+        var b = await s.Catalog.LoadTableAsync(s.Id("b"));
+        Assert.Equal(t.Metadata.TableUuid, b.Metadata.TableUuid);
+
+        // Register points a second identifier at existing metadata (how tables move between catalogs).
+        var registered = await s.Catalog.RegisterTableAsync(s.Id("c"), b.MetadataLocation!);
+        Assert.Equal(3, (await TableScan.ReadAllAsync(registered)).Count);
+
+        await s.Catalog.DropTableAsync(s.Id("c"));
+        await Assert.ThrowsAsync<NoSuchTableException>(() => s.Catalog.LoadTableAsync(s.Id("c")));
+    }
+
+    [SkippableTheory]
+    [MemberData(nameof(Catalogs))]
+    public async Task Format_v3_tables(string kind)
+    {
+        Require.Catalog(kind);
+        await using var s = await ScopeAsync(kind, "v3");
+        var t = await s.Catalog.CreateTableAsync(new CreateTableRequest(s.Id("t"), Schema, Spec, FormatVersion: 3));
+        Assert.Equal(3, t.Metadata.FormatVersion);
+        await SnapshotProducer.Append(t).AddFiles(await TableWriter.WriteAsync(t, Rows(0, 12))).CommitAsync();
+        await SnapshotProducer.Append(t).AddFiles(await TableWriter.WriteAsync(t, Rows(12, 8))).CommitAsync();
+        var loaded = await s.Catalog.LoadTableAsync(t.Identifier);
+        Assert.Equal(20, loaded.Metadata.NextRowId);
+        Assert.Equal(12, loaded.Metadata.CurrentSnapshot!.FirstRowId);
+    }
+}

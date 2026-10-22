@@ -95,7 +95,9 @@ def env_catalog(kind: str) -> Catalog:
     if endpoint := os.environ.get("ICEBERG_S3_ENDPOINT"):
         s3 |= {"s3.endpoint": endpoint, "s3.path-style-access": "true"}
     if kind == "glue":
-        props = {"type": "glue", "glue.region": region, **s3}
+        # Same default location rule as the C# GlueCatalog: {warehouse}/glue/{db}.db/{table}
+        warehouse = os.environ["ICEBERG_WAREHOUSE"].rstrip("/") + "/glue"
+        props = {"type": "glue", "glue.region": region, "warehouse": warehouse, **s3}
         if glue_endpoint := os.environ.get("ICEBERG_GLUE_ENDPOINT"):
             props["glue.endpoint"] = glue_endpoint
         return load_catalog("glue", **props)

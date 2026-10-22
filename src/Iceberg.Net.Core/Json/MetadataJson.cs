@@ -35,8 +35,8 @@ public static class MetadataJson
         o["default-sort-order-id"] = m.DefaultSortOrderId;
         o["sort-orders"] = Array(m.SortOrders, TypeJson.SortOrderToJson);
         o["properties"] = StringMap(m.Properties);
-        // Older readers treat a missing/-1 current-snapshot-id as "no snapshot"; Java still writes -1.
-        o["current-snapshot-id"] = m.CurrentSnapshotId ?? -1;
+        // v1/v2 readers expect -1 for "no snapshot"; Java writes null for v3+ (since 1.9, apache/iceberg#12335).
+        o["current-snapshot-id"] = m.CurrentSnapshotId is { } current ? current : m.FormatVersion >= 3 ? null : -1;
         o["refs"] = new JsonObject(m.Refs.Select(kv => KeyValuePair.Create(kv.Key, (JsonNode?)RefToJson(kv.Value))));
         o["snapshots"] = Array(m.Snapshots, s => SnapshotToJson(s, m.FormatVersion));
         o["statistics"] = Array(m.Statistics, StatisticsToJson);
