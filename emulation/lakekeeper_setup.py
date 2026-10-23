@@ -1,5 +1,6 @@
-"""Bootstrap Lakekeeper and create the regression warehouse (idempotent): S3 storage on moto without STS, so
-clients bring their own credentials. Run by the lakekeeper-setup compose service, which shares the host network
+"""Bootstrap Lakekeeper and create the regression warehouse (idempotent): S3 storage on moto with neither STS nor
+remote signing, so clients bring their own credentials, as with every other catalog in the suite. An existing
+warehouse gets the storage profile re-applied, so a changed setting converges. Run by the lakekeeper-setup compose service, which shares the host network
 with Lakekeeper (see docker-compose.yml)."""
 
 import json
@@ -20,6 +21,9 @@ WAREHOUSE = {
         "path-style-access": True,
         "flavor": "s3-compat",
         "sts-enabled": False,
+        # Lakekeeper enables remote signing by default. PyIceberg then sends every S3 request through Lakekeeper's
+        # signer, and some of those came back 403 from moto. The suite tests catalogs, not signers.
+        "remote-signing-enabled": False,
     },
     "storage-credential": {
         "type": "s3",
@@ -50,8 +54,13 @@ def main() -> None:
     status, text = call("GET", "/management/v1/warehouse")
     if status != 200:
         raise SystemExit(f"listing warehouses failed ({status}): {text}")
-    if any(w.get("name") == "regression" for w in json.loads(text).get("warehouses", [])):
-        print("warehouse regression exists")
+    existing = next((w for w in json.loads(text).get("warehouses", []) if w.get("name") == "regression"), None)
+    if existing is not None:
+        storage = {k: WAREHOUSE[k] for k in ("storage-profile", "storage-credential")}
+        status, text = call("POST", f"/management/v1/warehouse/{existing['warehouse-id']}/storage", storage)
+        if status >= 300:
+            raise SystemExit(f"updating the warehouse storage failed ({status}): {text}")
+        print("warehouse regression exists; storage profile re-applied")
         return
     status, text = call("POST", "/management/v1/warehouse", WAREHOUSE)
     if status >= 300:

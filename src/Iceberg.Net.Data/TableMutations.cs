@@ -191,31 +191,19 @@ public static class TableMutations
 
             if (matcher is not null && table.Metadata.CurrentSnapshot is not null)
             {
-                switch (strategy)
+                try
                 {
-                    case DeleteStrategy.EqualityDeletes:
-                        await AddEqualityDeletesAsync(table, producer, matcher, ct);
-                        deleted = null; // unknown without a scan; that is the point of equality deletes
-                        break;
-                    case DeleteStrategy.PositionDeletes:
-                        foreach (var (file, positions, _, _) in await FindMatchesAsync(table, matcher, ct))
-                        {
-                            producer.DeletePositions(file.FilePath, positions);
-                            deleted += positions.Count;
-                        }
-                        break;
-                    case DeleteStrategy.CopyOnWrite:
-                        foreach (var (file, positions, survivors, lineage) in await FindMatchesAsync(table, matcher, ct))
-                        {
-                            producer.RemoveDataFiles([file.FilePath]);
-                            // Survivors keep their row identity (v3 row lineage) across the rewrite.
-                            if (survivors.Count > 0) producer.AddFiles(await TableWriter.WriteAsync(table, survivors, lineage.Count > 0 ? lineage : null, ct));
-                            deleted += positions.Count;
-                            rewritten++;
-                        }
-                        break;
-                    default:
-                        throw new ArgumentOutOfRangeException(nameof(strategy));
+                    (deleted, rewritten) = await PlanDeletesAsync(table, producer, matcher, strategy, ct);
+                }
+                catch (Exception e) when (e is FileNotFoundException or DirectoryNotFoundException && attempt <= policy.NumRetries)
+                {
+                    // Compaction and expiry removed a file of the state this attempt planned against: re-plan if the table
+                    // has moved since, as for a lost commit race; otherwise the file is genuinely missing.
+                    var before = table.Metadata.CurrentSnapshotId;
+                    await table.RefreshAsync(ct);
+                    if (table.Metadata.CurrentSnapshotId == before) throw;
+                    await BackOffAsync(policy, attempt, ct);
+                    continue;
                 }
             }
 
@@ -226,10 +214,49 @@ public static class TableMutations
             }
             catch (CommitFailedException) when (attempt <= policy.NumRetries)
             {
-                var wait = Math.Min(policy.MaxWaitMs, policy.MinWaitMs * (1 << Math.Min(attempt - 1, 20)));
-                await Task.Delay(wait + Random.Shared.Next(wait / 10 + 1), ct);
+                await BackOffAsync(policy, attempt, ct);
             }
         }
+    }
+
+    /// <summary>Adds this attempt's deletes to <paramref name="producer"/>; returns rows deleted (null if unknown) and files rewritten.</summary>
+    private static async Task<(long? Deleted, int Rewritten)> PlanDeletesAsync(Table table, SnapshotProducer producer, Matcher matcher, DeleteStrategy strategy, CancellationToken ct)
+    {
+        long? deleted = 0;
+        var rewritten = 0;
+        switch (strategy)
+        {
+            case DeleteStrategy.EqualityDeletes:
+                await AddEqualityDeletesAsync(table, producer, matcher, ct);
+                deleted = null; // unknown without a scan; that is the point of equality deletes
+                break;
+            case DeleteStrategy.PositionDeletes:
+                foreach (var (file, positions, _, _) in await FindMatchesAsync(table, matcher, ct))
+                {
+                    producer.DeletePositions(file.FilePath, positions);
+                    deleted += positions.Count;
+                }
+                break;
+            case DeleteStrategy.CopyOnWrite:
+                foreach (var (file, positions, survivors, lineage) in await FindMatchesAsync(table, matcher, ct))
+                {
+                    producer.RemoveDataFiles([file.FilePath]);
+                    // Survivors keep their row identity (v3 row lineage) across the rewrite.
+                    if (survivors.Count > 0) producer.AddFiles(await TableWriter.WriteAsync(table, survivors, lineage.Count > 0 ? lineage : null, ct));
+                    deleted += positions.Count;
+                    rewritten++;
+                }
+                break;
+            default:
+                throw new ArgumentOutOfRangeException(nameof(strategy));
+        }
+        return (deleted, rewritten);
+    }
+
+    private static Task BackOffAsync(CommitRetryPolicy policy, int attempt, CancellationToken ct)
+    {
+        var wait = Math.Min(policy.MaxWaitMs, policy.MinWaitMs * (1 << Math.Min(attempt - 1, 20)));
+        return Task.Delay(wait + Random.Shared.Next(wait / 10 + 1), ct);
     }
 
     /// <summary>

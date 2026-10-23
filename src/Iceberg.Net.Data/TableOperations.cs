@@ -259,6 +259,8 @@ public sealed class SnapshotProducer
 
     private readonly long? _startingSnapshotId;
     private Func<DataFile, bool>? _conflictFilter;
+    /// <summary>The data files the first attempt removed: a serializable retry must still find every one of them live.</summary>
+    private List<DataFile>? _removedAtStart;
 
     public static SnapshotProducer Append(Table table) => new(table);
 
@@ -291,15 +293,56 @@ public sealed class SnapshotProducer
     {
         if (_conflictFilter is null) return;
         var m = _table.Metadata;
-        foreach (var snapshot in m.Ancestors(m.CurrentSnapshotId).TakeWhile(sn => sn.SnapshotId != _startingSnapshotId))
+        var since = new List<Snapshot>();
+        var reachedStart = _startingSnapshotId is null;
+        foreach (var snapshot in m.Ancestors(m.CurrentSnapshotId))
+        {
+            if (snapshot.SnapshotId == _startingSnapshotId)
+            {
+                reachedStart = true;
+                break;
+            }
+            since.Add(snapshot);
+        }
+        // The starting snapshot expired (Glue's retention optimizer, Athena VACUUM, ExpireAsync) or main was rolled back
+        // past it. Snapshots in between may have expired with it, so a conflicting file can no longer be ruled out (Java:
+        // "Cannot determine history between starting snapshot ... and the last known ancestor").
+        if (!reachedStart)
+            throw new ValidationException($"Cannot determine history between starting snapshot {_startingSnapshotId} and current snapshot {m.CurrentSnapshotId}: " +
+                $"it has expired or is no longer an ancestor of main; re-plan this {_operation} against the current table state");
+        var removed = _removedAtStart ?? [];
+        var removedPaths = removed.Select(f => f.FilePath).ToHashSet();
+        foreach (var snapshot in since)
         {
             if (snapshot.ManifestList is null) continue;
-            foreach (var manifest in (await TableScan.ManifestsAsync(_table, snapshot, ct)).Where(mf => mf.Content == ManifestContent.Data && mf.AddedSnapshotId == snapshot.SnapshotId))
+            foreach (var manifest in (await TableScan.ManifestsAsync(_table, snapshot, ct)).Where(mf => mf.AddedSnapshotId == snapshot.SnapshotId))
             {
-                var entries = ManifestCodec.ReadManifest(await _table.IO.ReadAllAsync(manifest.ManifestPath, ct), m.SpecById(manifest.PartitionSpecId), m.CurrentSchema, manifest).Entries;
-                if (entries.FirstOrDefault(e => e.Status == ManifestEntryStatus.Added && _conflictFilter(e.DataFile)) is { } conflict)
-                    throw new ValidationException($"Concurrent snapshot {snapshot.SnapshotId} ({snapshot.Operation}) added {conflict.DataFile.FilePath}, which this {_operation} would remove; re-plan against the new table state");
+                var entries = ManifestCodec.ReadManifest(await _table.IO.ReadAllAsync(manifest.ManifestPath, ct), m.SpecById(manifest.PartitionSpecId), m.CurrentSchema, manifest).Entries
+                    .Where(e => e.Status == ManifestEntryStatus.Added);
+                if (manifest.Content == ManifestContent.Data)
+                {
+                    if (entries.FirstOrDefault(e => _conflictFilter(e.DataFile)) is { } conflict)
+                        throw new ValidationException($"Concurrent snapshot {snapshot.SnapshotId} ({snapshot.Operation}) added {conflict.DataFile.FilePath}, which this {_operation} would remove; re-plan against the new table state");
+                    continue;
+                }
+                // Java's validateNoConflictingDeletes: a delete added meanwhile against a file this commit removes would be
+                // dropped with the file while this commit re-adds rows read before it, so the deleted rows would return.
+                // A delete naming its data file conflicts only with that file; one that does not (multi-file position
+                // deletes, equality deletes) conflicts with any removed file of its partition.
+                if (entries.FirstOrDefault(e => e.DataFile.ReferencedDataFile is { } target
+                        ? removedPaths.Contains(target)
+                        : removed.Any(f => f.SpecId == manifest.PartitionSpecId && f.Partition.SequenceEqual(e.DataFile.Partition))) is { } delete)
+                    throw new ValidationException($"Concurrent snapshot {snapshot.SnapshotId} ({snapshot.Operation}) added delete file {delete.DataFile.FilePath} against data this {_operation} replaces; re-plan against the new table state");
             }
+        }
+
+        // Java's failMissingDeletePaths: compaction or another writer already removed a file this commit replaces. Re-applying
+        // the filter would remove nothing and add the replacement rows a second time.
+        if (removed.Count > 0)
+        {
+            var live = (await TableScan.PlanFilesAsync(_table, Expression.True, null, ct)).Select(t => t.File.FilePath).ToHashSet();
+            if (removed.FirstOrDefault(f => !live.Contains(f.FilePath)) is { } gone)
+                throw new ValidationException($"{gone.FilePath}, which this {_operation} replaces, was removed by a concurrent commit (compaction or another writer); re-plan against the new table state");
         }
     }
 
@@ -401,7 +444,7 @@ public sealed class SnapshotProducer
             try
             {
                 if (attempt > 0) await ValidateNoConflictingDataAsync(ct);
-                var snapshot = await ApplyAsync(ct);
+                var snapshot = await ApplyOrConflictAsync(ct);
                 var requirements = new List<UpdateRequirement>
                 {
                     new UpdateRequirement.AssertTableUuid(_table.Metadata.TableUuid),
@@ -434,6 +477,25 @@ public sealed class SnapshotProducer
                 await Task.Delay(wait + Random.Shared.Next(wait / 10 + 1), ct);
                 await _table.RefreshAsync(ct);
             }
+        }
+    }
+
+    /// <summary>
+    /// <see cref="ApplyAsync"/>, treating a missing base file as a lost race when the table has moved: expiry or compaction
+    /// deleted files of the snapshot this attempt started from, so it must refresh (and validate) like any conflict.
+    /// </summary>
+    private async Task<Snapshot> ApplyOrConflictAsync(CancellationToken ct)
+    {
+        try
+        {
+            return await ApplyAsync(ct);
+        }
+        catch (Exception e) when (e is FileNotFoundException or DirectoryNotFoundException)
+        {
+            var before = _table.Metadata.CurrentSnapshotId;
+            await _table.RefreshAsync(ct);
+            if (_table.Metadata.CurrentSnapshotId == before) throw;
+            throw new CommitFailedException($"Files of snapshot {before} were removed while this {_operation} was being prepared; the table has moved to {_table.Metadata.CurrentSnapshotId}", e);
         }
     }
 
@@ -492,6 +554,7 @@ public sealed class SnapshotProducer
 
         // 1. Carry forward (or rewrite, when deleting) the parent's manifests.
         var toRegroup = new List<ManifestFile>();
+        var removedThisAttempt = new List<DataFile>();
         if (parent is not null)
         {
             var rewriteIndex = 0;
@@ -522,6 +585,7 @@ public sealed class SnapshotProducer
                     manifests.Add(manifest);
                     continue;
                 }
+                removedThisAttempt.AddRange(matched.Select(e => e.DataFile with { SpecId = manifest.PartitionSpecId }));
                 var rewritten = entries.Select(e => matched.Contains(e)
                     ? e with { Status = ManifestEntryStatus.Deleted, SnapshotId = snapshotId }
                     : e with { Status = ManifestEntryStatus.Existing }).ToList();
@@ -533,6 +597,8 @@ public sealed class SnapshotProducer
                 _attemptArtifacts.Add(path);
             }
         }
+
+        if (_deleteWhere is not null) _removedAtStart ??= removedThisAttempt;
 
         // 1a. Rewrite manifests: all live data entries, sorted by partition, cut into target-sized manifests.
         var regroupIndex = 0;

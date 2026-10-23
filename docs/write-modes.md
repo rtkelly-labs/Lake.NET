@@ -43,6 +43,9 @@ serializable semantics:
   (`Concurrent upserts of the same key keep a single row`).
 - A writer whose target file was rewritten by someone else re-scans instead of deleting from a file that no longer
   exists (`A writer whose target file disappeared does not resurrect deletes`).
+- A file removed by compaction and expiry between planning and reading it counts as a lost race, not an error.
+- `InterleavingTests` lands append, upsert, delete, compaction, expiry and orphan cleanup between each
+  mutation's plan and its commit, on every strategy and on v2 and v3.
 
 Inserted data files are written once and reused across attempts, because they don't depend on table state.
 

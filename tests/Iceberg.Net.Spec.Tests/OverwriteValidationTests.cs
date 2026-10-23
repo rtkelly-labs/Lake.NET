@@ -1,6 +1,7 @@
 using Iceberg.Net.Catalog;
 using Iceberg.Net.Data;
 using Iceberg.Net.Manifests;
+using Iceberg.Net.Metadata;
 using Iceberg.Net.Partitioning;
 using Iceberg.Net.Types;
 
@@ -81,5 +82,38 @@ public sealed class OverwriteValidationTests : IDisposable
         var drop = SnapshotProducer.DeleteFiles(a, Us);
         await TableMutations.InsertAsync(b, [[3L, "us"]]);
         await Assert.ThrowsAsync<ValidationException>(() => drop.CommitAsync());
+    }
+
+    [Fact]
+    public async Task Overwrite_fails_when_its_starting_snapshot_expired_meanwhile()
+    {
+        // Expiry (Glue's retention optimizer, Athena VACUUM, ours) removed the snapshot the overwrite started from and
+        // the one that added a matching file. The conflict cannot be checked any more, so it must not be assumed away.
+        var (a, b) = await Setup();
+        var overwrite = SnapshotProducer.Overwrite(a, Us).AddFiles(await TableWriter.WriteAsync(a, [[10L, "us"]]));
+        await TableMutations.InsertAsync(b, [[3L, "us"]]); // the conflicting write
+        await TableMutations.InsertAsync(b, [[4L, "eu"]]); // an unrelated one after it
+        await b.RefreshAsync();
+        await Maintenance.ExpireAsync(b, olderThanMs: DateTimeOffset.UtcNow.ToUnixTimeMilliseconds() + 1, retainLast: 1);
+
+        var e = await Assert.ThrowsAsync<ValidationException>(() => overwrite.CommitAsync());
+        Assert.Contains("cannot determine", e.Message, StringComparison.OrdinalIgnoreCase);
+        Assert.Equal([1L, 2L, 3L, 4L], (await TableScan.ReadAllAsync(await _catalog.LoadTableAsync(a.Identifier))).Select(r => (long)r[0]!).Order());
+    }
+
+    [Fact]
+    public async Task Overwrite_fails_when_the_table_was_rolled_back_past_its_starting_snapshot()
+    {
+        var (a, b) = await Setup();
+        var start = a.Metadata.CurrentSnapshotId!.Value;
+        await TableMutations.InsertAsync(b, [[3L, "eu"]]);
+        await b.RefreshAsync();
+        var overwrite = SnapshotProducer.Overwrite(b, Us).AddFiles(await TableWriter.WriteAsync(b, [[10L, "us"]]));
+        // Someone rolls main back to the snapshot before the overwrite's starting point.
+        await a.RefreshAsync();
+        Assert.NotEqual(start, b.Metadata.CurrentSnapshotId);
+        await a.CommitAsync([], [new MetadataUpdate.SetSnapshotRef(SnapshotRef.Main, SnapshotRef.Branch(start))]);
+
+        await Assert.ThrowsAsync<ValidationException>(() => overwrite.CommitAsync());
     }
 }

@@ -212,7 +212,24 @@ public sealed class S3FileIO : IFileIO, ISupportsListing
         return (rest[..slash], rest[(slash + 1)..]);
     }
 
-    public async Task<byte[]> ReadAllAsync(string location, CancellationToken ct = default)
+    // A missing object surfaces as FileNotFoundException, as it does for LocalFileIO, so callers handle one exception
+    // type whatever the store. The S3 error stays available as the inner exception.
+    private static async Task<T> NotFoundAsFileNotFound<T>(string location, Func<Task<T>> call)
+    {
+        try
+        {
+            return await call();
+        }
+        catch (AmazonS3Exception e) when (e.StatusCode == System.Net.HttpStatusCode.NotFound)
+        {
+            throw new FileNotFoundException($"No such object: {location}", location, e);
+        }
+    }
+
+    public Task<byte[]> ReadAllAsync(string location, CancellationToken ct = default) =>
+        NotFoundAsFileNotFound(location, () => ReadAllCoreAsync(location, ct));
+
+    private async Task<byte[]> ReadAllCoreAsync(string location, CancellationToken ct)
     {
         var (b, k) = Parse(location);
         using var resp = await _s3.GetObjectAsync(b, k, ct);
@@ -223,7 +240,10 @@ public sealed class S3FileIO : IFileIO, ISupportsListing
 
     public async Task<Stream> OpenReadAsync(string location, CancellationToken ct = default) => new MemoryStream(await ReadAllAsync(location, ct));
 
-    public async Task<byte[]> ReadRangeAsync(string location, long offset, int length, CancellationToken ct = default)
+    public Task<byte[]> ReadRangeAsync(string location, long offset, int length, CancellationToken ct = default) =>
+        NotFoundAsFileNotFound(location, () => ReadRangeCoreAsync(location, offset, length, ct));
+
+    private async Task<byte[]> ReadRangeCoreAsync(string location, long offset, int length, CancellationToken ct)
     {
         var (b, k) = Parse(location);
         using var resp = await _s3.GetObjectAsync(new GetObjectRequest { BucketName = b, Key = k, ByteRange = new ByteRange(offset, offset + length - 1) }, ct);
@@ -232,12 +252,13 @@ public sealed class S3FileIO : IFileIO, ISupportsListing
         return ms.ToArray();
     }
 
-    public async Task<long> LengthAsync(string location, CancellationToken ct = default)
-    {
-        var (b, k) = Parse(location);
-        var meta = await _s3.GetObjectMetadataAsync(b, k, ct);
-        return meta.ContentLength;
-    }
+    public Task<long> LengthAsync(string location, CancellationToken ct = default) =>
+        NotFoundAsFileNotFound(location, async () =>
+        {
+            var (b, k) = Parse(location);
+            var meta = await _s3.GetObjectMetadataAsync(b, k, ct);
+            return meta.ContentLength;
+        });
 
     public async Task<bool> ExistsAsync(string location, CancellationToken ct = default)
     {
@@ -246,7 +267,7 @@ public sealed class S3FileIO : IFileIO, ISupportsListing
             await LengthAsync(location, ct);
             return true;
         }
-        catch (AmazonS3Exception e) when (e.StatusCode == System.Net.HttpStatusCode.NotFound)
+        catch (FileNotFoundException)
         {
             return false;
         }
