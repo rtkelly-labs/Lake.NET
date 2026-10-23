@@ -29,8 +29,8 @@ namespace Iceberg.Net.Behaviour.Tests.Features
                 "spec:row-lineage"};
         
         private static global::Reqnroll.FeatureInfo featureInfo = new global::Reqnroll.FeatureInfo(new global::System.Globalization.CultureInfo("en-US"), "Features", "Other engines see what we write", @"  Whatever write mode and delete mechanism a C# producer uses, Spark with Iceberg Java (the reference
-  implementation) must read exactly the same rows, and on format v3 derive the same row lineage.
-  (Each Spark check starts a JVM, so this feature is deliberately small.)", global::Reqnroll.ProgrammingLanguage.CSharp, featureTags, InitializeCucumberMessages());
+  implementation) must read exactly the same rows, and on format v3 derive the same row lineage; so must Trino,
+  through the shared REST catalog. (Each Spark check starts a JVM, so this feature is deliberately small.)", global::Reqnroll.ProgrammingLanguage.CSharp, featureTags, InitializeCucumberMessages());
         
         private global::Xunit.Abstractions.ITestOutputHelper _testOutputHelper;
         
@@ -111,7 +111,7 @@ namespace Iceberg.Net.Behaviour.Tests.Features
         
         private static global::Reqnroll.Formatters.RuntimeSupport.FeatureLevelCucumberMessages InitializeCucumberMessages()
         {
-            return new global::Reqnroll.Formatters.RuntimeSupport.FeatureLevelCucumberMessages("Features/CrossEngine.feature.ndjson", 6);
+            return new global::Reqnroll.Formatters.RuntimeSupport.FeatureLevelCucumberMessages("Features/CrossEngine.feature.ndjson", 9);
         }
         
         async global::System.Threading.Tasks.Task global::Xunit.IAsyncLifetime.InitializeAsync()
@@ -169,68 +169,159 @@ namespace Iceberg.Net.Behaviour.Tests.Features
 #line 8
     await testRunner.GivenAsync(string.Format("a format v{0} table keyed by \"id\"", version), ((string)(null)), ((global::Reqnroll.Table)(null)), "Given ");
 #line hidden
-                global::Reqnroll.Table table10 = new global::Reqnroll.Table(new string[] {
+                global::Reqnroll.Table table1 = new global::Reqnroll.Table(new string[] {
                             "id",
                             "name",
                             "region"});
-                table10.AddRow(new string[] {
+                table1.AddRow(new string[] {
                             "1",
                             "alice",
                             "eu"});
-                table10.AddRow(new string[] {
+                table1.AddRow(new string[] {
                             "2",
                             "bob",
                             "us"});
-                table10.AddRow(new string[] {
+                table1.AddRow(new string[] {
                             "3",
                             "carol",
                             "eu"});
-                table10.AddRow(new string[] {
+                table1.AddRow(new string[] {
                             "4",
                             "dave",
                             "us"});
 #line 9
-    await testRunner.AndAsync("the table contains:", ((string)(null)), table10, "And ");
+    await testRunner.AndAsync("the table contains:", ((string)(null)), table1, "And ");
 #line hidden
-                global::Reqnroll.Table table11 = new global::Reqnroll.Table(new string[] {
+                global::Reqnroll.Table table2 = new global::Reqnroll.Table(new string[] {
                             "id",
                             "name",
                             "region"});
-                table11.AddRow(new string[] {
+                table2.AddRow(new string[] {
                             "2",
                             "bobby",
                             "us"});
-                table11.AddRow(new string[] {
+                table2.AddRow(new string[] {
                             "5",
                             "eve",
                             "eu"});
 #line 15
-    await testRunner.WhenAsync(string.Format("I upsert with {0}:", mechanism), ((string)(null)), table11, "When ");
+    await testRunner.WhenAsync(string.Format("I upsert with {0}:", mechanism), ((string)(null)), table2, "When ");
 #line hidden
 #line 19
     await testRunner.AndAsync(string.Format("I delete keys 1 and 3 with {0}", mechanism), ((string)(null)), ((global::Reqnroll.Table)(null)), "And ");
 #line hidden
-                global::Reqnroll.Table table12 = new global::Reqnroll.Table(new string[] {
+                global::Reqnroll.Table table3 = new global::Reqnroll.Table(new string[] {
                             "id",
                             "name",
                             "region"});
-                table12.AddRow(new string[] {
+                table3.AddRow(new string[] {
                             "2",
                             "bobby",
                             "us"});
-                table12.AddRow(new string[] {
+                table3.AddRow(new string[] {
                             "4",
                             "dave",
                             "us"});
-                table12.AddRow(new string[] {
+                table3.AddRow(new string[] {
                             "5",
                             "eve",
                             "eu"});
 #line 20
-    await testRunner.ThenAsync("the table contains exactly:", ((string)(null)), table12, "Then ");
+    await testRunner.ThenAsync("the table contains exactly:", ((string)(null)), table3, "Then ");
 #line hidden
 #line 25
     await testRunner.AndAsync("Spark reads the same rows", ((string)(null)), ((global::Reqnroll.Table)(null)), "And ");
+#line hidden
+            }
+            await this.ScenarioCleanupAsync();
+        }
+        
+        [global::Xunit.SkippableTheoryAttribute(DisplayName="Trino reads our deletes through the REST catalog")]
+        [global::Xunit.TraitAttribute("FeatureTitle", "Other engines see what we write")]
+        [global::Xunit.TraitAttribute("Description", "Trino reads our deletes through the REST catalog")]
+        [global::Xunit.InlineDataAttribute("2", "equality deletes", "4", new string[0])]
+        [global::Xunit.InlineDataAttribute("2", "position deletes", "5", new string[0])]
+        [global::Xunit.InlineDataAttribute("3", "copy-on-write", "6", new string[0])]
+        public async global::System.Threading.Tasks.Task TrinoReadsOurDeletesThroughTheRESTCatalog(string version, string mechanism, string @__pickleIndex, string[] exampleTags)
+        {
+            string[] tagsOfScenario = exampleTags;
+            global::System.Collections.Specialized.OrderedDictionary argumentsOfScenario = new global::System.Collections.Specialized.OrderedDictionary();
+            argumentsOfScenario.Add("version", version);
+            argumentsOfScenario.Add("mechanism", mechanism);
+            string pickleIndex = @__pickleIndex;
+            global::Reqnroll.ScenarioInfo scenarioInfo = new global::Reqnroll.ScenarioInfo("Trino reads our deletes through the REST catalog", null, tagsOfScenario, argumentsOfScenario, featureTags, pickleIndex);
+            string[] tagsOfRule = ((string[])(null));
+            global::Reqnroll.RuleInfo ruleInfo = null;
+#line 35
+  this.ScenarioInitialize(scenarioInfo, ruleInfo);
+#line hidden
+            if ((global::Reqnroll.TagHelper.ContainsIgnoreTag(scenarioInfo.CombinedTags) || global::Reqnroll.TagHelper.ContainsIgnoreTag(featureTags)))
+            {
+                await testRunner.SkipScenarioAsync();
+            }
+            else
+            {
+                await this.ScenarioStartAsync();
+#line 36
+    await testRunner.GivenAsync("the tables live in the shared REST catalog", ((string)(null)), ((global::Reqnroll.Table)(null)), "Given ");
+#line hidden
+#line 37
+    await testRunner.AndAsync(string.Format("a format v{0} table keyed by \"id\"", version), ((string)(null)), ((global::Reqnroll.Table)(null)), "And ");
+#line hidden
+                global::Reqnroll.Table table4 = new global::Reqnroll.Table(new string[] {
+                            "id",
+                            "name",
+                            "region"});
+                table4.AddRow(new string[] {
+                            "1",
+                            "alice",
+                            "eu"});
+                table4.AddRow(new string[] {
+                            "2",
+                            "bob",
+                            "us"});
+                table4.AddRow(new string[] {
+                            "3",
+                            "carol",
+                            "eu"});
+#line 38
+    await testRunner.AndAsync("the table contains:", ((string)(null)), table4, "And ");
+#line hidden
+                global::Reqnroll.Table table5 = new global::Reqnroll.Table(new string[] {
+                            "id",
+                            "name",
+                            "region"});
+                table5.AddRow(new string[] {
+                            "2",
+                            "bobby",
+                            "us"});
+                table5.AddRow(new string[] {
+                            "4",
+                            "dan",
+                            "eu"});
+#line 43
+    await testRunner.WhenAsync(string.Format("I upsert with {0}:", mechanism), ((string)(null)), table5, "When ");
+#line hidden
+#line 47
+    await testRunner.AndAsync(string.Format("I delete keys 1 and 3 with {0}", mechanism), ((string)(null)), ((global::Reqnroll.Table)(null)), "And ");
+#line hidden
+                global::Reqnroll.Table table6 = new global::Reqnroll.Table(new string[] {
+                            "id",
+                            "name",
+                            "region"});
+                table6.AddRow(new string[] {
+                            "2",
+                            "bobby",
+                            "us"});
+                table6.AddRow(new string[] {
+                            "4",
+                            "dan",
+                            "eu"});
+#line 48
+    await testRunner.ThenAsync("the table contains exactly:", ((string)(null)), table6, "Then ");
+#line hidden
+#line 52
+    await testRunner.AndAsync("Trino reads the same rows", ((string)(null)), ((global::Reqnroll.Table)(null)), "And ");
 #line hidden
             }
             await this.ScenarioCleanupAsync();

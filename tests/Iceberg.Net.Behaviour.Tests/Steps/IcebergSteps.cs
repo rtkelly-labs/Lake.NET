@@ -16,7 +16,10 @@ public sealed class IcebergWorld : IDisposable
 {
     // Under the directory shared with the Spark oracle's container, so "Spark reads the same rows" can see the table.
     public string Warehouse { get; } = Path.Combine(SparkOracle.SharedRoot, "bdd", Guid.NewGuid().ToString("N"));
-    public InMemoryCatalog Catalog { get; }
+    public ICatalog Catalog { get; private set; }
+    /// <summary>"bdd" in the in-memory catalog; a fresh namespace per scenario in the shared REST catalog.</summary>
+    public Namespace Namespace { get; private set; } = Namespace.Of("bdd");
+    private bool _shared;
     public Table? Table { get; set; }
     public Table? SecondWriter { get; set; }
     public MutationResult? LastResult { get; set; }
@@ -32,8 +35,24 @@ public sealed class IcebergWorld : IDisposable
 
     public Table T => Table ?? throw new InvalidOperationException("No table yet: start with 'Given a format vN table ...'");
 
+    /// <summary>Switch to the emulated REST catalog over S3, which Trino reads too (needs emulation/up.sh --trino).</summary>
+    public async Task UseSharedRestCatalogAsync()
+    {
+        Skip.If(TrinoOracle.SkipReason is not null, TrinoOracle.SkipReason);
+        Catalog.Dispose();
+        Catalog = await TestEnvironment.Current.CatalogAsync("rest");
+        Namespace = Namespace.Of(TestEnvironment.Current.NewNamespace("bdd"));
+        await Catalog.CreateNamespaceAsync(Namespace);
+        _shared = true;
+    }
+
     public void Dispose()
     {
+        if (_shared)
+        {
+            foreach (var id in Catalog.ListTablesAsync(Namespace).GetAwaiter().GetResult()) Catalog.DropTableAsync(id, purge: true).GetAwaiter().GetResult();
+            Catalog.DropNamespaceAsync(Namespace).GetAwaiter().GetResult();
+        }
         Catalog.Dispose();
         if (Directory.Exists(Warehouse)) Directory.Delete(Warehouse, recursive: true);
     }
@@ -77,12 +96,15 @@ public sealed class IcebergSteps(IcebergWorld world)
 
     [Given(@"^a format v(\d) table keyed by ""id""$")]
     public async Task GivenTable(int version) =>
-        world.Table = await world.Catalog.CreateTableAsync(new CreateTableRequest(TableIdentifier.Of("bdd", "events"), Schema, FormatVersion: version));
+        world.Table = await world.Catalog.CreateTableAsync(new CreateTableRequest(new TableIdentifier(world.Namespace, "events"), Schema, FormatVersion: version));
 
     [Given(@"^a format v(\d) table keyed by ""id"" and partitioned by ""region""$")]
     public async Task GivenPartitionedTable(int version) =>
-        world.Table = await world.Catalog.CreateTableAsync(new CreateTableRequest(TableIdentifier.Of("bdd", "events"), Schema,
+        world.Table = await world.Catalog.CreateTableAsync(new CreateTableRequest(new TableIdentifier(world.Namespace, "events"), Schema,
             PartitionSpec.BuilderFor(Schema).Identity("region").Build(), FormatVersion: version));
+
+    [Given(@"^the tables live in the shared REST catalog$")]
+    public Task GivenSharedCatalog() => world.UseSharedRestCatalogAsync();
 
     [Given(@"^the default rows are:$")]
     public void GivenDefaultRows(DataTable rows) => world.DefaultRows = RowsOf(rows);
@@ -230,5 +252,16 @@ public sealed class IcebergSteps(IcebergWorld world)
             var sparkLineage = spark["row_lineage"]!.AsArray().Select(r => $"{r!["id"]}:{r["row_id"]}:{r["last_updated_seq"]}");
             Assert.Equal(lineage, sparkLineage);
         }
+    }
+
+    [Then(@"^Trino reads the same rows$")]
+    public async Task ThenTrinoAgrees()
+    {
+        Skip.If(TrinoOracle.SkipReason is not null, TrinoOracle.SkipReason);
+        var table = await world.Catalog.LoadTableAsync(world.T.Identifier);
+        var trino = await TrinoOracle.QueryAsync($"SELECT id, name, region FROM {TrinoOracle.Table(world.Namespace.ToString(), "events")} ORDER BY id");
+        var theirs = trino.Rows.Select(r => $"{r[0]}|{r[1]?.GetValue<string>() ?? "null"}|{r[2]}").ToList();
+        var ours = (await TableScan.ReadAllAsync(table)).OrderBy(r => (long)r[0]!).Select(Describe).ToList();
+        Assert.Equal(ours, theirs);
     }
 }
