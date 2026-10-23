@@ -13,7 +13,8 @@ namespace Iceberg.Net.Regression.Tests;
 [Trait("Category", "Regression")]
 public sealed class CatalogConformanceTests
 {
-    public static TheoryData<string> Catalogs => new() { "glue", "rest" };
+    /// <summary>"rest" is the Iceberg project's Java test server; "polaris" is Apache Polaris, implemented independently.</summary>
+    public static TheoryData<string> Catalogs => new() { "glue", "rest", "polaris" };
 
     public static readonly Schema Schema = new(
         NestedField.Require(1, "id", PrimitiveType.Long),
@@ -62,6 +63,12 @@ public sealed class CatalogConformanceTests
         return new Scope(catalog, ns);
     }
 
+    [Spec("rest: createNamespace")]
+    [Spec("rest: listNamespaces")]
+    [Spec("rest: loadNamespaceMetadata")]
+    [Spec("rest: dropNamespace")]
+    [Spec("rest: getConfig")]
+    [Spec("rest: namespaceExists")]
     [SkippableTheory]
     [MemberData(nameof(Catalogs))]
     public async Task Namespace_lifecycle(string kind)
@@ -74,6 +81,9 @@ public sealed class CatalogConformanceTests
         Assert.False(await s.Catalog.NamespaceExistsAsync(Namespace.Of(s.Ns.Levels[0] + "_missing")));
     }
 
+    [Spec("rest: createTable")]
+    [Spec("rest: loadTable")]
+    [Spec("rest: updateTable")]
     [SkippableTheory]
     [MemberData(nameof(Catalogs))]
     public async Task Create_append_read_round_trip(string kind)
@@ -92,6 +102,8 @@ public sealed class CatalogConformanceTests
         Assert.True(await loaded.IO.ExistsAsync(loaded.MetadataLocation!));
     }
 
+    [Spec("Metastore Tables")]
+    [Spec("rest: updateTable")]
     [SkippableTheory]
     [MemberData(nameof(Catalogs))]
     public async Task Concurrent_commits_serialise_through_the_catalog(string kind)
@@ -114,6 +126,7 @@ public sealed class CatalogConformanceTests
         Assert.Equal(writers, final.Metadata.Ancestors(final.Metadata.CurrentSnapshotId).Count());
     }
 
+    [Spec("Optimistic Concurrency")]
     [SkippableTheory]
     [MemberData(nameof(Catalogs))]
     public async Task Stale_requirements_are_rejected(string kind)
@@ -129,6 +142,8 @@ public sealed class CatalogConformanceTests
             b.CommitAsync([new UpdateRequirement.AssertTableUuid(Guid.NewGuid())], [new MetadataUpdate.SetProperties(new Dictionary<string, string> { ["k"] = "v" })]));
     }
 
+    [Spec("Point in Time Reads (Time Travel)")]
+    [Spec("Schema Evolution")]
     [SkippableTheory]
     [MemberData(nameof(Catalogs))]
     public async Task Overwrite_schema_evolution_and_time_travel(string kind)
@@ -153,6 +168,11 @@ public sealed class CatalogConformanceTests
         Assert.True(loaded.Metadata.MetadataLog.Count >= 4, $"metadata-log has {loaded.Metadata.MetadataLog.Count} entries");
     }
 
+    [Spec("rest: renameTable")]
+    [Spec("rest: registerTable")]
+    [Spec("rest: dropTable")]
+    [Spec("rest: tableExists")]
+    [Spec("rest: listTables")]
     [SkippableTheory]
     [MemberData(nameof(Catalogs))]
     public async Task Rename_register_and_drop(string kind)
@@ -167,14 +187,20 @@ public sealed class CatalogConformanceTests
         var b = await s.Catalog.LoadTableAsync(s.Id("b"));
         Assert.Equal(t.Metadata.TableUuid, b.Metadata.TableUuid);
 
-        // Register points a second identifier at existing metadata (how tables move between catalogs).
+        // Register adopts existing metadata (how tables move between catalogs): unregister b, keeping its files, then
+        // register its metadata as c. (Registering while b is still live would give two tables one location, which
+        // Polaris rightly refuses.)
+        await s.Catalog.DropTableAsync(s.Id("b"), purge: false);
+        Assert.False(await s.Catalog.TableExistsAsync(s.Id("b")));
         var registered = await s.Catalog.RegisterTableAsync(s.Id("c"), b.MetadataLocation!);
+        Assert.Equal(t.Metadata.TableUuid, registered.Metadata.TableUuid);
         Assert.Equal(3, (await TableScan.ReadAllAsync(registered)).Count);
 
         await s.Catalog.DropTableAsync(s.Id("c"));
         await Assert.ThrowsAsync<NoSuchTableException>(() => s.Catalog.LoadTableAsync(s.Id("c")));
     }
 
+    [Spec("Version 3")]
     [SkippableTheory]
     [MemberData(nameof(Catalogs))]
     public async Task Format_v3_tables(string kind)

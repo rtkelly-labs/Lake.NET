@@ -94,6 +94,10 @@ public sealed class SparkCrossEngineTests(SparkTablesFixture fx) : IClassFixture
         return view;
     }
 
+    [Spec("Scan Planning")]
+    [Spec("Equality Delete Files")]
+    [Spec("Position Delete Files")]
+    [Spec("Deletion Vectors")]
     [SkippableTheory]
     [MemberData(nameof(Names))]
     public void Spark_reads_the_same_rows(string name)
@@ -114,6 +118,7 @@ public sealed class SparkCrossEngineTests(SparkTablesFixture fx) : IClassFixture
         }
     }
 
+    [Spec("Snapshots")]
     [SkippableTheory]
     [MemberData(nameof(Names))]
     public void Spark_sees_the_same_snapshots_and_format(string name)
@@ -125,6 +130,7 @@ public sealed class SparkCrossEngineTests(SparkTablesFixture fx) : IClassFixture
         Assert.Equal(t.Metadata.Snapshots.Count, view["snapshot_count"]!.GetValue<int>());
     }
 
+    [Spec("Delete Formats")]
     [SkippableTheory]
     [InlineData("PositionDeletes_v3", "1:PUFFIN")]
     [InlineData("PositionDeletes_v2", "1:PARQUET")]
@@ -139,6 +145,8 @@ public sealed class SparkCrossEngineTests(SparkTablesFixture fx) : IClassFixture
         if (name.EndsWith("_v3", StringComparison.Ordinal) && kind == "1:PUFFIN") Assert.DoesNotContain("1:PARQUET", deletes); // v3: DVs only
     }
 
+    [Spec("Row lineage assignment")]
+    [Spec("Row Lineage for Upgraded Tables")]
     [SkippableTheory]
     [InlineData("CopyOnWrite_v3")]
     [InlineData("PositionDeletes_v3")]

@@ -17,12 +17,14 @@ namespace Iceberg.Net.Behaviour.Tests.Features
     
     [global::System.CodeDom.Compiler.GeneratedCodeAttribute("Reqnroll", "3.0.0.0")]
     [global::System.Runtime.CompilerServices.CompilerGeneratedAttribute()]
+    [global::Xunit.TraitAttribute("Category", "spec:commit-conflict-resolution-and-retry")]
     public partial class ConcurrentWritersAndFormatConversionFeature : object, global::Xunit.IClassFixture<ConcurrentWritersAndFormatConversionFeature.FixtureData>, global::Xunit.IAsyncLifetime
     {
         
         private global::Reqnroll.ITestRunner testRunner;
         
-        private static string[] featureTags = ((string[])(null));
+        private static string[] featureTags = new string[] {
+                "spec:commit-conflict-resolution-and-retry"};
         
         private static global::Reqnroll.FeatureInfo featureInfo = new global::Reqnroll.FeatureInfo(new global::System.Globalization.CultureInfo("en-US"), "Features", "Concurrent writers and format conversion", "  Two writers working from the same table version must both land without losing o" +
                 "r duplicating rows,\n  and a v2 table\'s position deletes must survive the upgrade" +
@@ -153,7 +155,7 @@ namespace Iceberg.Net.Behaviour.Tests.Features
             global::Reqnroll.ScenarioInfo scenarioInfo = new global::Reqnroll.ScenarioInfo("Concurrent upserts of the same key keep a single row", null, tagsOfScenario, argumentsOfScenario, featureTags, pickleIndex);
             string[] tagsOfRule = ((string[])(null));
             global::Reqnroll.RuleInfo ruleInfo = null;
-#line 5
+#line 6
   this.ScenarioInitialize(scenarioInfo, ruleInfo);
 #line hidden
             if ((global::Reqnroll.TagHelper.ContainsIgnoreTag(scenarioInfo.CombinedTags) || global::Reqnroll.TagHelper.ContainsIgnoreTag(featureTags)))
@@ -163,7 +165,7 @@ namespace Iceberg.Net.Behaviour.Tests.Features
             else
             {
                 await this.ScenarioStartAsync();
-#line 6
+#line 7
     await testRunner.GivenAsync(string.Format("a format v{0} table keyed by \"id\"", version), ((string)(null)), ((global::Reqnroll.Table)(null)), "Given ");
 #line hidden
                 global::Reqnroll.Table table1 = new global::Reqnroll.Table(new string[] {
@@ -174,10 +176,10 @@ namespace Iceberg.Net.Behaviour.Tests.Features
                             "1",
                             "a",
                             "eu"});
-#line 7
+#line 8
     await testRunner.AndAsync("the table contains:", ((string)(null)), table1, "And ");
 #line hidden
-#line 10
+#line 11
     await testRunner.AndAsync("a second writer that has already loaded the table", ((string)(null)), ((global::Reqnroll.Table)(null)), "And ");
 #line hidden
                 global::Reqnroll.Table table2 = new global::Reqnroll.Table(new string[] {
@@ -188,7 +190,7 @@ namespace Iceberg.Net.Behaviour.Tests.Features
                             "7",
                             "from-me",
                             "eu"});
-#line 11
+#line 12
     await testRunner.WhenAsync(string.Format("I upsert with {0}:", strategy), ((string)(null)), table2, "When ");
 #line hidden
                 global::Reqnroll.Table table3 = new global::Reqnroll.Table(new string[] {
@@ -199,7 +201,7 @@ namespace Iceberg.Net.Behaviour.Tests.Features
                             "7",
                             "from-second",
                             "eu"});
-#line 14
+#line 15
     await testRunner.AndAsync(string.Format("the second writer upserts with {0}:", strategy), ((string)(null)), table3, "And ");
 #line hidden
                 global::Reqnroll.Table table4 = new global::Reqnroll.Table(new string[] {
@@ -214,10 +216,10 @@ namespace Iceberg.Net.Behaviour.Tests.Features
                             "7",
                             "from-second",
                             "eu"});
-#line 17
+#line 18
     await testRunner.ThenAsync("the table contains exactly:", ((string)(null)), table4, "Then ");
 #line hidden
-#line 21
+#line 22
     await testRunner.AndAsync("the second writer needed 2 attempts", ((string)(null)), ((global::Reqnroll.Table)(null)), "And ");
 #line hidden
             }
@@ -235,7 +237,7 @@ namespace Iceberg.Net.Behaviour.Tests.Features
             global::Reqnroll.ScenarioInfo scenarioInfo = new global::Reqnroll.ScenarioInfo("A writer whose target file disappeared does not resurrect deletes", null, tagsOfScenario, argumentsOfScenario, featureTags, pickleIndex);
             string[] tagsOfRule = ((string[])(null));
             global::Reqnroll.RuleInfo ruleInfo = null;
-#line 31
+#line 32
   this.ScenarioInitialize(scenarioInfo, ruleInfo);
 #line hidden
             if ((global::Reqnroll.TagHelper.ContainsIgnoreTag(scenarioInfo.CombinedTags) || global::Reqnroll.TagHelper.ContainsIgnoreTag(featureTags)))
@@ -245,7 +247,7 @@ namespace Iceberg.Net.Behaviour.Tests.Features
             else
             {
                 await this.ScenarioStartAsync();
-#line 32
+#line 33
     await testRunner.GivenAsync("a format v3 table keyed by \"id\"", ((string)(null)), ((global::Reqnroll.Table)(null)), "Given ");
 #line hidden
                 global::Reqnroll.Table table5 = new global::Reqnroll.Table(new string[] {
@@ -256,13 +258,13 @@ namespace Iceberg.Net.Behaviour.Tests.Features
                             "1",
                             "a",
                             "eu"});
-#line 33
+#line 34
     await testRunner.AndAsync("the table contains:", ((string)(null)), table5, "And ");
 #line hidden
-#line 36
+#line 37
     await testRunner.AndAsync("a second writer that has already loaded the table", ((string)(null)), ((global::Reqnroll.Table)(null)), "And ");
 #line hidden
-#line 37
+#line 38
     await testRunner.WhenAsync("I delete rows where region is \"eu\" with copy-on-write", ((string)(null)), ((global::Reqnroll.Table)(null)), "When ");
 #line hidden
                 global::Reqnroll.Table table6 = new global::Reqnroll.Table(new string[] {
@@ -273,7 +275,7 @@ namespace Iceberg.Net.Behaviour.Tests.Features
                             "1",
                             "a2",
                             "eu"});
-#line 38
+#line 39
     await testRunner.AndAsync("the second writer upserts with position deletes:", ((string)(null)), table6, "And ");
 #line hidden
                 global::Reqnroll.Table table7 = new global::Reqnroll.Table(new string[] {
@@ -284,7 +286,7 @@ namespace Iceberg.Net.Behaviour.Tests.Features
                             "1",
                             "a2",
                             "eu"});
-#line 41
+#line 42
     await testRunner.ThenAsync("the table contains exactly:", ((string)(null)), table7, "Then ");
 #line hidden
             }
@@ -294,15 +296,19 @@ namespace Iceberg.Net.Behaviour.Tests.Features
         [global::Xunit.SkippableFactAttribute(DisplayName="Upgrading to v3 converts position deletes into deletion vectors")]
         [global::Xunit.TraitAttribute("FeatureTitle", "Concurrent writers and format conversion")]
         [global::Xunit.TraitAttribute("Description", "Upgrading to v3 converts position deletes into deletion vectors")]
+        [global::Xunit.TraitAttribute("Category", "spec:deletion-vectors")]
+        [global::Xunit.TraitAttribute("Category", "spec:version-3")]
         public async global::System.Threading.Tasks.Task UpgradingToV3ConvertsPositionDeletesIntoDeletionVectors()
         {
-            string[] tagsOfScenario = ((string[])(null));
+            string[] tagsOfScenario = new string[] {
+                    "spec:deletion-vectors",
+                    "spec:version-3"};
             global::System.Collections.Specialized.OrderedDictionary argumentsOfScenario = new global::System.Collections.Specialized.OrderedDictionary();
             string pickleIndex = "6";
             global::Reqnroll.ScenarioInfo scenarioInfo = new global::Reqnroll.ScenarioInfo("Upgrading to v3 converts position deletes into deletion vectors", null, tagsOfScenario, argumentsOfScenario, featureTags, pickleIndex);
             string[] tagsOfRule = ((string[])(null));
             global::Reqnroll.RuleInfo ruleInfo = null;
-#line 45
+#line 48
   this.ScenarioInitialize(scenarioInfo, ruleInfo);
 #line hidden
             if ((global::Reqnroll.TagHelper.ContainsIgnoreTag(scenarioInfo.CombinedTags) || global::Reqnroll.TagHelper.ContainsIgnoreTag(featureTags)))
@@ -312,7 +318,7 @@ namespace Iceberg.Net.Behaviour.Tests.Features
             else
             {
                 await this.ScenarioStartAsync();
-#line 46
+#line 49
     await testRunner.GivenAsync("a format v2 table keyed by \"id\"", ((string)(null)), ((global::Reqnroll.Table)(null)), "Given ");
 #line hidden
                 global::Reqnroll.Table table8 = new global::Reqnroll.Table(new string[] {
@@ -331,16 +337,16 @@ namespace Iceberg.Net.Behaviour.Tests.Features
                             "3",
                             "c",
                             "eu"});
-#line 47
+#line 50
     await testRunner.AndAsync("the table contains:", ((string)(null)), table8, "And ");
 #line hidden
-#line 52
+#line 55
     await testRunner.AndAsync("I delete keys 1 and 3 with position deletes", ((string)(null)), ((global::Reqnroll.Table)(null)), "And ");
 #line hidden
-#line 53
+#line 56
     await testRunner.WhenAsync("I upgrade the table to format v3", ((string)(null)), ((global::Reqnroll.Table)(null)), "When ");
 #line hidden
-#line 54
+#line 57
     await testRunner.AndAsync("I convert position deletes to deletion vectors", ((string)(null)), ((global::Reqnroll.Table)(null)), "And ");
 #line hidden
                 global::Reqnroll.Table table9 = new global::Reqnroll.Table(new string[] {
@@ -351,16 +357,16 @@ namespace Iceberg.Net.Behaviour.Tests.Features
                             "2",
                             "b",
                             "us"});
-#line 55
+#line 58
     await testRunner.ThenAsync("the table contains exactly:", ((string)(null)), table9, "Then ");
 #line hidden
-#line 58
+#line 61
     await testRunner.AndAsync("the table\'s delete files are deletion vectors", ((string)(null)), ((global::Reqnroll.Table)(null)), "And ");
 #line hidden
-#line 59
+#line 62
     await testRunner.AndAsync("the last snapshot operation is \"replace\"", ((string)(null)), ((global::Reqnroll.Table)(null)), "And ");
 #line hidden
-#line 60
+#line 63
     await testRunner.AndAsync("PyIceberg reads the same rows", ((string)(null)), ((global::Reqnroll.Table)(null)), "And ");
 #line hidden
             }

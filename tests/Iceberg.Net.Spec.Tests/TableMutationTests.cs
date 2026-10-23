@@ -64,6 +64,7 @@ public sealed class TableMutationTests : IDisposable
         return [.. idx.All.Concat(idx.EqualityDeletes).Select(e => new ManifestEntry(ManifestEntryStatus.Existing, null, null, null, e.File))];
     }
 
+    [Spec("Row-level Deletes")]
     [Theory]
     [InlineData(2)]
     [InlineData(3)]
@@ -76,6 +77,8 @@ public sealed class TableMutationTests : IDisposable
         Assert.Empty(await LiveDeleteFiles(t));
     }
 
+    [Spec("Row-level Deletes")]
+    [Spec("Identifier Field IDs")]
     [Theory]
     [MemberData(nameof(Matrix))]
     public async Task Upsert_replaces_matching_keys_and_inserts_new_ones(int formatVersion, DeleteStrategy strategy)
@@ -111,6 +114,7 @@ public sealed class TableMutationTests : IDisposable
         }
     }
 
+    [Spec("Row-level Deletes")]
     [Theory]
     [MemberData(nameof(Matrix))]
     public async Task Group_replacement_swaps_whole_groups_only(int formatVersion, DeleteStrategy strategy)
@@ -125,6 +129,8 @@ public sealed class TableMutationTests : IDisposable
         if (strategy == DeleteStrategy.CopyOnWrite) Assert.Equal(1, r.DataFilesRewritten);
     }
 
+    [Spec("Equality Delete Files")]
+    [Spec("Position Delete Files")]
     [Theory]
     [MemberData(nameof(Matrix))]
     public async Task Delete_by_keys(int formatVersion, DeleteStrategy strategy)
@@ -137,6 +143,7 @@ public sealed class TableMutationTests : IDisposable
         Assert.DoesNotContain(4L, rows.Keys);
     }
 
+    [Spec("Row-level Deletes")]
     [Theory]
     [InlineData(2, DeleteStrategy.CopyOnWrite)]
     [InlineData(2, DeleteStrategy.PositionDeletes)]
@@ -152,6 +159,7 @@ public sealed class TableMutationTests : IDisposable
         Assert.Equal(27, (await Rows(t)).Count);
     }
 
+    [Spec("Equality Delete Files")]
     [Fact]
     public async Task Equality_deletes_cannot_express_predicates()
     {
@@ -159,6 +167,7 @@ public sealed class TableMutationTests : IDisposable
         await Assert.ThrowsAsync<ArgumentException>(() => TableMutations.DeleteWhereAsync(t, _ => true, DeleteStrategy.EqualityDeletes));
     }
 
+    [Spec("Equality Delete Files")]
     [Fact]
     public async Task Equality_deletes_require_partition_sources_in_the_key()
     {
@@ -191,6 +200,7 @@ public sealed class TableMutationTests : IDisposable
         Assert.Equal(expected, r.Strategy);
     }
 
+    [Spec("Commit Conflict Resolution and Retry")]
     [Theory]
     [MemberData(nameof(Matrix))]
     public async Task Concurrent_upserts_of_the_same_new_key_leave_one_row(int formatVersion, DeleteStrategy strategy)
@@ -206,6 +216,7 @@ public sealed class TableMutationTests : IDisposable
         Assert.Equal("from-b", rows[777][1]);
     }
 
+    [Spec("Deletion Vectors")]
     [Fact]
     public async Task Copy_on_write_removes_deletion_vectors_of_rewritten_files()
     {

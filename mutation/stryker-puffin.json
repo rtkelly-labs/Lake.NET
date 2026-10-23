@@ -1,0 +1,11 @@
+{
+  "$schema": "https://raw.githubusercontent.com/stryker-mutator/stryker-net/master/src/Stryker.Core/Stryker.Core/assets/stryker-config.schema.json",
+  "stryker-config": {
+    "project": "Iceberg.Net.Puffin.csproj",
+    "test-projects": ["../tests/Iceberg.Net.Spec.Tests/Iceberg.Net.Spec.Tests.csproj"],
+    "coverage-analysis": "perTest",
+    "reporters": ["json", "html", "progress", "cleartext"],
+    "concurrency": 4,
+    "thresholds": { "high": 85, "low": 70, "break": 0 }
+  }
+}

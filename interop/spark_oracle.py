@@ -6,7 +6,14 @@ Runs inside the apache/spark image via spark-submit (see TestSupport/SparkOracle
     read-tables <metadata.json>...  the same for many tables in one JVM: {location: description | {"error": ...}}
     fixtures <out_dir>              write reference tables (DVs, position deletes, row lineage) with Spark
 
-Output is a single JSON document on stdout; Spark's own logging goes to stderr.
+Output is the JSON document after the last @@ORACLE@@ marker on stdout; Spark's own logging goes to stderr.
+Regenerate the committed L0 fixtures (from iceberg-dotnet/, after emulation/up.sh --spark):
+
+    docker run --rm --user root --network none --hostname localhost -e SPARK_LOCAL_IP=127.0.0.1 \
+      -v $PWD/emulation/.cache:/jars:ro -v $PWD/interop:/interop:ro -v $PWD/tests/Iceberg.Net.Spec.Tests/fixtures:/out \
+      -v /tmp/sentric-spark-fixture-root:/tmp/sentric-spark-fixture-root apache/spark:4.0.1 \
+      /opt/spark/bin/spark-submit --jars /jars/iceberg-spark-runtime-4.0_2.13-1.12.0.jar /interop/spark_oracle.py fixtures /out/spark
+    find tests/Iceberg.Net.Spec.Tests/fixtures/spark -name '*.crc' -delete
 """
 
 from __future__ import annotations

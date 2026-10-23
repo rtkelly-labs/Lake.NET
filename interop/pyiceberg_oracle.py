@@ -6,6 +6,7 @@ Commands (all output is JSON on stdout so the C# suite can assert on it):
     write <catalog> <table> <rows>   create (or replace) a partitioned table and append rows
     read <catalog> <table>           print row count, rows, snapshot summary and spec details
     read-metadata <metadata.json>    same, for a table addressed only by its metadata file
+    fingerprint <metadata.json>      order-independent per-column + per-row hashes (shadow comparison; streams batches)
     puffin-fixtures <out_dir>        reference Theta sketches (datasketches) and deletion vectors (pyroaring)
     inspect-puffin <file.puffin>     decode a Puffin file with PyIceberg + datasketches and report contents
 
@@ -18,14 +19,16 @@ from __future__ import annotations
 
 import datetime as dt
 import decimal
+import hashlib
 import json
 import os
 import shutil
+import struct
 import sys
 import uuid
 import zlib
 from pathlib import Path
-from typing import Any
+from typing import Any, Callable
 
 import pyarrow as pa
 from pyiceberg.catalog import Catalog, load_catalog
@@ -251,6 +254,88 @@ def puffin(blobs: list[tuple[dict[str, Any], bytes]]) -> bytes:
     )
 
 
+def _canonical(field_type: Any) -> Callable[[Any], str]:
+    """Canonical text per Iceberg type; must match TableFingerprint.Canonical in Iceberg.Net.Data."""
+    from pyiceberg.types import (
+        BinaryType,
+        BooleanType,
+        DecimalType,
+        FixedType,
+        FloatType,
+        UUIDType,
+    )
+
+    if isinstance(field_type, BooleanType):
+        return lambda v: "true" if v else "false"
+    if isinstance(field_type, FloatType):
+        return lambda v: "NaN" if v != v else struct.pack(">f", v).hex()
+    if isinstance(field_type, DoubleType):
+        return lambda v: "NaN" if v != v else struct.pack(">d", v).hex()
+    if isinstance(field_type, DecimalType):
+        scale = field_type.scale
+        return lambda v: str(int(decimal.Decimal(v).scaleb(scale)))
+    if isinstance(field_type, UUIDType):
+        return lambda v: str(
+            v if isinstance(v, uuid.UUID) else uuid.UUID(bytes=bytes(v))
+        )
+    if isinstance(field_type, (BinaryType, FixedType)):
+        return lambda v: bytes(v).hex()
+    return str  # int/long, temporal types (pre-cast to integers), strings
+
+
+def _h(text: str) -> int:
+    return int.from_bytes(hashlib.sha256(text.encode()).digest()[:8], "little")
+
+
+def cmd_fingerprint(location: str) -> dict[str, Any]:
+    import pyarrow.compute as pc
+
+    s3 = {"client.region": os.environ.get("AWS_REGION", "eu-west-1")}
+    if endpoint := os.environ.get("ICEBERG_S3_ENDPOINT"):
+        s3 |= {"s3.endpoint": endpoint, "s3.path-style-access": "true"}
+    table = StaticTable.from_metadata(location, properties=s3)
+    fields = table.schema().columns
+    canon = [_canonical(f.field_type) for f in fields]
+    mask = (1 << 64) - 1
+    columns = {
+        f.field_id: {"name": f.name, "count": 0, "nulls": 0, "hash": 0} for f in fields
+    }
+    rows, row_hash = 0, 0
+    for batch in table.scan().to_arrow_batch_reader():
+        arrays = []
+        for f in fields:
+            arr = batch.column(f.name)
+            if pa.types.is_temporal(
+                arr.type
+            ):  # days / micros / nanos as integers, exactly
+                arr = pc.cast(
+                    arr, pa.int32() if pa.types.is_date32(arr.type) else pa.int64()
+                )
+            arrays.append(arr.to_pylist())
+        for i in range(batch.num_rows):
+            parts = []
+            for c, f in enumerate(fields):
+                v = arrays[c][i]
+                col = columns[f.field_id]
+                col["count"] += 1
+                if v is None:
+                    col["nulls"] += 1
+                    parts.append("\u0000")
+                else:
+                    text = canon[c](v)
+                    col["hash"] = (col["hash"] + _h(text)) & mask
+                    parts.append(text)
+            row_hash = (row_hash + _h("\u001f".join(parts))) & mask
+            rows += 1
+    return {
+        "rows": rows,
+        "row_hash": f"{row_hash:016x}",
+        "columns": {
+            str(k): v | {"hash": f"{v['hash']:016x}"} for k, v in columns.items()
+        },
+    }
+
+
 def cmd_puffin_fixtures(out_dir: Path) -> dict[str, Any]:
     from datasketches import update_theta_sketch
 
@@ -348,6 +433,8 @@ def main(argv: list[str]) -> None:
             result = describe(env_catalog(kind), identifier)
         case ["read-metadata", location]:
             result = describe_table(StaticTable.from_metadata(location))
+        case ["fingerprint", location]:
+            result = cmd_fingerprint(location)
         case ["puffin-fixtures", out]:
             result = cmd_puffin_fixtures(Path(out))
         case ["inspect-puffin", location]:

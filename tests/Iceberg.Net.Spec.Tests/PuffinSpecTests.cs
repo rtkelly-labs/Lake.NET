@@ -16,6 +16,7 @@ public class PuffinSpecTests
     private static IEnumerable<long> ExpectedPositions() => Expected["dv"]!["ranges"]!.AsArray()
         .SelectMany(r => Enumerable.Range(0, (int)(r![1]!.GetValue<long>() - r[0]!.GetValue<long>())).Select(i => r[0]!.GetValue<long>() + i));
 
+    [Spec("puffin: apache-datasketches-theta-v1 blob type")]
     [Fact]
     public void Murmur3_x64_128_and_seed_hash_match_datasketches()
     {
@@ -27,6 +28,7 @@ public class PuffinSpecTests
         Assert.Equal(0x032E42766A92E119L, BitConverter.ToInt64(sketch.Serialize(), 8));
     }
 
+    [Spec("puffin: apache-datasketches-theta-v1 blob type")]
     [Theory]
     [InlineData("empty", 0)]
     [InlineData("single", 1)]
@@ -39,6 +41,7 @@ public class PuffinSpecTests
         Assert.Equal(Fixture($"theta-{name}.bin"), sketch.Serialize());
     }
 
+    [Spec("puffin: apache-datasketches-theta-v1 blob type")]
     [Fact]
     public void Estimation_mode_sketch_from_datasketches_deserialises_and_estimates()
     {
@@ -57,6 +60,7 @@ public class PuffinSpecTests
         Assert.Equal(mine.Estimate, back.Estimate, 9);
     }
 
+    [Spec("puffin: apache-datasketches-theta-v1 blob type")]
     [Fact]
     public void Merged_sketches_estimate_the_union()
     {
@@ -68,6 +72,8 @@ public class PuffinSpecTests
         Assert.InRange(a.Estimate, 9000 * 0.95, 9000 * 1.05);
     }
 
+    [Spec("puffin: deletion-vector-v1 blob type")]
+    [Spec("Deletion Vectors")]
     [Fact]
     public void Reads_deletion_vectors_written_by_pyroaring_including_run_containers()
     {
@@ -83,6 +89,7 @@ public class PuffinSpecTests
         }
     }
 
+    [Spec("puffin: deletion-vector-v1 blob type")]
     [Fact]
     public void Deletion_vector_round_trip_and_crc_detection()
     {
@@ -97,6 +104,7 @@ public class PuffinSpecTests
         Assert.Throws<ArgumentOutOfRangeException>(() => bm.Add(-1));
     }
 
+    [Spec("puffin: deletion-vector-v1 blob type")]
     [Fact]
     public void Bitmap_switches_container_types_at_4096_values()
     {
@@ -110,6 +118,10 @@ public class PuffinSpecTests
         Assert.Equal(4097, RoaringPositionBitmap.Deserialize(bm.Serialize()).Cardinality);
     }
 
+    [Spec("puffin: File structure")]
+    [Spec("puffin: Footer Payload")]
+    [Spec("puffin: BlobMetadata")]
+    [Spec("puffin: Compression codecs")]
     [Fact]
     public void Puffin_container_round_trip_with_zstd_blob_and_offsets()
     {

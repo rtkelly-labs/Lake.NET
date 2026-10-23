@@ -9,9 +9,19 @@ emulators**, and make every place the emulation is weaker than AWS explicit and 
 |---|---|---|---|
 | `moto` | `motoserver/moto:5.2.4` via `emulation/moto_server.py` | S3 (incl. conditional `If-None-Match` writes, ranged GETs), Glue Data Catalog, STS — on one endpoint | The standard AWS emulator in the Python ecosystem; the only free emulator with a usable Glue Data Catalog; also pip-installable (`moto[server]`) so it runs without Docker |
 | `rest` | `apache/iceberg-rest-fixture:1.10.0` | An Iceberg REST catalog | The Iceberg project's own test server (Java reference `CatalogHandlers` over JDBC) — used by iceberg-go and DuckDB CI. Server-side commits are applied by *Java* code, so passing against it is strong evidence of protocol correctness |
+| `polaris` (`--polaris`) | `apache/polaris:1.8.0` + `polaris_setup.py` | A second, independently implemented REST catalog | Different server, different interpretation of the protocol (it refuses overlapping table locations, and dropping with purge unless enabled). Bootstrapped with catalog `regression` on moto S3, no STS, so no credential vending |
+| `trino` (`--trino`) | `trinodb/trino:478` | A query engine over the REST fixture + moto S3 | Athena's engine family; reads and writes merge-on-read tables, so it is both an oracle and a reference writer |
+| Spark (`--spark`, not a service) | `apache/spark:4.0.1` + `iceberg-spark-runtime-4.0_2.13-1.12.0.jar` (SHA-256 pinned, cached in `.cache/`) | Iceberg Java, the reference implementation | Run per test session with `docker run --network none`; tables are shared through a bind mount at the same absolute path |
 
-Both are configured so the REST fixture stores its metadata in moto's S3 (`CATALOG_S3_ENDPOINT=http://moto:5000`),
-so tests read REST-catalog tables from the same object store as Glue tables.
+All are configured to store data in moto's S3 (`http://moto:5000` inside the network, `http://localhost:5000` from
+the host), so tests read every catalog's tables from the same object store as Glue tables. Image tags are pinned;
+`MOTO_TAG`, `REST_FIXTURE_TAG`, `POLARIS_TAG` and `TRINO_TAG` override them, and the weekly upkeep workflow runs the
+regression suite against `:latest` so emulator changes show up before a pin bump.
+
+**REST fixture under contention.** The fixture's default in-memory SQLite fails concurrent commits with
+`SQLITE_BUSY`, which surfaces as HTTP 500. Clients must treat that as an unknown commit state, not a failure. The
+soak tests found it. The compose file therefore uses a file database with WAL and a busy timeout
+(`CATALOG_URI=jdbc:sqlite:/tmp/rest-catalog.db?journal_mode=WAL&busy_timeout=30000`).
 
 Alternatives considered:
 
@@ -20,7 +30,7 @@ Alternatives considered:
 | MinIO | Good S3 fidelity but no Glue. Pulling `minio/minio` from Docker Hub and quay.io both failed while building M0 (MinIO has reportedly stopped publishing community images; unverified) — avoid as a hard dependency |
 | LocalStack | S3 + many services, but Glue is not in the free tier (unverified for current releases); heavier |
 | Adobe S3Mock, RustFS, SeaweedFS | S3 only |
-| Lakekeeper / Polaris / Nessie containers | Excellent *additional* REST implementations to add to the conformance matrix (DuckDB's CI does) — next tier |
+| Lakekeeper / Nessie containers | More REST implementations for the conformance matrix. Polaris is in; the other two publish to quay.io/ghcr.io, which the development sandbox could not reach, and Docker Hub rate-limited Nessie |
 
 ## Fidelity shims
 
@@ -47,8 +57,8 @@ Verified *without* a shim (moto already matches AWS):
 | **Athena** | Cannot check that our tables are readable by the production engine, nor read Athena-written tables (position deletes) | `AthenaTests` — AWS mode only |
 | Lake Formation, IAM policies | Permission failures only show up in AWS | AWS mode |
 | Glue Iceberg REST / S3 Tables REST endpoints (SigV4) | No emulator | AWS mode once SigV4 lands |
-| S3 consistency/latency, throttling (503 SlowDown) | Retry paths under load | AWS mode; consider fault-injection FileIO for L0 |
-| Spark 4 / Trino as readers | v3 DV and variant interop | future tier (large images) |
+| S3 consistency/latency, throttling (503 SlowDown) | Retry paths under load | AWS mode; `FaultInjectingFileIO` covers write failures, not throttling yet |
+| Trino reading deletion vectors | Trino 478 refuses v3 DVs (`Unexpected PUFFIN file format`) | Spark reads them; a characterization test flags a Trino upgrade that adds support |
 
 ## Running without Docker
 

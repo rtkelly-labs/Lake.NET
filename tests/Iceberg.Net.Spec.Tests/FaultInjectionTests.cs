@@ -13,6 +13,8 @@ namespace Iceberg.Net.Spec.Tests;
 /// happens, the table must read exactly the state before or exactly the state after the operation (atomicity),
 /// and must pass a deep fsck (nothing it references is missing, metadata stays consistent).
 /// </summary>
+[Spec("Commit Conflict Resolution and Retry")]
+[Spec("File System Operations")]
 public sealed class FaultInjectionTests
 {
     private static readonly Schema Schema = new(0,

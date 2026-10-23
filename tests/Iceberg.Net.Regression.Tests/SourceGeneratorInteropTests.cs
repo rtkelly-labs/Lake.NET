@@ -48,6 +48,8 @@ public partial record UnsignedModel
 /// the fix (docs/parquet-sourcegenerator.md). When the generator closes a gap, its test fails and moves to
 /// the compatible list.
 /// </summary>
+[Spec("Parquet")]
+[Spec("Column Projection")]
 [Trait("Category", "Regression")]
 public sealed class SourceGeneratorInteropTests : IDisposable
 {

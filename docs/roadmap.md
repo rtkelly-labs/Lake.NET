@@ -1,21 +1,96 @@
 # Roadmap
 
-Ordered by what unblocks production use cases soonest, not by spec order. Each milestone ends with its rows in
-[spec-coverage.md](spec-coverage.md) flipped and tests in the tier that proves them.
+Two tracks: **delivery** (what C# producers can do with Iceberg tables) and **verification** (how we know it is
+correct, and stays correct). Delivery is ordered by what unblocks production use cases soonest; each milestone ends with
+its rows in [spec-coverage.md](spec-coverage.md) flipped and tests in the tier that proves them. Verification is the
+13 paths agreed as "how do we make sure the capabilities are correct", with what is built, what is left, and what
+needs action outside this repository.
+
+## Delivery milestones
 
 | Milestone | Outcome | Contents | Proven by |
 |---|---|---|---|
-| **M0 — foundations** ✅ | C# can create, append to, overwrite and read flat v2/v3 tables in Glue and REST catalogs, interoperably | spec model, transforms, state machine, Avro, Parquet (flat), Glue/REST/in-memory, emulation + regression suite | L0 90, L1/L2 21 |
-| **M1 — production-grade append** | A C# producer can safely own appends to an Athena-queried Glue table | typed producers via Parquet.SourceGenerator once its Iceberg profile lands ([gaps](parquet-sourcegenerator.md)), nested types, fixed columns, decimal P>18, `UpdateSchema` builder API, merge-append (manifest compaction on commit), serializable `Overwrite` validation, `DropTable(purge)` deleting data, SigV4 handler (Glue/S3 Tables REST), JDBC catalog, Idempotency-Key retries, `add_files`, packaging (NuGet, net8.0 + netstandard2.0 core) | Athena L3 green in a sandbox account; soak test with concurrent writers |
-| **M2 — merge-on-read reads** | Read any table Athena/Spark/Trino have mutated | ✅ position deletes, DVs, Puffin, delete applicability, v2→v3 DV converter, NDV statistics (pulled forward); remaining: expressions + partition/metrics pruning, equality deletes, Spark DV fixtures | PyIceberg applies our deletes (done); Athena-written DELETE/MERGE tables (AWS run pending) |
-| **M3 — row-level writes** | C# upserts / deletes without Athena | ✅ insert, upsert by key, group replacement, delete by key/predicate with copy-on-write, position/DV and equality deletes; single-snapshot RowDelta; re-plan-on-conflict serializability ([write-modes.md](write-modes.md)); remaining: pruning (needs expressions), `_row_id` preservation on v3 rewrites, Arrow `RecordBatch` API | PyIceberg reads our MoR output (done); Spark + Athena |
-| **M4 — maintenance & breadth** | Self-sufficient operations | expire with file deletion, orphan cleanup, rewrite data files / manifests, views, multi-table transactions, scan planning endpoint, more REST servers in CI | |
+| **M0 — foundations** ✅ | C# can create, append to, overwrite and read flat v2/v3 tables in Glue and REST catalogs, interoperably | spec model, transforms, state machine, Avro, Parquet (flat), Glue/REST/in-memory, emulation + regression suite | L0, L1/L2 |
+| **M1 — production-grade append** | A C# producer can safely own appends to an Athena-queried Glue table | typed producers via Parquet.SourceGenerator once its Iceberg profile lands ([gaps](parquet-sourcegenerator.md)), nested types, fixed columns, decimal P>18, `UpdateSchema` builder API, merge-append (manifest compaction on commit), serializable `Overwrite` validation, `DropTable(purge)` deleting data, SigV4 handler (Glue/S3 Tables REST), JDBC catalog, `add_files`, packaging (NuGet, net8.0 + netstandard2.0 core) | Athena L3 green in a sandbox account (needs AWS, below); soak against Glue ✅ in emulation |
+| **M2 — merge-on-read reads** | Read any table Athena/Spark/Trino have mutated | ✅ position deletes, DVs, Puffin, delete applicability, v2→v3 DV converter, NDV statistics, **Spark-written MoR tables (v2 position deletes, v3 DVs)**, **Trino-written MoR tables**, v3 row lineage read (`_row_id`, `_last_updated_sequence_number`); remaining: expressions + partition/metrics pruning | Spark + Trino + PyIceberg ✅; Athena-written DELETE/MERGE tables (AWS run pending) |
+| **M3 — row-level writes** | C# upserts / deletes without Athena | ✅ insert, upsert by key, group replacement, delete by key/predicate with copy-on-write, position/DV and equality deletes; single-snapshot RowDelta; re-plan-on-conflict serializability ([write-modes.md](write-modes.md)); **`_row_id` preserved on v3 copy-on-write rewrites**; remaining: pruning (needs expressions), Arrow `RecordBatch` API | Spark, Trino and PyIceberg read our output ✅; Athena (AWS pending) |
+| **M4 — maintenance & breadth** | Self-sufficient operations | expire with file deletion, orphan cleanup, rewrite data files / manifests, views, multi-table transactions, scan planning endpoint | |
+
+### Upstream changes to plan for (from the spec-drift check)
+
+`python tools/spec_trace.py drift` compares apache/iceberg `main` with the sections pinned at the 1.12.0 release.
+Today it reports the in-progress **v4** work. Two items affect our design:
+
+- **v4 forbids new equality deletes** ("Equality delete files must not be added to v4 tables"; existing v2/v3 ones
+  must still be applied). When v4 support lands (we read and write up to v3 today), `DeleteStrategy.EqualityDeletes`
+  must refuse v4 tables, and producers that rely on
+  equality deletes for cheap upserts need a v4 answer: deletion vectors after a key lookup, which our
+  `PositionDeletes` strategy already does.
+- **Manifests are being restructured** (root manifests, content stats, manifest deletion vectors, relative paths).
+  This is additive for v1–v3 readers, but it is the biggest change to plan for if we adopt v4.
+
+## Verification roadmap
+
+Status: ✅ built and running in CI · 🟡 built, the rest needs something external · ⏳ not started.
+
+| # | Path | Status | What is built | What is left | Needs from outside this repo |
+|---|---|---|---|---|---|
+| 1 | **Table invariant checker ("fsck")** | ✅ | `TableValidator` (`src/Iceberg.Net.Data/TableValidator.cs`): 40+ checks on metadata, manifests, files, DVs, row-ID ranges, summaries and bounds; deep mode re-reads data. Runs after every BDD scenario, every model-based case, every fault and soak run, on Spark/Trino-written tables, and inside the shadow tool | — | Running it read-only against **production** tables happens through #4 |
+| 2 | **Model-based property testing** | ✅ | `ModelBasedTests` (FsCheck): random insert / upsert / group-replace / delete / drop / expire / stats / upgrade+convert sequences vs an in-memory model, with shrinking (`ICEBERG_PBT_RUNS`, `ICEBERG_PBT_SEED`); checks time travel, fsck and v3 row-lineage invariants after every step | Concurrent interleavings are covered by #6 rather than by the model | — |
+| 3 | **Spark and Trino as oracles** | ✅ | **Spark 4.0.1 + Iceberg 1.12** (`interop/spark_oracle.py`, `SparkOracle`): committed Spark-written fixtures in L0 (rows, fsck, row lineage, our writes on top), and a live run that reads every table we write: rows, snapshots, delete-file kinds and lineage. **Trino 478** (`--trino`): reads our writes, we read its MoR DELETE/UPDATE/MERGE, mixed histories agree | Trino 478 cannot read deletion vectors (pinned as a characterization test that will flag the upgrade); Spark never writes equality deletes (Flink does), so equality-delete *reading* is cross-checked by Spark and Trino reading ours, not by a third-party writer | — |
+| 4 | **Nightly AWS run + read-only shadowing** | 🟡 | `.github/workflows/iceberg-dotnet-aws.yml` (nightly, dormant until configured); `tools/ShadowCompare`: reads a table with this library and with PyIceberg from the **same metadata file**, compares order-independent per-column and per-row fingerprints (`TableFingerprint`), and runs fsck. Proven locally against every type and delete mechanism, and against Spark tables | Athena as a second shadow reference (aggregates only), once a workgroup exists | **An AWS OIDC role and repository variables** (`ICEBERG_AWS_ROLE_ARN`, `ICEBERG_AWS_WAREHOUSE`, `ICEBERG_ATHENA_WORKGROUP`, optional `ICEBERG_SHADOW_TABLES`); an S3 lifecycle rule on the regression prefix. See [regression-suite.md](regression-suite.md#aws-mode) |
+| 5 | **Crash and fault injection** | ✅ | `FaultInjectingFileIO` + `FaultInjectionTests`: every write fault before and after it lands, ambiguous catalog swaps, unknown commit outcomes (`CommitStateUnknownException.ServerResponded`): the table is always before-or-after and fsck-clean, and nothing that may have committed is deleted | S3 throttling (`503 SlowDown`) and retry back-off in `S3FileIO` | — |
+| 6 | **Concurrency soak** | ✅ | `SoakTests`: 4 writers × random modes against memory v2/v3, Glue, the Java REST fixture and Polaris; per-writer models plus hot keys contended by all writers; `ICEBERG_SOAK_SECONDS` for long runs. It found that the REST fixture's SQLite returned HTTP 500 under contention, and that unknown commit outcomes were never resolved; both are fixed | Hours-long runs on a schedule | AWS soak once #4 is configured |
+| 7 | **Reference files from other writers** | ✅ | Committed fixtures from PyIceberg (`fixtures/pyiceberg`) and Spark (`fixtures/spark`: v2 position deletes, v3 DVs + row lineage), read in the network-free L0 tier | Spark v1 tables; evolved-schema Spark tables | Athena-written fixtures (the L3 test that reads one exists; it needs AWS) |
+| 8 | **Decoder fuzzing** | ✅ | `CorruptionTests`: bit flips, truncation, insertion and hostile length fields against metadata JSON, manifest lists, manifests, Puffin, DVs, Roaring and Theta, plus structural JSON damage and required-field removal (`ICEBERG_FUZZ_RUNS`, `ICEBERG_FUZZ_SEED`). Contract (`Corruption`): fail with a format error, never a crash or a silent wrong answer. Found and fixed: unchecked lengths sizing allocations (Avro, Roaring), DV length overflow, negative Theta counts accepted, unchecked Avro union branches and varints, v2/v3 metadata silently defaulting required fields | Coverage-guided fuzzing (SharpFuzz + libFuzzer) for long unattended runs | — |
+| 9 | **Mutation testing** | ✅ | Stryker.NET 5 (`dotnet-tools.json`, `mutation/`); baseline on `Iceberg.Net.Puffin`: see [Mutation testing](#mutation-testing) | Extend to transforms, the metadata state machine and delete applicability; schedule it (too slow for PR CI) | — |
+| 10 | **Spec traceability + drift** | ✅ | `[Spec("…")]` (C#, also an xunit trait: `--filter Spec=row-lineage`) and `@spec:` (Gherkin) tags; `tools/spec_trace.py` builds [spec-traceability.md](spec-traceability.md) from sections pinned at apache-iceberg-1.12.0 (CI fails if it is stale or links to unknown sections); the weekly `drift` job diffs upstream `main` and fails on changes nobody has reviewed yet (`drift --acknowledge` records a review in `docs/spec/acknowledged-drift.json`; the v4 changes above are acknowledged as of 2026-10-23). Today 65/88 implementable table + Puffin sections and 14/15 implemented REST operations have linked tests | The ⬜ rows of the matrix: untagged tests, or real gaps such as sort orders, default values and path relativization | — |
+| 11 | **More REST servers** | 🟡 | **Apache Polaris 1.8** (`--polaris`) runs the full catalog conformance suite and the soak. It caught a test that registered two live tables at one location, which Polaris rightly refuses | Nessie, Lakekeeper | Their images are on quay.io/ghcr.io, which this sandbox's proxy blocks, and Docker Hub rate-limited the Nessie pull. GitHub Actions can reach them: add them as compose profiles from a machine with access |
+| 12 | **BDD across engines** | ⏳ | The Gherkin features already assert PyIceberg agreement; Spark and Trino agreement is asserted in xunit (`SparkCrossEngineTests`, `TrinoCrossEngineTests`) | `Then Spark/Trino/Athena reads the same rows` steps. Spark costs ~20 s of JVM start-up per call, so the world should batch one Spark read per feature | Athena step needs #4 |
+| 13 | **Emulator fidelity upkeep** | ✅ | `.github/workflows/iceberg-dotnet-upkeep.yml` (weekly): the whole regression suite against `:latest` moto, REST fixture, Polaris and Trino, and the spec-drift check; image tags are pinned and overridable (`MOTO_TAG`, `REST_FIXTURE_TAG`, `POLARIS_TAG`, `TRINO_TAG`) | — | Fidelity tests against real AWS on the same schedule (#4) |
+
+### Bugs these paths found
+
+Each of these reproduced with the tests listed, and was fixed:
+
+| Found by | Defect |
+|---|---|
+| Soak (#6) | Commits with an unknown outcome (HTTP 5xx after the server may have applied them) always failed the mutation; now resolved by reloading the table when the server answered |
+| Soak (#6) | The Java REST fixture's default in-memory SQLite fails concurrent commits (`SQLITE_BUSY` → 500); now file SQLite with WAL |
+| Spark (#3, #7) | Copy-on-write rewrites gave surviving rows new `_row_id`s; Java and Spark preserve them |
+| Shadow tool smoke test (#4) | `LocalFileIO` rejected Hadoop-style `file:/path` locations, which Java writes into manifests |
+| Fuzzing (#8) | The nine decoder defects listed in row 8 |
+| Polaris (#11) | A conformance test relied on registering a second live table over an existing table's location |
+
+## Mutation testing
+
+`cd mutation && dotnet stryker --config-file stryker-puffin.json` (about half an hour; nothing else may build the
+solution while it runs, because Stryker swaps the mutated assembly into the test output). The score is the share of
+injected bugs (flipped conditions, changed arithmetic and constants, removed statements) that at least one L0 test
+catches.
+
+| Project | Mutants | Killed | Survived | No coverage | Score | Date |
+|---|---|---|---|---|---|---|
+| Iceberg.Net.Puffin | — | — | — | — | — | pending first full run |
+
+## Needs action outside this repository
+
+1. **AWS sandbox for CI** (#4, #6, #7, #13, M1): an OIDC role trusted by this repository, with S3 on the regression
+   prefix, Glue on `regr_*` databases and Athena on one workgroup; set the repository variables listed in row 4.
+   The nightly workflow then starts on its own.
+2. **S3 lifecycle rule** on the regression prefix (expire after 3 days), because `DropTable(purge)` does not delete
+   data files yet.
+3. **Shadow tables**: choose the production tables to shadow-read nightly (`ICEBERG_SHADOW_TABLES`). The tool only
+   reads.
+4. **Registry access for Nessie/Lakekeeper** (#11), or add them from a machine that can pull from quay.io/ghcr.io.
+5. **Upstream issues**: Parquet.Net group field IDs ([drafted](upstream/parquet-net-group-field-ids.md), patch
+   verified) and the Parquet.SourceGenerator Iceberg profile ([gaps](parquet-sourcegenerator.md)).
 
 ## Breaking out
 
 The folder is designed to be extracted into its own repository (`rtkelly-labs/Iceberg.NET`) without changes:
-no references outside `iceberg-dotnet/`, its own `global.json`, `Directory.*.props`, `.gitignore`, docs, CI
-workflow (move `.github/workflows/iceberg-dotnet.yml` and drop the `iceberg-dotnet/` path prefixes). Suggested
+no references outside `iceberg-dotnet/`, its own `global.json`, `Directory.*.props`, `.gitignore`, docs, tools and
+CI workflows (move `.github/workflows/iceberg-dotnet*.yml` and drop the `iceberg-dotnet/` path prefixes). Suggested
 moment: when M1 starts and it needs NuGet publishing.
 
 ## Open questions
@@ -26,3 +101,5 @@ moment: when M1 starts and it needs NuGet publishing.
 2. **Arrow as the public row API** (M3) vs keeping `object?[]` for simple producers — likely both.
 3. **Upstream?** An Apache `iceberg-dotnet` does not exist; if this matures, proposing it upstream (or contributing
    to an existing community effort) would share the maintenance cost. Decide after M2.
+4. **v4 adoption**: whether producers that use equality deletes move to deletion vectors before v4 tables
+   appear in our estate (see "Upstream changes to plan for").

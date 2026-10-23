@@ -47,6 +47,7 @@ public sealed class RowDeleteTests : IDisposable
 
     private static Dictionary<string, IEnumerable<long>> Del(DataFile f, params long[] positions) => new() { [f.FilePath] = positions };
 
+    [Spec("Position Delete Files")]
     [Fact]
     public async Task V2_row_deletes_write_position_delete_files()
     {
@@ -67,6 +68,7 @@ public sealed class RowDeleteTests : IDisposable
         Assert.Equal(30, (await TableScan.ReadAllAsync(t, before)).Count);
     }
 
+    [Spec("Deletion Vectors")]
     [Fact]
     public async Task V3_row_deletes_write_one_deletion_vector_per_data_file_and_merge_later_deletes()
     {
@@ -90,6 +92,8 @@ public sealed class RowDeleteTests : IDisposable
         Assert.Contains(await DeleteEntries(t, includeDeleted: true), e => e.Status == ManifestEntryStatus.Deleted && e.DataFile.ReferencedDataFile == files[0].FilePath);
     }
 
+    [Spec("Deletion Vectors")]
+    [Spec("Version 3")]
     [Fact]
     public async Task Converter_folds_v2_position_deletes_into_deletion_vectors()
     {
@@ -114,6 +118,8 @@ public sealed class RowDeleteTests : IDisposable
         Assert.Equal("4", snap.Summary["total-position-deletes"]);
     }
 
+    [Spec("Scan Planning")]
+    [Spec("Sequence Numbers")]
     [Fact]
     public async Task Deletion_vector_applies_only_to_older_data()
     {
@@ -126,6 +132,7 @@ public sealed class RowDeleteTests : IDisposable
         Assert.Null(await index.DeletedPositionsAsync(files[0], dv.DataSequenceNumber + 1));
     }
 
+    [Spec("Commit Conflict Resolution and Retry")]
     [Fact]
     public async Task Deleting_from_a_removed_data_file_is_a_validation_failure()
     {
@@ -138,6 +145,8 @@ public sealed class RowDeleteTests : IDisposable
         await Assert.ThrowsAsync<ValidationException>(() => SnapshotProducer.DeleteRows(stale, Del(files[0], 1)).CommitAsync());
     }
 
+    [Spec("Deletion Vectors")]
+    [Spec("Commit Conflict Resolution and Retry")]
     [Fact]
     public async Task Concurrent_deletes_on_one_file_merge_into_one_deletion_vector()
     {
@@ -151,6 +160,7 @@ public sealed class RowDeleteTests : IDisposable
         Assert.Equal(28, (await TableScan.ReadAllAsync(final)).Count);
     }
 
+    [Spec("Table Statistics")]
     [Fact]
     public async Task Ndv_statistics_are_written_to_puffin_and_registered()
     {

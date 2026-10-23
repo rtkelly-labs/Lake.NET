@@ -5,6 +5,8 @@ using Iceberg.Net.Metadata;
 namespace Iceberg.Net.Spec.Tests;
 
 /// <summary>Failure handling in the metastore commit protocol (write new metadata file, then CAS the pointer).</summary>
+[Spec("Commit Conflict Resolution and Retry")]
+[Spec("Metastore Tables")]
 public sealed class CommitProtocolTests : IDisposable
 {
     private readonly string _warehouse = Path.Combine(Path.GetTempPath(), "iceberg-dotnet-tests", Guid.NewGuid().ToString("N"));

@@ -1,3 +1,4 @@
+@spec:row-level-deletes @spec:identifier-field-ids
 Feature: Write modes
   C# producers change Iceberg tables in three ways: pure insertion, upsert by key, and replacement of whole
   groups. Existing rows are removed with one of three delete mechanisms (copy-on-write, position deletes,

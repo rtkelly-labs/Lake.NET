@@ -9,6 +9,8 @@ namespace Iceberg.Net.Regression.Tests;
 /// Trino reads what we write (every delete strategy), we read what Trino writes (its merge-on-read DELETE/UPDATE/MERGE),
 /// and mixed histories (Trino's position deletes, then our equality deletes) read the same in both.
 /// </summary>
+[Spec("Row-level Deletes")]
+[Spec("Scan Planning")]
 [Trait("Category", "Regression")]
 public sealed class TrinoCrossEngineTests : IAsyncLifetime
 {

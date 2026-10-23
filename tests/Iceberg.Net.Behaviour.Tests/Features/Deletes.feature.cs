@@ -17,12 +17,16 @@ namespace Iceberg.Net.Behaviour.Tests.Features
     
     [global::System.CodeDom.Compiler.GeneratedCodeAttribute("Reqnroll", "3.0.0.0")]
     [global::System.Runtime.CompilerServices.CompilerGeneratedAttribute()]
+    [global::Xunit.TraitAttribute("Category", "spec:row-level-deletes")]
+    [global::Xunit.TraitAttribute("Category", "spec:delete-formats")]
     public partial class DeletingRowsFeature : object, global::Xunit.IClassFixture<DeletingRowsFeature.FixtureData>, global::Xunit.IAsyncLifetime
     {
         
         private global::Reqnroll.ITestRunner testRunner;
         
-        private static string[] featureTags = ((string[])(null));
+        private static string[] featureTags = new string[] {
+                "spec:row-level-deletes",
+                "spec:delete-formats"};
         
         private static global::Reqnroll.FeatureInfo featureInfo = new global::Reqnroll.FeatureInfo(new global::System.Globalization.CultureInfo("en-US"), "Features", "Deleting rows", @"  Rows can be deleted by key, by predicate, or by dropping whole data files, using the mechanism that fits
   the workload: copy-on-write (cheap reads), position deletes / deletion vectors (cheap writes after a scan),
@@ -107,7 +111,7 @@ namespace Iceberg.Net.Behaviour.Tests.Features
         
         public virtual async global::System.Threading.Tasks.Task FeatureBackgroundAsync()
         {
-#line 6
+#line 7
   #line hidden
             global::Reqnroll.Table table10 = new global::Reqnroll.Table(new string[] {
                         "id",
@@ -129,7 +133,7 @@ namespace Iceberg.Net.Behaviour.Tests.Features
                         "4",
                         "d",
                         "us"});
-#line 7
+#line 8
     await testRunner.GivenAsync("the default rows are:", ((string)(null)), table10, "Given ");
 #line hidden
         }
@@ -184,7 +188,7 @@ namespace Iceberg.Net.Behaviour.Tests.Features
             global::Reqnroll.ScenarioInfo scenarioInfo = new global::Reqnroll.ScenarioInfo("Delete by key", null, tagsOfScenario, argumentsOfScenario, featureTags, pickleIndex);
             string[] tagsOfRule = ((string[])(null));
             global::Reqnroll.RuleInfo ruleInfo = null;
-#line 14
+#line 15
   this.ScenarioInitialize(scenarioInfo, ruleInfo);
 #line hidden
             if ((global::Reqnroll.TagHelper.ContainsIgnoreTag(scenarioInfo.CombinedTags) || global::Reqnroll.TagHelper.ContainsIgnoreTag(featureTags)))
@@ -194,13 +198,13 @@ namespace Iceberg.Net.Behaviour.Tests.Features
             else
             {
                 await this.ScenarioStartAsync();
-#line 6
+#line 7
   await this.FeatureBackgroundAsync();
 #line hidden
-#line 15
+#line 16
     await testRunner.GivenAsync(string.Format("a format v{0} table keyed by \"id\" holding the default rows", version), ((string)(null)), ((global::Reqnroll.Table)(null)), "Given ");
 #line hidden
-#line 16
+#line 17
     await testRunner.WhenAsync(string.Format("I delete keys 2 and 3 with {0}", strategy), ((string)(null)), ((global::Reqnroll.Table)(null)), "When ");
 #line hidden
                 global::Reqnroll.Table table11 = new global::Reqnroll.Table(new string[] {
@@ -215,10 +219,10 @@ namespace Iceberg.Net.Behaviour.Tests.Features
                             "4",
                             "d",
                             "us"});
-#line 17
+#line 18
     await testRunner.ThenAsync("the table contains exactly:", ((string)(null)), table11, "Then ");
 #line hidden
-#line 21
+#line 22
     await testRunner.AndAsync(string.Format("the last snapshot operation is \"{0}\"", operation), ((string)(null)), ((global::Reqnroll.Table)(null)), "And ");
 #line hidden
             }
@@ -242,7 +246,7 @@ namespace Iceberg.Net.Behaviour.Tests.Features
             global::Reqnroll.ScenarioInfo scenarioInfo = new global::Reqnroll.ScenarioInfo("Delete by predicate", null, tagsOfScenario, argumentsOfScenario, featureTags, pickleIndex);
             string[] tagsOfRule = ((string[])(null));
             global::Reqnroll.RuleInfo ruleInfo = null;
-#line 32
+#line 33
   this.ScenarioInitialize(scenarioInfo, ruleInfo);
 #line hidden
             if ((global::Reqnroll.TagHelper.ContainsIgnoreTag(scenarioInfo.CombinedTags) || global::Reqnroll.TagHelper.ContainsIgnoreTag(featureTags)))
@@ -252,13 +256,13 @@ namespace Iceberg.Net.Behaviour.Tests.Features
             else
             {
                 await this.ScenarioStartAsync();
-#line 6
+#line 7
   await this.FeatureBackgroundAsync();
 #line hidden
-#line 33
+#line 34
     await testRunner.GivenAsync(string.Format("a format v{0} table keyed by \"id\" holding the default rows", version), ((string)(null)), ((global::Reqnroll.Table)(null)), "Given ");
 #line hidden
-#line 34
+#line 35
     await testRunner.WhenAsync(string.Format("I delete rows where region is \"us\" with {0}", strategy), ((string)(null)), ((global::Reqnroll.Table)(null)), "When ");
 #line hidden
                 global::Reqnroll.Table table12 = new global::Reqnroll.Table(new string[] {
@@ -273,10 +277,10 @@ namespace Iceberg.Net.Behaviour.Tests.Features
                             "3",
                             "c",
                             "eu"});
-#line 35
+#line 36
     await testRunner.ThenAsync("the table contains exactly:", ((string)(null)), table12, "Then ");
 #line hidden
-#line 39
+#line 40
     await testRunner.AndAsync("PyIceberg reads the same rows", ((string)(null)), ((global::Reqnroll.Table)(null)), "And ");
 #line hidden
             }
@@ -286,15 +290,17 @@ namespace Iceberg.Net.Behaviour.Tests.Features
         [global::Xunit.SkippableFactAttribute(DisplayName="Equality deletes cannot express a predicate")]
         [global::Xunit.TraitAttribute("FeatureTitle", "Deleting rows")]
         [global::Xunit.TraitAttribute("Description", "Equality deletes cannot express a predicate")]
+        [global::Xunit.TraitAttribute("Category", "spec:equality-delete-files")]
         public async global::System.Threading.Tasks.Task EqualityDeletesCannotExpressAPredicate()
         {
-            string[] tagsOfScenario = ((string[])(null));
+            string[] tagsOfScenario = new string[] {
+                    "spec:equality-delete-files"};
             global::System.Collections.Specialized.OrderedDictionary argumentsOfScenario = new global::System.Collections.Specialized.OrderedDictionary();
             string pickleIndex = "10";
             global::Reqnroll.ScenarioInfo scenarioInfo = new global::Reqnroll.ScenarioInfo("Equality deletes cannot express a predicate", null, tagsOfScenario, argumentsOfScenario, featureTags, pickleIndex);
             string[] tagsOfRule = ((string[])(null));
             global::Reqnroll.RuleInfo ruleInfo = null;
-#line 48
+#line 51
   this.ScenarioInitialize(scenarioInfo, ruleInfo);
 #line hidden
             if ((global::Reqnroll.TagHelper.ContainsIgnoreTag(scenarioInfo.CombinedTags) || global::Reqnroll.TagHelper.ContainsIgnoreTag(featureTags)))
@@ -304,16 +310,16 @@ namespace Iceberg.Net.Behaviour.Tests.Features
             else
             {
                 await this.ScenarioStartAsync();
-#line 6
+#line 7
   await this.FeatureBackgroundAsync();
 #line hidden
-#line 49
+#line 52
     await testRunner.GivenAsync("a format v2 table keyed by \"id\" holding the default rows", ((string)(null)), ((global::Reqnroll.Table)(null)), "Given ");
 #line hidden
-#line 50
+#line 53
     await testRunner.WhenAsync("I delete rows where region is \"us\" with equality deletes", ((string)(null)), ((global::Reqnroll.Table)(null)), "When ");
 #line hidden
-#line 51
+#line 54
     await testRunner.ThenAsync("the write fails with \"Equality deletes delete by key\"", ((string)(null)), ((global::Reqnroll.Table)(null)), "Then ");
 #line hidden
             }
@@ -323,15 +329,17 @@ namespace Iceberg.Net.Behaviour.Tests.Features
         [global::Xunit.SkippableFactAttribute(DisplayName="Equality deletes need the partition columns in the key")]
         [global::Xunit.TraitAttribute("FeatureTitle", "Deleting rows")]
         [global::Xunit.TraitAttribute("Description", "Equality deletes need the partition columns in the key")]
+        [global::Xunit.TraitAttribute("Category", "spec:equality-delete-files")]
         public async global::System.Threading.Tasks.Task EqualityDeletesNeedThePartitionColumnsInTheKey()
         {
-            string[] tagsOfScenario = ((string[])(null));
+            string[] tagsOfScenario = new string[] {
+                    "spec:equality-delete-files"};
             global::System.Collections.Specialized.OrderedDictionary argumentsOfScenario = new global::System.Collections.Specialized.OrderedDictionary();
             string pickleIndex = "11";
             global::Reqnroll.ScenarioInfo scenarioInfo = new global::Reqnroll.ScenarioInfo("Equality deletes need the partition columns in the key", null, tagsOfScenario, argumentsOfScenario, featureTags, pickleIndex);
             string[] tagsOfRule = ((string[])(null));
             global::Reqnroll.RuleInfo ruleInfo = null;
-#line 53
+#line 58
   this.ScenarioInitialize(scenarioInfo, ruleInfo);
 #line hidden
             if ((global::Reqnroll.TagHelper.ContainsIgnoreTag(scenarioInfo.CombinedTags) || global::Reqnroll.TagHelper.ContainsIgnoreTag(featureTags)))
@@ -341,19 +349,19 @@ namespace Iceberg.Net.Behaviour.Tests.Features
             else
             {
                 await this.ScenarioStartAsync();
-#line 6
+#line 7
   await this.FeatureBackgroundAsync();
 #line hidden
-#line 54
+#line 59
     await testRunner.GivenAsync("a format v2 table keyed by \"id\" and partitioned by \"region\"", ((string)(null)), ((global::Reqnroll.Table)(null)), "Given ");
 #line hidden
-#line 55
+#line 60
     await testRunner.AndAsync("the table contains the default rows", ((string)(null)), ((global::Reqnroll.Table)(null)), "And ");
 #line hidden
-#line 56
+#line 61
     await testRunner.WhenAsync("I delete keys 2 and 3 with equality deletes", ((string)(null)), ((global::Reqnroll.Table)(null)), "When ");
 #line hidden
-#line 57
+#line 62
     await testRunner.ThenAsync("the write fails with \"partition source column\"", ((string)(null)), ((global::Reqnroll.Table)(null)), "Then ");
 #line hidden
             }
@@ -371,7 +379,7 @@ namespace Iceberg.Net.Behaviour.Tests.Features
             global::Reqnroll.ScenarioInfo scenarioInfo = new global::Reqnroll.ScenarioInfo("Dropping whole partitions removes their files without reading them", null, tagsOfScenario, argumentsOfScenario, featureTags, pickleIndex);
             string[] tagsOfRule = ((string[])(null));
             global::Reqnroll.RuleInfo ruleInfo = null;
-#line 59
+#line 64
   this.ScenarioInitialize(scenarioInfo, ruleInfo);
 #line hidden
             if ((global::Reqnroll.TagHelper.ContainsIgnoreTag(scenarioInfo.CombinedTags) || global::Reqnroll.TagHelper.ContainsIgnoreTag(featureTags)))
@@ -381,16 +389,16 @@ namespace Iceberg.Net.Behaviour.Tests.Features
             else
             {
                 await this.ScenarioStartAsync();
-#line 6
+#line 7
   await this.FeatureBackgroundAsync();
 #line hidden
-#line 60
+#line 65
     await testRunner.GivenAsync("a format v2 table keyed by \"id\" and partitioned by \"region\"", ((string)(null)), ((global::Reqnroll.Table)(null)), "Given ");
 #line hidden
-#line 61
+#line 66
     await testRunner.AndAsync("the table contains the default rows", ((string)(null)), ((global::Reqnroll.Table)(null)), "And ");
 #line hidden
-#line 62
+#line 67
     await testRunner.WhenAsync("I drop the data files where region is \"us\"", ((string)(null)), ((global::Reqnroll.Table)(null)), "When ");
 #line hidden
                 global::Reqnroll.Table table13 = new global::Reqnroll.Table(new string[] {
@@ -405,10 +413,10 @@ namespace Iceberg.Net.Behaviour.Tests.Features
                             "3",
                             "c",
                             "eu"});
-#line 63
+#line 68
     await testRunner.ThenAsync("the table contains exactly:", ((string)(null)), table13, "Then ");
 #line hidden
-#line 67
+#line 72
     await testRunner.AndAsync("the table has no delete files", ((string)(null)), ((global::Reqnroll.Table)(null)), "And ");
 #line hidden
             }
@@ -418,15 +426,17 @@ namespace Iceberg.Net.Behaviour.Tests.Features
         [global::Xunit.SkippableFactAttribute(DisplayName="Later deletes on a v3 table merge into one deletion vector per data file")]
         [global::Xunit.TraitAttribute("FeatureTitle", "Deleting rows")]
         [global::Xunit.TraitAttribute("Description", "Later deletes on a v3 table merge into one deletion vector per data file")]
+        [global::Xunit.TraitAttribute("Category", "spec:deletion-vectors")]
         public async global::System.Threading.Tasks.Task LaterDeletesOnAV3TableMergeIntoOneDeletionVectorPerDataFile()
         {
-            string[] tagsOfScenario = ((string[])(null));
+            string[] tagsOfScenario = new string[] {
+                    "spec:deletion-vectors"};
             global::System.Collections.Specialized.OrderedDictionary argumentsOfScenario = new global::System.Collections.Specialized.OrderedDictionary();
             string pickleIndex = "13";
             global::Reqnroll.ScenarioInfo scenarioInfo = new global::Reqnroll.ScenarioInfo("Later deletes on a v3 table merge into one deletion vector per data file", null, tagsOfScenario, argumentsOfScenario, featureTags, pickleIndex);
             string[] tagsOfRule = ((string[])(null));
             global::Reqnroll.RuleInfo ruleInfo = null;
-#line 69
+#line 76
   this.ScenarioInitialize(scenarioInfo, ruleInfo);
 #line hidden
             if ((global::Reqnroll.TagHelper.ContainsIgnoreTag(scenarioInfo.CombinedTags) || global::Reqnroll.TagHelper.ContainsIgnoreTag(featureTags)))
@@ -436,16 +446,16 @@ namespace Iceberg.Net.Behaviour.Tests.Features
             else
             {
                 await this.ScenarioStartAsync();
-#line 6
+#line 7
   await this.FeatureBackgroundAsync();
 #line hidden
-#line 70
+#line 77
     await testRunner.GivenAsync("a format v3 table keyed by \"id\" holding the default rows", ((string)(null)), ((global::Reqnroll.Table)(null)), "Given ");
 #line hidden
-#line 71
+#line 78
     await testRunner.WhenAsync("I delete keys 2 and 3 with position deletes", ((string)(null)), ((global::Reqnroll.Table)(null)), "When ");
 #line hidden
-#line 72
+#line 79
     await testRunner.AndAsync("I delete keys 4 and 4 with position deletes", ((string)(null)), ((global::Reqnroll.Table)(null)), "And ");
 #line hidden
                 global::Reqnroll.Table table14 = new global::Reqnroll.Table(new string[] {
@@ -456,13 +466,13 @@ namespace Iceberg.Net.Behaviour.Tests.Features
                             "1",
                             "a",
                             "eu"});
-#line 73
+#line 80
     await testRunner.ThenAsync("the table contains exactly:", ((string)(null)), table14, "Then ");
 #line hidden
-#line 76
+#line 83
     await testRunner.AndAsync("every data file has at most one deletion vector", ((string)(null)), ((global::Reqnroll.Table)(null)), "And ");
 #line hidden
-#line 77
+#line 84
     await testRunner.AndAsync("PyIceberg reads the same rows", ((string)(null)), ((global::Reqnroll.Table)(null)), "And ");
 #line hidden
             }

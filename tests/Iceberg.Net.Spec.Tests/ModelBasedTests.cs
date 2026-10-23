@@ -16,6 +16,10 @@ namespace Iceberg.Net.Spec.Tests;
 /// table must pass a deep fsck. Failures shrink to a minimal operation sequence and print a replay seed:
 ///   ICEBERG_PBT_SEED="seed,gamma" ICEBERG_PBT_RUNS=n dotnet test --filter ModelBased
 /// </summary>
+[Spec("Row-level Deletes")]
+[Spec("Sequence Numbers")]
+[Spec("Row Lineage")]
+[Spec("Snapshot Retention Policy")]
 public sealed class ModelBasedTests
 {
     // Small key space (id 0..7 × 3 days) so operations collide often.

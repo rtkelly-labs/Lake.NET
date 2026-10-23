@@ -45,6 +45,7 @@ public class PyIcebergFixtureTests
         return new Table(new InMemoryCatalog("/unused"), TableIdentifier.Of("interop", name), metadata, io);
     }
 
+    [Spec("Scan Planning")]
     [Fact]
     public async Task Partitioned_table_reads_the_same_rows_as_pyiceberg()
     {
@@ -70,6 +71,8 @@ public class PyIcebergFixtureTests
         }
     }
 
+    [Spec("Optional Snapshot Summary Fields")]
+    [Spec("Snapshots")]
     [Fact]
     public async Task Delete_snapshot_metadata_matches_spec_semantics()
     {
@@ -91,6 +94,8 @@ public class PyIcebergFixtureTests
         Assert.Contains(entries, e => e.Status == ManifestEntryStatus.Deleted && (string)e.DataFile.Partition[2]! == "us");
     }
 
+    [Spec("Partition Transforms")]
+    [Spec("Bucket Transform Details")]
     [Fact]
     public async Task Our_transforms_agree_with_pyiceberg_partition_values()
     {
@@ -108,6 +113,8 @@ public class PyIcebergFixtureTests
         }
     }
 
+    [Spec("Binary single-value serialization")]
+    [Spec("Field-level Metrics and Statistics")]
     [Fact]
     public async Task Column_metrics_decode_with_single_value_serialisation()
     {
@@ -120,6 +127,7 @@ public class PyIcebergFixtureTests
         Assert.Equal(rows.Count, file.ValueCounts![1]);
     }
 
+    [Spec("Column Projection")]
     [Fact]
     public async Task Schema_evolution_projects_missing_columns_as_null()
     {
@@ -132,6 +140,8 @@ public class PyIcebergFixtureTests
         Assert.Equal("added", rows.Single(r => (long)r[0]! == 100)[note]);
     }
 
+    [Spec("Manifests")]
+    [Spec("Manifest Lists")]
     [Fact]
     public async Task Manifest_list_and_manifest_metadata_keys_are_present()
     {

@@ -9,6 +9,8 @@ namespace Iceberg.Net.Regression.Tests;
 /// and storage. The REST variant also exercises the Java reference server in the middle, so
 /// "C# writes, Java commits, Python reads" is covered end to end.
 /// </summary>
+[Spec("Scan Planning")]
+[Spec("Partition Transforms")]
 [Trait("Category", "Regression")]
 public sealed class CrossEngineTests
 {

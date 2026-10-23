@@ -7,6 +7,9 @@ using Iceberg.Net.Types;
 namespace Iceberg.Net.Spec.Tests;
 
 /// <summary>The fsck must pass on healthy tables and name each kind of corruption precisely.</summary>
+[Spec("Manifests")]
+[Spec("Content file uniqueness")]
+[Spec("Field-level Metrics and Statistics")]
 public sealed class TableValidatorTests : IDisposable
 {
     private readonly string _warehouse = Path.Combine(Path.GetTempPath(), "iceberg-dotnet-tests", Guid.NewGuid().ToString("N"));

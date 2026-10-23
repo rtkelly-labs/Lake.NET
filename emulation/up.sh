@@ -2,6 +2,7 @@
 # Start the full-emulation stack (moto + Iceberg REST fixture) and wait until both answer.
 #   --spark   also fetch the Spark oracle (apache/spark image + pinned Iceberg runtime jar into .cache/)
 #   --trino   also start Trino (Iceberg connector over the REST fixture + moto S3) on :8080
+#   --polaris also start Apache Polaris (second REST catalog implementation) on :8182, catalog "regression"
 set -euo pipefail
 cd "$(dirname "$0")"
 SPARK=0; PROFILES=()
@@ -9,13 +10,15 @@ for arg in "$@"; do
   case "$arg" in
     --spark) SPARK=1 ;;
     --trino) PROFILES+=(--profile trino) ;;
+    --polaris) PROFILES+=(--profile polaris) ;;
     *) echo "unknown option: $arg" >&2; exit 2 ;;
   esac
 done
 docker compose "${PROFILES[@]}" up -d --wait
 echo "moto (S3 + Glue):      http://localhost:5000"
 echo "Iceberg REST fixture:  http://localhost:8181"
-[[ ${#PROFILES[@]} -gt 0 ]] && echo "Trino:                 http://localhost:8080"
+[[ " ${PROFILES[*]} " == *" trino "* ]] && echo "Trino:                 http://localhost:8080"
+[[ " ${PROFILES[*]} " == *" polaris "* ]] && echo "Polaris (REST):        http://localhost:8182/api/catalog (warehouse regression)"
 
 if [[ "$SPARK" == 1 ]]; then
   SPARK_IMAGE="${ICEBERG_SPARK_IMAGE:-apache/spark:4.0.1}"

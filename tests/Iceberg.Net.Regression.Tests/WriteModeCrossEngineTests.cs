@@ -8,6 +8,7 @@ namespace Iceberg.Net.Regression.Tests;
 /// Every write mode × delete strategy produces a table PyIceberg reads identically — except equality deletes,
 /// which PyIceberg 0.12 does not implement and must refuse rather than return deleted rows.
 /// </summary>
+[Spec("Row-level Deletes")]
 [Trait("Category", "Regression")]
 public sealed class WriteModeCrossEngineTests : IDisposable
 {

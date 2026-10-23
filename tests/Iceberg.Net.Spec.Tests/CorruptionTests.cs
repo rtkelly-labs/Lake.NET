@@ -100,10 +100,12 @@ public sealed class CorruptionTests(ITestOutputHelper output)
 
     private static string SparkMeta => Path.Combine(Fixtures, "spark", "ref", "mor_v3", "metadata");
 
+    [Spec("Table Metadata and Snapshots")]
     [Fact]
     public void Table_metadata_json() =>
         Fuzz("metadata", Fixture("metadata", "v2-valid.metadata.json"), b => MetadataJson.Read(Encoding.UTF8.GetString(b)));
 
+    [Spec("Manifest Lists")]
     [Fact]
     public void Manifest_list_avro()
     {
@@ -111,6 +113,7 @@ public sealed class CorruptionTests(ITestOutputHelper output)
         Fuzz("manifest-list", File.ReadAllBytes(list), b => ManifestCodec.ReadManifestList(b));
     }
 
+    [Spec("Manifests")]
     [Fact]
     public void Manifest_avro()
     {
@@ -119,6 +122,8 @@ public sealed class CorruptionTests(ITestOutputHelper output)
             Fuzz($"manifest {Path.GetFileName(path)}", File.ReadAllBytes(path), b => ManifestCodec.ReadManifest(b, metadata.DefaultSpec, metadata.CurrentSchema));
     }
 
+    [Spec("puffin: File structure")]
+    [Spec("puffin: Footer structure")]
     [Fact]
     public void Puffin_file() =>
         Fuzz("puffin", Fixture("puffin", "dv.puffin"), b =>
@@ -127,6 +132,7 @@ public sealed class CorruptionTests(ITestOutputHelper output)
             foreach (var blob in p.Blobs) p.Payload(blob);
         });
 
+    [Spec("puffin: deletion-vector-v1 blob type")]
     [Fact]
     public void Deletion_vector()
     {
@@ -134,6 +140,7 @@ public sealed class CorruptionTests(ITestOutputHelper output)
         Fuzz("deletion-vector", puffin.Payload(puffin.Blobs[0]), b => DeletionVector.Decode(b));
     }
 
+    [Spec("Deletion Vectors")]
     [Fact]
     public void Roaring_bitmap()
     {
@@ -143,12 +150,14 @@ public sealed class CorruptionTests(ITestOutputHelper output)
         Fuzz("roaring", bm.Serialize(), b => RoaringPositionBitmap.Deserialize(b));
     }
 
+    [Spec("puffin: apache-datasketches-theta-v1 blob type")]
     [Theory]
     [InlineData("theta-exact3.bin")]
     [InlineData("theta-est10k.bin")]
     public void Theta_sketch(string file) => Fuzz(file, Fixture("puffin", file), b => ThetaSketch.Deserialize(b));
 
     /// <summary>The CRC catches every single-bit error in a deletion vector: none may decode to a different bitmap.</summary>
+    [Spec("puffin: deletion-vector-v1 blob type")]
     [Fact]
     public void Every_single_bit_flip_in_a_deletion_vector_is_detected()
     {
@@ -168,6 +177,7 @@ public sealed class CorruptionTests(ITestOutputHelper output)
         "schemas", "current-schema-id", "partition-specs", "default-spec-id", "last-partition-id", "sort-orders", "default-sort-order-id")]
     [InlineData("v3-valid.metadata.json", "format-version", "table-uuid", "location", "last-sequence-number", "last-updated-ms", "last-column-id",
         "schemas", "current-schema-id", "partition-specs", "default-spec-id", "last-partition-id", "sort-orders", "default-sort-order-id", "next-row-id")]
+    [Spec("Table Metadata Fields")]
     public void Missing_required_metadata_fields_are_rejected(string file, params string[] required)
     {
         var json = File.ReadAllText(Path.Combine(Fixtures, "metadata", file));
@@ -183,6 +193,7 @@ public sealed class CorruptionTests(ITestOutputHelper output)
     }
 
     /// <summary>Wrong JSON types anywhere in the metadata tree must produce a format error.</summary>
+    [Spec("Table Metadata and Snapshots")]
     [Fact]
     public void Structurally_damaged_metadata_fails_with_a_format_error()
     {

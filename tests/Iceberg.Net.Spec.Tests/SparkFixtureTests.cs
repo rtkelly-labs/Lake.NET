@@ -42,6 +42,9 @@ public sealed class SparkFixtureTests : IDisposable
 
     private static Dictionary<long, string?> ByKey(IEnumerable<object?[]> rows) => rows.ToDictionary(r => (long)r[0]!, r => (string?)r[1]);
 
+    [Spec("Scan Planning")]
+    [Spec("Deletion Vectors")]
+    [Spec("Position Delete Files")]
     [Theory]
     [MemberData(nameof(Tables))]
     public async Task Reads_the_same_rows_as_spark(string name)
@@ -55,6 +58,7 @@ public sealed class SparkFixtureTests : IDisposable
         Assert.Equal(want.OrderBy(kv => kv.Key), ByKey(rows).OrderBy(kv => kv.Key));
     }
 
+    [Spec("Manifests")]
     [Theory]
     [MemberData(nameof(Tables))]
     public async Task Spark_tables_pass_deep_validation(string name)
@@ -64,6 +68,9 @@ public sealed class SparkFixtureTests : IDisposable
         Assert.True(report.IsValid, report.ToString());
     }
 
+    [Spec("Row lineage assignment")]
+    [Spec("First Row ID Inheritance")]
+    [Spec("Reserved Field IDs")]
     [Fact]
     public async Task Row_lineage_matches_spark()
     {
@@ -75,6 +82,7 @@ public sealed class SparkFixtureTests : IDisposable
         Assert.Equal(expected.OrderBy(kv => kv.Key), actual.OrderBy(kv => kv.Key));
     }
 
+    [Spec("Row-level Deletes")]
     [Theory]
     [InlineData("mor_v2", DeleteStrategy.CopyOnWrite)]
     [InlineData("mor_v2", DeleteStrategy.PositionDeletes)]
@@ -99,6 +107,8 @@ public sealed class SparkFixtureTests : IDisposable
         Assert.True(report.IsValid, report.ToString());
     }
 
+    [Spec("Row lineage assignment")]
+    [Spec("Row lineage example")]
     [Fact]
     public async Task Copy_on_write_preserves_spark_row_ids_for_untouched_rows()
     {

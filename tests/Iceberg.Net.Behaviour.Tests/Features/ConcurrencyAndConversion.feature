@@ -1,3 +1,4 @@
+@spec:commit-conflict-resolution-and-retry
 Feature: Concurrent writers and format conversion
   Two writers working from the same table version must both land without losing or duplicating rows,
   and a v2 table's position deletes must survive the upgrade to v3 deletion vectors unchanged.
@@ -41,6 +42,8 @@ Feature: Concurrent writers and format conversion
     Then the table contains exactly:
       | id | name | region |
       | 1  | a2   | eu     |
+
+  @spec:deletion-vectors @spec:version-3
 
   Scenario: Upgrading to v3 converts position deletes into deletion vectors
     Given a format v2 table keyed by "id"

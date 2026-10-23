@@ -32,7 +32,7 @@ Legend: ✅ implemented and tested · 🟡 partial · ⬜ not started · — not
 | Schema evolution & type promotion (int→long, float→double, decimal widening, v3 date→timestamp, unknown→any) | ✓ | ✓ | ✓ | ✅ rules; 🟡 no `UpdateSchema` builder API yet (callers build the new schema) | `MetadataSpecTests`, `LocalTableTests` |
 | Column projection by field ID | ✓ | ✓ | ✓ | ✅ (name fallback only when a file has no IDs) | `PyIcebergFixtureTests` |
 | Name mapping (`schema.name-mapping.default`) | ✓ | ✓ | ✓ | ✅ top-level columns, aliases for renames | `NameMappingAndImportTests` |
-| Reserved field IDs / metadata columns (`_file`, `_pos`, `_row_id`, …) | ✓ | ✓ | ✓ | ⬜ | |
+| Reserved field IDs / metadata columns (`_file`, `_pos`, `_row_id`, …) | ✓ | ✓ | ✓ | 🟡 `_row_id` / `_last_updated_sequence_number` read and written (below); reserved IDs excluded from column metrics; `_file` / `_pos` not exposed | `SparkFixtureTests` |
 
 ### Partitioning and sorting
 
@@ -71,12 +71,12 @@ Legend: ✅ implemented and tested · 🟡 partial · ⬜ not started · — not
 
 | Section | Status | Notes |
 |---|---|---|
-| Position delete files (v2) | ✅ read + write (one file per data file) | `RowDeleteTests`, `PuffinCrossEngineTests` (PyIceberg applies ours), `AthenaTests` (we apply Athena's) |
-| Equality delete files (v2) | ✅ read + write (key-based upsert/delete; sequence-number and partition applicability; null matches null) | `TableMutationTests`, Behaviour features; PyIceberg refuses them (pinned) |
-| Deletion vectors (v3, Puffin `deletion-vector-v1`) | ✅ read + write; one DV per data file (merged on later deletes and concurrent retries); v2 → v3 converter | `PuffinSpecTests`, `RowDeleteTests`, `PuffinCrossEngineTests` — see [puffin.md](puffin.md) |
+| Position delete files (v2) | ✅ read + write (one file per data file) | `RowDeleteTests`, `PuffinCrossEngineTests` (PyIceberg applies ours), `SparkFixtureTests` (we apply Spark's), `TrinoCrossEngineTests` (both directions), `AthenaTests` (we apply Athena's) |
+| Equality delete files (v2) | ✅ read + write (key-based upsert/delete; sequence-number and partition applicability; null matches null) | `TableMutationTests`, Behaviour features, `SparkCrossEngineTests` and `TrinoCrossEngineTests` (both apply ours); PyIceberg refuses them (pinned) |
+| Deletion vectors (v3, Puffin `deletion-vector-v1`) | ✅ read + write; one DV per data file (merged on later deletes and concurrent retries); v2 → v3 converter | `PuffinSpecTests`, `RowDeleteTests`, `PuffinCrossEngineTests`, `SparkFixtureTests` (we apply Spark's), `SparkCrossEngineTests` (Spark applies ours); Trino 478 cannot read DVs (pinned) — see [puffin.md](puffin.md) |
 | Delete applicability by sequence number; DV supersedes position deletes | ✅ | `RowDeleteTests.Deletion_vector_applies_only_to_older_data` |
 | Row lineage: `next-row-id`, snapshot `first-row-id`/`added-rows`, manifest and file `first_row_id` | ✅ assignment and inheritance | `StateManagementTests`, `LocalTableTests`, `CatalogConformanceTests` |
-| Row lineage metadata columns `_row_id`, `_last_updated_sequence_number` | ⬜ | |
+| Row lineage metadata columns `_row_id`, `_last_updated_sequence_number` | ✅ read (`TableScan.ReadWithLineageAsync`: stored value, else inherited); copy-on-write rewrites store them explicitly so rows keep their identity, as Java does | `SparkFixtureTests` (matches Spark's values), `SparkCrossEngineTests` (Spark derives ours identically), `ModelBasedTests` (invariants) |
 | Table encryption keys, snapshot `key-id` | 🟡 metadata only | |
 
 ### Table metadata

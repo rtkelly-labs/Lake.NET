@@ -47,6 +47,7 @@ public sealed class PuffinCrossEngineTests : IDisposable
         files.OrderByDescending(f => f.RecordCount).ThenBy(f => f.FilePath, StringComparer.Ordinal).Take(3)
             .ToDictionary(f => f.FilePath, f => (IEnumerable<long>)Enumerable.Range(0, (int)Math.Min(2, f.RecordCount)).Select(i => (long)i).ToList());
 
+    [Spec("Position Delete Files")]
     [SkippableFact]
     public async Task Pyiceberg_applies_our_v2_position_deletes()
     {
@@ -58,6 +59,8 @@ public sealed class PuffinCrossEngineTests : IDisposable
         Assert.Equal(ours, await PyIcebergIds(t));
     }
 
+    [Spec("Deletion Vectors")]
+    [Spec("puffin: deletion-vector-v1 blob type")]
     [SkippableFact]
     public async Task Pyiceberg_applies_our_v3_deletion_vectors_and_decodes_them()
     {
@@ -80,6 +83,7 @@ public sealed class PuffinCrossEngineTests : IDisposable
         Assert.Equal([0L, 1L, 2L], decoded[deletes.Keys.First()]!.AsArray().Select(p => p!.GetValue<long>()));
     }
 
+    [Spec("Deletion Vectors")]
     [SkippableFact]
     public async Task Converted_table_reads_identically_in_pyiceberg()
     {
@@ -96,6 +100,8 @@ public sealed class PuffinCrossEngineTests : IDisposable
         Assert.Equal(before, await OurIds(t));
     }
 
+    [Spec("Table Statistics")]
+    [Spec("puffin: apache-datasketches-theta-v1 blob type")]
     [SkippableFact]
     public async Task Datasketches_reads_our_ndv_statistics()
     {

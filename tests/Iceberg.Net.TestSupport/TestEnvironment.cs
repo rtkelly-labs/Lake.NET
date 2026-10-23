@@ -30,6 +30,9 @@ public sealed class TestEnvironment
     /// <summary>Why the suite (or a capability) cannot run, or null when it can.</summary>
     public string? SkipReason { get; }
     public string? RestSkipReason { get; }
+    /// <summary>Apache Polaris (emulation/up.sh --polaris): a second REST server implementation.</summary>
+    public Uri PolarisUri { get; } = new(Env("ICEBERG_POLARIS_URI") ?? "http://localhost:8182/api/catalog");
+    public string? PolarisSkipReason { get; }
     public string? OracleSkipReason { get; }
     /// <summary>Oracle availability for tests that only use the local filesystem (no emulator or AWS).</summary>
     public string? LocalOracleSkipReason { get; }
@@ -58,6 +61,7 @@ public sealed class TestEnvironment
 
             SkipReason = Reachable(new Uri(S3Endpoint)) ? null : $"S3/Glue emulator not reachable at {S3Endpoint} (run emulation/up.sh)";
             RestSkipReason = SkipReason ?? (Reachable(RestUri) ? null : $"REST catalog fixture not reachable at {RestUri}");
+            PolarisSkipReason = SkipReason ?? (Reachable(PolarisUri) ? null : $"Polaris not reachable at {PolarisUri} (run emulation/up.sh --polaris)");
             AthenaSkipReason = "Athena only runs with ICEBERG_TEST_TARGET=aws";
         }
         else
@@ -69,6 +73,7 @@ public sealed class TestEnvironment
             SkipReason = Warehouse.StartsWith("s3://", StringComparison.Ordinal) ? null : "ICEBERG_WAREHOUSE=s3://bucket/prefix is required for AWS runs";
             // The Glue/S3 Tables REST endpoints need SigV4 request signing, which RestCatalogOptions.Handler can supply but the suite does not yet.
             RestSkipReason = SkipReason ?? (RestUri is null ? "Set ICEBERG_REST_URI to run REST tests against AWS (SigV4 signing not wired yet)" : null);
+            PolarisSkipReason = "Polaris runs in emulation only";
             AthenaSkipReason = SkipReason ?? (AthenaWorkGroup is null ? "Set ICEBERG_ATHENA_WORKGROUP (and optionally ICEBERG_ATHENA_OUTPUT)" : null);
         }
 
@@ -110,10 +115,17 @@ public sealed class TestEnvironment
         "glue" => GlueCatalog.Create(new S3FileIO(S3Options), new GlueCatalogOptions { Endpoint = GlueEndpoint, Region = Region, Warehouse = Warehouse.TrimEnd('/') + "/glue" }),
         "rest" => await RestCatalog.ConnectAsync(new RestCatalogOptions { Uri = RestUri!, Properties = S3Properties },
             props => new S3FileIO(S3FileIOOptions.FromProperties(props))),
+        // Bootstrapped by emulation/polaris_setup.py. No credential vending (no STS): clients bring S3 credentials.
+        "polaris" => await RestCatalog.ConnectAsync(new RestCatalogOptions
+            {
+                Uri = PolarisUri, Warehouse = "regression", Credential = "root:s3cr3t", Scope = "PRINCIPAL_ROLE:ALL",
+                AccessDelegation = null, Properties = S3Properties,
+            },
+            props => new S3FileIO(S3FileIOOptions.FromProperties(props)), "polaris"),
         _ => throw new ArgumentException(kind),
     };
 
-    public string? CatalogSkipReason(string kind) => kind == "rest" ? RestSkipReason : SkipReason;
+    public string? CatalogSkipReason(string kind) => kind switch { "rest" => RestSkipReason, "polaris" => PolarisSkipReason, _ => SkipReason };
 
     // ---------- PyIceberg oracle ----------
 
@@ -135,7 +147,10 @@ public sealed class TestEnvironment
         return uv is null ? null : (uv, $"run --quiet --project \"{InteropDir()}\" python -I \"{script}\"");
     }
 
-    public async Task<JsonNode> OracleAsync(params string[] args)
+    public async Task<JsonNode> OracleAsync(params string[] args) => JsonNode.Parse(await OracleRawAsync(args))!;
+
+    /// <summary>Run the PyIceberg oracle and return its stdout (a JSON document).</summary>
+    public async Task<string> OracleRawAsync(params string[] args)
     {
         var (file, prefix) = OracleCommand() ?? throw new InvalidOperationException(OracleSkipReason);
         var psi = new ProcessStartInfo(file, $"{prefix} {string.Join(' ', args.Select(a => $"\"{a}\""))}")
@@ -148,7 +163,7 @@ public sealed class TestEnvironment
         var stderr = p.StandardError.ReadToEndAsync();
         await p.WaitForExitAsync().WaitAsync(TimeSpan.FromMinutes(5));
         if (p.ExitCode != 0) throw new InvalidOperationException($"PyIceberg oracle failed ({p.ExitCode}): {await stderr}");
-        return JsonNode.Parse(await stdout)!;
+        return await stdout;
     }
 }
 

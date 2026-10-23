@@ -13,6 +13,7 @@
 | [parquet-sourcegenerator.md](parquet-sourcegenerator.md) | Using Parquet.SourceGenerator as a typed Iceberg write path: measured gaps and where to fix each |
 | [libraries.md](libraries.md) | Libraries under the hood (Avro, Parquet, ORC, compression, Roaring/DVs, Puffin, sketches, Arrow, SigV4) and CLR type pitfalls |
 | [emulation.md](emulation.md) | The local AWS + REST emulation stack, its fidelity shims, and known gaps |
-| [regression-suite.md](regression-suite.md) | Test tiers, running in emulation and AWS, environment variables, CI |
-| [roadmap.md](roadmap.md) | Milestones M0–M4, breaking out into its own repo, open questions |
+| [regression-suite.md](regression-suite.md) | Test tiers, running in emulation and AWS, environment variables, CI, shadow comparison |
+| [spec-traceability.md](spec-traceability.md) | Generated: every upstream spec section (pinned at 1.12.0) and the tests linked to it |
+| [roadmap.md](roadmap.md) | Delivery milestones M0–M4, the 13 verification paths (built / left / needs action), upstream v4 changes, breaking out, open questions |
 | [research/ecosystem-2026-10.md](research/ecosystem-2026-10.md) | Sourced research snapshot (specs, releases, ports, engines, catalogs, .NET libraries) |

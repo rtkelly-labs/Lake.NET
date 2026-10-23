@@ -15,6 +15,8 @@ namespace Iceberg.Net.Regression.Tests;
 /// gets a <see cref="Iceberg.Net.Metadata.CommitFailedException"/>; that is allowed, but the failed operation
 /// must leave no trace, which the per-writer model checks because it only records acknowledged operations.
 /// </summary>
+[Spec("Optimistic Concurrency")]
+[Spec("Commit Conflict Resolution and Retry")]
 [Trait("Category", "Soak")]
 public sealed class SoakTests
 {
@@ -28,7 +30,7 @@ public sealed class SoakTests
     private const int Writers = 4;
     private const long HotKeys = 5;
 
-    public static TheoryData<string, int> Targets() => new() { { "memory", 2 }, { "memory", 3 }, { "glue", 2 }, { "rest", 3 } };
+    public static TheoryData<string, int> Targets() => new() { { "memory", 2 }, { "memory", 3 }, { "glue", 2 }, { "rest", 3 }, { "polaris", 3 } };
 
     private static int Seconds => int.TryParse(Environment.GetEnvironmentVariable("ICEBERG_SOAK_SECONDS"), out var s) ? s : 15;
 

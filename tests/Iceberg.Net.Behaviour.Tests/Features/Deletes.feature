@@ -1,3 +1,4 @@
+@spec:row-level-deletes @spec:delete-formats
 Feature: Deleting rows
   Rows can be deleted by key, by predicate, or by dropping whole data files, using the mechanism that fits
   the workload: copy-on-write (cheap reads), position deletes / deletion vectors (cheap writes after a scan),
@@ -45,10 +46,14 @@ Feature: Deleting rows
       | 3       | copy-on-write    |
       | 3       | position deletes |
 
+  @spec:equality-delete-files
+
   Scenario: Equality deletes cannot express a predicate
     Given a format v2 table keyed by "id" holding the default rows
     When I delete rows where region is "us" with equality deletes
     Then the write fails with "Equality deletes delete by key"
+
+  @spec:equality-delete-files
 
   Scenario: Equality deletes need the partition columns in the key
     Given a format v2 table keyed by "id" and partitioned by "region"
@@ -65,6 +70,8 @@ Feature: Deleting rows
       | 1  | a    | eu     |
       | 3  | c    | eu     |
     And the table has no delete files
+
+  @spec:deletion-vectors
 
   Scenario: Later deletes on a v3 table merge into one deletion vector per data file
     Given a format v3 table keyed by "id" holding the default rows

@@ -26,7 +26,14 @@ public sealed class FileAlreadyExistsException(string location) : IOException($"
 /// <summary>Local filesystem FileIO for <c>file://</c> and bare paths. Used by unit tests and local catalogs.</summary>
 public sealed class LocalFileIO : IFileIO
 {
-    private static string PathOf(string location) => location.StartsWith("file:", StringComparison.Ordinal) ? new Uri(location).LocalPath : location;
+    /// <summary>
+    /// <c>file:///tmp/x</c> and bare paths, plus Hadoop's <c>file:/tmp/x</c> form, which Java engines write into manifests
+    /// (<see cref="Uri"/> rejects it: the empty authority is missing).
+    /// </summary>
+    private static string PathOf(string location) =>
+        !location.StartsWith("file:", StringComparison.Ordinal) ? location
+        : location.StartsWith("file://", StringComparison.Ordinal) ? new Uri(location).LocalPath
+        : Uri.UnescapeDataString(location["file:".Length..]);
 
     public Task<byte[]> ReadAllAsync(string location, CancellationToken ct = default) => File.ReadAllBytesAsync(PathOf(location), ct);
 

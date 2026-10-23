@@ -32,6 +32,8 @@ public class StateManagementTests
     private TableMetadata Commit(TableMetadata m, string next, params MetadataUpdate[] updates) =>
         TableMetadataBuilder.From(m, Clock).ApplyAll(updates).Build(next);
 
+    [Spec("Sequence Numbers")]
+    [Spec("Table Metadata Fields")]
     [Fact]
     public void Appending_snapshots_advances_sequence_number_current_snapshot_and_logs()
     {
@@ -51,6 +53,7 @@ public class StateManagementTests
         Assert.True(m2.LastUpdatedMs > m1.LastUpdatedMs);
     }
 
+    [Spec("Sequence Numbers")]
     [Fact]
     public void Stale_sequence_number_is_rejected()
     {
@@ -58,6 +61,7 @@ public class StateManagementTests
         Assert.Throws<ArgumentException>(() => Commit(m1, "s3://x/2.metadata.json", new U.AddSnapshot(Snap(2, 1, 1))));
     }
 
+    [Spec("Table Metadata Fields")]
     [Fact]
     public void Metadata_log_is_trimmed_to_previous_versions_max()
     {
@@ -67,6 +71,7 @@ public class StateManagementTests
         Assert.Equal(["s3://b/t/metadata/00003.metadata.json", "s3://b/t/metadata/00004.metadata.json"], m.MetadataLog.Select(e => e.MetadataFile));
     }
 
+    [Spec("Snapshot References")]
     [Fact]
     public void Branches_and_tags_are_independent_of_main()
     {
@@ -84,6 +89,7 @@ public class StateManagementTests
         Assert.Equal(1, removed.CurrentSnapshotId);
     }
 
+    [Spec("Snapshot Retention Policy")]
     [Fact]
     public void Removing_snapshots_drops_refs_and_truncates_snapshot_log()
     {
@@ -96,6 +102,7 @@ public class StateManagementTests
         Assert.Equal([3L], expired.SnapshotLog.Select(s => s.SnapshotId));
     }
 
+    [Spec("Schema Evolution")]
     [Fact]
     public void Adding_an_equivalent_schema_reuses_it()
     {
@@ -113,6 +120,7 @@ public class StateManagementTests
         Assert.DoesNotContain(b.Changes, c => c is U.AddSchema);
     }
 
+    [Spec("Partition Evolution")]
     [Fact]
     public void Partition_spec_evolution_assigns_new_spec_id()
     {
@@ -124,6 +132,8 @@ public class StateManagementTests
         Assert.Equal(2, m1.PartitionSpecs.Count);
     }
 
+    [Spec("Format Versioning")]
+    [Spec("Appendix E: Format version changes")]
     [Fact]
     public void Format_version_can_upgrade_not_downgrade()
     {
@@ -134,6 +144,8 @@ public class StateManagementTests
         Assert.Throws<ArgumentException>(() => Commit(m1, "s3://x/2.metadata.json", new U.UpgradeFormatVersion(2)));
     }
 
+    [Spec("Snapshot Row IDs")]
+    [Spec("First Row ID Assignment")]
     [Fact]
     public void V3_row_lineage_advances_next_row_id()
     {
@@ -145,6 +157,8 @@ public class StateManagementTests
         Assert.Throws<ArgumentException>(() => Commit(m1, "s3://x/2.metadata.json", new U.AddSnapshot(Snap(2, 1, 2))));
     }
 
+    [Spec("Optimistic Concurrency")]
+    [Spec("rest: updateTable")]
     [Fact]
     public void Requirements_detect_concurrent_changes()
     {
@@ -160,6 +174,7 @@ public class StateManagementTests
         new R.AssertCreate().Validate(null);
     }
 
+    [Spec("rest: createTable")]
     [Fact]
     public void Create_records_every_initial_setting_as_changes()
     {
@@ -168,6 +183,7 @@ public class StateManagementTests
             b.Changes.Select(c => c.Action));
     }
 
+    [Spec("rest: updateTable")]
     [Fact]
     public void Updates_and_requirements_round_trip_as_rest_json()
     {

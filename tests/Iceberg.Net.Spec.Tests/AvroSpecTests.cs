@@ -7,6 +7,7 @@ namespace Iceberg.Net.Spec.Tests;
 
 public class AvroSpecTests
 {
+    [Spec("Avro")]
     [Theory]
     [InlineData(0L, new byte[] { 0x00 })]
     [InlineData(-1L, new byte[] { 0x01 })]
@@ -22,6 +23,7 @@ public class AvroSpecTests
         Assert.Equal(value, AvroBinary.ReadLong(ms));
     }
 
+    [Spec("Avro")]
     [Fact]
     public void Schema_json_keeps_iceberg_properties()
     {
@@ -35,6 +37,8 @@ public class AvroSpecTests
         Assert.Equal(json, AvroSchemaJson.ToJson(reparsed).ToJsonString());
     }
 
+    [Spec("Avro")]
+    [Spec("Primitive Types")]
     [Theory]
     [InlineData(1, 1)]
     [InlineData(9, 4)]
@@ -42,6 +46,9 @@ public class AvroSpecTests
     [InlineData(38, 16)]
     public void Decimal_fixed_sizes_match_java(int precision, int bytes) => Assert.Equal(bytes, ManifestCodec.DecimalRequiredBytes(precision));
 
+    [Spec("Manifests")]
+    [Spec("Manifest Entry Fields")]
+    [Spec("Data File Fields")]
     [Fact]
     public void Manifest_round_trip_with_every_partition_type()
     {
@@ -78,6 +85,7 @@ public class AvroSpecTests
         Assert.Equal([4L], entry.DataFile.SplitOffsets);
     }
 
+    [Spec("Sequence Number Inheritance")]
     [Fact]
     public void Deleted_entries_do_not_inherit_sequence_numbers()
     {
@@ -91,6 +99,7 @@ public class AvroSpecTests
         Assert.Equal([9L, 8L], entries.Select(e => e.SnapshotId!.Value));
     }
 
+    [Spec("Manifest Lists")]
     [Fact]
     public void Manifest_list_round_trip()
     {
@@ -110,6 +119,7 @@ public class AvroSpecTests
         Assert.True(r.Partitions[0].ContainsNull);
     }
 
+    [Spec("Avro")]
     [Fact]
     public void Container_handles_multiple_blocks()
     {
@@ -123,6 +133,8 @@ public class AvroSpecTests
         Assert.Equal("deflate", c.Metadata["avro.codec"]);
     }
 
+    [Spec("Appendix D: Single-value serialization")]
+    [Spec("Binary single-value serialization")]
     [Fact]
     public void Single_value_serialisation_matches_spec_appendix_d()
     {

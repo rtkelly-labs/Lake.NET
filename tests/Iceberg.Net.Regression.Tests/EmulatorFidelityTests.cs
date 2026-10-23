@@ -9,6 +9,8 @@ namespace Iceberg.Net.Regression.Tests;
 /// passing against AWS proves the behaviour is real; passing in emulation proves the emulator
 /// (plus emulation/moto_server.py shims) reproduces it. A failure in only one mode is a fidelity gap.
 /// </summary>
+[Spec("File System Operations")]
+[Spec("Metastore Tables")]
 [Trait("Category", "Regression")]
 public sealed class EmulatorFidelityTests
 {

@@ -1,23 +1,28 @@
 # Regression suite
 
 One suite, two targets. The **same test binaries** run in full emulation (default, local and CI) and against AWS
-(manual / scheduled), selected by environment variables. Tests that need something the target cannot provide
+(nightly once configured), selected by environment variables. Tests that need something the target cannot provide
 **skip with a reason**; with `ICEBERG_REQUIRE_TARGET=1` (set by `run-tests.sh` and CI) an unreachable target is
-a failure instead.
+a failure instead. Every test is linked to the spec section it verifies ([spec-traceability.md](spec-traceability.md)).
 
 ## Tiers
 
-| Tier | Project / class | Needs | What it proves | Runtime |
-|---|---|---|---|---|
-| **L0 spec** | `Iceberg.Net.Spec.Tests` | nothing | Spec vectors (Appendix B/D, truncate), metadata v1/v2/v3 JSON, state machine, Avro/manifest codecs, local end-to-end with in-memory catalog, commit-protocol failure handling, **reading committed PyIceberg-written tables**, Puffin/DV/Theta against DataSketches + pyroaring reference bytes, row deletes and the v2→v3 converter, name mapping and import | ~1 s |
-| **L1 catalog conformance** | `CatalogConformanceTests` | S3 + Glue (moto or AWS); REST catalog | Identical scenarios against Glue (client-side commit) and the Java REST fixture (server-side commit): lifecycle, round trip, 4 concurrent writers, stale requirements, overwrite + evolution + time travel, rename/register/drop, v3 row lineage | ~10 s |
-| **L1 fidelity** | `EmulatorFidelityTests` | S3 + Glue | The storage/catalog guarantees commits rely on (conditional create, Glue VersionId); same assertions in both modes | ~1 s |
-| **L2 cross-engine** | `CrossEngineTests` | L1 + PyIceberg oracle | C# writes → PyIceberg reads (rows, values, spec, summary) and PyIceberg writes → C# reads, re-partitions identically, appends → PyIceberg reads | ~5 s |
-| **L2 local cross-engine** | `PuffinCrossEngineTests`, `SourceGeneratorInteropTests` | PyIceberg oracle only (local filesystem) | PyIceberg applies our position deletes and DVs, reads converted tables; DataSketches reads our NDV blobs; Parquet.SourceGenerator files are adopted and read by PyIceberg; generator gaps pinned | ~5 s |
-| **BDD** | `Iceberg.Net.Behaviour.Tests` (Reqnroll) | PyIceberg oracle for the cross-engine steps (they skip without it) | Gherkin specification of write modes × delete mechanisms × format versions, concurrency and v2→v3 conversion | ~10 s |
-| **L3 AWS-only** | `AthenaTests` | AWS + Athena workgroup | Athena reads our tables (counts, sums, partition pruning on our transforms); we read Athena-written tables including its position deletes, delete on top, and Athena reads the result | minutes |
+| Tier | Project / class | Needs | What it proves |
+|---|---|---|---|
+| **L0 spec** | `Iceberg.Net.Spec.Tests` | nothing | Spec vectors (Appendix B/D, truncate), metadata v1/v2/v3 JSON, state machine, Avro/manifest codecs, local end-to-end, commit protocol, Puffin/DV/Theta against DataSketches + pyroaring bytes, row deletes and the v2→v3 converter, name mapping and import, write modes |
+| L0 · other writers | `PyIcebergFixtureTests`, `SparkFixtureTests` | nothing (committed fixtures) | We read PyIceberg- and Spark-written tables (v2 position deletes, v3 DVs, row lineage) exactly, they pass fsck, and our writes on top of them stay consistent |
+| L0 · invariants | `TableValidatorTests`, `ModelBasedTests`, `FaultInjectionTests`, `CorruptionTests` | nothing | fsck detects planted corruption; random operation sequences always match an in-memory model; every write fault leaves the table before-or-after; corrupt bytes fail with a format error |
+| **L1 catalog conformance** | `CatalogConformanceTests` | S3 + Glue (moto or AWS); REST fixture; Polaris | Identical scenarios against Glue (client-side commit), the Java REST fixture and Apache Polaris (server-side commit): lifecycle, round trip, concurrent writers, stale requirements, evolution + time travel, rename/register/drop, v3 |
+| L1 fidelity | `EmulatorFidelityTests` | S3 + Glue | The storage/catalog guarantees commits rely on (conditional create, Glue VersionId); same assertions in both modes |
+| L1 soak | `SoakTests` | per target | 4 concurrent writers × random modes for `ICEBERG_SOAK_SECONDS` against memory v2/v3, Glue, REST fixture and Polaris: no lost or duplicated rows, deletes stay deleted, fsck clean |
+| **L2 cross-engine** | `CrossEngineTests`, `WriteModeCrossEngineTests`, `PuffinCrossEngineTests`, `SourceGeneratorInteropTests`, `ShadowCompareTests` | PyIceberg oracle | Both directions with PyIceberg (rows, values, partitions, summaries, position deletes, DVs, NDV sketches, generator files); PyIceberg refuses equality deletes rather than misreading them; shadow fingerprints agree for every type |
+| L2 · Spark | `SparkCrossEngineTests` | `emulation/up.sh --spark` | Spark + Iceberg Java reads every write path (CoW, position deletes, DVs, equality deletes, v2→v3 upgrade, multi-transform partitioning) with the same rows, snapshots, delete kinds and row lineage |
+| L2 · Trino | `TrinoCrossEngineTests` | `emulation/up.sh --trino` | Trino reads our writes; we read Trino's MoR DELETE/UPDATE/MERGE; mixed histories agree in both |
+| **BDD** | `Iceberg.Net.Behaviour.Tests` (Reqnroll) | PyIceberg oracle for the cross-engine steps | Gherkin specification of write modes × delete mechanisms × format versions, concurrency and conversion; deep fsck after every scenario |
+| **L3 AWS-only** | `AthenaTests` | AWS + Athena workgroup | Athena reads our tables (counts, sums, partition pruning on our transforms); we read Athena-written tables including its position deletes |
 
-Current results (emulation): **L0 147/147**, **L1+L2 37/37**, **BDD 39/39**, L3 skipped (requires AWS).
+Current results (emulation, everything up): **L0 210/210**, **L1+L2 117/119** (2 Athena tests skip without AWS),
+**BDD 39/39**.
 
 ## Environment variables
 
@@ -29,19 +34,32 @@ Current results (emulation): **L0 147/147**, **L1+L2 37/37**, **BDD 39/39**, L3 
 | `ICEBERG_S3_ENDPOINT` | `http://localhost:5000` | unset | S3 endpoint override |
 | `ICEBERG_GLUE_ENDPOINT` | = S3 endpoint | unset | Glue endpoint override |
 | `ICEBERG_REST_URI` | `http://localhost:8181` | optional | REST catalog under test |
+| `ICEBERG_POLARIS_URI` | `http://localhost:8182/api/catalog` | — | Polaris (emulation only) |
+| `ICEBERG_TRINO_URI` | `http://localhost:8080` | — | Trino (emulation only) |
+| `ICEBERG_SPARK` / `ICEBERG_SPARK_IMAGE` / `ICEBERG_SPARK_JAR` | on / `apache/spark:4.0.1` / `emulation/.cache/…jar` | — | Spark oracle; `ICEBERG_SPARK=0` disables it, `ICEBERG_SPARK_KEEP=1` keeps its tables for debugging |
 | `ICEBERG_WAREHOUSE` | `s3://iceberg-regression/warehouse` | **required** `s3://bucket/prefix` | where test tables live (Glue tables under `/glue`) |
 | `ICEBERG_ATHENA_WORKGROUP` | — | e.g. `primary` | enables L3 |
 | `ICEBERG_ATHENA_OUTPUT` | — | optional `s3://…` | Athena result location if the workgroup has none |
 | `ICEBERG_PYTHON` | — | — | interpreter with `interop/` deps; otherwise `uv run --project interop` is used |
+| `ICEBERG_SOAK_SECONDS` | `15` | | soak duration per target |
+| `ICEBERG_PBT_RUNS` / `ICEBERG_PBT_SEED` | `40` / random | | model-based test cases; a failure prints the seed to replay |
+| `ICEBERG_FUZZ_RUNS` / `ICEBERG_FUZZ_SEED` | `500` / random | | corruption mutations per decoder sample |
 | AWS credentials | `test`/`test` (set automatically) | standard SDK chain | |
 
 ## Running
 
 ```bash
-./run-tests.sh spec         # L0
-./run-tests.sh emulation    # L0 + L1 + L2 (starts docker compose if needed)
+./run-tests.sh spec                                   # L0
+./emulation/up.sh --spark --trino --polaris           # everything CI runs; plain ./emulation/up.sh for moto + REST
+./run-tests.sh emulation                              # L0 + BDD + L1 + L2
+dotnet test tests/Iceberg.Net.Spec.Tests --filter Spec=deletion-vectors   # every test of one spec section
+ICEBERG_PBT_RUNS=2000 ICEBERG_FUZZ_RUNS=20000 ./run-tests.sh spec               # longer randomized runs
+```
 
-# AWS: use a sandbox account/bucket. Every run creates Glue databases named regr_<purpose>_<yyyyMMddHHmm>_<id>
+### AWS mode
+
+```bash
+# Use a sandbox account/bucket. Every run creates Glue databases named regr_<purpose>_<yyyyMMddHHmm>_<id>
 # and removes them (tables purged) at the end of each test.
 export AWS_PROFILE=data-sandbox ICEBERG_WAREHOUSE=s3://iceberg-net-regression/runs ICEBERG_ATHENA_WORKGROUP=primary
 ./run-tests.sh aws
@@ -50,32 +68,43 @@ export AWS_PROFILE=data-sandbox ICEBERG_WAREHOUSE=s3://iceberg-net-regression/ru
 AWS permissions needed: `s3:GetObject/PutObject/DeleteObject/ListBucket` on the warehouse prefix;
 `glue:*Database*`, `glue:*Table*` on `regr_*`; `athena:StartQueryExecution/GetQueryExecution/GetQueryResults`
 on the workgroup (and its output bucket). Cost per run: a handful of Athena queries over KB-sized tables (cents).
+For the nightly shadow read, add read-only S3/Glue access to the production tables listed in `ICEBERG_SHADOW_TABLES`.
 
 Leftovers: if a run is killed, delete Glue databases matching `regr_*` older than a day and the corresponding
 `$ICEBERG_WAREHOUSE` prefixes. Data files are not deleted by `DropTable(purge)` yet (metadata only) — set an S3
 lifecycle rule on the regression prefix (e.g. expire after 3 days).
 
+### Shadow comparison
+
+`tools/ShadowCompare` reads one table with this library and with PyIceberg, both from the same metadata file, and
+compares order-independent content fingerprints (row count; per column the null count and a sum of value hashes;
+a sum of whole-row hashes), then runs the read-only table checker. It moves no rows and writes nothing.
+
+```bash
+dotnet run --project tools/ShadowCompare -- --catalog glue --table analytics.plays   # exit 0 identical, 1 different, 2 error
+dotnet run --project tools/ShadowCompare -- --metadata s3://bucket/path/metadata/00042-….metadata.json
+```
+
 ## CI
 
-`.github/workflows/iceberg-dotnet.yml` runs L0 + emulation on every PR touching `iceberg-dotnet/**` (path-filtered,
-so it does not affect the platform's CI time budget). AWS mode is not wired to CI: it needs an OIDC role in a
-sandbox account — add a `workflow_dispatch`/scheduled job with `aws-actions/configure-aws-credentials` once a role
-exists.
+| Workflow | When | What |
+|---|---|---|
+| `iceberg-dotnet.yml` | every PR / push touching `iceberg-dotnet/**` | L0, spec-traceability freshness, all emulators + Spark + Trino + Polaris, BDD, L1/L2 |
+| `iceberg-dotnet-upkeep.yml` | weekly | spec drift vs apache/iceberg `main` (red only for upstream changes not yet reviewed with `tools/spec_trace.py drift --acknowledge`); the regression suite against `:latest` emulator images |
+| `iceberg-dotnet-aws.yml` | nightly, **dormant until `ICEBERG_AWS_ROLE_ARN` is set** | L1–L3 against AWS; shadow comparison of `ICEBERG_SHADOW_TABLES` |
+
+All are path-filtered or scheduled, so they do not affect the platform's CI time budget.
 
 ## Adding tests
 
-- Spec behaviour → L0, citing the spec section; prefer the spec's vectors.
+- Tag every test with the spec section it verifies: `[Spec("Row Lineage")]`, `[Spec("puffin: deletion-vector-v1 blob
+  type")]`, `[Spec("rest: loadTable")]`, or `@spec:row-lineage` in Gherkin; then `python tools/spec_trace.py matrix`.
+- Spec behaviour → L0, preferring the spec's own vectors.
 - Anything that touches a catalog → add to `CatalogConformanceTests` (it runs for every catalog), not a new class.
-- Anything another engine observes → add a `CrossEngineTests` case (extend `interop/pyiceberg_oracle.py`).
+- Anything another engine observes → add a case to the cross-engine classes (extend `interop/pyiceberg_oracle.py` or
+  `interop/spark_oracle.py`; Spark tables go in the shared fixture so one JVM reads them all).
 - An AWS guarantee the emulator lacks → shim + `EmulatorFidelityTests` ([emulation.md](emulation.md)).
-- Regenerate L0 PyIceberg fixtures with the oracle's `fixtures` command when its scenarios change; they are
-  committed so L0 stays network-free.
+- A new decoder → add its sample to `CorruptionTests`; a new operation → add it to `ModelBasedTests`.
+- Regenerate committed fixtures with the oracles' `fixtures` commands when their scenarios change; L0 stays network-free.
 
-## Future tiers
-
-| Tier | Adds | Blocker |
-|---|---|---|
-| More REST servers | Lakekeeper (Rust), Polaris, Nessie in compose, added to the `Catalogs` theory | none — container time |
-| Spark 4 oracle | v3 DV and variant cross-checks; Spark procedures as maintenance reference | ~1 GB image; run nightly |
-| Fault injection | FileIO/catalog wrappers that throttle, time out, or fail after apply | small; extends `CommitProtocolTests` |
-| Property-based | random schemas/partition specs × values, compared with PyIceberg | oracle throughput |
+Planned tiers and their status are tracked in [roadmap.md](roadmap.md#verification-roadmap).

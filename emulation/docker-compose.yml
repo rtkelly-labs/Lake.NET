@@ -1,14 +1,18 @@
 # Full-emulation stack for the regression suite. See ../docs/regression-suite.md.
+# Image tags are pinned; MOTO_TAG / REST_FIXTURE_TAG / TRINO_TAG / POLARIS_TAG override them (the weekly upkeep workflow runs
+# the suite against :latest to catch upstream drift before a pin bump).
 #   moto  - AWS emulator: S3 (incl. conditional writes) + Glue Data Catalog + STS, one endpoint,
 #           started through moto_server.py so the Glue fidelity shims (docs/emulation.md) apply
 #   rest  - apache/iceberg-rest-fixture: the Iceberg project's own REST catalog test server
 #           (Java reference implementation, JDBC-backed) storing metadata in moto's S3
+#   polaris - (profile "polaris": ./up.sh --polaris) Apache Polaris, a second, independently implemented REST
+#           catalog server (in-memory persistence, S3 storage on moto, no credential vending)
 #   trino - (profile "trino": ./up.sh --trino) Trino's Iceberg connector over the same REST catalog + S3,
 #           a third independent reader (Java, but not the Iceberg core library's scan planner)
 name: iceberg-dotnet-emulation
 services:
   moto:
-    image: motoserver/moto:5.2.4
+    image: motoserver/moto:${MOTO_TAG:-5.2.4}
     ports: ["5000:5000"]
     volumes: ["./moto_server.py:/shim/moto_server.py:ro"]
     entrypoint: ["python", "-I", "/shim/moto_server.py", "--port", "5000"]
@@ -18,14 +22,14 @@ services:
       retries: 30
 
   bucket:
-    image: motoserver/moto:5.2.4
+    image: motoserver/moto:${MOTO_TAG:-5.2.4}
     depends_on:
       moto: { condition: service_healthy }
     # Idempotent: moto may already hold the bucket when the stack is restarted.
     entrypoint: ["python", "-c", "import boto3; s3 = boto3.client('s3', endpoint_url='http://moto:5000', region_name='eu-west-1', aws_access_key_id='test', aws_secret_access_key='test'); s3.head_bucket(Bucket='iceberg-regression') if 'iceberg-regression' in [b['Name'] for b in s3.list_buckets()['Buckets']] else s3.create_bucket(Bucket='iceberg-regression', CreateBucketConfiguration={'LocationConstraint': 'eu-west-1'})"]
 
   rest:
-    image: apache/iceberg-rest-fixture:1.10.0
+    image: apache/iceberg-rest-fixture:${REST_FIXTURE_TAG:-1.10.0}
     depends_on:
       bucket: { condition: service_completed_successfully }
     ports: ["8181:8181"]
@@ -42,7 +46,7 @@ services:
       CATALOG_URI: "jdbc:sqlite:/tmp/rest-catalog.db?journal_mode=WAL&busy_timeout=30000"
 
   trino:
-    image: trinodb/trino:478
+    image: trinodb/trino:${TRINO_TAG:-478}
     profiles: ["trino"]
     depends_on:
       rest: { condition: service_started }
@@ -54,3 +58,29 @@ services:
       test: ["CMD", "curl", "-sf", "http://localhost:8080/v1/info/state"]
       interval: 3s
       retries: 60
+
+  polaris:
+    image: apache/polaris:${POLARIS_TAG:-1.8.0}
+    profiles: ["polaris"]
+    depends_on:
+      bucket: { condition: service_completed_successfully }
+    ports: ["8182:8181", "8183:8182"]
+    environment:
+      AWS_REGION: eu-west-1
+      AWS_ACCESS_KEY_ID: test
+      AWS_SECRET_ACCESS_KEY: test
+      POLARIS_BOOTSTRAP_CREDENTIALS: POLARIS,root,s3cr3t
+      polaris.realm-context.realms: POLARIS
+      quarkus.otel.sdk.disabled: "true"
+    healthcheck:
+      test: ["CMD", "curl", "-sf", "http://localhost:8182/q/health"]
+      interval: 3s
+      retries: 60
+
+  polaris-setup:
+    image: motoserver/moto:${MOTO_TAG:-5.2.4}
+    profiles: ["polaris"]
+    depends_on:
+      polaris: { condition: service_healthy }
+    volumes: ["./polaris_setup.py:/setup/polaris_setup.py:ro"]
+    entrypoint: ["python", "-I", "/setup/polaris_setup.py"]

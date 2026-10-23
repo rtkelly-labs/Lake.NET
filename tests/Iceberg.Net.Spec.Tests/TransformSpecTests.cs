@@ -8,6 +8,7 @@ namespace Iceberg.Net.Spec.Tests;
 /// <summary>Test vectors from the spec, Appendix B ("32-bit Hash Requirements") and "Truncate Transform Details".</summary>
 public class TransformSpecTests
 {
+    [Spec("Appendix B: 32-bit Hash Requirements")]
     [Fact]
     public void Murmur3_matches_spec_vectors()
     {
@@ -25,6 +26,7 @@ public class TransformSpecTests
         Assert.Equal(-188683207, Murmur3.HashBytes(new byte[] { 0, 1, 2, 3 }));
     }
 
+    [Spec("Bucket Transform Details")]
     [Fact]
     public void Nanosecond_timestamps_bucket_like_their_microsecond_value()
     {
@@ -37,6 +39,7 @@ public class TransformSpecTests
         Assert.Equal(-1207196810, BucketTransform.Hash(PrimitiveType.TimestampNs, nanos));
     }
 
+    [Spec("Appendix B: 32-bit Hash Requirements")]
     [Fact]
     public void Guid_default_byte_order_would_break_uuid_buckets()
     {
@@ -45,6 +48,7 @@ public class TransformSpecTests
         Assert.NotEqual(1488055340, Murmur3.HashBytes(g.ToByteArray()));
     }
 
+    [Spec("Bucket Transform Details")]
     [Theory]
     [InlineData(34, 16)]
     public void Bucket_masks_sign_bit_before_mod(int value, int n)
@@ -53,6 +57,7 @@ public class TransformSpecTests
         Assert.Equal(expected, Transform.Bucket(n).Apply(PrimitiveType.Int, value));
     }
 
+    [Spec("Truncate Transform Details")]
     [Fact]
     public void Truncate_matches_spec_examples()
     {
@@ -66,6 +71,7 @@ public class TransformSpecTests
         Assert.Equal(new byte[] { 1, 2, 3 }, Transform.Truncate(3).Apply(PrimitiveType.Binary, new byte[] { 1, 2, 3, 4 }));
     }
 
+    [Spec("Truncate Transform Details")]
     [Fact]
     public void Truncate_counts_code_points_not_utf16_units()
     {
@@ -75,6 +81,7 @@ public class TransformSpecTests
         Assert.Equal(5, Encoding.UTF8.GetByteCount(truncated));
     }
 
+    [Spec("Partition Transforms")]
     [Fact]
     public void Temporal_transforms_floor_towards_negative_infinity()
     {
@@ -94,6 +101,7 @@ public class TransformSpecTests
         Assert.Equal(17486, Transform.Day.Apply(PrimitiveType.TimestampNs, t * 1000));
     }
 
+    [Spec("Partition Transforms")]
     [Fact]
     public void Human_strings_match_hive_partition_paths()
     {
@@ -104,6 +112,7 @@ public class TransformSpecTests
         Assert.Equal("null", Transform.Identity.ToHumanString(PrimitiveType.String, null));
     }
 
+    [Spec("Partition Specs")]
     [Theory]
     [InlineData("identity")]
     [InlineData("bucket[16]")]
@@ -116,6 +125,7 @@ public class TransformSpecTests
     [InlineData("zorder")] // unknown transforms must round-trip, not fail
     public void Transform_strings_round_trip(string text) => Assert.Equal(text, Transform.Parse(text).ToString());
 
+    [Spec("Partition Transforms")]
     [Fact]
     public void Transform_type_rules()
     {
@@ -127,6 +137,7 @@ public class TransformSpecTests
         Assert.Equal(PrimitiveType.Int, Transform.Bucket(4).ResultType(PrimitiveType.String));
     }
 
+    [Spec("Partitioning")]
     [Fact]
     public void Partition_spec_builds_type_and_path()
     {

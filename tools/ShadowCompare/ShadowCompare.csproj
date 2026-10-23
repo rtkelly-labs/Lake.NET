@@ -1,0 +1,12 @@
+<Project Sdk="Microsoft.NET.Sdk">
+  <PropertyGroup>
+    <OutputType>Exe</OutputType>
+    <IsPackable>false</IsPackable>
+    <RootNamespace>Iceberg.Net.Tools.ShadowCompare</RootNamespace>
+    <Description>Shadow-read a table with iceberg-dotnet and a reference engine and compare content fingerprints.</Description>
+  </PropertyGroup>
+  <ItemGroup>
+    <ProjectReference Include="../../src/Iceberg.Net.Catalog/Iceberg.Net.Catalog.csproj" />
+    <ProjectReference Include="../../src/Iceberg.Net.Data/Iceberg.Net.Data.csproj" />
+  </ItemGroup>
+</Project>

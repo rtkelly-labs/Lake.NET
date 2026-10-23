@@ -10,6 +10,8 @@ public class MetadataSpecTests
 {
     private static string Fixture(string name) => File.ReadAllText(Path.Combine(AppContext.BaseDirectory, "fixtures", "metadata", name));
 
+    [Spec("Table Metadata Fields")]
+    [Spec("Version 2")]
     [Fact]
     public void V1_legacy_fields_are_upgraded_on_read()
     {
@@ -24,6 +26,7 @@ public class MetadataSpecTests
         Assert.True(m.DefaultSortOrder.IsUnsorted);
     }
 
+    [Spec("Table Metadata Fields")]
     [Fact]
     public void V1_write_keeps_legacy_fields_for_old_readers()
     {
@@ -33,6 +36,7 @@ public class MetadataSpecTests
         Assert.Null(json["last-sequence-number"]);
     }
 
+    [Spec("Table Metadata and Snapshots")]
     [Fact]
     public void V2_round_trips_semantically()
     {
@@ -51,6 +55,8 @@ public class MetadataSpecTests
         Assert.Equal(MetadataJson.Write(m), MetadataJson.Write(again));
     }
 
+    [Spec("Version 3")]
+    [Spec("Table Metadata Fields")]
     [Fact]
     public void V3_fields_round_trip()
     {
@@ -73,6 +79,7 @@ public class MetadataSpecTests
         Assert.Equal(MetadataJson.Write(m), MetadataJson.Write(MetadataJson.Read(written.ToJsonString())));
     }
 
+    [Spec("Assignment of Snapshot IDs and current-snapshot-id")]
     [Theory]
     [InlineData(2, "-1")]
     [InlineData(3, "null")]
@@ -85,10 +92,13 @@ public class MetadataSpecTests
         Assert.Null(MetadataJson.Read(json.ToJsonString()).CurrentSnapshotId);
     }
 
+    [Spec("Format Versioning")]
     [Fact]
     public void Unknown_format_version_is_rejected() =>
         Assert.Throws<NotSupportedException>(() => MetadataJson.Read("""{"format-version": 9, "location": "x", "last-updated-ms": 0, "last-column-id": 0}"""));
 
+    [Spec("Schemas")]
+    [Spec("Primitive Types")]
     [Theory]
     [InlineData("decimal(9,2)")]
     [InlineData("decimal(38, 10)")]
@@ -101,6 +111,8 @@ public class MetadataSpecTests
         Assert.Equal(t, TypeJson.TypeFromJson(TypeJson.ToJson(t)));
     }
 
+    [Spec("Nested Types")]
+    [Spec("Schemas")]
     [Fact]
     public void Nested_types_round_trip_with_ids()
     {
@@ -120,6 +132,7 @@ public class MetadataSpecTests
         Assert.Equal("attrs.value.b", back.FindColumnName(8));
     }
 
+    [Spec("Identifier Field IDs")]
     [Fact]
     public void Identifier_fields_must_be_required_non_float_primitives()
     {
@@ -127,6 +140,7 @@ public class MetadataSpecTests
         Assert.Throws<ArgumentException>(() => new Schema(0, [NestedField.Require(1, "x", PrimitiveType.Double)], [1]));
     }
 
+    [Spec("Schema Evolution")]
     [Theory]
     [InlineData("int", "long", 2, true)]
     [InlineData("float", "double", 2, true)]
@@ -140,6 +154,8 @@ public class MetadataSpecTests
         Assert.Equal(allowed, TypeUtil.IsPromotionAllowed(
             TypeJson.TypeFromJson(JsonValue.Create(from)!), TypeJson.TypeFromJson(JsonValue.Create(to)!), formatVersion));
 
+    [Spec("Partition Specs")]
+    [Spec("Schemas")]
     [Fact]
     public void New_table_assigns_fresh_ids_and_remaps_spec_sources()
     {
@@ -160,6 +176,7 @@ public class MetadataSpecTests
         Assert.Equal("s3://b/t", m.Location);
     }
 
+    [Spec("Version 3: Extended Types and Capabilities")]
     [Fact]
     public void New_table_rejects_v3_types_on_v2()
     {

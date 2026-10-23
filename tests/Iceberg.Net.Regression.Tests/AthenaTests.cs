@@ -10,6 +10,7 @@ namespace Iceberg.Net.Regression.Tests;
 /// through Glue, and we must read what Athena writes. There is no emulator for Athena; these are
 /// the tests that justify an AWS run.
 /// </summary>
+[Spec("Scan Planning")]
 [Trait("Category", "Aws")]
 public sealed class AthenaTests
 {

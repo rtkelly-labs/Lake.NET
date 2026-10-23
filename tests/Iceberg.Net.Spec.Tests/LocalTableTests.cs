@@ -1,6 +1,7 @@
 using Iceberg.Net.Avro;
 using Iceberg.Net.Catalog;
 using Iceberg.Net.Data;
+using Iceberg.Net.IO;
 using Iceberg.Net.Manifests;
 using Iceberg.Net.Metadata;
 using Iceberg.Net.Partitioning;
@@ -39,6 +40,8 @@ public sealed class LocalTableTests : IDisposable
     private Task<Table> Create(int formatVersion = 2, PartitionSpec? spec = null) => _catalog.CreateTableAsync(new CreateTableRequest(
         TableIdentifier.Of("db", "t"), Schema, spec ?? PartitionSpec.BuilderFor(Schema).Identity("event_date").Build(), FormatVersion: formatVersion));
 
+    [Spec("Scan Planning")]
+    [Spec("Parquet")]
     [Theory]
     [InlineData(2)]
     [InlineData(3)]
@@ -72,6 +75,8 @@ public sealed class LocalTableTests : IDisposable
         }
     }
 
+    [Spec("Field-level Metrics and Statistics")]
+    [Spec("Data File Fields")]
     [Fact]
     public async Task Metrics_include_nan_counts_and_exclude_nan_from_bounds()
     {
@@ -83,6 +88,8 @@ public sealed class LocalTableTests : IDisposable
         Assert.Equal(file.RecordCount, file.ValueCounts![1]);
     }
 
+    [Spec("Snapshots")]
+    [Spec("Point in Time Reads (Time Travel)")]
     [Fact]
     public async Task Overwrite_marks_replaced_files_deleted_and_keeps_history()
     {
@@ -107,6 +114,8 @@ public sealed class LocalTableTests : IDisposable
         Assert.All(all.Where(e => e.Status == ManifestEntryStatus.Added), e => Assert.Equal(2, e.SequenceNumber));
     }
 
+    [Spec("Optimistic Concurrency")]
+    [Spec("Commit Conflict Resolution and Retry")]
     [Fact]
     public async Task Concurrent_writers_both_land_via_refresh_and_retry()
     {
@@ -128,6 +137,7 @@ public sealed class LocalTableTests : IDisposable
         Assert.Equal(2, lists.Length);
     }
 
+    [Spec("Optimistic Concurrency")]
     [Fact]
     public async Task Stale_commit_without_retry_is_rejected_by_requirements()
     {
@@ -144,6 +154,8 @@ public sealed class LocalTableTests : IDisposable
             b.UpdateSchemaAsync(new Schema(0, [.. Schema.Columns, NestedField.Optional(5, "other", PrimitiveType.String)])));
     }
 
+    [Spec("Schema Evolution")]
+    [Spec("Column Projection")]
     [Fact]
     public async Task Schema_evolution_then_append_reads_old_files_with_nulls()
     {
@@ -159,6 +171,7 @@ public sealed class LocalTableTests : IDisposable
         Assert.Equal(5, rows.Count(r => (string?)r[4] == "t"));
     }
 
+    [Spec("Snapshot Retention Policy")]
     [Fact]
     public async Task Expire_snapshots_keeps_refs_and_current()
     {
@@ -191,6 +204,7 @@ public sealed class LocalTableTests : IDisposable
         await Assert.ThrowsAsync<NoSuchTableException>(() => _catalog.LoadTableAsync(TableIdentifier.Of("db", "t2")));
     }
 
+    [Spec("File System Operations")]
     [Fact]
     public async Task Metadata_files_are_never_overwritten()
     {
@@ -198,6 +212,28 @@ public sealed class LocalTableTests : IDisposable
         await Assert.ThrowsAsync<IO.FileAlreadyExistsException>(() => table.IO.WriteAsync(table.MetadataLocation!, new byte[] { 1 }));
     }
 
+    [Spec("File System Operations")]
+    [Fact]
+    public async Task Local_file_io_accepts_every_file_uri_form_engines_write()
+    {
+        var dir = Path.Combine(Path.GetTempPath(), "iceberg-dotnet-uri", Guid.NewGuid().ToString("N"), "a b");
+        Directory.CreateDirectory(dir);
+        try
+        {
+            var path = Path.Combine(dir, "x.bin");
+            await File.WriteAllBytesAsync(path, [1, 2, 3]);
+            using var io = new LocalFileIO();
+            // bare path, RFC 8089 file:///, Hadoop/Java file:/ (as Spark writes into manifests), percent-encoded
+            foreach (var location in new[] { path, $"file://{path}", $"file:{path}", $"file:{path.Replace(" ", "%20")}" })
+                Assert.Equal([1, 2, 3], await io.ReadAllAsync(location));
+        }
+        finally
+        {
+            Directory.Delete(Path.GetDirectoryName(dir)!, recursive: true);
+        }
+    }
+
+    [Spec("Version 1: Analytic Data Tables")]
     [Fact]
     public async Task V1_tables_are_read_only()
     {

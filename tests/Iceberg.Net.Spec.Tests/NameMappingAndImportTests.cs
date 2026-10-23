@@ -23,6 +23,7 @@ public sealed class NameMappingAndImportTests : IDisposable
         if (Directory.Exists(_warehouse)) Directory.Delete(_warehouse, recursive: true);
     }
 
+    [Spec("Name Mapping Serialization")]
     [Fact]
     public void Name_mapping_json_matches_the_spec_shape_and_round_trips()
     {
@@ -37,6 +38,8 @@ public sealed class NameMappingAndImportTests : IDisposable
         Assert.Equal(mapping.ToJson(), NameMapping.Parse(mapping.ToJson()).ToJson());
     }
 
+    [Spec("Parquet")]
+    [Spec("Primitive Types")]
     [Fact]
     public async Task Decimal_and_uuid_columns_round_trip()
     {
@@ -75,6 +78,8 @@ public sealed class NameMappingAndImportTests : IDisposable
         w.Close();
     }
 
+    [Spec("Column Projection")]
+    [Spec("Name Mapping Serialization")]
     [Fact]
     public async Task Files_without_ids_resolve_through_the_name_mapping_including_renames()
     {
@@ -95,6 +100,8 @@ public sealed class NameMappingAndImportTests : IDisposable
         Assert.Null(rows[1][1]);
     }
 
+    [Spec("Writing data files")]
+    [Spec("Parquet")]
     [Fact]
     public async Task Import_rejects_files_that_span_partitions_or_break_required_columns()
     {
