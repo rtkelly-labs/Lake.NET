@@ -21,7 +21,7 @@ Legend: ✅ implemented and tested · 🟡 partial · ⬜ not started · — not
 
 | Section | v1 | v2 | v3 | Status | Tests |
 |---|---|---|---|---|---|
-| Primitive types (boolean … binary) | ✓ | ✓ | ✓ | ✅ model + JSON + Parquet I/O incl. decimal (write P≤18) and uuid; 🟡 fixed not in Parquet I/O | `MetadataSpecTests`, `NameMappingAndImportTests` |
+| Primitive types (boolean … binary) | ✓ | ✓ | ✓ | ✅ model + JSON + Parquet I/O incl. decimal up to P=38 (INT32/INT64/minimal FIXED), uuid and fixed(L); Arrow mapping (`Iceberg.Net.Arrow`) | `MetadataSpecTests`, `NameMappingAndImportTests`, `WideTypesTests`, `ArrowTests`, `ShadowCompareTests` (PyIceberg) |
 | `timestamp_ns`, `timestamptz_ns` | | | ✓ | ✅ model, JSON, transforms, Parquet I/O | `TransformSpecTests` |
 | `variant` | | | ✓ | 🟡 model + JSON only (no shredding/encoding) | `MetadataSpecTests` |
 | `geometry`, `geography` (CRS, algorithm) | | | ✓ | 🟡 model + JSON only (WKB I/O and bounds not done) | `MetadataSpecTests` |
@@ -88,7 +88,7 @@ Legend: ✅ implemented and tested · 🟡 partial · ⬜ not started · — not
 | Drop with purge | ✅ every referenced file (metadata, manifests, data, deletes, statistics) | `MaintenanceTests` |
 | Orphan-file cleanup | ✅ listing (`ISupportsListing`) + age cutoff, URI forms normalised | `MaintenanceTests` |
 | Rewrite data files (bin-pack) | ✅ deletes applied, v3 lineage kept, re-plan on any concurrent commit | `CompactionTests`, `SparkCrossEngineTests` |
-| Rewrite manifests | ⬜ (merge-append keeps counts bounded) | |
+| Rewrite manifests | ✅ regroup by partition into target-sized manifests | `MergeAppendTests` |
 
 ### Table metadata
 
@@ -117,7 +117,7 @@ Legend: ✅ implemented and tested · 🟡 partial · ⬜ not started · — not
 | `Idempotency-Key` header | 🟡 sent on mutations; no automatic retry yet | |
 | Storage credentials / per-table `config` | ✅ longest-prefix credential selection | |
 | `loadCredentials` refresh, remote signing | ⬜ | |
-| Multi-table `transactions/commit` | ⬜ | |
+| Multi-table `transactions/commit` | ✅ `ICatalog.CommitTransactionAsync` + `SnapshotProducer.StageAsync` | `CatalogConformanceTests` (Java REST server, Polaris; JDBC via one SQL transaction; Glue refuses) |
 | Scan planning (`plan`, `tasks`) | ⬜ | |
 | Views | ⬜ | |
 | Metrics reporting | ⬜ | |
