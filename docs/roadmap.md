@@ -88,6 +88,7 @@ catches.
 | Iceberg.Net.Puffin | 526 | 375 + 10 timeouts | 97 | 44 | 73.2% | 2026-10-23, after `PuffinEdgeTests` |
 | Iceberg.Net.Core (transforms, expressions) | 414 | 286 + 1 timeout | 58 | 69 | 69.3% | 2026-10-23 (baseline; most survivors and uncovered mutants in `Expression.cs` and `Evaluators.cs`) |
 | Iceberg.Net.Core (metadata state machine) | 246 | 130 + 3 timeouts | 54 | 59 | 54.1% | 2026-10-23 (baseline; `MetadataBuilderTests` written from its survivors since) |
+| Iceberg.Net.Core (metadata state machine) | 247 | 186 | 42 | 19 | 75.3% | 2026-10-23, after `MetadataBuilderTests` (most survivors left are error-message text) |
 | Iceberg.Net.Data (delete applicability, `DeleteFiles.cs`) | 97 | 67 + 16 timeouts | 3 | 11 | 85.6% | 2026-10-23 |
 
 Runs weekly in `.github/workflows/iceberg-dotnet-mutation.yml` (Puffin, and Core's transforms and expressions via
