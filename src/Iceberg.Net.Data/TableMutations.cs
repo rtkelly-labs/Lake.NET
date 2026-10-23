@@ -1,4 +1,5 @@
 using Iceberg.Net.Catalog;
+using Iceberg.Net.Expressions;
 using Iceberg.Net.Manifests;
 using Iceberg.Net.Metadata;
 using Iceberg.Net.Types;
@@ -50,7 +51,7 @@ public static class TableMutations
     {
         var key = Key.Resolve(table.Schema, keyColumns, requireIdentifierDefault: true);
         var keys = key.KeysOf(rows, requireUnique: true, allowNull: false, what: "upsert key");
-        return RunAsync(table, rows, new Matcher(key, keys, null), Resolve(table, strategy, MergeModeProperty), ct);
+        return RunAsync(table, rows, new Matcher(key, keys, null, key.FilterFor(keys.Tuples)), Resolve(table, strategy, MergeModeProperty), ct);
     }
 
     /// <summary>
@@ -63,7 +64,7 @@ public static class TableMutations
     {
         var key = Key.Resolve(table.Schema, groupColumns, requireIdentifierDefault: false);
         var keys = key.KeysOf(rows, requireUnique: false, allowNull: true, what: "group key");
-        return RunAsync(table, rows, new Matcher(key, keys, null), Resolve(table, strategy, MergeModeProperty), ct);
+        return RunAsync(table, rows, new Matcher(key, keys, null, key.FilterFor(keys.Tuples)), Resolve(table, strategy, MergeModeProperty), ct);
     }
 
     /// <summary>Delete rows by key. <paramref name="keys"/> are tuples in <paramref name="keyColumns"/> order.</summary>
@@ -73,7 +74,7 @@ public static class TableMutations
         var key = Key.Resolve(table.Schema, keyColumns, requireIdentifierDefault: false);
         var encoded = keys.Select(k => key.Encode(k)).ToHashSet(StringComparer.Ordinal);
         var sample = keys.ToList();
-        return RunAsync(table, [], new Matcher(key, new KeySet(encoded, sample), null), Resolve(table, strategy, DeleteModeProperty), ct);
+        return RunAsync(table, [], new Matcher(key, new KeySet(encoded, sample), null, key.FilterFor(sample)), Resolve(table, strategy, DeleteModeProperty), ct);
     }
 
     /// <summary>Delete rows matching a predicate over full rows. Equality deletes cannot express predicates.</summary>
@@ -83,7 +84,21 @@ public static class TableMutations
         var resolved = Resolve(table, strategy, DeleteModeProperty);
         if (resolved == DeleteStrategy.EqualityDeletes)
             throw new ArgumentException("Equality deletes delete by key; use DeleteByKeysAsync, or CopyOnWrite/PositionDeletes for predicates");
-        return RunAsync(table, [], new Matcher(null, null, predicate), resolved, ct);
+        return RunAsync(table, [], new Matcher(null, null, predicate, Expression.True), resolved, ct);
+    }
+
+    /// <summary>
+    /// Delete rows matching a filter expression. Unlike the <see cref="Func{T, TResult}"/> overload, only data files
+    /// whose partitions and column metrics can match are read.
+    /// </summary>
+    public static Task<MutationResult> DeleteWhereAsync(Table table, Expression filter,
+        DeleteStrategy strategy = DeleteStrategy.Default, CancellationToken ct = default)
+    {
+        var resolved = Resolve(table, strategy, DeleteModeProperty);
+        if (resolved == DeleteStrategy.EqualityDeletes)
+            throw new ArgumentException("Equality deletes delete by key; use DeleteByKeysAsync, or CopyOnWrite/PositionDeletes for predicates");
+        var matches = RowEvaluator.Compile(Binder.Bind(table.Schema, filter));
+        return RunAsync(table, [], new Matcher(null, null, row => matches(row), filter), resolved, ct);
     }
 
     public static DeleteStrategy Resolve(Table table, DeleteStrategy strategy, string modeProperty) => strategy != DeleteStrategy.Default
@@ -117,6 +132,28 @@ public static class TableMutations
         public string Encode(object?[] tuple) => EqualityKey.Encode(Fields, i => tuple[i]);
         public object?[] TupleOf(object?[] row) => Columns.Select(c => row[c]).ToArray();
 
+        /// <summary>
+        /// A pruning filter implied by a key set: per key column, membership (or the min–max range for large sets),
+        /// or-ed with "is null" when a key holds nulls. Floating-point columns are not pruned (NaN keys).
+        /// </summary>
+        public Expression FilterFor(IReadOnlyList<object?[]> tuples)
+        {
+            var filter = Expression.True;
+            for (var j = 0; j < Fields.Count; j++)
+            {
+                var field = Fields[j];
+                if (field.Type.TypeId is TypeId.Float or TypeId.Double) continue;
+                var values = tuples.Select(t => t[j]).Where(v => v is not null).Distinct(ValueEquality.Instance).Cast<object>().ToList();
+                var column = values.Count == 0 ? Expression.False
+                    : values.Count <= 1000 ? Expr.In(field.Name, values)
+                    : Expr.And(Expr.GreaterThanOrEqual(field.Name, values.Min(Comparer<object>.Create(ValueComparer.Compare))!),
+                               Expr.LessThanOrEqual(field.Name, values.Max(Comparer<object>.Create(ValueComparer.Compare))!));
+                if (tuples.Any(t => t[j] is null)) column = Expr.Or(column, Expr.IsNull(field.Name));
+                filter = Expr.And(filter, column);
+            }
+            return filter;
+        }
+
         public KeySet KeysOf(IReadOnlyList<object?[]> rows, bool requireUnique, bool allowNull, string what)
         {
             var encoded = new HashSet<string>(StringComparer.Ordinal);
@@ -133,7 +170,8 @@ public static class TableMutations
     }
 
     /// <summary>What to delete: rows whose key is in a set, or rows matching a predicate.</summary>
-    private sealed record Matcher(Key? Key, KeySet? Keys, Func<object?[], bool>? Predicate)
+    /// <param name="Prune">Implied by the match (never narrower): data files it rules out are not read.</param>
+    private sealed record Matcher(Key? Key, KeySet? Keys, Func<object?[], bool>? Predicate, Expression Prune)
     {
         public bool Matches(object?[] row) => Predicate?.Invoke(row) ?? Keys!.Encoded.Contains(Key!.FromRow(row));
     }
@@ -206,7 +244,7 @@ public static class TableMutations
         var projection = v3 ? RowLineage.WithLineage(table.Schema) : table.Schema;
         var n = table.Schema.Columns.Count;
         var result = new List<(DataFile, List<long>, List<object?[]>, List<(long?, long?)>)>();
-        foreach (var task in await TableScan.PlanFilesAsync(table, null, null, ct))
+        foreach (var task in await TableScan.PlanFilesAsync(table, matcher.Prune, null, ct))
         {
             var rows = await ParquetFiles.ReadAsync(table.IO, task.File.FilePath, projection, mapping, ct);
             var isDeleted = deletes.IsEmpty ? null : await deletes.RowFilterAsync(task.File, task.DataSequenceNumber, table.Schema, ct);
@@ -253,6 +291,13 @@ public static class TableMutations
     }
 
     private static IEnumerable<Partitioning.PartitionSpec> Specs(this TableMetadata m) => m.PartitionSpecs;
+
+    private sealed class ValueEquality : IEqualityComparer<object?>
+    {
+        public static readonly ValueEquality Instance = new();
+        public new bool Equals(object? a, object? b) => a is byte[] x && b is byte[] y ? x.AsSpan().SequenceEqual(y) : object.Equals(a, b);
+        public int GetHashCode(object? o) => o is byte[] b ? b.Length : o?.GetHashCode() ?? 0;
+    }
 
     private sealed class PartitionComparer : IEqualityComparer<object?[]>
     {

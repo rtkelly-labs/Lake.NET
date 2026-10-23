@@ -7,6 +7,11 @@ Commands (all output is JSON on stdout so the C# suite can assert on it):
     read <catalog> <table>           print row count, rows, snapshot summary and spec details
     read-metadata <metadata.json>    same, for a table addressed only by its metadata file
     fingerprint <metadata.json>      order-independent per-column + per-row hashes (shadow comparison; streams batches)
+    sigv4 <request-json>             botocore's SigV4 canonical request and Authorization for a request, at a fixed
+                                     timestamp (cross-checks Iceberg.Net.Catalog.SigV4Handler)
+    read-filter <metadata.json> <expression-json>
+                                     ids (first column) of the rows PyIceberg's scan(row_filter=...) returns, plus the
+                                     number of files it planned; the expression format is in _expression()
     puffin-fixtures <out_dir>        reference Theta sketches (datasketches) and deletion vectors (pyroaring)
     inspect-puffin <file.puffin>     decode a Puffin file with PyIceberg + datasketches and report contents
 
@@ -109,6 +114,26 @@ def env_catalog(kind: str) -> Catalog:
         if glue_endpoint := os.environ.get("ICEBERG_GLUE_ENDPOINT"):
             props["glue.endpoint"] = glue_endpoint
         return load_catalog("glue", **props)
+    if kind == "jdbc":
+        warehouse = os.environ["ICEBERG_WAREHOUSE"].rstrip("/") + "/jdbc"
+        uri = f"sqlite:///{os.environ['ICEBERG_JDBC_SQLITE']}"
+        return load_catalog(
+            "regression", type="sql", uri=uri, warehouse=warehouse, **s3
+        )
+    if kind == "polaris":
+        # emulation/polaris_setup.py; no credential vending (no STS), so no access-delegation header
+        return load_catalog(
+            "polaris",
+            type="rest",
+            uri=os.environ.get(
+                "ICEBERG_POLARIS_URI", "http://localhost:8182/api/catalog"
+            ),
+            credential="root:s3cr3t",
+            scope="PRINCIPAL_ROLE:ALL",
+            warehouse="regression",
+            **{"header.X-Iceberg-Access-Delegation": ""},
+            **s3,
+        )
     if kind == "rest":
         return load_catalog(
             "rest",
@@ -336,6 +361,92 @@ def cmd_fingerprint(location: str) -> dict[str, Any]:
     }
 
 
+def _expression(node: dict[str, Any]) -> Any:
+    """{"op": "and"|"or", "left", "right"} | {"op": "not", "child"} | {"op": "true"|"false"} |
+    {"op": "<pred>", "term": column, "value": v} | {"op": "in"|"not_in", "term", "values": [...]} |
+    {"op": "is_null"|"not_null"|"is_nan"|"not_nan", "term"}; dates/timestamps/decimals as strings."""
+    from pyiceberg import expressions as ex
+
+    op = node["op"]
+    match op:
+        case "and":
+            return ex.And(_expression(node["left"]), _expression(node["right"]))
+        case "or":
+            return ex.Or(_expression(node["left"]), _expression(node["right"]))
+        case "not":
+            return ex.Not(_expression(node["child"]))
+        case "true":
+            return ex.AlwaysTrue()
+        case "false":
+            return ex.AlwaysFalse()
+    unary = {
+        "is_null": ex.IsNull,
+        "not_null": ex.NotNull,
+        "is_nan": ex.IsNaN,
+        "not_nan": ex.NotNaN,
+    }
+    if op in unary:
+        return unary[op](node["term"])
+    if op in ("in", "not_in"):
+        return (ex.In if op == "in" else ex.NotIn)(node["term"], set(node["values"]))
+    binary = {
+        "lt": ex.LessThan,
+        "lt_eq": ex.LessThanOrEqual,
+        "gt": ex.GreaterThan,
+        "gt_eq": ex.GreaterThanOrEqual,
+        "eq": ex.EqualTo,
+        "not_eq": ex.NotEqualTo,
+        "starts_with": ex.StartsWith,
+        "not_starts_with": ex.NotStartsWith,
+    }
+    return binary[op](node["term"], node["value"])
+
+
+def cmd_read_filter(location: str, expression: str) -> dict[str, Any]:
+    s3 = {"client.region": os.environ.get("AWS_REGION", "eu-west-1")}
+    if endpoint := os.environ.get("ICEBERG_S3_ENDPOINT"):
+        s3 |= {"s3.endpoint": endpoint, "s3.path-style-access": "true"}
+    table = StaticTable.from_metadata(location, properties=s3)
+    scan = table.scan(row_filter=_expression(json.loads(expression)))
+    first = table.schema().columns[0].name
+    return {
+        "ids": sorted(scan.to_arrow().column(first).to_pylist()),
+        "files_planned": len(list(scan.plan_files())),
+    }
+
+
+def cmd_sigv4(request_json: str) -> dict[str, Any]:
+    from botocore.auth import SigV4Auth
+    from botocore.awsrequest import AWSRequest
+    from botocore.credentials import Credentials
+
+    r = json.loads(request_json)
+    auth = SigV4Auth(
+        Credentials(r["access_key"], r["secret_key"], r.get("token")),
+        r["service"],
+        r["region"],
+    )
+    request = AWSRequest(
+        method=r["method"],
+        url=r["url"],
+        headers=r.get("headers", {}),
+        data=r.get("body", "").encode(),
+    )
+    request.context["timestamp"] = r[
+        "timestamp"
+    ]  # what add_auth would set from the clock
+    auth._modify_request_before_signing(
+        request
+    )  # adds X-Amz-Date (and the security token)
+    canonical = auth.canonical_request(request)
+    signature = auth.signature(auth.string_to_sign(request, canonical), request)
+    return {
+        "canonical": canonical,
+        "signature": signature,
+        "headers": {k: v for k, v in request.headers.items()},
+    }
+
+
 def cmd_puffin_fixtures(out_dir: Path) -> dict[str, Any]:
     from datasketches import update_theta_sketch
 
@@ -435,6 +546,10 @@ def main(argv: list[str]) -> None:
             result = describe_table(StaticTable.from_metadata(location))
         case ["fingerprint", location]:
             result = cmd_fingerprint(location)
+        case ["sigv4", request_json]:
+            result = cmd_sigv4(request_json)
+        case ["read-filter", location, expression]:
+            result = cmd_read_filter(location, expression)
         case ["puffin-fixtures", out]:
             result = cmd_puffin_fixtures(Path(out))
         case ["inspect-puffin", location]:

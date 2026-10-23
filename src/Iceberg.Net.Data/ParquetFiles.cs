@@ -281,19 +281,6 @@ internal sealed record Metrics(
 /// <summary>Converts JSON single-value defaults (spec Appendix D, JSON form) to physical values.</summary>
 internal static class Defaults
 {
-    public static object? ToValue(IcebergType type, object? jsonDefault)
-    {
-        if (jsonDefault is not System.Text.Json.Nodes.JsonValue v) return null;
-        return type.TypeId switch
-        {
-            TypeId.Boolean => v.GetValue<bool>(),
-            TypeId.Int => v.GetValue<int>(),
-            TypeId.Long => v.GetValue<long>(),
-            TypeId.Float => v.GetValue<float>(),
-            TypeId.Double => v.GetValue<double>(),
-            TypeId.String => v.GetValue<string>(),
-            TypeId.Date => IcebergTime.DaysFromDate(DateOnly.Parse(v.GetValue<string>(), System.Globalization.CultureInfo.InvariantCulture)),
-            _ => throw new NotSupportedException($"initial-default for {type} is not supported yet"),
-        };
-    }
+    public static object? ToValue(IcebergType type, object? jsonDefault) =>
+        jsonDefault is System.Text.Json.Nodes.JsonNode node ? Json.SingleValueJson.FromJson(type, node) : null;
 }

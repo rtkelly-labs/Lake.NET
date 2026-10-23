@@ -1,6 +1,7 @@
 using System.Globalization;
 using Iceberg.Net.Avro;
 using Iceberg.Net.Catalog;
+using Iceberg.Net.Expressions;
 using Iceberg.Net.Manifests;
 using Iceberg.Net.Metadata;
 using Iceberg.Net.Partitioning;
@@ -32,6 +33,9 @@ public sealed record LineageRow(object?[] Row, long? RowId, long? LastUpdatedSeq
 /// <summary>Live data file in a snapshot, with the sequence number used for delete applicability.</summary>
 public sealed record ScanTask(DataFile File, long DataSequenceNumber, string ManifestPath);
 
+/// <summary>Planned data files and how much the filter pruned (manifests via partition summaries, files via partitions and metrics).</summary>
+public sealed record ScanPlan(IReadOnlyList<ScanTask> Tasks, int ManifestsRead, int ManifestsSkipped, int FilesSkippedByPartition, int FilesSkippedByMetrics);
+
 public static class TableScan
 {
     public static async Task<IReadOnlyList<ManifestFile>> ManifestsAsync(Table table, Snapshot snapshot, CancellationToken ct = default)
@@ -45,25 +49,51 @@ public static class TableScan
         snapshotId is { } id ? m.SnapshotById(id) ?? throw new ArgumentException($"Unknown snapshot {id}") : m.CurrentSnapshot;
 
     /// <summary>Plan the live data files of a snapshot (default: current).</summary>
-    public static async Task<IReadOnlyList<ScanTask>> PlanFilesAsync(Table table, long? snapshotId = null, Func<DataFile, bool>? filter = null, CancellationToken ct = default)
+    public static async Task<IReadOnlyList<ScanTask>> PlanFilesAsync(Table table, long? snapshotId = null, Func<DataFile, bool>? filter = null, CancellationToken ct = default) =>
+        (await PlanAsync(table, Expression.True, snapshotId, filter, ct)).Tasks;
+
+    /// <summary>Data files that may hold rows matching <paramref name="filter"/> (pruning only: rows still need filtering).</summary>
+    public static async Task<IReadOnlyList<ScanTask>> PlanFilesAsync(Table table, Expression filter, long? snapshotId = null, CancellationToken ct = default) =>
+        (await PlanAsync(table, filter, snapshotId, null, ct)).Tasks;
+
+    /// <summary>
+    /// Plan a scan (spec "Scan Planning"): skip manifests whose partition summaries cannot match the filter's inclusive
+    /// projection, then files whose partition tuple or column metrics cannot match. <paramref name="fileFilter"/> is an
+    /// extra caller predicate on files.
+    /// </summary>
+    public static async Task<ScanPlan> PlanAsync(Table table, Expression filter, long? snapshotId = null, Func<DataFile, bool>? fileFilter = null, CancellationToken ct = default)
     {
         var m = table.Metadata;
         var snapshot = Resolve(m, snapshotId);
-        if (snapshot is null) return [];
+        if (snapshot is null) return new ScanPlan([], 0, 0, 0, 0);
 
+        var schema = m.CurrentSchema;
+        var bound = Binder.Bind(schema, filter);
+        var metrics = bound is AlwaysTrue ? null : new MetricsEvaluator(bound);
+        var bySpec = new Dictionary<int, (ManifestEvaluator Manifest, Func<IReadOnlyList<object?>, bool> Partition)>();
+        int read = 0, skipped = 0, byPartition = 0, byMetrics = 0;
         var tasks = new List<ScanTask>();
         foreach (var manifest in (await ManifestsAsync(table, snapshot, ct)).Where(mf => mf.Content == ManifestContent.Data))
         {
             var spec = m.SpecById(manifest.PartitionSpecId);
-            var contents = ManifestCodec.ReadManifest(await table.IO.ReadAllAsync(manifest.ManifestPath, ct), spec, m.CurrentSchema, manifest);
+            if (!bySpec.TryGetValue(spec.SpecId, out var eval))
+            {
+                var projected = Projections.Inclusive(spec, schema, bound);
+                bySpec[spec.SpecId] = eval = (new ManifestEvaluator(projected), RowEvaluator.Compile(projected));
+            }
+            if (!eval.Manifest.MightMatch(manifest.Partitions)) { skipped++; continue; }
+            read++;
+            var contents = ManifestCodec.ReadManifest(await table.IO.ReadAllAsync(manifest.ManifestPath, ct), spec, schema, manifest);
             foreach (var e in contents.Entries)
             {
                 if (e.Status == ManifestEntryStatus.Deleted) continue;
-                if (filter is not null && !filter(e.DataFile)) continue;
+                if (fileFilter is not null && !fileFilter(e.DataFile)) continue;
+                if (!eval.Partition(e.DataFile.Partition)) { byPartition++; continue; }
+                if (metrics is not null && !metrics.MightMatch(e.DataFile)) { byMetrics++; continue; }
                 tasks.Add(new ScanTask(e.DataFile, e.SequenceNumber ?? 0, manifest.ManifestPath));
             }
         }
-        return tasks;
+        return new ScanPlan(tasks, read, skipped, byPartition, byMetrics);
     }
 
     /// <summary>The delete files (v2 position deletes, v3 deletion vectors) of a snapshot.</summary>
@@ -102,18 +132,25 @@ public static class TableScan
     /// Read all rows of a snapshot, projected onto the current schema (by field ID), with position deletes,
     /// deletion vectors and equality deletes applied (merge-on-read).
     /// </summary>
-    public static async Task<List<object?[]>> ReadAllAsync(Table table, long? snapshotId = null, CancellationToken ct = default)
+    public static Task<List<object?[]>> ReadAllAsync(Table table, long? snapshotId = null, CancellationToken ct = default) =>
+        ReadAsync(table, Expression.True, snapshotId, ct);
+
+    /// <summary>Rows of a snapshot matching <paramref name="filter"/>: pruned planning, deletes applied, then the filter on every row.</summary>
+    public static async Task<List<object?[]>> ReadAsync(Table table, Expression filter, long? snapshotId = null, CancellationToken ct = default)
     {
+        var bound = Binder.Bind(table.Schema, filter);
+        var matches = bound is AlwaysTrue ? null : RowEvaluator.Compile(bound);
         var deletes = await DeletesAsync(table, snapshotId, ct);
         var mapping = NameMapping.ForTable(table.Metadata.Properties);
         var rows = new List<object?[]>();
-        foreach (var task in await PlanFilesAsync(table, snapshotId, null, ct))
+        foreach (var task in await PlanFilesAsync(table, filter, snapshotId, ct))
         {
             if (task.File.FileFormat != "PARQUET") throw new NotSupportedException($"{task.File.FileFormat} data files are not supported");
             var fileRows = await ParquetFiles.ReadAsync(table.IO, task.File.FilePath, table.Schema, mapping, ct);
             var isDeleted = deletes.IsEmpty ? null : await deletes.RowFilterAsync(task.File, task.DataSequenceNumber, table.Schema, ct);
-            if (isDeleted is null) rows.AddRange(fileRows);
-            else rows.AddRange(fileRows.Where((row, pos) => !isDeleted(pos, row)));
+            for (var pos = 0; pos < fileRows.Count; pos++)
+                if (isDeleted?.Invoke(pos, fileRows[pos]) != true && matches?.Invoke(fileRows[pos]) != false)
+                    rows.Add(fileRows[pos]);
         }
         return rows;
     }
@@ -254,6 +291,9 @@ public sealed class SnapshotProducer
     /// (<c>append</c>, <c>delete</c> or <c>overwrite</c>).
     /// </summary>
     public static SnapshotProducer RowDelta(Table table) => new(table) { _operation = null };
+
+    /// <summary>Compaction: replace data files with rewritten ones holding the same rows (operation <c>replace</c>).</summary>
+    public static SnapshotProducer Rewrite(Table table) => new(table) { _operation = Operations.Replace };
 
     /// <summary>Remove these data files (copy-on-write); DVs that reference them are removed in the same commit.</summary>
     public SnapshotProducer RemoveDataFiles(IEnumerable<string> paths)
@@ -442,6 +482,9 @@ public sealed class SnapshotProducer
             manifests.Insert(0, _writtenManifestFile! with { SequenceNumber = sequenceNumber, MinSequenceNumber = sequenceNumber, AddedSnapshotId = snapshotId });
         }
 
+        // 2b. Merge-append: compact small data manifests carried forward unchanged (plus this commit's new one).
+        manifests = await MergeManifestsAsync(manifests, parentManifests, snapshotId, sequenceNumber, metaDir, commitUuid, ct);
+
         // 3. v3 row lineage: assign first_row_id to data manifests that lack one.
         long? firstRowId = null, addedRows = null;
         if (m.FormatVersion >= 3)
@@ -598,6 +641,65 @@ public sealed class SnapshotProducer
 
     private static string DataDir(TableMetadata m) => m.Property("write.data.path", $"{m.Location}/data").TrimEnd('/');
 
+    public const string ManifestMergeEnabled = "commit.manifest-merge.enabled";
+    public const string ManifestMinCountToMerge = "commit.manifest.min-count-to-merge";
+    public const string ManifestTargetSizeBytes = "commit.manifest.target-size-bytes";
+
+    /// <summary>
+    /// Java's merge-append: when a partition spec has at least <c>commit.manifest.min-count-to-merge</c> (100) data
+    /// manifests, bin-pack them (newest first) into manifests of up to <c>commit.manifest.target-size-bytes</c> (8 MB).
+    /// Only manifests carried forward unchanged from the parent, and this commit's own added manifest, are merged.
+    /// Merged entries keep their data and file sequence numbers, snapshot IDs and v3 <c>first_row_id</c>s explicitly;
+    /// entries deleted by earlier snapshots are dropped, as in Java.
+    /// </summary>
+    private async Task<List<ManifestFile>> MergeManifestsAsync(List<ManifestFile> manifests, IReadOnlyList<ManifestFile> parentManifests,
+        long snapshotId, long sequenceNumber, string metaDir, Guid commitUuid, CancellationToken ct)
+    {
+        var m = _table.Metadata;
+        if (m.Property(ManifestMergeEnabled, "true") != "true") return manifests;
+        var minCount = int.Parse(m.Property(ManifestMinCountToMerge, "100"), CultureInfo.InvariantCulture);
+        var target = long.Parse(m.Property(ManifestTargetSizeBytes, "8388608"), CultureInfo.InvariantCulture);
+        var carried = parentManifests.Select(p => p.ManifestPath).ToHashSet(StringComparer.Ordinal);
+        bool Mergeable(ManifestFile mf) => mf.Content == ManifestContent.Data && (carried.Contains(mf.ManifestPath) || mf.ManifestPath == _writtenManifest);
+
+        var result = new List<ManifestFile>();
+        var mergeIndex = 0;
+        foreach (var group in manifests.Where(Mergeable).GroupBy(mf => mf.PartitionSpecId))
+        {
+            var members = group.ToList(); // manifests are newest first
+            if (members.Count < Math.Max(2, minCount)) { result.AddRange(members); continue; }
+            var bins = new List<List<ManifestFile>>();
+            foreach (var mf in members)
+            {
+                if (bins.Count == 0 || bins[^1].Sum(x => x.ManifestLength) + mf.ManifestLength > target) bins.Add([]);
+                bins[^1].Add(mf);
+            }
+            var spec = m.SpecById(group.Key);
+            foreach (var bin in bins)
+            {
+                if (bin.Count == 1) { result.Add(bin[0]); continue; }
+                var entries = new List<ManifestEntry>();
+                foreach (var mf in bin)
+                {
+                    var read = ManifestCodec.ReadManifest(await _table.IO.ReadAllAsync(mf.ManifestPath, ct), spec, m.CurrentSchema, mf).Entries;
+                    foreach (var e in read)
+                    {
+                        if (e.Status == ManifestEntryStatus.Deleted) continue;
+                        entries.Add(mf.ManifestPath == _writtenManifest
+                            ? e with { Status = ManifestEntryStatus.Added, SnapshotId = snapshotId, SequenceNumber = null, FileSequenceNumber = null }
+                            : e with { Status = ManifestEntryStatus.Existing });
+                    }
+                }
+                var path = $"{metaDir}/{commitUuid}-m-merged{mergeIndex++}.avro";
+                result.Add(await WriteManifestAsync(path, spec, ManifestContent.Data, entries, snapshotId, sequenceNumber, ct));
+                _attemptArtifacts.Add(path);
+            }
+        }
+        // Keep the original order otherwise: new/merged manifests first, then the rest as they were.
+        var merged = result.ToHashSet();
+        return [.. result, .. manifests.Where(mf => !Mergeable(mf) && !merged.Contains(mf))];
+    }
+
     private async Task<ManifestFile> RewriteDeleteManifestAsync(ManifestFile manifest, IReadOnlySet<(string Path, long? Offset)> removed, long snapshotId, long sequenceNumber, string path, CancellationToken ct)
     {
         if (removed.Count == 0) return manifest;
@@ -724,24 +826,74 @@ public sealed class SnapshotProducer
 /// <summary>A commit's preconditions no longer hold on the current table (not retryable, unlike <see cref="CommitFailedException"/>).</summary>
 public sealed class ValidationException(string message) : Exception(message);
 
+/// <param name="Expired">Snapshot IDs removed from the table.</param>
+/// <param name="DeletedFiles">Files only expired snapshots referenced, deleted after the commit.</param>
+public sealed record ExpireResult(IReadOnlyList<long> Expired, IReadOnlyList<string> DeletedFiles);
+
 public static class Maintenance
 {
+    /// <summary>Expire snapshots and delete the files only they referenced; see <see cref="ExpireAsync"/>.</summary>
+    public static async Task<IReadOnlyList<long>> ExpireSnapshotsAsync(Table table, long olderThanMs, int retainLast = 1, CancellationToken ct = default) =>
+        (await ExpireAsync(table, olderThanMs, retainLast, cleanExpiredFiles: true, ct)).Expired;
+
     /// <summary>
-    /// Expire snapshots older than <paramref name="olderThanMs"/>, keeping at least
-    /// <paramref name="retainLast"/> ancestors of main and every snapshot a ref points at.
-    /// Metadata-only: unreachable files are left for an orphan-file sweep (deleting them safely needs
-    /// the reachability diff Java's ExpireSnapshots computes; tracked in docs/roadmap.md).
+    /// Expire snapshots older than <paramref name="olderThanMs"/>, keeping at least <paramref name="retainLast"/>
+    /// ancestors of main and every snapshot a ref points at (spec "Snapshot Retention Policy"). With
+    /// <paramref name="cleanExpiredFiles"/> (Java's default), files reachable from expired snapshots but from no retained
+    /// one — manifest lists, manifests, data, delete and statistics files — are deleted once the commit has succeeded.
+    /// Nothing is deleted if the commit fails or its outcome is unknown.
     /// </summary>
-    public static async Task<IReadOnlyList<long>> ExpireSnapshotsAsync(Table table, long olderThanMs, int retainLast = 1, CancellationToken ct = default)
+    public static async Task<ExpireResult> ExpireAsync(Table table, long olderThanMs, int retainLast = 1, bool cleanExpiredFiles = true, CancellationToken ct = default)
     {
         var m = table.Metadata;
         var keep = m.Ancestors(m.CurrentSnapshotId).Take(Math.Max(1, retainLast)).Select(s => s.SnapshotId).ToHashSet();
         keep.UnionWith(m.Refs.Values.Select(r => r.SnapshotId));
-        var expire = m.Snapshots.Where(s => s.TimestampMs < olderThanMs && !keep.Contains(s.SnapshotId)).Select(s => s.SnapshotId).ToList();
-        if (expire.Count == 0) return [];
+        var expire = m.Snapshots.Where(s => s.TimestampMs < olderThanMs && !keep.Contains(s.SnapshotId)).ToList();
+        if (expire.Count == 0) return new ExpireResult([], []);
         await table.CommitAsync(
             [new UpdateRequirement.AssertTableUuid(m.TableUuid), new UpdateRequirement.AssertRefSnapshotId(SnapshotRef.Main, m.CurrentSnapshotId)],
-            [new MetadataUpdate.RemoveSnapshots(expire)], ct);
-        return expire;
+            [new MetadataUpdate.RemoveSnapshots(expire.Select(s => s.SnapshotId).ToList())], ct);
+        if (!cleanExpiredFiles) return new ExpireResult(expire.Select(s => s.SnapshotId).ToList(), []);
+
+        // Reachability diff against the committed metadata, so snapshots another writer added meanwhile are retained.
+        var after = table.Metadata;
+        var candidates = await TableFiles.ReachableAsync(m, table.IO, expire, ct);
+        candidates.ExceptWith(await TableFiles.ReachableAsync(after, table.IO, after.Snapshots, ct));
+        await TableFiles.DeleteAllAsync(table.IO, candidates, ct);
+        return new ExpireResult(expire.Select(s => s.SnapshotId).ToList(), candidates.Order(StringComparer.Ordinal).ToList());
+    }
+
+    /// <summary>
+    /// Delete files under the table location that no snapshot or metadata file references (Java's
+    /// <c>DeleteOrphanFiles</c>): leftovers of failed or abandoned writes. Only files older than
+    /// <paramref name="olderThan"/> (default 3 days, as Java) are candidates, so in-flight writes of other writers are
+    /// safe; <paramref name="dryRun"/> only reports. Locations are compared after normalising URI forms
+    /// (<c>s3a://</c>/<c>s3n://</c> vs <c>s3://</c>, <c>file:/</c> vs <c>file:///</c> vs bare paths).
+    /// </summary>
+    public static async Task<IReadOnlyList<string>> DeleteOrphanFilesAsync(Table table, TimeSpan? olderThan = null, bool dryRun = false, CancellationToken ct = default)
+    {
+        if (table.IO is not IO.ISupportsListing lister) throw new NotSupportedException($"{table.IO.GetType().Name} cannot list files");
+        var m = table.Metadata;
+        var referenced = await TableFiles.ReachableAsync(m, table.IO, m.Snapshots, ct);
+        referenced.UnionWith(m.MetadataLog.Select(l => l.MetadataFile));
+        if (m.MetadataFileLocation is { } current) referenced.UnionWith([current, current[..(current.LastIndexOf('/') + 1)] + "version-hint.text"]);
+        referenced.UnionWith(m.Statistics.Select(s => s.StatisticsPath));
+        referenced.UnionWith(m.PartitionStatistics.Select(s => s.StatisticsPath));
+        var keep = referenced.Select(Normalise).ToHashSet(StringComparer.Ordinal);
+
+        var cutoff = DateTime.UtcNow - (olderThan ?? TimeSpan.FromDays(3));
+        var orphans = new List<string>();
+        await foreach (var f in lister.ListAsync(m.Location.TrimEnd('/') + "/", ct))
+            if (f.LastModifiedUtc < cutoff && !keep.Contains(Normalise(f.Location))) orphans.Add(f.Location);
+        if (!dryRun) await TableFiles.DeleteAllAsync(table.IO, orphans, ct);
+        return orphans;
+    }
+
+    private static string Normalise(string location)
+    {
+        if (location.StartsWith("s3a://", StringComparison.Ordinal) || location.StartsWith("s3n://", StringComparison.Ordinal)) return "s3://" + location[6..];
+        if (location.StartsWith("file://", StringComparison.Ordinal)) return new Uri(location).LocalPath;
+        if (location.StartsWith("file:", StringComparison.Ordinal)) return Uri.UnescapeDataString(location[5..]);
+        return location;
     }
 }

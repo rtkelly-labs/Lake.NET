@@ -126,7 +126,9 @@ public sealed class ModelBasedTests
         {
             await catalog.CreateNamespaceAsync(Namespace.Of("pbt"));
             var table = await catalog.CreateTableAsync(new CreateTableRequest(TableIdentifier.Of("pbt", "t"), Schema,
-                PartitionSpec.BuilderFor(Schema).Identity("event_date").Build(), FormatVersion: c.FormatVersion));
+                PartitionSpec.BuilderFor(Schema).Identity("event_date").Build(), FormatVersion: c.FormatVersion,
+                // Merge manifests aggressively so random sequences exercise merge-append too.
+                Properties: new Dictionary<string, string> { [SnapshotProducer.ManifestMinCountToMerge] = "3" }));
             var model = new List<Row>();
             var history = new Dictionary<long, string>();
             var step = 0;

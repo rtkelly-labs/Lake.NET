@@ -21,11 +21,35 @@ public interface IFileIO : IDisposable
     Task DeleteAsync(string location, CancellationToken ct = default);
 }
 
+/// <summary>A stored object found by listing.</summary>
+public sealed record StoredFile(string Location, long Size, DateTime LastModifiedUtc);
+
+/// <summary>FileIO that can list by prefix (Java's <c>SupportsPrefixOperations</c>); needed by orphan-file cleanup.</summary>
+public interface ISupportsListing
+{
+    /// <summary>Every object under <paramref name="prefix"/>, recursively; locations use the same scheme as the prefix.</summary>
+    IAsyncEnumerable<StoredFile> ListAsync(string prefix, CancellationToken ct = default);
+}
+
 public sealed class FileAlreadyExistsException(string location) : IOException($"File already exists: {location}");
 
 /// <summary>Local filesystem FileIO for <c>file://</c> and bare paths. Used by unit tests and local catalogs.</summary>
-public sealed class LocalFileIO : IFileIO
+public sealed class LocalFileIO : IFileIO, ISupportsListing
 {
+    public async IAsyncEnumerable<StoredFile> ListAsync(string prefix, [System.Runtime.CompilerServices.EnumeratorCancellation] CancellationToken ct = default)
+    {
+        var root = PathOf(prefix);
+        if (!Directory.Exists(root)) yield break;
+        var scheme = prefix.StartsWith("file:", StringComparison.Ordinal) ? "file://" : "";
+        foreach (var path in Directory.EnumerateFiles(root, "*", SearchOption.AllDirectories))
+        {
+            ct.ThrowIfCancellationRequested();
+            var info = new FileInfo(path);
+            yield return new StoredFile(scheme + path, info.Length, info.LastWriteTimeUtc);
+        }
+        await Task.CompletedTask;
+    }
+
     /// <summary>
     /// <c>file:///tmp/x</c> and bare paths, plus Hadoop's <c>file:/tmp/x</c> form, which Java engines write into manifests
     /// (<see cref="Uri"/> rejects it: the empty authority is missing).
@@ -88,6 +112,19 @@ public sealed record S3FileIOOptions
     public string? AccessKeyId { get; init; }
     public string? SecretAccessKey { get; init; }
     public string? SessionToken { get; init; }
+    /// <summary>
+    /// <c>s3.retry.num-retries</c> (Iceberg Java's name; default 5, as there): retries of throttling (<c>503 SlowDown</c>),
+    /// 5xx and transient network errors, with the SDK's standard jittered exponential back-off.
+    /// </summary>
+    public int MaxRetries { get; init; } = 5;
+    /// <summary>
+    /// The SDK's client-wide retry quota (token bucket). Off by default: under sustained throttling the quota drains and
+    /// the SDK then fails requests without retrying, mid-commit, even though each request's retries are already capped
+    /// by <see cref="MaxRetries"/>. Found by <c>ThrottlingTests</c>.
+    /// </summary>
+    public bool RetryQuota { get; init; }
+    /// <summary>Test hook: the HTTP handler under the SDK (e.g. to inject throttling responses).</summary>
+    public HttpMessageHandler? HttpHandler { get; init; }
 
     /// <summary>Build from Iceberg catalog properties (e.g. a REST <c>config</c> response or vended credentials).</summary>
     public static S3FileIOOptions FromProperties(IReadOnlyDictionary<string, string> p) => new()
@@ -98,6 +135,7 @@ public sealed record S3FileIOOptions
         AccessKeyId = p.GetValueOrDefault("s3.access-key-id"),
         SecretAccessKey = p.GetValueOrDefault("s3.secret-access-key"),
         SessionToken = p.GetValueOrDefault("s3.session-token"),
+        MaxRetries = int.TryParse(p.GetValueOrDefault("s3.retry.num-retries"), out var n) ? n : 5,
     };
 }
 
@@ -106,8 +144,23 @@ public sealed record S3FileIOOptions
 /// the wild from Hadoop-era writers). Conditional create uses <c>If-None-Match: *</c>, which S3 has
 /// supported since 2024 and which closes the "two writers, same metadata file" race.
 /// </summary>
-public sealed class S3FileIO : IFileIO
+public sealed class S3FileIO : IFileIO, ISupportsListing
 {
+    public async IAsyncEnumerable<StoredFile> ListAsync(string prefix, [System.Runtime.CompilerServices.EnumeratorCancellation] CancellationToken ct = default)
+    {
+        var (bucket, key) = Parse(prefix);
+        var scheme = prefix[..prefix.IndexOf("://", StringComparison.Ordinal)];
+        var request = new ListObjectsV2Request { BucketName = bucket, Prefix = key };
+        do
+        {
+            var page = await _s3.ListObjectsV2Async(request, ct);
+            foreach (var o in page.S3Objects ?? [])
+                yield return new StoredFile($"{scheme}://{bucket}/{o.Key}", o.Size ?? 0, o.LastModified?.ToUniversalTime() ?? DateTime.MinValue);
+            request.ContinuationToken = page.IsTruncated == true ? page.NextContinuationToken : null;
+        }
+        while (request.ContinuationToken is not null);
+    }
+
     private readonly IAmazonS3 _s3;
     private readonly bool _ownsClient;
 
@@ -122,7 +175,11 @@ public sealed class S3FileIO : IFileIO
         {
             RegionEndpoint = Amazon.RegionEndpoint.GetBySystemName(options.Region),
             ForcePathStyle = options.PathStyleAccess,
+            RetryMode = Amazon.Runtime.RequestRetryMode.Standard,
+            MaxErrorRetry = options.MaxRetries,
+            ThrottleRetries = options.RetryQuota,
         };
+        if (options.HttpHandler is { } handler) config.HttpClientFactory = new HandlerClientFactory(handler);
         if (options.Endpoint is not null)
         {
             config.ServiceURL = options.Endpoint;
@@ -137,6 +194,11 @@ public sealed class S3FileIO : IFileIO
     }
 
     public IAmazonS3 Client => _s3;
+
+    private sealed class HandlerClientFactory(HttpMessageHandler handler) : Amazon.Runtime.HttpClientFactory
+    {
+        public override HttpClient CreateHttpClient(Amazon.Runtime.IClientConfig clientConfig) => new(handler, disposeHandler: false);
+    }
 
     public static (string Bucket, string Key) Parse(string location)
     {
@@ -201,6 +263,9 @@ public sealed class S3FileIO : IFileIO
         }
         catch (AmazonS3Exception e) when (!overwrite && (int)e.StatusCode is 412 or 409)
         {
+            // A retried PUT whose first attempt landed (response lost, e.g. 503 after apply) fails its own
+            // If-None-Match. Locations are unique per write, so identical bytes mean the object is ours.
+            if (await ReadAllAsync(location, ct) is var existing && existing.AsSpan().SequenceEqual(content.Span)) return;
             throw new FileAlreadyExistsException(location);
         }
     }
@@ -218,8 +283,11 @@ public sealed class S3FileIO : IFileIO
 }
 
 /// <summary>Routes by scheme so a table whose files span local and S3 (e.g. fixtures) still resolves.</summary>
-public sealed class ResolvingFileIO(Func<IFileIO> s3Factory) : IFileIO
+public sealed class ResolvingFileIO(Func<IFileIO> s3Factory) : IFileIO, ISupportsListing
 {
+    public IAsyncEnumerable<StoredFile> ListAsync(string prefix, CancellationToken ct = default) =>
+        For(prefix) is ISupportsListing l ? l.ListAsync(prefix, ct) : throw new NotSupportedException("The FileIO for this location cannot list");
+
     private readonly LocalFileIO _local = new();
     private readonly Lazy<IFileIO> _s3 = new(s3Factory);
 

@@ -30,7 +30,7 @@ public sealed class SoakTests
     private const int Writers = 4;
     private const long HotKeys = 5;
 
-    public static TheoryData<string, int> Targets() => new() { { "memory", 2 }, { "memory", 3 }, { "glue", 2 }, { "rest", 3 }, { "polaris", 3 } };
+    public static TheoryData<string, int> Targets() => new() { { "memory", 2 }, { "memory", 3 }, { "glue", 2 }, { "rest", 3 }, { "polaris", 3 }, { "jdbc", 2 } };
 
     private static int Seconds => int.TryParse(Environment.GetEnvironmentVariable("ICEBERG_SOAK_SECONDS"), out var s) ? s : 15;
 

@@ -7,6 +7,7 @@
   <ItemGroup>
     <PackageReference Include="Xunit.SkippableFact" />
     <PackageReference Include="xunit" />
+    <PackageReference Include="Microsoft.Data.Sqlite" />
   </ItemGroup>
   <ItemGroup>
     <ProjectReference Include="../../src/Iceberg.Net.Data/Iceberg.Net.Data.csproj" />

@@ -55,7 +55,10 @@ public interface ICatalog : IDisposable
     Task<bool> TableExistsAsync(TableIdentifier id, CancellationToken ct = default);
     Task<Table> RegisterTableAsync(TableIdentifier id, string metadataLocation, CancellationToken ct = default);
     Task RenameTableAsync(TableIdentifier from, TableIdentifier to, CancellationToken ct = default);
-    /// <summary>Drop the catalog entry. With <paramref name="purge"/>, also delete metadata files (data files are left to maintenance jobs).</summary>
+    /// <summary>
+    /// Drop the catalog entry. With <paramref name="purge"/>, also delete every file the table references: metadata
+    /// files, manifest lists, manifests, data, delete and statistics files (as Java's <c>dropTableData</c>).
+    /// </summary>
     Task DropTableAsync(TableIdentifier id, bool purge = false, CancellationToken ct = default);
 
     /// <summary>
@@ -100,6 +103,30 @@ public sealed class Table(ICatalog catalog, TableIdentifier identifier, TableMet
             [new UpdateRequirement.AssertCurrentSchemaId(Metadata.CurrentSchemaId), new UpdateRequirement.AssertLastAssignedFieldId(Metadata.LastColumnId)],
             [new MetadataUpdate.AddSchema(newSchema), new MetadataUpdate.SetCurrentSchema(MetadataUpdate.LastAdded)],
             ct);
+
+    /// <summary>
+    /// Evolve the schema with <see cref="SchemaUpdate"/> operations, e.g.
+    /// <c>table.UpdateSchemaAsync(s => s.AddColumn("region", PrimitiveType.String).RenameColumn("qty", "quantity"))</c>.
+    /// If another writer changes the schema first, the operations are re-applied to the new schema (up to
+    /// <paramref name="retries"/> times); an operation that no longer makes sense then fails with its own error.
+    /// </summary>
+    public async Task<TableMetadata> UpdateSchemaAsync(Action<SchemaUpdate> changes, int retries = 4, CancellationToken ct = default)
+    {
+        for (var attempt = 0; ; attempt++)
+        {
+            var update = new SchemaUpdate(Metadata);
+            changes(update);
+            var (requirements, updates) = update.ToCommit();
+            try
+            {
+                return await CommitAsync(requirements, updates, ct);
+            }
+            catch (CommitFailedException) when (attempt < retries)
+            {
+                await RefreshAsync(ct);
+            }
+        }
+    }
 }
 
 /// <summary>
@@ -167,8 +194,10 @@ public abstract partial class MetastoreCatalog(string name, IFileIO io) : ICatal
         await RemoveTableEntryAsync(id, ct);
         if (metadata is not null)
         {
-            foreach (var old in metadata.MetadataLog.Select(l => l.MetadataFile).Append(location))
-                await TryDeleteAsync(old, ct);
+            // Entry first, files second: a crash in between leaves orphans, never a table pointing at missing files.
+            var files = await TableFiles.ReachableAsync(metadata, FileIO, metadata.Snapshots, ct);
+            files.UnionWith(metadata.MetadataLog.Select(l => l.MetadataFile).Append(location));
+            await TableFiles.DeleteAllAsync(FileIO, files, ct);
         }
     }
 

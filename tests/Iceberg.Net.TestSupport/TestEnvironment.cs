@@ -31,6 +31,7 @@ public sealed class TestEnvironment
     public string? SkipReason { get; }
     public string? RestSkipReason { get; }
     /// <summary>Apache Polaris (emulation/up.sh --polaris): a second REST server implementation.</summary>
+    public string JdbcDatabase { get; } = Env("ICEBERG_JDBC_SQLITE") ?? Path.Combine(Path.GetTempPath(), "iceberg-dotnet-jdbc", "catalog.db");
     public Uri PolarisUri { get; } = new(Env("ICEBERG_POLARIS_URI") ?? "http://localhost:8182/api/catalog");
     public string? PolarisSkipReason { get; }
     public string? OracleSkipReason { get; }
@@ -78,6 +79,9 @@ public sealed class TestEnvironment
         }
 
         Environment.SetEnvironmentVariable("ICEBERG_WAREHOUSE", Warehouse);
+        // The JDBC catalog's SQLite database, shared with the PyIceberg oracle's SqlCatalog through this variable.
+        Directory.CreateDirectory(Path.GetDirectoryName(JdbcDatabase)!);
+        Environment.SetEnvironmentVariable("ICEBERG_JDBC_SQLITE", JdbcDatabase);
         LocalOracleSkipReason = OracleCommand() is null ? "PyIceberg oracle unavailable: set ICEBERG_PYTHON to an interpreter with interop/pyproject.toml installed, or install uv" : null;
         OracleSkipReason = SkipReason ?? LocalOracleSkipReason;
         if (required && SkipReason is not null) throw new InvalidOperationException($"ICEBERG_REQUIRE_TARGET=1 but: {SkipReason}");
@@ -122,8 +126,18 @@ public sealed class TestEnvironment
                 AccessDelegation = null, Properties = S3Properties,
             },
             props => new S3FileIO(S3FileIOOptions.FromProperties(props)), "polaris"),
+        // Java JdbcCatalog / PyIceberg SqlCatalog tables in SQLite, data in S3 (moto or AWS); catalog name "regression".
+        "jdbc" => await JdbcAsync(),
         _ => throw new ArgumentException(kind),
     };
+
+    private async Task<ICatalog> JdbcAsync()
+    {
+        var catalog = new JdbcCatalog(() => new Microsoft.Data.Sqlite.SqliteConnection($"Data Source={JdbcDatabase};Default Timeout=30"),
+            Warehouse.TrimEnd('/') + "/jdbc", new S3FileIO(S3Options), "regression");
+        await catalog.InitializeAsync();
+        return catalog;
+    }
 
     public string? CatalogSkipReason(string kind) => kind switch { "rest" => RestSkipReason, "polaris" => PolarisSkipReason, _ => SkipReason };
 
@@ -139,12 +153,13 @@ public sealed class TestEnvironment
 
     private static string InteropDir() => Path.Combine(RepoDir(), "interop");
 
-    private static (string File, string Prefix)? OracleCommand()
+    /// <summary>The interpreter (or uv) and the arguments that run the oracle script.</summary>
+    private static (string File, string[] Prefix)? OracleCommand()
     {
         var script = Path.Combine(InteropDir(), "pyiceberg_oracle.py");
-        if (Env("ICEBERG_PYTHON") is { } python) return (python, $"-I \"{script}\"");
+        if (Env("ICEBERG_PYTHON") is { } python) return (python, ["-I", script]);
         var uv = (Environment.GetEnvironmentVariable("PATH") ?? "").Split(Path.PathSeparator).Select(p => Path.Combine(p, "uv")).FirstOrDefault(File.Exists);
-        return uv is null ? null : (uv, $"run --quiet --project \"{InteropDir()}\" python -I \"{script}\"");
+        return uv is null ? null : (uv, ["run", "--quiet", "--project", InteropDir(), "python", "-I", script]);
     }
 
     public async Task<JsonNode> OracleAsync(params string[] args) => JsonNode.Parse(await OracleRawAsync(args))!;
@@ -153,11 +168,9 @@ public sealed class TestEnvironment
     public async Task<string> OracleRawAsync(params string[] args)
     {
         var (file, prefix) = OracleCommand() ?? throw new InvalidOperationException(OracleSkipReason);
-        var psi = new ProcessStartInfo(file, $"{prefix} {string.Join(' ', args.Select(a => $"\"{a}\""))}")
-        {
-            RedirectStandardOutput = true,
-            RedirectStandardError = true,
-        };
+        // ArgumentList quotes each argument correctly (JSON arguments contain quotes and spaces).
+        var psi = new ProcessStartInfo(file) { RedirectStandardOutput = true, RedirectStandardError = true };
+        foreach (var a in prefix.Concat(args)) psi.ArgumentList.Add(a);
         using var p = Process.Start(psi)!;
         var stdout = p.StandardOutput.ReadToEndAsync();
         var stderr = p.StandardError.ReadToEndAsync();

@@ -13,8 +13,11 @@ namespace Iceberg.Net.Regression.Tests;
 [Trait("Category", "Regression")]
 public sealed class CatalogConformanceTests
 {
-    /// <summary>"rest" is the Iceberg project's Java test server; "polaris" is Apache Polaris, implemented independently.</summary>
-    public static TheoryData<string> Catalogs => new() { "glue", "rest", "polaris" };
+    /// <summary>
+    /// "rest" is the Iceberg project's Java test server; "polaris" is Apache Polaris, implemented independently;
+    /// "jdbc" is our JdbcCatalog over SQLite, in the tables PyIceberg's SqlCatalog and Java's JdbcCatalog share.
+    /// </summary>
+    public static TheoryData<string> Catalogs => new() { "glue", "rest", "polaris", "jdbc" };
 
     public static readonly Schema Schema = new(
         NestedField.Require(1, "id", PrimitiveType.Long),

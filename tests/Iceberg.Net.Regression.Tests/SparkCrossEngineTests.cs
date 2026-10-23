@@ -54,6 +54,32 @@ public sealed class SparkTablesFixture : IAsyncLifetime
             await TableMutations.DeleteByKeysAsync(t, ["id", "event_ts", "region"], [[201L, CatalogConformanceTests.Rows(201, 1)[0][3], "eu"]], DeleteStrategy.PositionDeletes);
         }, CatalogConformanceTests.Spec);
 
+        // Maintenance output must read the same in Java: compaction (lineage preserved), merged manifests, an
+        // evolved schema, and snapshot expiry with file cleanup.
+        await Build("compacted_v3", 3, async t =>
+        {
+            for (var i = 0; i < 4; i++) await TableMutations.InsertAsync(t, CatalogConformanceTests.Rows(100 + i * 5, 5));
+            await TableMutations.DeleteByKeysAsync(t, ["id"], [[101L], [7L]], DeleteStrategy.PositionDeletes);
+            await Compaction.RewriteDataFilesAsync(t, new RewriteOptions(MinInputFiles: 2));
+        });
+        await Build("merged_v3", 3, async t =>
+        {
+            await t.SetPropertiesAsync(new Dictionary<string, string> { [SnapshotProducer.ManifestMinCountToMerge] = "2" });
+            for (var i = 0; i < 4; i++) await TableMutations.InsertAsync(t, CatalogConformanceTests.Rows(200 + i * 5, 5));
+            await TableMutations.UpsertAsync(t, CatalogConformanceTests.Rows(3, 2).Select(r => { r[1] = "merged"; return r; }).ToList(), ["id"], DeleteStrategy.EqualityDeletes);
+        });
+        await Build("evolved_v2", 2, async t =>
+        {
+            await t.UpdateSchemaAsync(s => s.UpdateColumn("qty", Types.PrimitiveType.Long).AddColumn("note", Types.PrimitiveType.String));
+            await TableMutations.InsertAsync(t, CatalogConformanceTests.Rows(300, 3).Select(r => (object?[])[.. r[..5], (long)(int)r[5]!, "new"]).ToList());
+        });
+        await Build("expired_v2", 2, async t =>
+        {
+            await TableMutations.UpsertAsync(t, CatalogConformanceTests.Rows(0, 10).Select(r => { r[1] = "expired"; return r; }).ToList(), ["id"], DeleteStrategy.CopyOnWrite);
+            await TableMutations.InsertAsync(t, CatalogConformanceTests.Rows(400, 3));
+            await Maintenance.ExpireAsync(t, long.MaxValue, retainLast: 1);
+        });
+
         Spark = await SparkOracle.ReadTablesAsync(Tables.Values.Select(b => b.Table.MetadataLocation!));
     }
 
@@ -84,7 +110,7 @@ public sealed class SparkCrossEngineTests(SparkTablesFixture fx) : IClassFixture
     {
         "CopyOnWrite_v2", "PositionDeletes_v2", "EqualityDeletes_v2",
         "CopyOnWrite_v3", "PositionDeletes_v3", "EqualityDeletes_v3",
-        "upgraded_v2_to_v3", "partitioned_v3",
+        "upgraded_v2_to_v3", "partitioned_v3", "compacted_v3", "merged_v3", "evolved_v2", "expired_v2",
     };
 
     private JsonNode SparkView(string name)
@@ -114,7 +140,7 @@ public sealed class SparkCrossEngineTests(SparkTablesFixture fx) : IClassFixture
             Assert.Equal((double?)row[2], s["amount"]?.GetValue<double>());
             Assert.Equal((long?)row[3], s["event_ts"]?.GetValue<long>());
             Assert.Equal((string?)row[4], s["region"]?.GetValue<string>());
-            Assert.Equal((int?)row[5], s["qty"]?.GetValue<int>());
+            Assert.Equal(row[5] is null ? null : Convert.ToInt64(row[5]), s["qty"]?.GetValue<long>());
         }
     }
 
@@ -153,6 +179,8 @@ public sealed class SparkCrossEngineTests(SparkTablesFixture fx) : IClassFixture
     [InlineData("EqualityDeletes_v3")]
     [InlineData("partitioned_v3")]
     [InlineData("upgraded_v2_to_v3")]
+    [InlineData("compacted_v3")]
+    [InlineData("merged_v3")]
     public void Spark_derives_the_same_row_lineage(string name)
     {
         Require.Spark();

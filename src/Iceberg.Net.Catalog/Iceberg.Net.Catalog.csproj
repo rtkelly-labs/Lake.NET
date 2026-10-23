@@ -6,6 +6,7 @@
   <ItemGroup>
     <PackageReference Include="AWSSDK.Glue" />
     <ProjectReference Include="../Iceberg.Net.Core/Iceberg.Net.Core.csproj" />
+    <ProjectReference Include="../Iceberg.Net.Avro/Iceberg.Net.Avro.csproj" />
     <ProjectReference Include="../Iceberg.Net.IO/Iceberg.Net.IO.csproj" />
   </ItemGroup>
 </Project>
