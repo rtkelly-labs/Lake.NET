@@ -16,6 +16,31 @@ needs action outside this repository.
 | **M3 — row-level writes** ✅ | C# upserts / deletes without Athena | insert, upsert by key, group replacement, delete by key/predicate/expression with copy-on-write, position/DV and equality deletes (also across partition specs); single-snapshot RowDelta; re-plan-on-conflict serializability ([write-modes.md](write-modes.md)); `_row_id` preserved on v3 rewrites; key- and filter-based file pruning; Arrow `RecordBatch` API (`Iceberg.Net.Arrow`) | Spark, Trino and PyIceberg read our output ✅ (PyIceberg also our Arrow output); Athena (AWS pending) |
 | **M4 — maintenance & breadth** | Self-sufficient operations | ✅ snapshot expiry with file deletion, orphan-file cleanup, bin-pack and sort compaction (lineage kept), sorted writes (`ReplaceSortOrderAsync`; files record `sort_order_id`), merge-append and manifest rewrite, multi-table transactions (REST, JDBC), views (REST, JDBC V1 layout, in-memory; Trino reads ours and we read its); server-side scan planning (`RestCatalog.PlanTableScanAsync` + `ServerSideScan`; checked end to end against Gravitino and against plans Iceberg Java makes of Spark's tables and ours) | Spark reads compacted, merged, evolved and expired tables ✅ |
 
+
+### Next-phase design (phases A–G)
+
+These were designed together and built in parallel on one shared read contract (`ScanRequest`) and one UPDATE/MERGE
+shape.
+
+| Phase | Scope | State |
+|---|---|---|
+| **A. Conflict hardening** | Serializable overwrites against compaction, concurrent deletes and expiry; interleaving suite | ✅ |
+| **B. UPDATE and MERGE** | `UpdateAsync`, `MergeAsync` (all clauses, cardinality, v3 lineage), Spark MERGE equivalence | ✅ [update-merge.md](update-merge.md) |
+| **C. Read path** | Projection by field ID, row-group pruning, streaming, time travel with the snapshot's schema, metadata counts | ✅ [read-path.md](read-path.md) |
+| **D. Snapshot management** | Branches/tags, rollback, cherry-pick, fast-forward, branch writes (WAP), per-ref retention, metadata tables, change feed, partial-progress compaction, position-delete rewrite | ✅ [snapshot-management.md](snapshot-management.md) |
+| **E. Typed layer** | `Iceberg.Net.Linq`: mapping by field ID, LINQ provider, typed writes in EF Core's bulk shape | ✅ [linq.md](linq.md) |
+| **F. EF Core provider** | Non-relational provider over phase E: model, queries, `ExecuteUpdate`/`ExecuteDelete`, `SaveChanges` | ⬜ |
+| **G. Ecosystem** | DuckDB oracle, OpenTelemetry, Spark procedure helpers and job submission, Athena helpers, a REST catalog server | ⬜ |
+
+Gaps the phases left open:
+- UPDATE can't assign nested struct fields.
+- Column chunks are fetched whole: projection decodes less but still downloads the whole file.
+- Delete files are decoded with the current schema.
+- Cherry-pick replay needs the default partition spec.
+- The change feed is Spark-checked only for tables without delete files (Java's changelog scan refuses them).
+- In the LINQ layer, a delete with a residual reads every file, and a time-travel filter on a renamed column runs in memory.
+- `CreateTableAsync` always renumbers field IDs.
+
 ### Upstream changes to plan for (from the spec-drift check)
 
 `python tools/spec_trace.py drift` compares apache/iceberg `main` with the sections pinned at the 1.12.0 release.

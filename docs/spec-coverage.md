@@ -66,7 +66,8 @@ Legend: ✅ implemented and tested · 🟡 partial · ⬜ not started · — not
 | Single-value binary serialisation (Appendix D) for bounds | ✅ incl. promoted-width reads | `AvroSpecTests` |
 | v1 snapshots with embedded `manifests` list | ⬜ (refused explicitly) | |
 | Manifest compaction / merge-append | ✅ Java defaults (`commit.manifest-merge.enabled`, min count 100, 8 MB); sequence numbers and `first_row_id` preserved | `MergeAppendTests`, `ModelBasedTests`, `SparkCrossEngineTests` |
-| Scan planning: filter expressions, manifest pruning by partition summaries, file pruning by partition projection and column metrics | ✅ identity/bucket/truncate/temporal projection; Java null semantics | `ExpressionTests`, `ScanPruningTests` (random filters ≡ full scan), `FilterCrossEngineTests` (PyIceberg) |
+| Scan planning: filter expressions, manifest pruning by partition summaries, file pruning by partition projection and column metrics, Parquet row-group pruning on footer statistics | ✅ identity/bucket/truncate/temporal projection; Java null semantics; doubtful statistics never prune | `ExpressionTests`, `ScanPruningTests` and `ReadPathTests` (random filters ≡ full scan), `FilterCrossEngineTests` (PyIceberg), `SparkCrossEngineTests` |
+| Point-in-time reads: by snapshot ID, by branch or tag, as of an instant (snapshot log), each with the schema the snapshot was written with | ✅ through `ScanRequest`; the legacy `ReadAsync(snapshotId)` keeps the current schema | `ScanContractTests`, `ReadPathTests`, `SparkCrossEngineTests` (`versionAsOf` / `timestampAsOf`) |
 | Column metrics modes (`write.metadata.metrics.*`, truncate(16)) | 🟡 full metrics; long strings omit bounds instead of truncating | `LocalTableTests` |
 
 ### Row-level deletes and v3 capabilities
@@ -85,7 +86,7 @@ Legend: ✅ implemented and tested · 🟡 partial · ⬜ not started · — not
 
 | Operation | Status | Tests |
 |---|---|---|
-| Snapshot expiry (retention policy) with file cleanup by reachability | ✅ files only expired snapshots referenced, after the commit | `MaintenanceTests`, `ModelBasedTests`, `SparkCrossEngineTests` |
+| Snapshot expiry (retention policy) with file cleanup by reachability | ✅ files only expired snapshots referenced, after the commit; table defaults and per-ref `min-snapshots-to-keep` / `max-snapshot-age-ms` / `max-ref-age-ms` | `MaintenanceTests`, `ExpiryRetentionTests`, `ModelBasedTests`, `SparkCrossEngineTests` |
 | Drop with purge | ✅ every referenced file (metadata, manifests, data, deletes, statistics) | `MaintenanceTests` |
 | Orphan-file cleanup | ✅ listing (`ISupportsListing`) + age cutoff, URI forms normalised | `MaintenanceTests` |
 | Rewrite data files (bin-pack) | ✅ deletes applied, v3 lineage kept, re-plan on any concurrent commit | `CompactionTests`, `SparkCrossEngineTests` |
@@ -97,7 +98,7 @@ Legend: ✅ implemented and tested · 🟡 partial · ⬜ not started · — not
 |---|---|---|
 | All v1/v2/v3 fields, legacy v1 `schema`/`partition-spec` read and write | ✅ | `MetadataSpecTests` |
 | `current-snapshot-id`: -1 for v1/v2, `null` for v3 (as Java ≥1.9) | ✅ | `MetadataSpecTests` |
-| Refs (branches, tags, retention fields); implied `main` when `refs` absent | ✅ | `MetadataSpecTests`, `StateManagementTests` |
+| Refs (branches, tags, retention fields); implied `main` when `refs` absent | ✅ metadata, plus `ManageSnapshots()` (create, replace, rename, remove, rollback, cherry-pick, fast-forward) and branch writes; Spark reads our refs and we read Spark's | `MetadataSpecTests`, `StateManagementTests`, `SnapshotManagementTests`, `BranchWriteTests`, `SparkCrossEngineTests` |
 | Snapshot log / metadata log (trimmed by `write.metadata.previous-versions-max`) | ✅ | `StateManagementTests` |
 | Statistics / partition statistics file entries | ✅ metadata; NDV statistics files written (`PuffinStatistics`) | `MetadataSpecTests`, `RowDeleteTests` |
 | Metadata file naming `{version:05d}-{uuid}.metadata.json`, gzip read | ✅ | `LocalTableTests` |

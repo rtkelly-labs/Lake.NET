@@ -38,7 +38,7 @@ and where this port stands. Release facts are sourced in [research/ecosystem-202
 - **Appends** are conflict-free: on a lost race the producer re-bases onto the new parent and retries.
   `CatalogConformanceTests.Concurrent_commits_serialise_through_the_catalog` runs four writers against Glue
   and REST and checks every row lands exactly once with a linear snapshot chain.
-- **Row-level mutations** (`TableMutations`: upsert, group replacement, deletes) are re-planned from scratch on
+- **Row-level mutations** (`TableMutations`: upsert, group replacement, deletes, update, merge) are re-planned from scratch on
   the winner's state after a lost race, so they are serializable without any validation step.
 - **Overwrites/file deletes** (`SnapshotProducer.Overwrite` / `DeleteFiles`) are **serializable** by default, as
   Java's are. On retry, `ValidationException` is raised when any of these holds:
@@ -50,6 +50,11 @@ and where this port stands. Release facts are sourced in [research/ecosystem-202
   - the starting snapshot has expired or is no longer an ancestor of `main`, so the history can't be checked.
 
   `WithSnapshotIsolation()` opts out of all of them.
+- **Ref changes** are guarded by `assert-ref-snapshot-id` on every ref they read or change. Rollback, set-current,
+  replace, rename and remove fail with `CommitFailedException` if their ref moved. Fast-forward and cherry-pick are
+  re-validated and re-applied.
+- **Branch writes** (`ToBranch`) validate against the branch's own history and leave `main` alone. A stale sequence
+  number is a retryable conflict (Java #15126).
 - **Metadata-only commits** (properties, schema) are guarded by the relevant requirement
   (`assert-current-schema-id`, `assert-last-assigned-field-id`), so two schema changes conflict while two
   property changes do not — the same as Java.
@@ -97,11 +102,12 @@ outcome, look for it in the table's snapshots before retrying. That pattern need
 
 | Operation | Java/Spark reference | Here |
 |---|---|---|
-| Expire snapshots (`older_than`, `retain_last`, keep refs) | `expire_snapshots`, defaults 5 days / 1 | ✅ `Maintenance.ExpireAsync`: deletes files only expired snapshots referenced, after the commit succeeds |
+| Expire snapshots (`older_than`, `retain_last`, keep refs) | `expire_snapshots`, defaults 5 days / 1 | ✅ `Maintenance.ExpireAsync`: deletes files only expired snapshots referenced, after the commit succeeds; honours `history.expire.*` and each ref's `min-snapshots-to-keep` / `max-snapshot-age-ms` / `max-ref-age-ms`, and removes refs that aged out (never `main`) |
 | Remove orphan files | `remove_orphan_files` (needs listing + age threshold) | ✅ `Maintenance.DeleteOrphanFilesAsync` (default 3 days, dry run) |
-| Rewrite data files (bin-pack/sort) | `rewrite_data_files`, `use-starting-sequence-number=true` | ✅ `Compaction.RewriteDataFilesAsync`, bin-pack and sort (by the table's default sort order); instead of starting sequence numbers it re-plans on any concurrent commit; partial progress ⬜ |
+| Rewrite data files (bin-pack/sort) | `rewrite_data_files`, `use-starting-sequence-number=true` | ✅ `Compaction.RewriteDataFilesAsync`, bin-pack and sort (by the table's default sort order); instead of starting sequence numbers it re-plans on any concurrent commit; partial progress ✅ (`PartialProgressEnabled`, `PartialProgressMaxCommits`) |
+| Rewrite position deletes | `rewrite_position_delete_files` | ✅ `Compaction.RewritePositionDeletesAsync`: one file per data file on v2, deletion vectors on v3; dangling deletes dropped |
 | Rewrite manifests | `rewrite_manifests` | 🟡 merge-append on commit (Java defaults) keeps counts bounded; standalone rewrite ⬜ |
-| Rollback / cherry-pick / fast-forward | procedures of the same names | 🟡 possible via raw `set-snapshot-ref` updates |
+| Rollback / cherry-pick / fast-forward, branches and tags | procedures of the same names | ✅ `table.ManageSnapshots()` (Java's ManageSnapshots and CherryPickOperation); branch writes with `SnapshotProducer.ToBranch`. See [snapshot-management.md](snapshot-management.md) |
 
 Note:Athena's `OPTIMIZE` and `VACUUM` already cover compaction and expiry for Glue tables, so
 the port does not need to own maintenance to be useful for producers.

@@ -7,6 +7,10 @@
 | [state-management.md](state-management.md) | What Iceberg's release history taught about table state (sequence numbers, row lineage, unknown commits, idempotency, isolation, maintenance) and where we stand |
 | [ports-and-engines.md](ports-and-engines.md) | Other implementations (Java, PyIceberg, Go, Rust, C++, .NET attempts) and reference engines (Spark runtime, Athena, Trino, Flink, DuckDB, Snowflake) |
 | [catalogs.md](catalogs.md) | Integration challenges for each catalog provider: Glue, Glue/S3 Tables REST, Polaris, Unity, Nessie, Lakekeeper, Gravitino, Hive, JDBC, DynamoDB |
+| [update-merge.md](update-merge.md) | UPDATE and MERGE: clause semantics, strategies, cardinality, row lineage, concurrency |
+| [read-path.md](read-path.md) | Scans: pruning levels (manifests, files, row groups), projection by field ID, streaming, time travel semantics |
+| [snapshot-management.md](snapshot-management.md) | Branches, tags, rollback, cherry-pick, write-audit-publish, per-ref retention, metadata tables, change feed |
+| [linq.md](linq.md) | The typed layer: mapping rules, what LINQ pushes down vs evaluates in memory, strict mode, typed writes |
 | [write-modes.md](write-modes.md) | Insert, upsert by key, group key replacement, deletes — and the copy-on-write / position / equality delete mechanisms |
 | [upstream/parquet-net-group-field-ids.md](upstream/parquet-net-group-field-ids.md) | Draft Parquet.Net issue + verified minimal patch for field IDs on struct/list/map |
 | [puffin.md](puffin.md) | Puffin files, deletion vectors, Theta sketches, the v2→v3 position-delete converter, NDV statistics |

@@ -10,6 +10,8 @@ reader sees either all of the change or none of it.
 | **Group key replacement** | `ReplaceGroupsAsync(table, rows, groupColumns, strategy)` | "this batch *is* client 42 / period 2024-09": every existing row of each group present in the input is deleted, then the input inserted. Groups absent from the input are untouched |
 | **Delete by key** | `DeleteByKeysAsync(table, keyColumns, keys, strategy)` | GDPR erasure, retractions |
 | **Delete by predicate** | `DeleteWhereAsync(table, row => …, strategy)` | arbitrary conditions over full rows |
+| **Update** | `UpdateAsync(table, filter, u => u.Set(...), strategy)` | corrections in place; one snapshot, none if nothing matches. See [update-merge.md](update-merge.md) |
+| **Merge** | `MergeAsync(table, source, on, m => …, strategy)` | reconcile with a feed: matched update or delete, not-matched insert, not-matched-by-source delete. See [update-merge.md](update-merge.md) |
 | **Drop whole files / partitions** | `SnapshotProducer.DeleteFiles(table, file => …)` | retention by partition; metadata-only, reads no data |
 
 ## Delete mechanisms
