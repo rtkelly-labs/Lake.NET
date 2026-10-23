@@ -138,29 +138,53 @@ internal static class BoundsPruning
     }
 }
 
+/// <summary>
+/// Decoded column metrics of one unit of data (a Parquet row group): counts where known, bounds as physical Iceberg
+/// values of the column's type (null when absent). Null means "unknown", never "zero".
+/// </summary>
+public sealed record ColumnMetrics(long? ValueCount, long? NullCount, long? NanCount, object? Lower, object? Upper);
+
 /// <summary>Can a data or delete file contain rows matching a bound expression, judging by its column metrics?</summary>
 public sealed class MetricsEvaluator(Expression bound)
 {
     private readonly Expression _expr = Expr.RewriteNot(bound);
 
-    public bool MightMatch(DataFile file) => file.RecordCount != 0 && Eval(_expr, file);
+    public bool MightMatch(DataFile file) => file.RecordCount != 0 && Eval(_expr, p => FileMetrics(p, file));
 
-    private static bool Eval(Expression e, DataFile f) => e switch
+    /// <summary>
+    /// The same inclusive test on already decoded metrics (Parquet row-group statistics), keyed by field ID:
+    /// <paramref name="metricsOf"/> gets a field ID and the type its values must be decoded as, and returns null for a
+    /// column without statistics, which never prunes.
+    /// </summary>
+    public bool MightMatch(long recordCount, Func<int, IcebergType, ColumnMetrics?> metricsOf) =>
+        recordCount != 0 && Eval(_expr, p => metricsOf(p.FieldId, p.Type) ?? Unknown);
+
+    private static readonly ColumnMetrics Unknown = new(null, null, null, null, null);
+
+    private static ColumnMetrics FileMetrics(BoundPredicate p, DataFile f)
+    {
+        static long? Count(IReadOnlyDictionary<int, long>? counts, int id) => counts is not null && counts.TryGetValue(id, out var n) ? n : null;
+        return new ColumnMetrics(
+            Count(f.ValueCounts, p.FieldId),
+            Count(f.NullValueCounts, p.FieldId),
+            Count(f.NanValueCounts, p.FieldId),
+            BoundsPruning.Decode(p.Type, f.LowerBounds?.GetValueOrDefault(p.FieldId)),
+            BoundsPruning.Decode(p.Type, f.UpperBounds?.GetValueOrDefault(p.FieldId)));
+    }
+
+    private static bool Eval(Expression e, Func<BoundPredicate, ColumnMetrics> metrics) => e switch
     {
         AlwaysTrue => true,
         AlwaysFalse => false,
-        And a => Eval(a.Left, f) && Eval(a.Right, f),
-        Or o => Eval(o.Left, f) || Eval(o.Right, f),
-        BoundPredicate p => Test(p, f),
+        And a => Eval(a.Left, metrics) && Eval(a.Right, metrics),
+        Or o => Eval(o.Left, metrics) || Eval(o.Right, metrics),
+        BoundPredicate p => Test(p, metrics(p)),
         _ => throw new ArgumentException($"Expression is not bound: {e}"),
     };
 
-    private static bool Test(BoundPredicate p, DataFile f)
+    private static bool Test(BoundPredicate p, ColumnMetrics m)
     {
-        static long? Count(IReadOnlyDictionary<int, long>? counts, int id) => counts is not null && counts.TryGetValue(id, out var n) ? n : null;
-        var values = Count(f.ValueCounts, p.FieldId);
-        var nulls = Count(f.NullValueCounts, p.FieldId);
-        var nans = Count(f.NanValueCounts, p.FieldId);
+        var (values, nulls, nans) = (m.ValueCount, m.NullCount, m.NanCount);
         var allNull = values is not null && nulls == values;
         switch (p.Op)
         {
@@ -170,10 +194,7 @@ public sealed class MetricsEvaluator(Expression bound)
             case Operation.NotNaN: return !(values is not null && nans == values);
         }
         var noComparable = values is not null && (nulls ?? 0) + (nans ?? 0) == values && (nulls is not null || nans is not null);
-        return BoundsPruning.MightMatch(p,
-            BoundsPruning.Decode(p.Type, f.LowerBounds?.GetValueOrDefault(p.FieldId)),
-            BoundsPruning.Decode(p.Type, f.UpperBounds?.GetValueOrDefault(p.FieldId)),
-            noComparable);
+        return BoundsPruning.MightMatch(p, m.Lower, m.Upper, noComparable);
     }
 }
 

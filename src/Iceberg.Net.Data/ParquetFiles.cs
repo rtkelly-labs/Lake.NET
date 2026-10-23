@@ -1,12 +1,24 @@
+using System.Runtime.CompilerServices;
 using ParquetSharp;
 using ParquetSharp.IO;
 using ParquetSharp.Schema;
+using Iceberg.Net.Expressions;
 using Iceberg.Net.Manifests;
 using Iceberg.Net.IO;
 using Iceberg.Net.Types;
 using TimeUnit = ParquetSharp.TimeUnit;
 
 namespace Iceberg.Net.Data;
+
+/// <summary>Parquet writer layout: rows per row group (default: one group per file) and whether footer statistics are written.</summary>
+public sealed record ParquetWriteOptions
+{
+    public static ParquetWriteOptions Default { get; } = new();
+    /// <summary>Rows per row group; null or ≤ 0 for a single row group.</summary>
+    public int? RowGroupRows { get; init; }
+    /// <summary>Write column-chunk min/max/null-count statistics (as other writers may not).</summary>
+    public bool Statistics { get; init; } = true;
+}
 
 /// <summary>
 /// Parquet data files with Iceberg field IDs. Rows are <c>object?[]</c> aligned to the schema's top-level
@@ -66,6 +78,17 @@ public static class ParquetFiles
     }
 
     /// <summary>Write rows to a Parquet file at <paramref name="location"/> and return the Iceberg <see cref="DataFile"/> with metrics.</summary>
+    public static Task<DataFile> WriteAsync(
+        IFileIO io,
+        string location,
+        Schema schema,
+        int specId,
+        IReadOnlyList<object?> partition,
+        IReadOnlyList<object?[]> rows,
+        CancellationToken ct = default) =>
+        WriteAsync(io, location, schema, specId, partition, rows, ParquetWriteOptions.Default, ct);
+
+    /// <summary>As <see cref="WriteAsync(IFileIO, string, Schema, int, IReadOnlyList{object?}, IReadOnlyList{object?[]}, CancellationToken)"/>, with row-group layout and statistics options.</summary>
     public static async Task<DataFile> WriteAsync(
         IFileIO io,
         string location,
@@ -73,11 +96,15 @@ public static class ParquetFiles
         int specId,
         IReadOnlyList<object?> partition,
         IReadOnlyList<object?[]> rows,
+        ParquetWriteOptions options,
         CancellationToken ct = default)
     {
         var columns = schema.Columns;
         using var root = new GroupNode("table", Repetition.Required, columns.Select(ToNode).ToArray());
-        using var props = new WriterPropertiesBuilder().Compression(Compression.Zstd).Build();
+        using var builder = new WriterPropertiesBuilder().Compression(Compression.Zstd);
+        if (!options.Statistics) builder.DisableStatistics();
+        using var props = builder.Build();
+        var groupRows = options.RowGroupRows is > 0 and var g ? g : int.MaxValue;
         var leafIds = new List<int>(); // field ID of each Parquet leaf column, in file order
         byte[] bytes;
         using (var ms = new MemoryStream())
@@ -85,26 +112,34 @@ public static class ParquetFiles
             using (var output = new ManagedOutputStream(ms, leaveOpen: true))
             using (var writer = new ParquetFileWriter(output, root, props))
             {
-                using (var rg = writer.AppendRowGroup())
+                // One row group per RowGroupRows rows (at least one, so an empty file still has a schema'd group).
+                for (var start = 0; start == 0 || start < rows.Count; start += groupRows)
                 {
+                    var slice = rows.Skip(start).Take(groupRows).ToList();
+                    var first = start == 0;
+                    using var rg = writer.AppendRowGroup();
+                    var leafCount = 0;
                     for (var c = 0; c < columns.Count; c++)
                     {
                         if (columns[c].Type.IsPrimitive)
                         {
                             using var col = rg.NextColumn();
-                            WriteColumn(col, columns[c], rows.Select(r => r[c]).ToArray());
-                            leafIds.Add(columns[c].Id);
+                            WriteColumn(col, columns[c], slice.Select(r => r[c]).ToArray());
+                            if (first) leafIds.Add(columns[c].Id);
+                            leafCount++;
                             continue;
                         }
-                        var plan = NestedColumns.Plan(columns[c], leafIds.Count);
-                        NestedColumns.Shred(plan, rows.Select(r => r[c]));
+                        var plan = NestedColumns.Plan(columns[c], leafCount);
+                        NestedColumns.Shred(plan, slice.Select(r => r[c]));
                         foreach (var leaf in plan.Leaves)
                         {
                             using var col = rg.NextColumn();
                             NestedColumns.WriteLeaf(col, leaf);
-                            leafIds.Add(leaf.FieldId);
+                            if (first) leafIds.Add(leaf.FieldId);
+                            leafCount++;
                         }
                     }
+                    if (rows.Count == 0) break;
                 }
                 writer.Close();
             }
@@ -114,9 +149,18 @@ public static class ParquetFiles
         long[] chunkSizes;
         using (var input = new ManagedRandomAccessFile(new MemoryStream(bytes)))
         using (var check = new ParquetFileReader(input))
-        using (var group = check.RowGroup(0))
         {
-            chunkSizes = Enumerable.Range(0, leafIds.Count).Select(i => group.MetaData.GetColumnChunkMetaData(i).TotalCompressedSize).ToArray();
+            chunkSizes = new long[leafIds.Count];
+            using var meta = check.FileMetaData;
+            for (var rg = 0; rg < meta.NumRowGroups; rg++)
+            {
+                using var group = check.RowGroup(rg);
+                for (var i = 0; i < leafIds.Count; i++)
+                {
+                    using var chunk = group.MetaData.GetColumnChunkMetaData(i);
+                    chunkSizes[i] += chunk.TotalCompressedSize;
+                }
+            }
         }
         await io.WriteAsync(location, bytes, overwrite: false, ct);
 
@@ -257,83 +301,147 @@ public static class ParquetFiles
     /// <param name="mapping">Resolves columns of files written without field IDs; defaults to current column names.</param>
     public static async Task<List<object?[]>> ReadAsync(IFileIO io, string location, Schema projection, NameMapping? mapping, CancellationToken ct = default)
     {
+        var rows = new List<object?[]>();
+        await foreach (var batch in ReadBatchesAsync(io, location, projection, mapping, null, ct)) rows.AddRange(batch.Rows);
+        return rows;
+    }
+
+    /// <summary>
+    /// Stream a data file one row group at a time, decoding only the leaf columns of <paramref name="projection"/>'s
+    /// top-level columns. With <see cref="DataFileReadOptions.Filter"/>, row groups whose footer statistics rule the
+    /// filter out (inclusive metrics evaluation, by field ID) are skipped; batch positions stay absolute file positions.
+    /// </summary>
+    public static async IAsyncEnumerable<DataFileBatch> ReadBatchesAsync(IFileIO io, string location, Schema projection, NameMapping? mapping,
+        DataFileReadOptions? options, [EnumeratorCancellation] CancellationToken ct = default)
+    {
         var bytes = await io.ReadAllAsync(location, ct);
         using var input = new ManagedRandomAccessFile(new MemoryStream(bytes));
         using var reader = new ParquetFileReader(input);
         using var meta = reader.FileMetaData;
-        var numRows = checked((int)meta.NumRows);
-
-        var byFieldId = new Dictionary<int, int>();
-        var byName = new Dictionary<string, int>();
-        for (var i = 0; i < meta.NumColumns; i++)
+        var layout = FileLayout.Of(meta, projection, mapping);
+        var evaluator = options?.Filter is { } filter && filter is not AlwaysTrue ? new MetricsEvaluator(filter) : null;
+        var metrics = options?.Metrics;
+        var groups = meta.NumRowGroups;
+        long position = 0;
+        for (var rg = 0; rg < groups; rg++)
         {
-            var descr = meta.Schema.Column(i);
-            using var node = descr.SchemaNode;
-            if (node.FieldId >= 0) byFieldId[node.FieldId] = i;
-            byName[descr.Path.ToDotString()] = i;
+            ct.ThrowIfCancellationRequested();
+            using var group = reader.RowGroup(rg);
+            var groupMeta = group.MetaData;
+            var n = checked((int)groupMeta.NumRows);
+            if (evaluator is not null && !evaluator.MightMatch(n, (id, type) => layout.StatisticsFor(groupMeta, id, type, n)))
+            {
+                metrics?.RowGroupSkipped(n);
+                position += n;
+                continue;
+            }
+            var rows = new object?[n][];
+            for (var r = 0; r < n; r++) rows[r] = new object?[projection.Columns.Count];
+            for (var c = 0; c < projection.Columns.Count; c++)
+            {
+                var f = projection.Columns[c];
+                switch (layout.Sources[c])
+                {
+                    case ColumnSource.Missing m:
+                        for (var r = 0; r < n; r++) rows[r][c] = m.Default;
+                        break;
+                    case ColumnSource.Leaf l:
+                    {
+                        using var col = group.Column(l.Column);
+                        var values = ReadColumn(col, f.Type, n);
+                        for (var r = 0; r < n; r++) rows[r][c] = values[r];
+                        break;
+                    }
+                    case ColumnSource.Nested nested:
+                        NestedColumns.Load(group, nested.Tree);
+                        for (var r = 0; r < n; r++) rows[r][c] = NestedColumns.Project(NestedColumns.Assemble(nested.Tree), nested.Tree, f.Type, FromPhysical);
+                        break;
+                }
+            }
+            metrics?.RowGroupRead(n);
+            yield return new DataFileBatch(position, rows);
+            position += n;
         }
-        // Top-level fields (nested columns span several leaves), with the index of their first leaf column.
-        var topLevel = new List<(Node Node, int FirstColumn)>();
+    }
+
+    /// <summary>Where each projected column comes from in a file, and which leaf holds each field ID's statistics.</summary>
+    private abstract record ColumnSource
+    {
+        public sealed record Missing(object? Default) : ColumnSource;
+        public sealed record Leaf(int Column) : ColumnSource;
+        public sealed record Nested(NestedColumns.PNode Tree) : ColumnSource;
+    }
+
+    private sealed class FileLayout
+    {
+        public required ColumnSource[] Sources { get; init; }
+        /// <summary>Field ID → leaf column index, for leaves outside lists and maps (one value per row).</summary>
+        public required Dictionary<int, int> StatsLeaves { get; init; }
+        public required SchemaDescriptor Descriptor { get; init; }
+
+        public static FileLayout Of(FileMetaData meta, Schema projection, NameMapping? mapping)
         {
-            var root = meta.Schema.GroupNode;
+            var schema = meta.Schema;
+            var byFieldId = new Dictionary<int, int>();
+            var byName = new Dictionary<string, int>();
+            var statsLeaves = new Dictionary<int, int>();
+            for (var i = 0; i < meta.NumColumns; i++)
+            {
+                var descr = schema.Column(i);
+                using var node = descr.SchemaNode;
+                if (node.FieldId >= 0)
+                {
+                    byFieldId[node.FieldId] = i;
+                    if (descr.MaxRepetitionLevel == 0) statsLeaves[node.FieldId] = i;
+                }
+                byName[descr.Path.ToDotString()] = i;
+            }
+            var hasIds = byFieldId.Count > 0;
+            // Top-level fields (nested columns span several leaves), with the index of their first leaf column.
+            var topLevel = new List<(Node Node, int FirstColumn)>();
             var column = 0;
-            foreach (var child in root.Fields)
+            foreach (var child in schema.GroupNode.Fields)
             {
                 topLevel.Add((child, column));
                 column += CountLeaves(child);
             }
-        }
 
-        var result = Enumerable.Range(0, numRows).Select(_ => new object?[projection.Columns.Count]).ToList();
-        for (var c = 0; c < projection.Columns.Count; c++)
-        {
-            var f = projection.Columns[c];
-            if (!f.Type.IsPrimitive)
+            IReadOnlyList<string> NamesOf(NestedField f) => mapping?.NamesFor(f.Id) is { Count: > 0 } ns ? ns : [f.Name];
+            var sources = new ColumnSource[projection.Columns.Count];
+            for (var c = 0; c < sources.Length; c++)
             {
-                var top = byFieldId.Count > 0
-                    ? topLevel.FindIndex(t => t.Node.FieldId == f.Id)
-                    : topLevel.FindIndex(t => (mapping?.NamesFor(f.Id) is { Count: > 0 } ns ? ns : [f.Name]).Contains(t.Node.Name));
-                if (top < 0)
+                var f = projection.Columns[c];
+                if (!f.Type.IsPrimitive)
                 {
-                    var missing = Defaults.ToValue(f.Type, f.InitialDefault);
-                    foreach (var row in result) row[c] = missing;
+                    var top = hasIds
+                        ? topLevel.FindIndex(t => t.Node.FieldId == f.Id)
+                        : topLevel.FindIndex(t => NamesOf(f).Contains(t.Node.Name));
+                    if (top < 0)
+                    {
+                        sources[c] = new ColumnSource.Missing(Defaults.ToValue(f.Type, f.InitialDefault));
+                        continue;
+                    }
+                    var first = topLevel[top].FirstColumn;
+                    sources[c] = new ColumnSource.Nested(NestedColumns.FromFile(topLevel[top].Node, ref first));
                     continue;
                 }
-                var column = topLevel[top].FirstColumn;
-                var tree = NestedColumns.FromFile(topLevel[top].Node, ref column);
-                var at = 0;
-                for (var rg = 0; rg < reader.FileMetaData.NumRowGroups; rg++)
+                var colIndex = -1;
+                var found = byFieldId.TryGetValue(f.Id, out colIndex)
+                    || (!hasIds && NamesOf(f).Any(n => byName.TryGetValue(n, out colIndex)));
+                if (!found)
                 {
-                    using var group = reader.RowGroup(rg);
-                    var rgRows = checked((int)group.MetaData.NumRows);
-                    NestedColumns.Load(group, tree);
-                    for (var r = 0; r < rgRows; r++) result[at + r][c] = NestedColumns.Project(NestedColumns.Assemble(tree), tree, f.Type, FromPhysical);
-                    at += rgRows;
+                    sources[c] = new ColumnSource.Missing(Defaults.ToValue(f.Type, f.InitialDefault));
+                    continue;
                 }
-                continue;
+                sources[c] = new ColumnSource.Leaf(colIndex);
+                if (!hasIds && schema.Column(colIndex).MaxRepetitionLevel == 0) statsLeaves[f.Id] = colIndex;
             }
-            var colIndex = -1;
-            var found = byFieldId.TryGetValue(f.Id, out colIndex)
-                || (byFieldId.Count == 0 && (mapping?.NamesFor(f.Id) is { Count: > 0 } names ? names : [f.Name]).Any(n => byName.TryGetValue(n, out colIndex)));
-            if (!found)
-            {
-                var def = Defaults.ToValue(f.Type, f.InitialDefault);
-                foreach (var row in result) row[c] = def;
-                continue;
-            }
-
-            var offset = 0;
-            for (var rg = 0; rg < reader.FileMetaData.NumRowGroups; rg++)
-            {
-                using var group = reader.RowGroup(rg);
-                var rgRows = checked((int)group.MetaData.NumRows);
-                using var col = group.Column(colIndex);
-                var values = ReadColumn(col, f.Type, rgRows);
-                for (var r = 0; r < rgRows; r++) result[offset + r][c] = values[r];
-                offset += rgRows;
-            }
+            return new FileLayout { Sources = sources, StatsLeaves = statsLeaves, Descriptor = schema };
         }
-        return result;
+
+        /// <summary>A row group's statistics for one field, or null when the file has none usable for it.</summary>
+        public ColumnMetrics? StatisticsFor(RowGroupMetaData group, int fieldId, IcebergType type, long rows) =>
+            StatsLeaves.TryGetValue(fieldId, out var leaf) ? RowGroupStatistics.For(group, Descriptor.Column(leaf), leaf, type, rows) : null;
     }
 
     private static object?[] ReadColumn(ColumnReader col, IcebergType type, int n) => type.TypeId switch
@@ -389,6 +497,114 @@ public static class ParquetFiles
         col.ColumnDescriptor.MaxDefinitionLevel == 0
             ? col.LogicalReader<T>().ReadAll(n).Select(v => (object?)v).ToArray()
             : col.LogicalReader<T?>().ReadAll(n).Select(v => (object?)v).ToArray();
+}
+
+/// <summary>
+/// Parquet row-group footer statistics as Iceberg <see cref="ColumnMetrics"/>, converted exactly as the reader converts
+/// values (promoted int → long and float → double, unscaled decimals), so pruning agrees with reading. Statistics are
+/// optional and partly untrustworthy across writers, so anything doubtful becomes "unknown" (never prunes):
+/// <list type="bullet">
+/// <item>no statistics, or no min/max: no bounds;</item>
+/// <item>a sort order other than the one Iceberg compares with (signed numerics, unsigned bytes): no bounds;</item>
+/// <item>a null count of 0 is trusted only alongside min/max (some writers omit null_count, which reads as 0);</item>
+/// <item>string bounds that are not valid UTF-8 (a truncated max can split a character): that bound dropped. A
+/// truncated min is a prefix and a truncated max is rounded up by the writer, so both stay valid bounds;</item>
+/// <item>uuid, fixed-width/binary decimals and INT96: no bounds (orderings writers disagree on).</item>
+/// </list>
+/// NaN counts are not in Parquet statistics, so they are unknown; NaN bounds are ignored by the evaluator.
+/// </summary>
+internal static class RowGroupStatistics
+{
+    private static readonly System.Text.UTF8Encoding StrictUtf8 = new(encoderShouldEmitUTF8Identifier: false, throwOnInvalidBytes: true);
+
+    public static ColumnMetrics? For(RowGroupMetaData group, ColumnDescriptor descr, int leaf, IcebergType type, long rows)
+    {
+        using var chunk = group.GetColumnChunkMetaData(leaf);
+        if (!chunk.IsStatsSet) return null;
+        using var stats = chunk.Statistics;
+        if (stats is null) return null;
+        var hasMinMax = stats.HasMinMax;
+        long? nulls = hasMinMax || stats.NullCount > 0 ? stats.NullCount : null;
+        object? lower = null, upper = null;
+        if (hasMinMax && Comparable(descr, type))
+        {
+            try
+            {
+                lower = Convert(stats, min: true, descr, type);
+                upper = Convert(stats, min: false, descr, type);
+            }
+            catch (Exception e) when (e is ArgumentException or InvalidCastException or OverflowException or NotSupportedException)
+            {
+                lower = upper = null;
+            }
+        }
+        return new ColumnMetrics(rows, nulls, null, lower, upper);
+    }
+
+    /// <summary>Whether the file's ordering for this column is the one Iceberg compares values with.</summary>
+    private static bool Comparable(ColumnDescriptor descr, IcebergType type) => (descr.PhysicalType, type.TypeId) switch
+    {
+        (PhysicalType.Boolean, TypeId.Boolean) => true,
+        (PhysicalType.Int32, TypeId.Int or TypeId.Date or TypeId.Long or TypeId.Decimal) => descr.SortOrder == SortOrder.Signed,
+        (PhysicalType.Int64, TypeId.Long or TypeId.Time or TypeId.Timestamp or TypeId.TimestampTz or TypeId.TimestampNs or TypeId.TimestampTzNs or TypeId.Decimal) =>
+            descr.SortOrder == SortOrder.Signed,
+        (PhysicalType.Float, TypeId.Float or TypeId.Double) or (PhysicalType.Double, TypeId.Double) => descr.SortOrder == SortOrder.Signed,
+        (PhysicalType.ByteArray, TypeId.String or TypeId.Binary) => descr.SortOrder == SortOrder.Unsigned,
+        (PhysicalType.FixedLenByteArray, TypeId.Fixed) => descr.SortOrder == SortOrder.Unsigned,
+        _ => false,
+    };
+
+    private static object? Convert(Statistics stats, bool min, ColumnDescriptor descr, IcebergType type)
+    {
+        switch (stats)
+        {
+            case Statistics<bool> b: return min ? b.Min : b.Max;
+            case Statistics<int> i:
+            {
+                var v = min ? i.Min : i.Max;
+                return type switch
+                {
+                    DecimalType d => new IcebergDecimal(v, d.Scale),
+                    PrimitiveType { TypeId: TypeId.Long } => (long)v,
+                    _ => v,
+                };
+            }
+            case Statistics<long> l:
+            {
+                var v = min ? l.Min : l.Max;
+                return type is DecimalType d ? new IcebergDecimal(v, d.Scale) : v;
+            }
+            case Statistics<float> f:
+            {
+                var v = min ? f.Min : f.Max;
+                return type.TypeId == TypeId.Double ? (double)v : v;
+            }
+            case Statistics<double> d: return min ? d.Min : d.Max;
+            case Statistics<ByteArray> ba:
+            {
+                var v = min ? ba.Min : ba.Max;
+                var bytes = new byte[v.Length];
+                if (v.Length > 0) System.Runtime.InteropServices.Marshal.Copy(v.Pointer, bytes, 0, v.Length);
+                if (type.TypeId != TypeId.String) return bytes;
+                try
+                {
+                    return StrictUtf8.GetString(bytes);
+                }
+                catch (System.Text.DecoderFallbackException)
+                {
+                    return null; // e.g. a max truncated inside a multi-byte character: no bound
+                }
+            }
+            case Statistics<FixedLenByteArray> fl:
+            {
+                var v = min ? fl.Min : fl.Max;
+                var bytes = new byte[descr.TypeLength];
+                System.Runtime.InteropServices.Marshal.Copy(v.Pointer, bytes, 0, bytes.Length);
+                return bytes;
+            }
+            default: return null;
+        }
+    }
 }
 
 /// <summary>Column metrics computed from the written values (independent of Parquet statistics).</summary>
