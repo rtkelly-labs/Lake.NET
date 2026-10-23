@@ -4,6 +4,7 @@ Runs inside the apache/spark image via spark-submit (see TestSupport/SparkOracle
 
     read-metadata <metadata.json>   load the table from its metadata file and print rows, snapshots, deletes, lineage
     read-tables <metadata.json>...  the same for many tables in one JVM: {location: description | {"error": ...}}
+                                    an argument "query:<json>" is instead a read query (see run_query), keyed by itself
     fixtures <out_dir>              write reference tables (DVs, position deletes, row lineage) with Spark
 
 Output is the JSON document after the last @@ORACLE@@ marker on stdout; Spark's own logging goes to stderr.
@@ -140,11 +141,43 @@ def describe_metadata_file(spark: SparkSession, location: str) -> dict[str, Any]
     )
 
 
+def run_query(spark: SparkSession, spec: dict[str, Any]) -> dict[str, Any]:
+    """One read: {"location", "version_as_of"?, "timestamp_as_of"? (UTC 'yyyy-MM-dd HH:mm:ss.SSS'), "where"?, "columns"?}.
+
+    versionAsOf/timestampAsOf are Spark's time-travel options, the DataFrame form of VERSION AS OF / TIMESTAMP AS OF.
+    """
+    zone = spark.conf.get("spark.sql.session.timeZone")
+    spark.conf.set("spark.sql.session.timeZone", "UTC")
+    try:
+        reader = spark.read.format("iceberg")
+        if "version_as_of" in spec:
+            reader = reader.option("versionAsOf", str(spec["version_as_of"]))
+        if "timestamp_as_of" in spec:
+            reader = reader.option("timestampAsOf", spec["timestamp_as_of"])
+        df = reader.load(spec["location"])
+        if spec.get("where"):
+            df = df.where(spec["where"])
+        if spec.get("columns"):
+            df = df.select(*spec["columns"])
+        rows = df.collect()
+    finally:
+        spark.conf.set("spark.sql.session.timeZone", zone)
+    return {
+        "columns": df.columns,
+        "rows": [{k: to_jsonable(v) for k, v in r.asDict().items()} for r in rows],
+    }
+
+
 def cmd_read_tables(locations: list[str]) -> dict[str, Any]:
     spark = session()
     result: dict[str, Any] = {}
     for location in locations:
         try:
+            if location.startswith("query:"):
+                result[location] = run_query(
+                    spark, json.loads(location[len("query:") :])
+                )
+                continue
             result[location] = describe_metadata_file(spark, location)
         except Exception as e:  # noqa: BLE001 - report per table; one bad table must not hide the others
             java = getattr(e, "java_exception", None)
