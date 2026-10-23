@@ -59,8 +59,9 @@ public sealed record ManifestsRow(
 
 /// <summary>
 /// A row of the <c>files</c>, <c>data_files</c> and <c>delete_files</c> metadata tables (<see cref="Content"/>: 0 data,
-/// 1 position deletes, 2 equality deletes). <see cref="Partition"/> maps partition field names to their stored
-/// (physical) values; metric maps are keyed by field ID with bounds in single-value binary form, as Spark shows them.
+/// 1 position deletes, 2 equality deletes). <see cref="Partition"/> maps the table's unified partition fields (every
+/// partition field of every spec, as Spark shows them) to the file's stored (physical) values, null for a field its spec
+/// lacks; metric maps are keyed by field ID with bounds in single-value binary form, as Spark shows them.
 /// </summary>
 public sealed record FilesRow(
     int Content, string FilePath, string FileFormat, int SpecId, IReadOnlyDictionary<string, object?> Partition,
@@ -186,11 +187,12 @@ public static class MetadataTables
         var snapshot = TimeTravel.Resolve(m, at ?? SnapshotSelector.Current);
         if (snapshot is null) return [];
         var rows = new List<EntriesRow>();
+        var unified = UnifiedPartitionFields(m);
         foreach (var mf in await TableScan.ManifestsAsync(table, snapshot, ct))
         {
             var spec = m.SpecById(mf.PartitionSpecId);
             foreach (var e in ManifestCodec.ReadManifest(await table.IO.ReadAllAsync(mf.ManifestPath, ct), spec, m.CurrentSchema, mf).Entries)
-                rows.Add(new EntriesRow((int)e.Status, e.SnapshotId, e.SequenceNumber, e.FileSequenceNumber, File(spec, e.DataFile with { SpecId = mf.PartitionSpecId })));
+                rows.Add(new EntriesRow((int)e.Status, e.SnapshotId, e.SequenceNumber, e.FileSequenceNumber, File(unified, spec, e.DataFile with { SpecId = mf.PartitionSpecId })));
         }
         return rows;
     }
@@ -200,9 +202,7 @@ public static class MetadataTables
         var m = table.Metadata;
         var snapshot = TimeTravel.Resolve(m, at ?? SnapshotSelector.Current);
         if (snapshot is null) return [];
-        // The unified partition type: every partition field ever defined, by field ID, in order of first definition.
-        var unified = m.PartitionSpecs.OrderBy(s => s.SpecId).SelectMany(s => s.Fields).Where(f => f.Transform is not VoidTransform)
-            .DistinctBy(f => f.FieldId).ToList();
+        var unified = UnifiedPartitionFields(m);
         var groups = new Dictionary<string, Acc>(StringComparer.Ordinal);
         foreach (var mf in await TableScan.ManifestsAsync(table, snapshot, ct))
         {
@@ -211,7 +211,7 @@ public static class MetadataTables
             {
                 if (e.Status == ManifestEntryStatus.Deleted) continue;
                 var f = e.DataFile;
-                var values = unified.Select(u => spec.Fields.ToList().FindIndex(sf => sf.FieldId == u.FieldId) is var i and >= 0 && i < f.Partition.Count ? f.Partition[i] : null).ToList();
+                var values = UnifiedValues(unified, spec, f);
                 var key = string.Join('\u001f', values.Select(v => v is byte[] b ? Convert.ToHexString(b) : Convert.ToString(v, CultureInfo.InvariantCulture) ?? "\0"));
                 if (!groups.TryGetValue(key, out var acc))
                     groups[key] = acc = new Acc(unified.Select((u, i) => KeyValuePair.Create(u.Name, values[i])).ToDictionary(kv => kv.Key, kv => kv.Value));
@@ -245,9 +245,17 @@ public static class MetadataTables
         public Snapshot? LastUpdated;
     }
 
-    private static FilesRow File(PartitionSpec spec, DataFile f) => new(
+    /// <summary>Java's <c>Partitioning.partitionType</c>: every non-void partition field of every spec, by field ID, in order of first definition.</summary>
+    private static List<PartitionField> UnifiedPartitionFields(TableMetadata m) =>
+        m.PartitionSpecs.OrderBy(s => s.SpecId).SelectMany(s => s.Fields).Where(f => f.Transform is not VoidTransform).DistinctBy(f => f.FieldId).ToList();
+
+    private static List<object?> UnifiedValues(List<PartitionField> unified, PartitionSpec spec, DataFile f) =>
+        unified.Select(u => spec.Fields.ToList().FindIndex(sf => sf.FieldId == u.FieldId) is var i and >= 0 && i < f.Partition.Count && spec.Fields[i].Transform is not VoidTransform
+            ? f.Partition[i] : null).ToList();
+
+    private static FilesRow File(List<PartitionField> unified, PartitionSpec spec, DataFile f) => new(
         (int)f.Content, f.FilePath, f.FileFormat, f.SpecId,
-        spec.Fields.Select((pf, i) => KeyValuePair.Create(pf.Name, i < f.Partition.Count ? f.Partition[i] : null)).ToDictionary(kv => kv.Key, kv => kv.Value),
+        unified.Zip(UnifiedValues(unified, spec, f)).ToDictionary(p => p.First.Name, p => p.Second),
         f.RecordCount, f.FileSizeInBytes, f.ColumnSizes, f.ValueCounts, f.NullValueCounts, f.NanValueCounts, f.LowerBounds, f.UpperBounds,
         f.KeyMetadata, f.SplitOffsets, f.EqualityIds, f.SortOrderId, f.FirstRowId, f.ReferencedDataFile, f.ContentOffset, f.ContentSizeInBytes);
 
