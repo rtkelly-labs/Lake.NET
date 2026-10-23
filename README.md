@@ -31,7 +31,7 @@ No production-grade .NET Iceberg library exists today (see [docs/ports-and-engin
 | Maintenance | Snapshot expiry with file deletion, orphan cleanup, bin-pack and sort compaction, merge-append, manifest rewrite |
 | Proven interop | Spark + Iceberg Java, PyIceberg and Trino read our tables (deletes, DVs, lineage, nested types) and we read theirs; Java REST, Polaris and JDBC catalogs accept our commits; DataSketches reads our sketches |
 
-Not yet: ORC/Avro data files, server-side scan planning, partition transforms or filters on fields inside structs. See [docs/roadmap.md](docs/roadmap.md).
+Not yet: ORC/Avro data files, filters or partitions through lists and maps. See [docs/roadmap.md](docs/roadmap.md).
 
 ## Layout
 

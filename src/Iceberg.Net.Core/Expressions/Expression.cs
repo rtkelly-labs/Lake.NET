@@ -90,6 +90,12 @@ public sealed record BoundPredicate(int Position, int FieldId, string Name, Iceb
 {
     public object Literal => Literals[0];
 
+    /// <summary>For a field inside structs, the positions from the row down to it (<see cref="Position"/> is the first).</summary>
+    public IReadOnlyList<int>? StructPath { get; init; }
+
+    /// <summary>The predicate's value in <paramref name="row"/>.</summary>
+    public object? ValueIn(IReadOnlyList<object?> row) => StructPath is { } path ? Schema.Navigate(row, path) : row[Position];
+
     public override string ToString() => UnboundPredicate.Describe(Name, Op, Literals);
 }
 
@@ -199,6 +205,7 @@ public static class Binder
     /// Bind to the top-level columns of <paramref name="schema"/> (positions are column indexes). Names match exactly,
     /// else case-insensitively when unambiguous. Negations are pushed down first.
     /// </summary>
+    /// <remarks>A dotted name (<c>location.lat</c>) that is not a top-level column binds to a field inside structs.</remarks>
     public static Expression Bind(Schema schema, Expression expression) => BindTo(Expr.RewriteNot(expression), schema.Columns, schema);
 
     private static Expression BindTo(Expression e, IReadOnlyList<NestedField> columns, Schema schema) => e switch
@@ -206,37 +213,50 @@ public static class Binder
         AlwaysTrue or AlwaysFalse or BoundPredicate => e,
         And a => Expr.And(BindTo(a.Left, columns, schema), BindTo(a.Right, columns, schema)),
         Or o => Expr.Or(BindTo(o.Left, columns, schema), BindTo(o.Right, columns, schema)),
-        UnboundPredicate p => BindPredicate(p, columns),
+        UnboundPredicate p => BindPredicate(p, columns, schema),
         _ => throw new ArgumentException($"Cannot bind {e}"),
     };
 
-    private static Expression BindPredicate(UnboundPredicate p, IReadOnlyList<NestedField> columns)
+    private static Expression BindPredicate(UnboundPredicate p, IReadOnlyList<NestedField> columns, Schema schema)
     {
         var position = -1;
         for (var i = 0; i < columns.Count; i++)
             if (columns[i].Name == p.Column) { position = i; break; }
-        if (position < 0)
+        IReadOnlyList<int>? path = null;
+        NestedField field;
+        if (position < 0 && schema.FindField(p.Column) is { } nested && schema.StructPath(nested.Id) is { Count: > 1 } structPath)
         {
-            var matches = columns.Select((c, i) => (c, i)).Where(x => string.Equals(x.c.Name, p.Column, StringComparison.OrdinalIgnoreCase)).ToList();
-            position = matches.Count == 1 ? matches[0].i : throw new ArgumentException($"Cannot find column '{p.Column}' in the schema" + (matches.Count > 1 ? " (ambiguous case-insensitively)" : ""));
+            // A field inside structs, by its full dotted name.
+            (path, position, field) = (structPath, structPath[0], nested);
         }
-        var field = columns[position];
-        if (field.Type is not PrimitiveType type) throw new NotSupportedException($"Filters on nested column '{field.Name}' are not supported");
+        else
+        {
+            if (position < 0)
+            {
+                var matches = columns.Select((c, i) => (c, i)).Where(x => string.Equals(x.c.Name, p.Column, StringComparison.OrdinalIgnoreCase)).ToList();
+                position = matches.Count == 1 ? matches[0].i : throw new ArgumentException($"Cannot find column '{p.Column}' in the schema" + (matches.Count > 1 ? " (ambiguous case-insensitively)" : ""));
+            }
+            field = columns[position];
+        }
+        if (field.Type is not PrimitiveType type)
+            throw new NotSupportedException($"Filters on '{p.Column}' are not supported: it is a {field.Type.TypeId}, not a primitive (filter on a field inside it, e.g. '{p.Column}.<field>')");
+        // A required field inside an optional struct is still null when the struct is.
+        var alwaysPresent = path is null ? field.Required : schema.AlwaysPresent(field.Id);
 
         switch (p.Op)
         {
             case Operation.IsNaN or Operation.NotNaN when type.TypeId is not (TypeId.Float or TypeId.Double):
                 // Only floating-point values can be NaN.
                 return p.Op == Operation.IsNaN ? Expression.False : Expression.True;
-            case Operation.IsNull when field.Required:
+            case Operation.IsNull when alwaysPresent:
                 return Expression.False;
-            case Operation.NotNull when field.Required:
+            case Operation.NotNull when alwaysPresent:
                 return Expression.True;
             case Operation.StartsWith or Operation.NotStartsWith when type.TypeId != TypeId.String:
                 throw new ArgumentException($"{p.Op} needs a string column; '{field.Name}' is {type}");
         }
         var literals = p.Literals.Select(l => Literals.Convert(type, l, field.Name)).ToList();
-        return new BoundPredicate(position, field.Id, field.Name, type, p.Op, literals);
+        return new BoundPredicate(position, field.Id, p.Column, type, p.Op, literals) { StructPath = path };
     }
 }
 

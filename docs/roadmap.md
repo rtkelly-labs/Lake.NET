@@ -67,6 +67,7 @@ Each of these reproduced with the tests listed, and was fixed:
 | Mutation testing (#9) | Theta merge semantics (`min` vs `max` theta, trimming to k), estimation-mode filtering and Puffin error types were untested |
 | Spark evolved fixture (#7) | Equality deletes refused tables with more than one partition spec; they are now written per (spec, partition) |
 | Arrow cross-check | UUID columns needed Arrow's `arrow.uuid` extension type to match PyIceberg's output |
+| Nested-field filter tests | String bounds were chosen by UTF-16 order, not Iceberg's code-point order, so files mixing U+E000–U+FFFF with supplementary characters could be pruned wrongly |
 | PyIceberg fingerprints (nested types) | PyIceberg 0.12 reads a null `list<struct>` as empty (upstream; [drafted](upstream/pyiceberg-null-list-of-struct.md)) |
 | Java scan-planning oracle | Iceberg Java 1.10's `PlanTableScanResponse` serializer resolves delete-file references by path, so deletion vectors sharing one Puffin file are attributed to the wrong data files (and to files with none). Fixed upstream by 1.12, whose builder derives delete files from the tasks; our client reads both forms, and the fixtures come from 1.12 |
 | netstandard2.0 tests | A `DateOnly` literal passed to the netstandard2.0 build (from a .NET 6+ app) was rejected; now recognised by type name |

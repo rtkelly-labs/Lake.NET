@@ -47,7 +47,7 @@ public static class RowEvaluator
         AlwaysFalse => _ => false,
         And a => Combine(Compile(a.Left), Compile(a.Right), and: true),
         Or o => Combine(Compile(o.Left), Compile(o.Right), and: false),
-        BoundPredicate p => row => Test(p, row[p.Position]),
+        BoundPredicate p => row => Test(p, p.ValueIn(row)),
         Not n => Compile(Expr.RewriteNot(n)),
         _ => throw new ArgumentException($"Expression is not bound: {bound}"),
     };

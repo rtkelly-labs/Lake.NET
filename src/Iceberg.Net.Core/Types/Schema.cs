@@ -41,6 +41,58 @@ public sealed class Schema
 
     public string? FindColumnName(int id) => _nameById.GetValueOrDefault(id);
 
+    /// <summary>
+    /// Positions from a row (aligned to <see cref="Columns"/>) down to field <paramref name="id"/> through enclosing
+    /// structs — <c>[2, 0]</c> for the first field of the third column's struct — or null when the field is inside a
+    /// list or map (no single value per row) or absent.
+    /// </summary>
+    public IReadOnlyList<int>? StructPath(int id)
+    {
+        List<int>? Find(IReadOnlyList<NestedField> fields)
+        {
+            for (var i = 0; i < fields.Count; i++)
+            {
+                if (fields[i].Id == id) return [i];
+                if (fields[i].Type is StructType s && Find(s.Fields) is { } rest) return [i, .. rest];
+            }
+            return null;
+        }
+        return Find(Columns);
+    }
+
+    /// <summary>Whether a field can never be null in a row: it and every struct enclosing it are required.</summary>
+    public bool AlwaysPresent(int id)
+    {
+        var path = StructPath(id);
+        if (path is null) return false;
+        IReadOnlyList<NestedField> fields = Columns;
+        foreach (var p in path)
+        {
+            if (!fields[p].Required) return false;
+            fields = fields[p].Type is StructType s ? s.Fields : [];
+        }
+        return true;
+    }
+
+    /// <summary>Reads field <paramref name="id"/> from a row through its enclosing structs (null when one of them is null).</summary>
+    public Func<object?[], object?> Accessor(int id)
+    {
+        var path = StructPath(id) ?? throw new NotSupportedException($"Field {id} is not reachable through structs (it is inside a list or map, or absent)");
+        if (path.Count == 1) return row => row[path[0]];
+        return row => Navigate(row, path);
+    }
+
+    public static object? Navigate(IReadOnlyList<object?> row, IReadOnlyList<int> path)
+    {
+        var v = row[path[0]];
+        for (var i = 1; i < path.Count; i++)
+        {
+            if (v is not object?[] fields) return null;
+            v = fields[path[i]];
+        }
+        return v;
+    }
+
     public IcebergType? FindType(int id) => FindField(id)?.Type;
 
     public Schema WithId(int schemaId) => new(schemaId, Columns, IdentifierFieldIds);

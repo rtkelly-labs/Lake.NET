@@ -178,10 +178,9 @@ public static class TableWriter
         if (spec.Fields.Any(f => f.Transform is Transforms.UnknownTransform))
             throw new NotSupportedException("Cannot write with a partition spec containing unknown transforms");
 
-        var positions = schema.Columns.Select((c, i) => (c.Id, i)).ToDictionary(x => x.Id, x => x.i);
-        var groups = rows.GroupBy(
-            r => spec.Partition(schema, id => positions.TryGetValue(id, out var p) ? r[p] : throw new NotSupportedException("Partitioning by nested columns is not supported yet")),
-            PartitionComparer.Instance);
+        // Partition sources may be fields inside structs.
+        var accessors = spec.Fields.SelectMany(f => f.AllSourceIds).Distinct().ToDictionary(id => id, schema.Accessor);
+        var groups = rows.GroupBy(r => spec.Partition(schema, id => accessors[id](r)), PartitionComparer.Instance);
 
         var dataDir = table.Metadata.Property("write.data.path", $"{table.Location}/data").TrimEnd('/');
         var index = new Dictionary<object?[], int>(ReferenceEqualityComparer.Instance);

@@ -284,12 +284,12 @@ public static class TableValidator
         if (rows.Count != file.RecordCount) error("DATA-RECORD-COUNT", $"record_count {file.RecordCount} but the file has {rows.Count} rows", file.FilePath);
 
         var spec = m.SpecById(file.SpecId);
-        var positions = schema.Columns.Select((c, i) => (c.Id, i)).ToDictionary(x => x.Id, x => x.i);
-        if (spec.Fields.All(f => positions.ContainsKey(f.SourceId)))
+        if (spec.Fields.All(f => f.AllSourceIds.All(id => schema.StructPath(id) is not null)))
         {
+            var accessors = spec.Fields.SelectMany(f => f.AllSourceIds).Distinct().ToDictionary(id => id, schema.Accessor);
             foreach (var row in rows)
             {
-                var computed = spec.Partition(schema, id => row[positions[id]]);
+                var computed = spec.Partition(schema, id => accessors[id](row));
                 if (!computed.SequenceEqual(file.Partition, PartitionValueComparer.Instance))
                 {
                     error("DATA-PARTITION", $"a row's partition [{string.Join(", ", computed)}] differs from the file's [{string.Join(", ", file.Partition)}]", file.FilePath);

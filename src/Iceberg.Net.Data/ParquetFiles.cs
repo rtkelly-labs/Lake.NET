@@ -405,12 +405,12 @@ internal sealed record Metrics(
     public static Metrics Compute(Schema schema, IReadOnlyList<object?[]> rows)
     {
         var m = new Metrics([], [], [], [], []);
-        for (var c = 0; c < schema.Columns.Count; c++)
+        // Every primitive reachable through structs (a top-level column or a field inside struct columns); leaves
+        // inside lists and maps get none, as in Java (one row holds many of their values).
+        foreach (var (f, path) in Leaves(schema.Columns, []))
         {
-            var f = schema.Columns[c];
             if (RowLineage.IsReserved(f.Id)) continue; // metadata columns carry no column metrics
-            if (!f.Type.IsPrimitive) continue; // nested: metrics are optional, and leaves inside lists/maps have none in Java either
-            var values = rows.Select(r => r[c]).ToList();
+            var values = rows.Select(r => Schema.Navigate(r, path)).ToList();
             m.ValueCounts[f.Id] = values.Count;
             m.NullCounts[f.Id] = values.Count(v => v is null);
             var present = values.Where(v => v is not null).Select(v => v!).ToList();
@@ -423,11 +423,22 @@ internal sealed record Metrics(
             // big-endian bytes; Guid.CompareTo is not) and for binary, rather than risk wrong pruning.
             if (present.Count == 0 || f.Type.TypeId is TypeId.Binary or TypeId.Uuid or TypeId.Fixed) continue;
             if (f.Type.TypeId == TypeId.String && present.Any(v => ((string)v).EnumerateRunes().Count() > StringBoundLimit)) continue;
-            var comparer = Comparer<object>.Create((a, b) => a is string sa ? string.CompareOrdinal(sa, (string)b) : ((IComparable)a).CompareTo(b));
+            // Strings compare by code point (UTF-16 order differs for supplementary characters).
+            var comparer = Comparer<object>.Create((a, b) => a is string sa ? Expressions.ValueComparer.CompareCodePoints(sa, (string)b) : ((IComparable)a).CompareTo(b));
             m.Lower[f.Id] = Conversions.ToBytes(f.Type, present.Min(comparer)!);
             m.Upper[f.Id] = Conversions.ToBytes(f.Type, present.Max(comparer)!);
         }
         return m;
+    }
+
+    private static IEnumerable<(NestedField Field, int[] Path)> Leaves(IReadOnlyList<NestedField> fields, int[] prefix)
+    {
+        for (var i = 0; i < fields.Count; i++)
+        {
+            int[] path = [.. prefix, i];
+            if (fields[i].Type.IsPrimitive) yield return (fields[i], path);
+            else if (fields[i].Type is StructType s) foreach (var leaf in Leaves(s.Fields, path)) yield return leaf;
+        }
     }
 }
 

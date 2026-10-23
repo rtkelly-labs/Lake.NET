@@ -94,6 +94,16 @@ public sealed class SparkTablesFixture : IAsyncLifetime
             Tables["nested_v3"] = new Built(t, (await TableScan.ReadAllAsync(t)).ToDictionary(r => (long)r[0]!), await TableScan.ReadWithLineageAsync(t));
         }
 
+        // Partitioned by fields inside a struct (identity + bucket), with a row-level delete by a nested-field filter.
+        {
+            var spec = Partitioning.PartitionSpec.BuilderFor(ShadowCompareTests.Nested).Identity("place.label").Bucket("place.since", 4).Build();
+            var t = await _catalog.CreateTableAsync(new CreateTableRequest(TableIdentifier.Of("db", "nested_partitioned_v2"), ShadowCompareTests.Nested, spec, FormatVersion: 2));
+            await TableMutations.InsertAsync(t, ShadowCompareTests.NestedRows(60, nullStructLists: true));
+            await TableMutations.DeleteWhereAsync(t, Expr.LessThan("place.lat", 3.0), DeleteStrategy.PositionDeletes);
+            t = await _catalog.LoadTableAsync(t.Identifier);
+            Tables["nested_partitioned_v2"] = new Built(t, (await TableScan.ReadAllAsync(t)).ToDictionary(r => (long)r[0]!), null);
+        }
+
         Spark = await SparkOracle.ReadTablesAsync(Tables.Values.Select(b => b.Table.MetadataLocation!));
     }
 
@@ -161,14 +171,34 @@ public sealed class SparkCrossEngineTests(SparkTablesFixture fx) : IClassFixture
     }
 
     [Spec("Nested Types")]
-    [SkippableFact]
-    public void Spark_reads_the_same_nested_values()
+    [SkippableTheory]
+    [InlineData("nested_v3")]
+    [InlineData("nested_partitioned_v2")]
+    public void Spark_reads_the_same_nested_values(string name)
     {
         Require.Spark();
-        var built = fx.Tables["nested_v3"];
+        var built = fx.Tables[name];
         var schema = built.Table.Schema;
-        Assert.Equal(SparkJson.Rows(schema, built.Rows.Values), SparkJson.Rows(schema, SparkView("nested_v3")["rows"]!.AsArray()));
+        Assert.Equal(SparkJson.Rows(schema, built.Rows.Values), SparkJson.Rows(schema, SparkView(name)["rows"]!.AsArray()));
         Assert.Contains(built.Rows.Values, r => r[4] is null); // the null list<struct> case really is covered
+    }
+
+    /// <summary>Java plans scans of the struct-partitioned table with filters on nested fields; we read its plans like ours.</summary>
+    [Spec("Partitioning")]
+    [SkippableFact]
+    public async Task Java_plans_nested_field_filters_like_we_do()
+    {
+        Require.Spark();
+        var t = fx.Tables["nested_partitioned_v2"].Table;
+        var filters = new[] { Expr.Equal("place.label", "p8"), Expr.GreaterThan("place.lat", 10.0), Expr.IsNull("place.label"), Expr.And(Expr.NotNull("place.since"), Expr.LessThan("id", 40L)) };
+        var plans = await SparkOracle.PlanScansAsync(filters.Select(f => (t.MetadataLocation!, (System.Text.Json.Nodes.JsonNode?)ExpressionJson.ToJson(f))));
+        for (var i = 0; i < filters.Length; i++)
+        {
+            var plan = ServerScanPlan.FromCompletedResponse(plans[i]!, t.Metadata);
+            var ours = await TableScan.PlanAsync(t, filters[i]);
+            Assert.Equal(ours.Tasks.Select(x => x.File.FilePath).Order(), plan.Tasks.Select(x => x.DataFile.FilePath.Replace("file:/", "file:///")).Order()); // same pruning
+            Assert.Equal(SparkJson.Rows(t.Schema, await TableScan.ReadAsync(t, filters[i])), SparkJson.Rows(t.Schema, await ServerSideScan.ReadAsync(t, plan, filters[i])));
+        }
     }
 
     /// <summary>Iceberg Java plans scans of every table we wrote (as a REST server would) and we read its plans exactly.</summary>
