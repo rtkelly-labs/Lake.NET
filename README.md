@@ -21,7 +21,7 @@ No production-grade .NET Iceberg library exists today (see [docs/ports-and-engin
 | Transforms | identity, bucket (Murmur3, all spec vectors), truncate, year/month/day/hour, void, unknown-transform passthrough |
 | Table metadata | v1 read, v2/v3 read+write, full update/requirement state machine (REST-shaped), metadata & snapshot logs, refs, row lineage |
 | Manifests | In-house Avro codec; manifest + manifest list read (v1–v3) and write (v2–v3), field-ID resolution, sequence-number and `first_row_id` inheritance |
-| Data | ParquetSharp data files with field IDs and column metrics, every primitive type plus struct/list/map columns (Dremel levels over the physical API); expression-based scan pruning; append, overwrite, file delete; sorted writes |
+| Data | ParquetSharp data files with field IDs and column metrics, every primitive type plus struct/list/map columns (Dremel levels over the physical API); Avro data and delete files read, and written when `write.format.default=avro`; expression-based scan pruning; append, overwrite, file delete; sorted writes |
 | Write modes | Pure insert, upsert by key, group key replacement, delete by key / predicate / whole files — each one atomic snapshot, re-planned on conflict ([docs/write-modes.md](docs/write-modes.md)) |
 | Delete mechanisms | Copy-on-write, v2 position delete files, v3 deletion vectors (one per data file, merged), equality deletes; v2→v3 converter |
 | Puffin | Container, `deletion-vector-v1` (Roaring64), `apache-datasketches-theta-v1`; NDV statistics files |
@@ -31,7 +31,7 @@ No production-grade .NET Iceberg library exists today (see [docs/ports-and-engin
 | Maintenance | Snapshot expiry with file deletion, orphan cleanup, bin-pack and sort compaction, merge-append, manifest rewrite |
 | Proven interop | Spark + Iceberg Java, PyIceberg and Trino read our tables (deletes, DVs, lineage, nested types) and we read theirs; Java REST, Polaris and JDBC catalogs accept our commits; DataSketches reads our sketches |
 
-Not yet: ORC/Avro data files, filters or partitions through lists and maps. See [docs/roadmap.md](docs/roadmap.md).
+Not yet: ORC data files, filters or partitions through lists and maps. See [docs/roadmap.md](docs/roadmap.md).
 
 ## Layout
 

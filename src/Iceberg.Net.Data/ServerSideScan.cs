@@ -28,7 +28,7 @@ public static class ServerSideScan
         var rows = new List<object?[]>();
         foreach (var task in plan.Tasks)
         {
-            var fileRows = await ParquetFiles.ReadAsync(table.IO, task.DataFile.FilePath, schema, mapping, ct);
+            var fileRows = await DataFiles.ReadAsync(table.IO, task.DataFile, schema, mapping, ct);
             var deleted = task.Deletes.Count == 0 ? null : await deletes.RowFilterAsync(task.DataFile, task.Deletes, schema, ct);
             for (var pos = 0; pos < fileRows.Count; pos++)
             {

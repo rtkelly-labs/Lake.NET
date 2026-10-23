@@ -59,7 +59,7 @@ public static class Compaction
                 var lineage = new List<(long? RowId, long? Seq)>();
                 foreach (var task in group)
                 {
-                    var fileRows = await ParquetFiles.ReadAsync(table.IO, task.File.FilePath, projection, mapping, ct);
+                    var fileRows = await DataFiles.ReadAsync(table.IO, task.File, projection, mapping, ct);
                     var isDeleted = deletes.IsEmpty ? null : await deletes.RowFilterAsync(task.File, task.DataSequenceNumber, schema, ct);
                     for (var pos = 0; pos < fileRows.Count; pos++)
                     {

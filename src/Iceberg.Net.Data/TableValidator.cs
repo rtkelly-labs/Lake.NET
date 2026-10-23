@@ -216,7 +216,7 @@ public static class TableValidator
         if (options.Deep)
         {
             var mapping = NameMapping.ForTable(m.Properties);
-            foreach (var (file, _) in liveData.Where(d => d.File.FileFormat == "PARQUET"))
+            foreach (var (file, _) in liveData.Where(d => d.File.FileFormat is "PARQUET" or "AVRO"))
                 await CheckDataFileAsync(table, file, mapping, error, ct);
         }
         return liveData.Count + liveDeletes.Count;
@@ -278,7 +278,7 @@ public static class TableValidator
         var m = table.Metadata;
         var schema = m.CurrentSchema;
         List<object?[]> rows;
-        try { rows = await ParquetFiles.ReadAsync(table.IO, file.FilePath, schema, mapping, ct); }
+        try { rows = await DataFiles.ReadAsync(table.IO, file, schema, mapping, ct); }
         catch (Exception e) when (e is not OperationCanceledException) { error("DATA-READ", e.Message, file.FilePath); return; }
 
         if (rows.Count != file.RecordCount) error("DATA-RECORD-COUNT", $"record_count {file.RecordCount} but the file has {rows.Count} rows", file.FilePath);

@@ -23,6 +23,7 @@ Legend: ✅ implemented and tested · 🟡 partial · ⬜ not started · — not
 |---|---|---|---|---|---|
 | Primitive types (boolean … binary) | ✓ | ✓ | ✓ | ✅ model + JSON + Parquet I/O incl. decimal up to P=38 (INT32/INT64/minimal FIXED), uuid and fixed(L); Arrow mapping (`Iceberg.Net.Arrow`) | `MetadataSpecTests`, `NameMappingAndImportTests`, `WideTypesTests`, `ArrowTests`, `ShadowCompareTests` (PyIceberg) |
 | `timestamp_ns`, `timestamptz_ns` | | | ✓ | ✅ model, JSON, transforms, Parquet I/O | `TransformSpecTests` |
+| Data file formats | ✓ | ✓ | ✓ | ✅ Parquet read/write; Avro data and delete files read (field IDs, every logical type, both map encodings) and written when `write.format.default=avro`; ⬜ ORC | `AvroDataFileTests`, `SparkFixtureTests.Reads_spark_avro_data_files_and_writes_on_top`, `SparkCrossEngineTests` (Spark reads our Avro) |
 | `variant` | | | ✓ | 🟡 model + JSON only (no shredding/encoding) | `MetadataSpecTests` |
 | `geometry`, `geography` (CRS, algorithm) | | | ✓ | 🟡 model + JSON only (WKB I/O and bounds not done) | `MetadataSpecTests` |
 | `unknown` | | | ✓ | 🟡 model + JSON + promotion rule | `MetadataSpecTests` |

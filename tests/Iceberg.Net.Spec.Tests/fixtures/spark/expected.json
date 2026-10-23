@@ -1,4 +1,730 @@
 {
+  "avro_v2": {
+    "delete_files": [
+      "1:AVRO",
+      "1:AVRO",
+      "1:AVRO",
+      "1:AVRO"
+    ],
+    "engine": "spark 4.0.1",
+    "format_version": 2,
+    "ids": [
+      1,
+      2,
+      3,
+      4,
+      6,
+      7,
+      8,
+      9,
+      11,
+      12,
+      13,
+      14,
+      16,
+      17,
+      18,
+      19,
+      21,
+      22,
+      23,
+      24,
+      26,
+      27,
+      28,
+      29
+    ],
+    "metadata_location": "file:///tmp/sentric-spark-fixture-root/warehouse/ref/avro_v2/metadata/v4.metadata.json",
+    "operation": "overwrite",
+    "row_count": 24,
+    "rows": [
+      {
+        "amount": "-8.75",
+        "big": "123456789.123456",
+        "codes": {
+          "1": "c1"
+        },
+        "counts": {
+          "a": 1,
+          "b": null
+        },
+        "day": "2024-01-02",
+        "flag": false,
+        "id": 1,
+        "n": 7,
+        "name": "updated",
+        "ntz": 1704164646000007,
+        "point": null,
+        "ratio": 0.25,
+        "raw": "6231",
+        "region": "us",
+        "score": 0.333333,
+        "tags": [
+          "t1",
+          null
+        ],
+        "ts": 1704164646000006
+      },
+      {
+        "amount": "-7.50",
+        "big": "246913578.246912",
+        "codes": {
+          "2": "c2"
+        },
+        "counts": {
+          "a": 2,
+          "b": null
+        },
+        "day": "2024-01-03",
+        "flag": true,
+        "id": 2,
+        "n": 14,
+        "name": "n2",
+        "ntz": 1704164647000007,
+        "point": {
+          "label": "p2",
+          "x": 1.0
+        },
+        "ratio": 0.5,
+        "raw": "6232",
+        "region": "eu",
+        "score": 0.666667,
+        "tags": null,
+        "ts": 1704164647000006
+      },
+      {
+        "amount": "-6.25",
+        "big": "370370367.370368",
+        "codes": {
+          "3": "c3"
+        },
+        "counts": {
+          "a": 3,
+          "b": null
+        },
+        "day": "2024-01-04",
+        "flag": false,
+        "id": 3,
+        "n": 21,
+        "name": "n3",
+        "ntz": 1704164648000007,
+        "point": {
+          "label": null,
+          "x": 1.5
+        },
+        "ratio": 0.75,
+        "raw": "6233",
+        "region": "us",
+        "score": 1.0,
+        "tags": [
+          "t3",
+          null
+        ],
+        "ts": 1704164648000006
+      },
+      {
+        "amount": "-5.00",
+        "big": "493827156.493824",
+        "codes": {
+          "4": "c4"
+        },
+        "counts": {
+          "a": 4,
+          "b": null
+        },
+        "day": "2024-01-05",
+        "flag": true,
+        "id": 4,
+        "n": 28,
+        "name": null,
+        "ntz": 1704164649000007,
+        "point": {
+          "label": "p4",
+          "x": 2.0
+        },
+        "ratio": 1.0,
+        "raw": "6234",
+        "region": "eu",
+        "score": 1.333333,
+        "tags": [
+          "t4",
+          null
+        ],
+        "ts": 1704164649000006
+      },
+      {
+        "amount": "-2.50",
+        "big": "740740734.740736",
+        "codes": {
+          "6": "c6"
+        },
+        "counts": {
+          "a": 6,
+          "b": null
+        },
+        "day": "2024-01-07",
+        "flag": true,
+        "id": 6,
+        "n": 42,
+        "name": "n6",
+        "ntz": 1704164651000007,
+        "point": null,
+        "ratio": 1.5,
+        "raw": "6236",
+        "region": "eu",
+        "score": null,
+        "tags": [
+          "t6",
+          null
+        ],
+        "ts": 1704164651000006
+      },
+      {
+        "amount": "-1.25",
+        "big": "864197523.864192",
+        "codes": {
+          "7": "c7"
+        },
+        "counts": {
+          "a": 7,
+          "b": null
+        },
+        "day": "2024-01-08",
+        "flag": false,
+        "id": 7,
+        "n": 49,
+        "name": "n7",
+        "ntz": 1704164652000007,
+        "point": {
+          "label": "p7",
+          "x": 3.5
+        },
+        "ratio": 1.75,
+        "raw": "6237",
+        "region": "us",
+        "score": 2.333333,
+        "tags": null,
+        "ts": 1704164652000006
+      },
+      {
+        "amount": "0.00",
+        "big": "987654312.987648",
+        "codes": {
+          "8": "c8"
+        },
+        "counts": {
+          "a": 8,
+          "b": null
+        },
+        "day": "2024-01-09",
+        "flag": true,
+        "id": 8,
+        "n": 56,
+        "name": "updated",
+        "ntz": 1704164653000007,
+        "point": {
+          "label": "p8",
+          "x": 4.0
+        },
+        "ratio": 2.0,
+        "raw": "6238",
+        "region": "eu",
+        "score": 2.666667,
+        "tags": [
+          "t8",
+          null
+        ],
+        "ts": 1704164653000006
+      },
+      {
+        "amount": "1.25",
+        "big": "1111111102.111104",
+        "codes": {
+          "9": "c9"
+        },
+        "counts": {
+          "a": 9,
+          "b": null
+        },
+        "day": "2024-01-10",
+        "flag": false,
+        "id": 9,
+        "n": 63,
+        "name": "n9",
+        "ntz": 1704164654000007,
+        "point": {
+          "label": null,
+          "x": 4.5
+        },
+        "ratio": 2.25,
+        "raw": "6239",
+        "region": "us",
+        "score": 3.0,
+        "tags": [
+          "t9",
+          null
+        ],
+        "ts": 1704164654000006
+      },
+      {
+        "amount": "3.75",
+        "big": "1358024680.358016",
+        "codes": {
+          "11": "c11"
+        },
+        "counts": {
+          "a": 11,
+          "b": null
+        },
+        "day": "2024-01-12",
+        "flag": false,
+        "id": 11,
+        "n": 77,
+        "name": "n11",
+        "ntz": 1704164656000007,
+        "point": null,
+        "ratio": 2.75,
+        "raw": "623131",
+        "region": "us",
+        "score": 3.666667,
+        "tags": [
+          "t11",
+          null
+        ],
+        "ts": 1704164656000006
+      },
+      {
+        "amount": "5.00",
+        "big": "1481481469.481472",
+        "codes": {
+          "12": "c12"
+        },
+        "counts": {
+          "a": 12,
+          "b": null
+        },
+        "day": "2024-01-13",
+        "flag": true,
+        "id": 12,
+        "n": 84,
+        "name": null,
+        "ntz": 1704164657000007,
+        "point": {
+          "label": null,
+          "x": 6.0
+        },
+        "ratio": 3.0,
+        "raw": "623132",
+        "region": "eu",
+        "score": null,
+        "tags": null,
+        "ts": 1704164657000006
+      },
+      {
+        "amount": "6.25",
+        "big": "1604938258.604928",
+        "codes": {
+          "13": "c13"
+        },
+        "counts": {
+          "a": 13,
+          "b": null
+        },
+        "day": "2024-01-14",
+        "flag": false,
+        "id": 13,
+        "n": 91,
+        "name": "n13",
+        "ntz": 1704164658000007,
+        "point": {
+          "label": "p13",
+          "x": 6.5
+        },
+        "ratio": 3.25,
+        "raw": "623133",
+        "region": "us",
+        "score": 4.333333,
+        "tags": [
+          "t13",
+          null
+        ],
+        "ts": 1704164658000006
+      },
+      {
+        "amount": "7.50",
+        "big": "1728395047.728384",
+        "codes": {
+          "14": "c14"
+        },
+        "counts": {
+          "a": 14,
+          "b": null
+        },
+        "day": "2024-01-15",
+        "flag": true,
+        "id": 14,
+        "n": 98,
+        "name": "n14",
+        "ntz": 1704164659000007,
+        "point": {
+          "label": "p14",
+          "x": 7.0
+        },
+        "ratio": 3.5,
+        "raw": "623134",
+        "region": "eu",
+        "score": 4.666667,
+        "tags": [
+          "t14",
+          null
+        ],
+        "ts": 1704164659000006
+      },
+      {
+        "amount": "10.00",
+        "big": "1975308625.975296",
+        "codes": {
+          "16": "c16"
+        },
+        "counts": {
+          "a": 16,
+          "b": null
+        },
+        "day": "2024-01-17",
+        "flag": true,
+        "id": 16,
+        "n": 112,
+        "name": null,
+        "ntz": 1704164661000007,
+        "point": null,
+        "ratio": 4.0,
+        "raw": "623136",
+        "region": "eu",
+        "score": 5.333333,
+        "tags": [
+          "t16",
+          null
+        ],
+        "ts": 1704164661000006
+      },
+      {
+        "amount": "11.25",
+        "big": "2098765415.098752",
+        "codes": {
+          "17": "c17"
+        },
+        "counts": {
+          "a": 17,
+          "b": null
+        },
+        "day": "2024-01-18",
+        "flag": false,
+        "id": 17,
+        "n": 119,
+        "name": "n17",
+        "ntz": 1704164662000007,
+        "point": {
+          "label": "p17",
+          "x": 8.5
+        },
+        "ratio": 4.25,
+        "raw": "623137",
+        "region": "us",
+        "score": 5.666667,
+        "tags": null,
+        "ts": 1704164662000006
+      },
+      {
+        "amount": "12.50",
+        "big": "2222222204.222208",
+        "codes": {
+          "18": "c18"
+        },
+        "counts": {
+          "a": 18,
+          "b": null
+        },
+        "day": "2024-01-19",
+        "flag": true,
+        "id": 18,
+        "n": 126,
+        "name": "n18",
+        "ntz": 1704164663000007,
+        "point": {
+          "label": null,
+          "x": 9.0
+        },
+        "ratio": 4.5,
+        "raw": "623138",
+        "region": "eu",
+        "score": null,
+        "tags": [
+          "t18",
+          null
+        ],
+        "ts": 1704164663000006
+      },
+      {
+        "amount": "13.75",
+        "big": "2345678993.345664",
+        "codes": {
+          "19": "c19"
+        },
+        "counts": {
+          "a": 19,
+          "b": null
+        },
+        "day": "2024-01-20",
+        "flag": false,
+        "id": 19,
+        "n": 133,
+        "name": "n19",
+        "ntz": 1704164664000007,
+        "point": {
+          "label": "p19",
+          "x": 9.5
+        },
+        "ratio": 4.75,
+        "raw": "623139",
+        "region": "us",
+        "score": 6.333333,
+        "tags": [
+          "t19",
+          null
+        ],
+        "ts": 1704164664000006
+      },
+      {
+        "amount": "16.25",
+        "big": "2592592571.592576",
+        "codes": {
+          "21": "c21"
+        },
+        "counts": {
+          "a": 21,
+          "b": null
+        },
+        "day": "2024-01-22",
+        "flag": false,
+        "id": 21,
+        "n": 147,
+        "name": "n21",
+        "ntz": 1704164666000007,
+        "point": null,
+        "ratio": 5.25,
+        "raw": "623231",
+        "region": "us",
+        "score": 7.0,
+        "tags": [
+          "t21",
+          null
+        ],
+        "ts": 1704164666000006
+      },
+      {
+        "amount": "17.50",
+        "big": "2716049360.716032",
+        "codes": {
+          "22": "c22"
+        },
+        "counts": {
+          "a": 22,
+          "b": null
+        },
+        "day": "2024-01-23",
+        "flag": true,
+        "id": 22,
+        "n": 154,
+        "name": "updated",
+        "ntz": 1704164667000007,
+        "point": {
+          "label": "p22",
+          "x": 11.0
+        },
+        "ratio": 5.5,
+        "raw": "623232",
+        "region": "eu",
+        "score": 7.333333,
+        "tags": null,
+        "ts": 1704164667000006
+      },
+      {
+        "amount": "18.75",
+        "big": "2839506149.839488",
+        "codes": {
+          "23": "c23"
+        },
+        "counts": {
+          "a": 23,
+          "b": null
+        },
+        "day": "2024-01-24",
+        "flag": false,
+        "id": 23,
+        "n": 161,
+        "name": "n23",
+        "ntz": 1704164668000007,
+        "point": {
+          "label": "p23",
+          "x": 11.5
+        },
+        "ratio": 5.75,
+        "raw": "623233",
+        "region": "us",
+        "score": 7.666667,
+        "tags": [
+          "t23",
+          null
+        ],
+        "ts": 1704164668000006
+      },
+      {
+        "amount": "20.00",
+        "big": "2962962938.962944",
+        "codes": {
+          "24": "c24"
+        },
+        "counts": {
+          "a": 24,
+          "b": null
+        },
+        "day": "2024-01-25",
+        "flag": true,
+        "id": 24,
+        "n": 168,
+        "name": null,
+        "ntz": 1704164669000007,
+        "point": {
+          "label": null,
+          "x": 12.0
+        },
+        "ratio": 6.0,
+        "raw": "623234",
+        "region": "eu",
+        "score": null,
+        "tags": [
+          "t24",
+          null
+        ],
+        "ts": 1704164669000006
+      },
+      {
+        "amount": "22.50",
+        "big": "3209876517.209856",
+        "codes": {
+          "26": "c26"
+        },
+        "counts": {
+          "a": 26,
+          "b": null
+        },
+        "day": "2024-01-27",
+        "flag": true,
+        "id": 26,
+        "n": 182,
+        "name": "n26",
+        "ntz": 1704164671000007,
+        "point": null,
+        "ratio": 6.5,
+        "raw": "623236",
+        "region": "eu",
+        "score": 8.666667,
+        "tags": [
+          "t26",
+          null
+        ],
+        "ts": 1704164671000006
+      },
+      {
+        "amount": "23.75",
+        "big": "3333333306.333312",
+        "codes": {
+          "27": "c27"
+        },
+        "counts": {
+          "a": 27,
+          "b": null
+        },
+        "day": "2024-01-28",
+        "flag": false,
+        "id": 27,
+        "n": 189,
+        "name": "n27",
+        "ntz": 1704164672000007,
+        "point": {
+          "label": null,
+          "x": 13.5
+        },
+        "ratio": 6.75,
+        "raw": "623237",
+        "region": "us",
+        "score": 9.0,
+        "tags": null,
+        "ts": 1704164672000006
+      },
+      {
+        "amount": "25.00",
+        "big": "3456790095.456768",
+        "codes": {
+          "28": "c28"
+        },
+        "counts": {
+          "a": 28,
+          "b": null
+        },
+        "day": "2024-01-29",
+        "flag": true,
+        "id": 28,
+        "n": 196,
+        "name": null,
+        "ntz": 1704164673000007,
+        "point": {
+          "label": "p28",
+          "x": 14.0
+        },
+        "ratio": 7.0,
+        "raw": "623238",
+        "region": "eu",
+        "score": 9.333333,
+        "tags": [
+          "t28",
+          null
+        ],
+        "ts": 1704164673000006
+      },
+      {
+        "amount": "26.25",
+        "big": "3580246884.580224",
+        "codes": {
+          "29": "c29"
+        },
+        "counts": {
+          "a": 29,
+          "b": null
+        },
+        "day": "2024-01-30",
+        "flag": false,
+        "id": 29,
+        "n": 203,
+        "name": "updated",
+        "ntz": 1704164674000007,
+        "point": {
+          "label": "p29",
+          "x": 14.5
+        },
+        "ratio": 7.25,
+        "raw": "623239",
+        "region": "us",
+        "score": 9.666667,
+        "tags": [
+          "t29",
+          null
+        ],
+        "ts": 1704164674000006
+      }
+    ],
+    "snapshot_count": 3
+  },
   "cow_v1": {
     "delete_files": [],
     "engine": "spark 4.0.1",

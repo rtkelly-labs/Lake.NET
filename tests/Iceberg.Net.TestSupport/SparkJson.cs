@@ -28,7 +28,8 @@ public static class SparkJson
                 return "[" + string.Join(",", v.AsArray().Select(e => Canonical(lt.ElementType, e))) + "]";
             case MapType mt:
                 return "{" + string.Join(",", v.AsObject()
-                    .Select(kv => (K: Canonical(mt.KeyType, JsonValue.Create(kv.Key)), V: Canonical(mt.ValueType, kv.Value)))
+                    // JSON object keys are text: non-string keys (numbers) are parsed back.
+                    .Select(kv => (K: Canonical(mt.KeyType, mt.KeyType.TypeId == TypeId.String ? JsonValue.Create(kv.Key) : JsonNode.Parse(kv.Key)), V: Canonical(mt.ValueType, kv.Value)))
                     .OrderBy(x => x.K, StringComparer.Ordinal).Select(x => $"{x.K}={x.V}")) + "}";
         }
         var text = v.GetValueKind() == JsonValueKind.String ? v.GetValue<string>() : v.ToJsonString();
@@ -43,6 +44,7 @@ public static class SparkJson
             TypeId.Decimal => IcebergDecimal.Parse(text),
             TypeId.Uuid => Guid.Parse(text),
             TypeId.String => text,
+            TypeId.Binary or TypeId.Fixed => Convert.FromHexString(text),
             _ => throw new NotSupportedException($"No Spark JSON reading for {type}"),
         };
         return TableFingerprint.Canonical(type, value);

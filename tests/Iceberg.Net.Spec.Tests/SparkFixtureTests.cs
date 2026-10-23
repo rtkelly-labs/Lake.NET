@@ -94,6 +94,30 @@ public sealed class SparkFixtureTests : IDisposable
         await TableValidator.AssertValidAsync(table, new ValidationOptions { AllSnapshots = true, Deep = true });
     }
 
+    /// <summary>Avro data files and Avro position deletes (write.format.default=avro): every logical type, both map forms.</summary>
+    [Spec("Avro")]
+    [Spec("Position Delete Files")]
+    [Fact]
+    public async Task Reads_spark_avro_data_files_and_writes_on_top()
+    {
+        var table = await Load("avro_v2");
+        var expected = Expected["avro_v2"]!["rows"]!.AsArray();
+        Assert.Equal(SparkJson.Rows(table.Schema, expected), SparkJson.Rows(table.Schema, await TableScan.ReadAllAsync(table)));
+        Assert.All((await TableScan.PlanAsync(table, Expressions.Expression.True)).Tasks, t => Assert.Equal("AVRO", t.File.FileFormat));
+        await TableValidator.AssertValidAsync(table, new ValidationOptions { AllSnapshots = true, Deep = true });
+
+        // Our Parquet files alongside Spark's Avro ones (a table may mix formats); deletes land on the Avro files.
+        var rows = (await TableScan.ReadAllAsync(table)).ToDictionary(r => (long)r[0]!);
+        var changed = (object?[])rows[1].Clone();
+        changed[1] = "ours";
+        await TableMutations.UpsertAsync(table, [changed], ["id"], DeleteStrategy.PositionDeletes);
+        await TableMutations.DeleteByKeysAsync(table, ["id"], [[2L]], DeleteStrategy.CopyOnWrite);
+        var after = (await TableScan.ReadAllAsync(table)).ToDictionary(r => (long)r[0]!);
+        Assert.Equal(rows.Count - 1, after.Count);
+        Assert.Equal("ours", after[1][1]);
+        await TableValidator.AssertValidAsync(table, new ValidationOptions { AllSnapshots = true, Deep = true });
+    }
+
     [Theory]
     [InlineData(DeleteStrategy.CopyOnWrite)]
     [InlineData(DeleteStrategy.PositionDeletes)]

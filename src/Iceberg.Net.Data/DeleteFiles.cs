@@ -30,10 +30,13 @@ public static class PositionDeleteFiles
         return file with { Content = FileContent.PositionDeletes };
     }
 
-    public static async Task<IReadOnlyDictionary<string, RoaringPositionBitmap>> ReadAsync(IFileIO io, string location, CancellationToken ct = default)
+    public static async Task<IReadOnlyDictionary<string, RoaringPositionBitmap>> ReadAsync(IFileIO io, string location, CancellationToken ct = default) =>
+        await ReadAsync(io, location, "PARQUET", ct);
+
+    public static async Task<IReadOnlyDictionary<string, RoaringPositionBitmap>> ReadAsync(IFileIO io, string location, string format, CancellationToken ct = default)
     {
         var result = new Dictionary<string, RoaringPositionBitmap>(StringComparer.Ordinal);
-        foreach (var row in await ParquetFiles.ReadAsync(io, location, Schema, ct))
+        foreach (var row in await DataFiles.ReadAsync(io, location, format, Schema, null, ct))
         {
             var path = (string)row[0]!;
             if (!result.TryGetValue(path, out var bm)) result[path] = bm = new RoaringPositionBitmap();
@@ -169,7 +172,7 @@ public sealed class DeleteIndex
             if (d.ReferencedDataFile is { } r && r != dataFile.FilePath) continue;
             RoaringPositionBitmap? bm;
             if (d.FileFormat == "PUFFIN") bm = await ReadDeletionVectorAsync(d, ct);
-            else (await PositionDeletesAsync(d.FilePath)).TryGetValue(dataFile.FilePath, out bm);
+            else (await PositionDeletesAsync(d.FilePath, d.FileFormat)).TryGetValue(dataFile.FilePath, out bm);
             if (bm is not null) (positions ??= new RoaringPositionBitmap()).Or(bm);
         }
         var equality = await EqualityFiltersAsync(applicable.Where(d => d.Content == FileContent.EqualityDeletes), projection);
@@ -207,7 +210,7 @@ public sealed class DeleteIndex
         {
             if (pd.DataSequenceNumber < dataSequenceNumber) continue;
             if (pd.File.ReferencedDataFile is { } r && r != dataFile.FilePath) continue;
-            var byFile = await PositionDeletesAsync(pd.File.FilePath);
+            var byFile = await PositionDeletesAsync(pd.File.FilePath, pd.File.FileFormat);
             if (!byFile.TryGetValue(dataFile.FilePath, out var bm)) continue;
             (result ??= new RoaringPositionBitmap()).Or(bm);
         }
@@ -248,17 +251,17 @@ public sealed class DeleteIndex
 
     private async Task<HashSet<string>> LoadEqualityKeysAsync(DataFile file, IReadOnlyList<NestedField> fields)
     {
-        var rows = await ParquetFiles.ReadAsync(_io, file.FilePath, new Schema(0, fields));
+        var rows = await DataFiles.ReadAsync(_io, file, new Schema(0, fields));
         return rows.Select(r => EqualityKey.Encode(fields, i => r[i])).ToHashSet(StringComparer.Ordinal);
     }
 
     /// <summary>All positions a v2 position delete file records, grouped by data file.</summary>
-    public Task<IReadOnlyDictionary<string, RoaringPositionBitmap>> PositionDeletesAsync(string location)
+    public Task<IReadOnlyDictionary<string, RoaringPositionBitmap>> PositionDeletesAsync(string location, string format = "PARQUET")
     {
         lock (_positionCache)
         {
             if (!_positionCache.TryGetValue(location, out var task))
-                _positionCache[location] = task = PositionDeleteFiles.ReadAsync(_io, location);
+                _positionCache[location] = task = PositionDeleteFiles.ReadAsync(_io, location, format);
             return task;
         }
     }

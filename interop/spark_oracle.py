@@ -66,6 +66,8 @@ def to_jsonable(value: Any) -> Any:
         return int(value.timestamp() * 1_000_000)
     if isinstance(value, dt.date):
         return value.isoformat()
+    if isinstance(value, (bytes, bytearray)):
+        return bytes(value).hex()
     if isinstance(value, (uuid.UUID, decimal.Decimal)):
         return str(value)
     if isinstance(value, float) and value != value:  # NaN
@@ -256,6 +258,30 @@ def cmd_fixtures(out_dir: Path) -> dict[str, Any]:
         f"INSERT INTO {t} SELECT id, named_struct('x', 1.0, 'y', 2.0, 'label', 'new', 'z', 3.0), array('n'), map('c', 1), array(), array() FROM range(30, 32)"
     )
     result["nested_v2"] = describe_fixture(spark, "nested_v2")
+
+    # Avro data and delete files (write.format.default=avro), with every logical type Spark writes and both map forms.
+    t = "fx.ref.avro_v2"
+    spark.sql(
+        f"CREATE TABLE {t} (id bigint NOT NULL, name string, amount decimal(10,2), big decimal(38,6), day date, "
+        "ts timestamp, ntz timestamp_ntz, flag boolean, score double, ratio float, n int, raw binary, "
+        "point struct<x: double, label: string>, tags array<string>, counts map<string, int>, codes map<int, string>, "
+        "region string) USING iceberg PARTITIONED BY (region) "
+        f"TBLPROPERTIES ('format-version'='2', 'write.format.default'='avro', {mor})"
+    )
+    spark.sql(
+        f"""INSERT INTO {t} SELECT id, IF(id % 4 = 0, NULL, concat('n', id)), CAST(id * 1.25 - 10 AS decimal(10,2)),
+          CAST(id * 123456789.123456 AS decimal(38,6)), date_add(DATE '2024-01-01', CAST(id AS int)),
+          TIMESTAMP '2024-01-02 03:04:05.000006' + make_interval(0, 0, 0, 0, 0, 0, id),
+          TIMESTAMP_NTZ '2024-01-02 03:04:05.000007' + make_interval(0, 0, 0, 0, 0, 0, id),
+          id % 2 = 0, IF(id % 6 = 0, NULL, id / 3.0), CAST(id / 4.0 AS float), CAST(id * 7 AS int), CAST(concat('b', id) AS binary),
+          IF(id % 5 = 1, NULL, named_struct('x', id / 2.0, 'label', IF(id % 3 = 0, NULL, concat('p', id)))),
+          IF(id % 5 = 2, NULL, array(concat('t', id), NULL)), map('a', CAST(id AS int), 'b', NULL),
+          map(CAST(id AS int), concat('c', id)), IF(id % 2 = 0, 'eu', 'us')
+        FROM range(0, 30)"""
+    )
+    spark.sql(f"DELETE FROM {t} WHERE id % 5 = 0")
+    spark.sql(f"UPDATE {t} SET name = 'updated' WHERE id % 7 = 1")
+    result["avro_v2"] = describe_fixture(spark, "avro_v2")
 
     shutil.rmtree(out_dir, ignore_errors=True)
     shutil.copytree(f"{FIXTURE_ROOT}/warehouse", out_dir)

@@ -24,7 +24,7 @@ public static class TableArrow
         var mapping = Types.NameMapping.ForTable(table.Metadata.Properties);
         foreach (var task in await TableScan.PlanFilesAsync(table, filter, snapshotId, ct))
         {
-            var rows = await ParquetFiles.ReadAsync(table.IO, task.File.FilePath, table.Schema, mapping, ct);
+            var rows = await DataFiles.ReadAsync(table.IO, task.File, table.Schema, mapping, ct);
             var isDeleted = deletes.IsEmpty ? null : await deletes.RowFilterAsync(task.File, task.DataSequenceNumber, table.Schema, ct);
             var kept = rows.Where((r, pos) => isDeleted?.Invoke(pos, r) != true && matches?.Invoke(r) != false).ToList();
             if (kept.Count > 0) yield return ArrowInterop.ToRecordBatch(table.Schema, kept);

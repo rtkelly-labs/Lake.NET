@@ -114,7 +114,7 @@ public static class TableScan
         var result = new List<LineageRow>();
         foreach (var task in await PlanFilesAsync(table, snapshotId, null, ct))
         {
-            var fileRows = await ParquetFiles.ReadAsync(table.IO, task.File.FilePath, projection, mapping, ct);
+            var fileRows = await DataFiles.ReadAsync(table.IO, task.File, projection, mapping, ct);
             var isDeleted = deletes.IsEmpty ? null : await deletes.RowFilterAsync(task.File, task.DataSequenceNumber, schema, ct);
             for (var pos = 0; pos < fileRows.Count; pos++)
             {
@@ -145,8 +145,7 @@ public static class TableScan
         var rows = new List<object?[]>();
         foreach (var task in await PlanFilesAsync(table, filter, snapshotId, ct))
         {
-            if (task.File.FileFormat != "PARQUET") throw new NotSupportedException($"{task.File.FileFormat} data files are not supported");
-            var fileRows = await ParquetFiles.ReadAsync(table.IO, task.File.FilePath, table.Schema, mapping, ct);
+            var fileRows = await DataFiles.ReadAsync(table.IO, task.File, table.Schema, mapping, ct);
             var isDeleted = deletes.IsEmpty ? null : await deletes.RowFilterAsync(task.File, task.DataSequenceNumber, table.Schema, ct);
             for (var pos = 0; pos < fileRows.Count; pos++)
                 if (isDeleted?.Invoke(pos, fileRows[pos]) != true && matches?.Invoke(fileRows[pos]) != false)
@@ -183,25 +182,26 @@ public static class TableWriter
         var groups = rows.GroupBy(r => spec.Partition(schema, id => accessors[id](r)), PartitionComparer.Instance);
 
         var dataDir = table.Metadata.Property("write.data.path", $"{table.Location}/data").TrimEnd('/');
+        // write.format.default (spec "Table Properties"): parquet unless the table asks for avro; orc is not supported.
+        var format = table.Metadata.Property("write.format.default", "parquet").ToLowerInvariant();
+        var avro = format switch { "parquet" => false, "avro" => true, _ => throw new NotSupportedException($"write.format.default={format} is not supported (parquet, avro)") };
         var index = new Dictionary<object?[], int>(ReferenceEqualityComparer.Instance);
         for (var i = 0; i < rows.Count; i++) index[rows[i]] = i;
         var files = new List<DataFile>();
         foreach (var g in groups)
         {
             var partitionPath = spec.IsUnpartitioned ? "" : spec.PartitionPath(schema, g.Key) + "/";
-            var location = $"{dataDir}/{partitionPath}{Guid.NewGuid():N}.parquet";
+            var location = $"{dataDir}/{partitionPath}{Guid.NewGuid():N}.{(avro ? "avro" : "parquet")}";
             var groupRows = g.ToList();
             // Files are written in the table's default sort order (spec "Sorting"), and say so in sort_order_id.
             var order = table.Metadata.DefaultSortOrder;
             if (!order.IsUnsorted) groupRows = groupRows.OrderBy(r => r, new RowSorter(schema, order)).ToList(); // stable: ties keep input order
             DataFile written;
-            if (lineage is null)
-                written = await ParquetFiles.WriteAsync(table.IO, location, schema, spec.SpecId, g.Key, groupRows, ct);
-            else
-            {
-                var withLineage = groupRows.Select(r => (object?[])[.. r, lineage[index[r]].RowId, lineage[index[r]].Seq]).ToList();
-                written = await ParquetFiles.WriteAsync(table.IO, location, RowLineage.WithLineage(schema), spec.SpecId, g.Key, withLineage, ct);
-            }
+            var fileSchema = lineage is null ? schema : RowLineage.WithLineage(schema);
+            var fileRows = lineage is null ? groupRows : groupRows.Select(r => (object?[])[.. r, lineage[index[r]].RowId, lineage[index[r]].Seq]).ToList();
+            written = avro
+                ? await AvroDataFiles.WriteAsync(table.IO, location, fileSchema, spec.SpecId, g.Key, fileRows, ct)
+                : await ParquetFiles.WriteAsync(table.IO, location, fileSchema, spec.SpecId, g.Key, fileRows, ct);
             files.Add(order.IsUnsorted ? written : written with { SortOrderId = order.OrderId });
         }
         return files;

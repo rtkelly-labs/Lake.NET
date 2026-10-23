@@ -246,7 +246,7 @@ public static class TableMutations
         var result = new List<(DataFile, List<long>, List<object?[]>, List<(long?, long?)>)>();
         foreach (var task in await TableScan.PlanFilesAsync(table, matcher.Prune, null, ct))
         {
-            var rows = await ParquetFiles.ReadAsync(table.IO, task.File.FilePath, projection, mapping, ct);
+            var rows = await DataFiles.ReadAsync(table.IO, task.File, projection, mapping, ct);
             var isDeleted = deletes.IsEmpty ? null : await deletes.RowFilterAsync(task.File, task.DataSequenceNumber, table.Schema, ct);
             var positions = new List<long>();
             var survivors = new List<object?[]>();

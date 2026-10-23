@@ -104,6 +104,18 @@ public sealed class SparkTablesFixture : IAsyncLifetime
             Tables["nested_partitioned_v2"] = new Built(t, (await TableScan.ReadAllAsync(t)).ToDictionary(r => (long)r[0]!), null);
         }
 
+        // Avro data files (write.format.default=avro) with nested types, uuids, decimals and timestamps, plus deletes.
+        foreach (var v in new[] { 2, 3 })
+        {
+            var t = await _catalog.CreateTableAsync(new CreateTableRequest(TableIdentifier.Of("db", $"avro_nested_v{v}"), ShadowCompareTests.Nested, FormatVersion: v,
+                Properties: new Dictionary<string, string> { ["write.format.default"] = "avro" }));
+            await TableMutations.InsertAsync(t, ShadowCompareTests.NestedRows(30, nullStructLists: true));
+            await TableMutations.InsertAsync(t, ShadowCompareTests.NestedRows(50, nullStructLists: true).Skip(30).ToList());
+            await TableMutations.DeleteWhereAsync(t, r => (long)r[0]! % 9 == 2, DeleteStrategy.PositionDeletes);
+            t = await _catalog.LoadTableAsync(t.Identifier);
+            Tables[$"avro_nested_v{v}"] = new Built(t, (await TableScan.ReadAllAsync(t)).ToDictionary(r => (long)r[0]!), v >= 3 ? await TableScan.ReadWithLineageAsync(t) : null);
+        }
+
         Spark = await SparkOracle.ReadTablesAsync(Tables.Values.Select(b => b.Table.MetadataLocation!));
     }
 
@@ -174,6 +186,8 @@ public sealed class SparkCrossEngineTests(SparkTablesFixture fx) : IClassFixture
     [SkippableTheory]
     [InlineData("nested_v3")]
     [InlineData("nested_partitioned_v2")]
+    [InlineData("avro_nested_v2")]
+    [InlineData("avro_nested_v3")]
     public void Spark_reads_the_same_nested_values(string name)
     {
         Require.Spark();
@@ -260,6 +274,7 @@ public sealed class SparkCrossEngineTests(SparkTablesFixture fx) : IClassFixture
     [InlineData("compacted_v3")]
     [InlineData("merged_v3")]
     [InlineData("nested_v3")]
+    [InlineData("avro_nested_v3")]
     public void Spark_derives_the_same_row_lineage(string name)
     {
         Require.Spark();
