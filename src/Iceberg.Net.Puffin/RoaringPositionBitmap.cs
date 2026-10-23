@@ -61,10 +61,13 @@ public sealed class RoaringPositionBitmap
         return ms.ToArray();
     }
 
-    public static RoaringPositionBitmap Deserialize(ReadOnlySpan<byte> data)
+    public static RoaringPositionBitmap Deserialize(ReadOnlySpan<byte> data) => Corruption.Guard("Roaring bitmap", data, DeserializeUnguarded);
+
+    private static RoaringPositionBitmap DeserializeUnguarded(ReadOnlySpan<byte> data)
     {
         var result = new RoaringPositionBitmap();
         var count = BinaryPrimitives.ReadInt64LittleEndian(data);
+        if (count < 0 || count > (data.Length - 8) / 4) throw new FormatException($"Roaring64 bitmap count {count} out of range");
         var pos = 8;
         long lastKey = -1;
         for (long i = 0; i < count; i++)
@@ -160,6 +163,8 @@ public sealed class RoaringPositionBitmap
                 hasOffsets = true;
             }
             else throw new FormatException($"Unknown Roaring cookie {cookie}");
+            // At most 2^16 containers, each with a 4-byte descriptive header: bound before allocating.
+            if (size < 0 || size > 65536 || size > (data.Length - pos) / 4) throw new FormatException($"Roaring container count {size} out of range");
 
             var keys = new ushort[size];
             var cards = new int[size];

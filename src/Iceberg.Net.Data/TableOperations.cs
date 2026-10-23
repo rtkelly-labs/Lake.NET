@@ -9,6 +9,26 @@ using Iceberg.Net.Types;
 
 namespace Iceberg.Net.Data;
 
+/// <summary>
+/// v3 row lineage metadata columns (spec "Row Lineage"). A row's <c>_row_id</c> is the value stored in its data file
+/// when present (rows carried through a rewrite keep their identity), otherwise the file's <c>first_row_id</c> plus
+/// the row's position. <c>_last_updated_sequence_number</c> is likewise stored, or inherited from the file.
+/// </summary>
+public static class RowLineage
+{
+    public const int RowIdFieldId = 2147483540;
+    public const int LastUpdatedSequenceNumberFieldId = 2147483539;
+
+    public static readonly NestedField RowId = NestedField.Optional(RowIdFieldId, "_row_id", PrimitiveType.Long);
+    public static readonly NestedField LastUpdatedSequenceNumber = NestedField.Optional(LastUpdatedSequenceNumberFieldId, "_last_updated_sequence_number", PrimitiveType.Long);
+
+    public static Schema WithLineage(Schema schema) => new(schema.SchemaId, [.. schema.Columns, RowId, LastUpdatedSequenceNumber], schema.IdentifierFieldIds);
+
+    public static bool IsReserved(int fieldId) => fieldId >= 2147483000;
+}
+
+public sealed record LineageRow(object?[] Row, long? RowId, long? LastUpdatedSequenceNumber);
+
 /// <summary>Live data file in a snapshot, with the sequence number used for delete applicability.</summary>
 public sealed record ScanTask(DataFile File, long DataSequenceNumber, string ManifestPath);
 
@@ -53,6 +73,31 @@ public static class TableScan
         return snapshot is null ? await DeleteIndex.LoadAsync(table, [], ct) : await DeleteIndex.LoadAsync(table, await ManifestsAsync(table, snapshot, ct), ct);
     }
 
+    /// <summary>Read live rows with their v3 row lineage (<c>_row_id</c>, <c>_last_updated_sequence_number</c>).</summary>
+    public static async Task<List<LineageRow>> ReadWithLineageAsync(Table table, long? snapshotId = null, CancellationToken ct = default)
+    {
+        var deletes = await DeletesAsync(table, snapshotId, ct);
+        var mapping = NameMapping.ForTable(table.Metadata.Properties);
+        var schema = table.Schema;
+        var projection = RowLineage.WithLineage(schema);
+        var n = schema.Columns.Count;
+        var result = new List<LineageRow>();
+        foreach (var task in await PlanFilesAsync(table, snapshotId, null, ct))
+        {
+            var fileRows = await ParquetFiles.ReadAsync(table.IO, task.File.FilePath, projection, mapping, ct);
+            var isDeleted = deletes.IsEmpty ? null : await deletes.RowFilterAsync(task.File, task.DataSequenceNumber, schema, ct);
+            for (var pos = 0; pos < fileRows.Count; pos++)
+            {
+                var row = fileRows[pos][..n];
+                if (isDeleted?.Invoke(pos, row) == true) continue;
+                var rowId = (long?)fileRows[pos][n] ?? (task.File.FirstRowId is { } first ? first + pos : null);
+                var seq = (long?)fileRows[pos][n + 1] ?? (table.Metadata.FormatVersion >= 3 ? task.DataSequenceNumber : null);
+                result.Add(new LineageRow(row, rowId, seq));
+            }
+        }
+        return result;
+    }
+
     /// <summary>
     /// Read all rows of a snapshot, projected onto the current schema (by field ID), with position deletes,
     /// deletion vectors and equality deletes applied (merge-on-read).
@@ -77,8 +122,20 @@ public static class TableScan
 /// <summary>Writes rows into Parquet files, one per partition, under <c>{location}/data/</c>.</summary>
 public static class TableWriter
 {
-    public static async Task<IReadOnlyList<DataFile>> WriteAsync(Table table, IReadOnlyList<object?[]> rows, CancellationToken ct = default)
+    public static Task<IReadOnlyList<DataFile>> WriteAsync(Table table, IReadOnlyList<object?[]> rows, CancellationToken ct = default) =>
+        WriteAsync(table, rows, null, ct);
+
+    /// <summary>
+    /// Write rows; with <paramref name="lineage"/> (v3), each row's <c>_row_id</c> and
+    /// <c>_last_updated_sequence_number</c> are stored explicitly so rows carried through a rewrite keep their identity.
+    /// </summary>
+    public static async Task<IReadOnlyList<DataFile>> WriteAsync(Table table, IReadOnlyList<object?[]> rows, IReadOnlyList<(long? RowId, long? Seq)>? lineage, CancellationToken ct = default)
     {
+        if (lineage is not null)
+        {
+            if (lineage.Count != rows.Count) throw new ArgumentException("One lineage entry per row is required");
+            if (table.Metadata.FormatVersion < 3) lineage = null; // no row lineage before v3
+        }
         var schema = table.Schema;
         var spec = table.Spec;
         if (spec.Fields.Any(f => f.Transform is Transforms.UnknownTransform))
@@ -90,12 +147,21 @@ public static class TableWriter
             PartitionComparer.Instance);
 
         var dataDir = table.Metadata.Property("write.data.path", $"{table.Location}/data").TrimEnd('/');
+        var index = new Dictionary<object?[], int>(ReferenceEqualityComparer.Instance);
+        for (var i = 0; i < rows.Count; i++) index[rows[i]] = i;
         var files = new List<DataFile>();
         foreach (var g in groups)
         {
             var partitionPath = spec.IsUnpartitioned ? "" : spec.PartitionPath(schema, g.Key) + "/";
             var location = $"{dataDir}/{partitionPath}{Guid.NewGuid():N}.parquet";
-            files.Add(await ParquetFiles.WriteAsync(table.IO, location, schema, spec.SpecId, g.Key, g.ToList(), ct));
+            var groupRows = g.ToList();
+            if (lineage is null)
+            {
+                files.Add(await ParquetFiles.WriteAsync(table.IO, location, schema, spec.SpecId, g.Key, groupRows, ct));
+                continue;
+            }
+            var withLineage = groupRows.Select(r => (object?[])[.. r, lineage[index[r]].RowId, lineage[index[r]].Seq]).ToList();
+            files.Add(await ParquetFiles.WriteAsync(table.IO, location, RowLineage.WithLineage(schema), spec.SpecId, g.Key, withLineage, ct));
         }
         return files;
     }

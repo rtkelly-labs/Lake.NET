@@ -96,8 +96,12 @@ public sealed class ThetaSketch
         return result;
     }
 
-    public static ThetaSketch Deserialize(ReadOnlySpan<byte> data, long seed = DefaultSeed)
+    public static ThetaSketch Deserialize(ReadOnlySpan<byte> data, long seed = DefaultSeed) =>
+        Corruption.Guard("Theta sketch", data, d => DeserializeUnguarded(d, seed));
+
+    private static ThetaSketch DeserializeUnguarded(ReadOnlySpan<byte> data, long seed)
     {
+        if (data.Length < 8) throw new FormatException("Theta sketch is too short");
         var preLongs = data[0] & 0x3F;
         if (data[1] != SerialVersion) throw new NotSupportedException($"Theta serial version {data[1]} (only 3 is supported)");
         if (data[2] != CompactFamily) throw new NotSupportedException($"Theta family {data[2]} (only compact is supported)");
@@ -108,6 +112,8 @@ public sealed class ThetaSketch
         int count;
         if (preLongs == 1) count = data.Length >= 16 ? 1 : 0;
         else count = BinaryPrimitives.ReadInt32LittleEndian(data[8..]);
+        if (preLongs is < 1 or > 3 || count < 0 || preLongs * 8L + count * 8L > data.Length)
+            throw new FormatException($"Theta sketch with {preLongs} preamble longs and {count} entries does not fit in {data.Length} bytes");
         if (preLongs == 3) sketch._theta = BinaryPrimitives.ReadInt64LittleEndian(data[16..]);
         for (var i = 0; i < count; i++) sketch._hashes.Add(BinaryPrimitives.ReadInt64LittleEndian(data[(preLongs * 8 + i * 8)..]));
         return sketch;

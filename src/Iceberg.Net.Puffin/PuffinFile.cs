@@ -72,11 +72,17 @@ public static class PuffinFile
 
     public sealed record Contents(IReadOnlyList<PuffinBlobMetadata> Blobs, IReadOnlyDictionary<string, string> Properties, byte[] Bytes)
     {
-        public byte[] Payload(PuffinBlobMetadata blob) =>
-            Decompress(blob.CompressionCodec, Bytes.AsSpan(checked((int)blob.Offset), checked((int)blob.Length)));
+        public byte[] Payload(PuffinBlobMetadata blob) => Corruption.Guard($"Puffin blob {blob.Type}", () =>
+        {
+            if (blob.Offset < 0 || blob.Length < 0 || blob.Offset + blob.Length > Bytes.Length)
+                throw new InvalidDataException($"Puffin blob [{blob.Offset}, +{blob.Length}) lies outside the {Bytes.Length}-byte file");
+            return Decompress(blob.CompressionCodec, Bytes.AsSpan((int)blob.Offset, (int)blob.Length));
+        });
     }
 
-    public static Contents Read(byte[] bytes)
+    public static Contents Read(byte[] bytes) => Corruption.Guard("Puffin file", () => ReadUnguarded(bytes));
+
+    private static Contents ReadUnguarded(byte[] bytes)
     {
         if (bytes.Length < Magic.Length * 2 + FooterTrailerLength || !bytes.AsSpan(0, 4).SequenceEqual(Magic) || !bytes.AsSpan(bytes.Length - 4).SequenceEqual(Magic))
             throw new FormatException("Not a Puffin file (bad magic)");

@@ -3,6 +3,8 @@
 #           started through moto_server.py so the Glue fidelity shims (docs/emulation.md) apply
 #   rest  - apache/iceberg-rest-fixture: the Iceberg project's own REST catalog test server
 #           (Java reference implementation, JDBC-backed) storing metadata in moto's S3
+#   trino - (profile "trino": ./up.sh --trino) Trino's Iceberg connector over the same REST catalog + S3,
+#           a third independent reader (Java, but not the Iceberg core library's scan planner)
 name: iceberg-dotnet-emulation
 services:
   moto:
@@ -38,3 +40,17 @@ services:
       # The fixture's default in-memory SQLite fails concurrent commits with SQLITE_BUSY (HTTP 500), which the
       # soak tests surfaced. A file database with WAL and a busy timeout serialises writers instead.
       CATALOG_URI: "jdbc:sqlite:/tmp/rest-catalog.db?journal_mode=WAL&busy_timeout=30000"
+
+  trino:
+    image: trinodb/trino:478
+    profiles: ["trino"]
+    depends_on:
+      rest: { condition: service_started }
+    ports: ["8080:8080"]
+    volumes:
+      - ./trino/catalog:/etc/trino/catalog:ro
+      - ./trino/jvm.config:/etc/trino/jvm.config:ro
+    healthcheck:
+      test: ["CMD", "curl", "-sf", "http://localhost:8080/v1/info/state"]
+      interval: 3s
+      retries: 60

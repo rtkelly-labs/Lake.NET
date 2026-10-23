@@ -1,0 +1,546 @@
+{
+  "mor_v2": {
+    "delete_files": [
+      "1:PARQUET",
+      "1:PARQUET"
+    ],
+    "engine": "spark 4.0.1",
+    "format_version": 2,
+    "ids": [
+      1,
+      4,
+      6,
+      7,
+      8,
+      9,
+      11,
+      12,
+      13,
+      14,
+      16,
+      17,
+      18,
+      19,
+      21,
+      22,
+      23,
+      24,
+      26,
+      27,
+      28,
+      29,
+      31,
+      32,
+      33,
+      34,
+      36,
+      37,
+      38,
+      39
+    ],
+    "metadata_location": "file:///tmp/sentric-spark-fixture-root/warehouse/ref/mor_v2/metadata/v5.metadata.json",
+    "operation": "delete",
+    "row_count": 30,
+    "rows": [
+      {
+        "id": 1,
+        "name": "updated",
+        "region": "us"
+      },
+      {
+        "id": 4,
+        "name": "n4",
+        "region": "eu"
+      },
+      {
+        "id": 6,
+        "name": "n6",
+        "region": "eu"
+      },
+      {
+        "id": 7,
+        "name": "n7",
+        "region": "us"
+      },
+      {
+        "id": 8,
+        "name": "updated",
+        "region": "eu"
+      },
+      {
+        "id": 9,
+        "name": "n9",
+        "region": "us"
+      },
+      {
+        "id": 11,
+        "name": "n11",
+        "region": "us"
+      },
+      {
+        "id": 12,
+        "name": "n12",
+        "region": "eu"
+      },
+      {
+        "id": 13,
+        "name": "n13",
+        "region": "us"
+      },
+      {
+        "id": 14,
+        "name": "n14",
+        "region": "eu"
+      },
+      {
+        "id": 16,
+        "name": "n16",
+        "region": "eu"
+      },
+      {
+        "id": 17,
+        "name": "n17",
+        "region": "us"
+      },
+      {
+        "id": 18,
+        "name": "n18",
+        "region": "eu"
+      },
+      {
+        "id": 19,
+        "name": "n19",
+        "region": "us"
+      },
+      {
+        "id": 21,
+        "name": "n21",
+        "region": "us"
+      },
+      {
+        "id": 22,
+        "name": "updated",
+        "region": "eu"
+      },
+      {
+        "id": 23,
+        "name": "n23",
+        "region": "us"
+      },
+      {
+        "id": 24,
+        "name": "n24",
+        "region": "eu"
+      },
+      {
+        "id": 26,
+        "name": "n26",
+        "region": "eu"
+      },
+      {
+        "id": 27,
+        "name": "n27",
+        "region": "us"
+      },
+      {
+        "id": 28,
+        "name": "n28",
+        "region": "eu"
+      },
+      {
+        "id": 29,
+        "name": "updated",
+        "region": "us"
+      },
+      {
+        "id": 31,
+        "name": "n31",
+        "region": "us"
+      },
+      {
+        "id": 32,
+        "name": "n32",
+        "region": "eu"
+      },
+      {
+        "id": 33,
+        "name": "n33",
+        "region": "us"
+      },
+      {
+        "id": 34,
+        "name": "n34",
+        "region": "eu"
+      },
+      {
+        "id": 36,
+        "name": "updated",
+        "region": "eu"
+      },
+      {
+        "id": 37,
+        "name": "n37",
+        "region": "us"
+      },
+      {
+        "id": 38,
+        "name": "n38",
+        "region": "eu"
+      },
+      {
+        "id": 39,
+        "name": "n39",
+        "region": "us"
+      }
+    ],
+    "snapshot_count": 4
+  },
+  "mor_v3": {
+    "delete_files": [
+      "1:PUFFIN",
+      "1:PUFFIN"
+    ],
+    "engine": "spark 4.0.1",
+    "format_version": 3,
+    "ids": [
+      1,
+      4,
+      6,
+      7,
+      8,
+      9,
+      11,
+      12,
+      13,
+      14,
+      16,
+      17,
+      18,
+      19,
+      21,
+      22,
+      23,
+      24,
+      26,
+      27,
+      28,
+      29,
+      31,
+      32,
+      33,
+      34,
+      36,
+      37,
+      38,
+      39
+    ],
+    "metadata_location": "file:///tmp/sentric-spark-fixture-root/warehouse/ref/mor_v3/metadata/v5.metadata.json",
+    "operation": "delete",
+    "row_count": 30,
+    "row_lineage": [
+      {
+        "id": 1,
+        "last_updated_seq": 3,
+        "row_id": 0
+      },
+      {
+        "id": 4,
+        "last_updated_seq": 1,
+        "row_id": 22
+      },
+      {
+        "id": 6,
+        "last_updated_seq": 1,
+        "row_id": 23
+      },
+      {
+        "id": 7,
+        "last_updated_seq": 1,
+        "row_id": 3
+      },
+      {
+        "id": 8,
+        "last_updated_seq": 3,
+        "row_id": 24
+      },
+      {
+        "id": 9,
+        "last_updated_seq": 1,
+        "row_id": 4
+      },
+      {
+        "id": 11,
+        "last_updated_seq": 1,
+        "row_id": 5
+      },
+      {
+        "id": 12,
+        "last_updated_seq": 1,
+        "row_id": 26
+      },
+      {
+        "id": 13,
+        "last_updated_seq": 1,
+        "row_id": 6
+      },
+      {
+        "id": 14,
+        "last_updated_seq": 1,
+        "row_id": 27
+      },
+      {
+        "id": 16,
+        "last_updated_seq": 1,
+        "row_id": 28
+      },
+      {
+        "id": 17,
+        "last_updated_seq": 1,
+        "row_id": 8
+      },
+      {
+        "id": 18,
+        "last_updated_seq": 1,
+        "row_id": 29
+      },
+      {
+        "id": 19,
+        "last_updated_seq": 1,
+        "row_id": 9
+      },
+      {
+        "id": 21,
+        "last_updated_seq": 1,
+        "row_id": 10
+      },
+      {
+        "id": 22,
+        "last_updated_seq": 3,
+        "row_id": 31
+      },
+      {
+        "id": 23,
+        "last_updated_seq": 1,
+        "row_id": 11
+      },
+      {
+        "id": 24,
+        "last_updated_seq": 1,
+        "row_id": 32
+      },
+      {
+        "id": 26,
+        "last_updated_seq": 1,
+        "row_id": 33
+      },
+      {
+        "id": 27,
+        "last_updated_seq": 1,
+        "row_id": 13
+      },
+      {
+        "id": 28,
+        "last_updated_seq": 1,
+        "row_id": 34
+      },
+      {
+        "id": 29,
+        "last_updated_seq": 3,
+        "row_id": 14
+      },
+      {
+        "id": 31,
+        "last_updated_seq": 1,
+        "row_id": 15
+      },
+      {
+        "id": 32,
+        "last_updated_seq": 1,
+        "row_id": 36
+      },
+      {
+        "id": 33,
+        "last_updated_seq": 1,
+        "row_id": 16
+      },
+      {
+        "id": 34,
+        "last_updated_seq": 1,
+        "row_id": 37
+      },
+      {
+        "id": 36,
+        "last_updated_seq": 3,
+        "row_id": 38
+      },
+      {
+        "id": 37,
+        "last_updated_seq": 1,
+        "row_id": 18
+      },
+      {
+        "id": 38,
+        "last_updated_seq": 1,
+        "row_id": 39
+      },
+      {
+        "id": 39,
+        "last_updated_seq": 1,
+        "row_id": 19
+      }
+    ],
+    "rows": [
+      {
+        "id": 1,
+        "name": "updated",
+        "region": "us"
+      },
+      {
+        "id": 4,
+        "name": "n4",
+        "region": "eu"
+      },
+      {
+        "id": 6,
+        "name": "n6",
+        "region": "eu"
+      },
+      {
+        "id": 7,
+        "name": "n7",
+        "region": "us"
+      },
+      {
+        "id": 8,
+        "name": "updated",
+        "region": "eu"
+      },
+      {
+        "id": 9,
+        "name": "n9",
+        "region": "us"
+      },
+      {
+        "id": 11,
+        "name": "n11",
+        "region": "us"
+      },
+      {
+        "id": 12,
+        "name": "n12",
+        "region": "eu"
+      },
+      {
+        "id": 13,
+        "name": "n13",
+        "region": "us"
+      },
+      {
+        "id": 14,
+        "name": "n14",
+        "region": "eu"
+      },
+      {
+        "id": 16,
+        "name": "n16",
+        "region": "eu"
+      },
+      {
+        "id": 17,
+        "name": "n17",
+        "region": "us"
+      },
+      {
+        "id": 18,
+        "name": "n18",
+        "region": "eu"
+      },
+      {
+        "id": 19,
+        "name": "n19",
+        "region": "us"
+      },
+      {
+        "id": 21,
+        "name": "n21",
+        "region": "us"
+      },
+      {
+        "id": 22,
+        "name": "updated",
+        "region": "eu"
+      },
+      {
+        "id": 23,
+        "name": "n23",
+        "region": "us"
+      },
+      {
+        "id": 24,
+        "name": "n24",
+        "region": "eu"
+      },
+      {
+        "id": 26,
+        "name": "n26",
+        "region": "eu"
+      },
+      {
+        "id": 27,
+        "name": "n27",
+        "region": "us"
+      },
+      {
+        "id": 28,
+        "name": "n28",
+        "region": "eu"
+      },
+      {
+        "id": 29,
+        "name": "updated",
+        "region": "us"
+      },
+      {
+        "id": 31,
+        "name": "n31",
+        "region": "us"
+      },
+      {
+        "id": 32,
+        "name": "n32",
+        "region": "eu"
+      },
+      {
+        "id": 33,
+        "name": "n33",
+        "region": "us"
+      },
+      {
+        "id": 34,
+        "name": "n34",
+        "region": "eu"
+      },
+      {
+        "id": 36,
+        "name": "updated",
+        "region": "eu"
+      },
+      {
+        "id": 37,
+        "name": "n37",
+        "region": "us"
+      },
+      {
+        "id": 38,
+        "name": "n38",
+        "region": "eu"
+      },
+      {
+        "id": 39,
+        "name": "n39",
+        "region": "us"
+      }
+    ],
+    "snapshot_count": 4
+  }
+}

@@ -163,7 +163,11 @@ public static class AvroBinary
                 return b;
             }
             case AvroUnion u:
-                return Read(s, u.Branches[(int)ReadLong(s)]);
+            {
+                var branch = ReadLong(s);
+                if (branch < 0 || branch >= u.Branches.Count) throw new InvalidDataException($"Avro union branch {branch} out of range");
+                return Read(s, u.Branches[(int)branch]);
+            }
             default:
                 throw new NotSupportedException(schema.GetType().Name);
         }
@@ -176,8 +180,11 @@ public static class AvroBinary
         if (count < 0)
         {
             ReadLong(s);
-            count = -count;
+            count = count == long.MinValue ? throw new InvalidDataException("Avro block count out of range") : -count;
         }
+        // Every item of an Iceberg schema takes at least one byte, so a count beyond the remaining bytes is corrupt
+        // (and would otherwise spin through billions of empty reads).
+        if (s.CanSeek && count > s.Length - s.Position) throw new InvalidDataException($"Avro block count {count} exceeds the remaining {s.Length - s.Position} bytes");
         return count;
     }
 
@@ -188,7 +195,11 @@ public static class AvroBinary
         {
             case AvroKind.Null: return null;
             case AvroKind.Boolean: return s.ReadByte() != 0;
-            case AvroKind.Int: return (int)ReadLong(s);
+            case AvroKind.Int:
+            {
+                var v = ReadLong(s);
+                return v is < int.MinValue or > int.MaxValue ? throw new InvalidDataException($"Avro int {v} out of range") : (int)v;
+            }
             case AvroKind.Long: return ReadLong(s);
             case AvroKind.Float:
                 s.ReadExactly(buf[..4]);
@@ -197,7 +208,7 @@ public static class AvroBinary
                 s.ReadExactly(buf);
                 return BinaryPrimitives.ReadDoubleLittleEndian(buf);
             case AvroKind.Bytes:
-                var b = new byte[ReadLong(s)];
+                var b = new byte[ReadLength(s)];
                 s.ReadExactly(b);
                 return b;
             case AvroKind.String: return ReadString(s);
@@ -207,9 +218,18 @@ public static class AvroBinary
 
     public static string ReadString(Stream s)
     {
-        var b = new byte[ReadLong(s)];
+        var b = new byte[ReadLength(s)];
         s.ReadExactly(b);
         return Encoding.UTF8.GetString(b);
+    }
+
+    /// <summary>A bytes/string length, checked against what is left before it sizes an allocation.</summary>
+    private static int ReadLength(Stream s)
+    {
+        var length = ReadLong(s);
+        if (length < 0 || length > int.MaxValue || (s.CanSeek && length > s.Length - s.Position))
+            throw new InvalidDataException($"Avro length {length} out of range");
+        return (int)length;
     }
 
     public static long ReadLong(Stream s)
@@ -223,6 +243,7 @@ public static class AvroBinary
             result |= (ulong)(b & 0x7F) << shift;
             if ((b & 0x80) == 0) break;
             shift += 7;
+            if (shift > 63) throw new InvalidDataException("Avro varint longer than 10 bytes");
         }
         return (long)(result >> 1) ^ -(long)(result & 1);
     }
@@ -265,7 +286,9 @@ public static class AvroContainer
 
     public sealed record Contents(AvroSchema Schema, IReadOnlyDictionary<string, string> Metadata, IReadOnlyList<object?> Records);
 
-    public static Contents Read(byte[] bytes)
+    public static Contents Read(byte[] bytes) => Corruption.Guard("Avro file", () => ReadUnguarded(bytes));
+
+    private static Contents ReadUnguarded(byte[] bytes)
     {
         using var s = new MemoryStream(bytes);
         var magic = new byte[4];
@@ -275,7 +298,7 @@ public static class AvroContainer
         var meta = rawMeta.ToDictionary(kv => kv.Key, kv => Encoding.UTF8.GetString((byte[])kv.Value!));
         var sync = new byte[16];
         s.ReadExactly(sync);
-        var schema = AvroSchemaJson.Parse(meta["avro.schema"]);
+        var schema = AvroSchemaJson.Parse(meta.TryGetValue("avro.schema", out var json) ? json : throw new InvalidDataException("Avro file has no avro.schema"));
         var codec = meta.GetValueOrDefault("avro.codec", "null");
 
         var records = new List<object?>();
@@ -284,6 +307,7 @@ public static class AvroContainer
         {
             var count = AvroBinary.ReadLong(s);
             var size = AvroBinary.ReadLong(s);
+            if (count < 0 || size < 0 || size > s.Length - s.Position) throw new InvalidDataException($"Avro block of {size} bytes / {count} records out of range");
             var data = new byte[size];
             s.ReadExactly(data);
             s.ReadExactly(marker);

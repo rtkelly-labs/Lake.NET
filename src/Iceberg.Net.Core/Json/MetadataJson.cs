@@ -12,7 +12,8 @@ public static class MetadataJson
 
     public static string Write(TableMetadata m, bool indented = false) => ToJson(m).ToJsonString(indented ? Pretty : null);
 
-    public static TableMetadata Read(string json, string? location = null) => FromJson(JsonNode.Parse(json)!) with { MetadataFileLocation = location };
+    public static TableMetadata Read(string json, string? location = null) =>
+        Corruption.Guard("table metadata", () => FromJson(JsonNode.Parse(json) ?? throw new InvalidDataException("Table metadata is JSON null")) with { MetadataFileLocation = location });
 
     public static JsonObject ToJson(TableMetadata m)
     {
@@ -56,11 +57,22 @@ public static class MetadataJson
         return o;
     }
 
+    private static readonly string[] V2Required =
+    [
+        "table-uuid", "location", "last-sequence-number", "last-updated-ms", "last-column-id", "schemas", "current-schema-id",
+        "partition-specs", "default-spec-id", "last-partition-id", "sort-orders", "default-sort-order-id",
+    ];
+
+    private static readonly string[] V3Required = [.. V2Required, "next-row-id"];
+
     public static TableMetadata FromJson(JsonNode n)
     {
         var formatVersion = n["format-version"]!.GetValue<int>();
         if (formatVersion is < 1 or > TableMetadata.SupportedFormatVersion)
             throw new NotSupportedException($"Unsupported table format version {formatVersion}");
+        // v1 fallbacks (schema, partition-spec, implied ids) are only legal in v1; from v2 the spec requires these.
+        foreach (var field in formatVersion >= 3 ? V3Required : formatVersion == 2 ? V2Required : [])
+            if (n[field] is null) throw new InvalidDataException($"Format v{formatVersion} table metadata is missing required field '{field}'");
 
         var schemas = n["schemas"] is JsonArray sa
             ? sa.Select(s => TypeJson.SchemaFromJson(s!)).ToList()

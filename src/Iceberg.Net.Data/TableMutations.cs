@@ -160,17 +160,18 @@ public static class TableMutations
                         deleted = null; // unknown without a scan; that is the point of equality deletes
                         break;
                     case DeleteStrategy.PositionDeletes:
-                        foreach (var (file, positions, _) in await FindMatchesAsync(table, matcher, ct))
+                        foreach (var (file, positions, _, _) in await FindMatchesAsync(table, matcher, ct))
                         {
                             producer.DeletePositions(file.FilePath, positions);
                             deleted += positions.Count;
                         }
                         break;
                     case DeleteStrategy.CopyOnWrite:
-                        foreach (var (file, positions, survivors) in await FindMatchesAsync(table, matcher, ct))
+                        foreach (var (file, positions, survivors, lineage) in await FindMatchesAsync(table, matcher, ct))
                         {
                             producer.RemoveDataFiles([file.FilePath]);
-                            if (survivors.Count > 0) producer.AddFiles(await TableWriter.WriteAsync(table, survivors, ct));
+                            // Survivors keep their row identity (v3 row lineage) across the rewrite.
+                            if (survivors.Count > 0) producer.AddFiles(await TableWriter.WriteAsync(table, survivors, lineage.Count > 0 ? lineage : null, ct));
                             deleted += positions.Count;
                             rewritten++;
                         }
@@ -193,25 +194,35 @@ public static class TableMutations
         }
     }
 
-    /// <summary>Live rows of the current snapshot that the matcher selects, per data file (existing deletes applied).</summary>
-    private static async Task<List<(DataFile File, List<long> Positions, List<object?[]> Survivors)>> FindMatchesAsync(Table table, Matcher matcher, CancellationToken ct)
+    /// <summary>
+    /// Live rows of the current snapshot that the matcher selects, per data file (existing deletes applied), with the
+    /// surviving rows and, on v3, their lineage so a copy-on-write rewrite can preserve <c>_row_id</c>.
+    /// </summary>
+    private static async Task<List<(DataFile File, List<long> Positions, List<object?[]> Survivors, List<(long? RowId, long? Seq)> Lineage)>> FindMatchesAsync(Table table, Matcher matcher, CancellationToken ct)
     {
         var deletes = await TableScan.DeletesAsync(table, null, ct);
         var mapping = NameMapping.ForTable(table.Metadata.Properties);
-        var result = new List<(DataFile, List<long>, List<object?[]>)>();
+        var v3 = table.Metadata.FormatVersion >= 3;
+        var projection = v3 ? RowLineage.WithLineage(table.Schema) : table.Schema;
+        var n = table.Schema.Columns.Count;
+        var result = new List<(DataFile, List<long>, List<object?[]>, List<(long?, long?)>)>();
         foreach (var task in await TableScan.PlanFilesAsync(table, null, null, ct))
         {
-            var rows = await ParquetFiles.ReadAsync(table.IO, task.File.FilePath, table.Schema, mapping, ct);
+            var rows = await ParquetFiles.ReadAsync(table.IO, task.File.FilePath, projection, mapping, ct);
             var isDeleted = deletes.IsEmpty ? null : await deletes.RowFilterAsync(task.File, task.DataSequenceNumber, table.Schema, ct);
             var positions = new List<long>();
             var survivors = new List<object?[]>();
+            var lineage = new List<(long?, long?)>();
             for (var pos = 0; pos < rows.Count; pos++)
             {
-                if (isDeleted?.Invoke(pos, rows[pos]) == true) continue;
-                if (matcher.Matches(rows[pos])) positions.Add(pos);
-                else survivors.Add(rows[pos]);
+                var row = rows[pos][..n];
+                if (isDeleted?.Invoke(pos, row) == true) continue;
+                if (matcher.Matches(row)) { positions.Add(pos); continue; }
+                survivors.Add(row);
+                if (v3)
+                    lineage.Add(((long?)rows[pos][n] ?? (task.File.FirstRowId is { } f ? f + pos : null), (long?)rows[pos][n + 1] ?? task.DataSequenceNumber));
             }
-            if (positions.Count > 0) result.Add((task.File, positions, survivors));
+            if (positions.Count > 0) result.Add((task.File, positions, survivors, lineage));
         }
         return result;
     }

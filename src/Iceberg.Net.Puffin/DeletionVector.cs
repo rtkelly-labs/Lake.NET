@@ -29,10 +29,13 @@ public static class DeletionVector
         return result;
     }
 
-    public static RoaringPositionBitmap Decode(ReadOnlySpan<byte> blob)
+    public static RoaringPositionBitmap Decode(ReadOnlySpan<byte> blob) => Corruption.Guard("deletion vector", blob, DecodeUnguarded);
+
+    private static RoaringPositionBitmap DecodeUnguarded(ReadOnlySpan<byte> blob)
     {
+        if (blob.Length < 12) throw new FormatException("Deletion vector is too short");
         var length = BinaryPrimitives.ReadInt32BigEndian(blob);
-        if (length < Magic.Length || 4 + length + 4 > blob.Length) throw new FormatException("Deletion vector length is out of range");
+        if (length < Magic.Length || 4L + length + 4 > blob.Length) throw new FormatException("Deletion vector length is out of range");
         if (!blob.Slice(4, 4).SequenceEqual(Magic)) throw new FormatException("Deletion vector magic mismatch");
         var expected = BinaryPrimitives.ReadUInt32BigEndian(blob[(4 + length)..]);
         var actual = Crc32.Compute(blob.Slice(4, length));

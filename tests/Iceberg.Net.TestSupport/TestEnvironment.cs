@@ -78,7 +78,7 @@ public sealed class TestEnvironment
         if (required && SkipReason is not null) throw new InvalidOperationException($"ICEBERG_REQUIRE_TARGET=1 but: {SkipReason}");
     }
 
-    private static bool Reachable(Uri uri)
+    internal static bool Reachable(Uri uri)
     {
         try
         {
@@ -117,12 +117,15 @@ public sealed class TestEnvironment
 
     // ---------- PyIceberg oracle ----------
 
-    private static string InteropDir()
+    /// <summary>The iceberg-dotnet directory (the first ancestor of the test output containing interop/).</summary>
+    public static string RepoDir()
     {
         var dir = new DirectoryInfo(AppContext.BaseDirectory);
         while (dir is not null && !Directory.Exists(Path.Combine(dir.FullName, "interop"))) dir = dir.Parent;
-        return dir is null ? throw new DirectoryNotFoundException("interop/ not found above test output") : Path.Combine(dir.FullName, "interop");
+        return dir is null ? throw new DirectoryNotFoundException("interop/ not found above test output") : dir.FullName;
     }
+
+    private static string InteropDir() => Path.Combine(RepoDir(), "interop");
 
     private static (string File, string Prefix)? OracleCommand()
     {
@@ -156,5 +159,7 @@ public static class Require
     public static void Catalog(string kind) => Skip.If(TestEnvironment.Current.CatalogSkipReason(kind) is not null, TestEnvironment.Current.CatalogSkipReason(kind));
     public static void Oracle() => Skip.If(TestEnvironment.Current.OracleSkipReason is not null, TestEnvironment.Current.OracleSkipReason);
     public static void LocalOracle() => Skip.If(TestEnvironment.Current.LocalOracleSkipReason is not null, TestEnvironment.Current.LocalOracleSkipReason);
+    public static void Trino() => Skip.If(TrinoOracle.SkipReason is not null, TrinoOracle.SkipReason);
+    public static void Spark() => Skip.If(SparkOracle.SkipReason is not null, SparkOracle.SkipReason);
     public static void Athena() => Skip.If(TestEnvironment.Current.AthenaSkipReason is not null, TestEnvironment.Current.AthenaSkipReason);
 }

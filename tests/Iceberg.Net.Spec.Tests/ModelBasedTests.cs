@@ -135,6 +135,7 @@ public sealed class ModelBasedTests
                 if (Canon(actual) != Canon(model))
                     throw new InvalidOperationException($"step {step} ({op}): table [{Canon(actual)}] != model [{Canon(model)}]");
                 if (table.Metadata.CurrentSnapshotId is { } sid) history[sid] = Canon(model);
+                if (table.Metadata.FormatVersion >= 3) await CheckLineage(table, createdV3: c.FormatVersion >= 3, step, op);
             }
 
             foreach (var (sid, expected) in history.Where(h => table.Metadata.SnapshotById(h.Key) is not null))
@@ -149,6 +150,21 @@ public sealed class ModelBasedTests
         {
             if (Directory.Exists(warehouse)) Directory.Delete(warehouse, recursive: true);
         }
+    }
+
+    /// <summary>
+    /// v3 row lineage invariants: live row IDs are unique and below <c>next-row-id</c>, and last-updated sequence numbers
+    /// are committed ones. Rows written before an upgrade from v2 legitimately have no row ID until rewritten.
+    /// </summary>
+    private static async Task CheckLineage(Table table, bool createdV3, int step, Op op)
+    {
+        var rows = await TableScan.ReadWithLineageAsync(table);
+        var ids = rows.Where(r => r.RowId is not null).Select(r => r.RowId!.Value).ToList();
+        if (createdV3 && ids.Count != rows.Count) throw new InvalidOperationException($"step {step} ({op}): a row in a v3 table has no _row_id");
+        if (ids.Distinct().Count() != ids.Count) throw new InvalidOperationException($"step {step} ({op}): duplicate _row_id among live rows");
+        if (ids.Any(id => id < 0 || id >= table.Metadata.NextRowId)) throw new InvalidOperationException($"step {step} ({op}): _row_id outside [0, next-row-id)");
+        if (rows.Any(r => r.LastUpdatedSequenceNumber is { } s && (s < 1 || s > table.Metadata.LastSequenceNumber)))
+            throw new InvalidOperationException($"step {step} ({op}): _last_updated_sequence_number outside committed range");
     }
 
     private static async Task Apply(Table t, Op op, List<Row> model)

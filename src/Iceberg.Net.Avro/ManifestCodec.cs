@@ -235,7 +235,10 @@ public static class ManifestCodec
 
     public sealed record ManifestListContents(IReadOnlyList<ManifestFile> Manifests, IReadOnlyDictionary<string, string> Metadata);
 
-    public static ManifestListContents ReadManifestList(byte[] bytes)
+    public static ManifestListContents ReadManifestList(byte[] bytes) =>
+        Corruption.Guard("manifest list", () => ReadManifestListUnguarded(bytes));
+
+    private static ManifestListContents ReadManifestListUnguarded(byte[] bytes)
     {
         var c = AvroContainer.Read(bytes);
         var schema = (AvroRecord)c.Schema;
@@ -284,7 +287,10 @@ public static class ManifestCodec
     /// Read a manifest. When <paramref name="manifest"/> is given, null snapshot IDs and sequence numbers on
     /// ADDED entries are inherited from it, and v3 <c>first_row_id</c>s are assigned, as the spec requires.
     /// </summary>
-    public static ManifestContents ReadManifest(byte[] bytes, PartitionSpec spec, Schema schema, ManifestFile? manifest = null)
+    public static ManifestContents ReadManifest(byte[] bytes, PartitionSpec spec, Schema schema, ManifestFile? manifest = null) =>
+        Corruption.Guard("manifest", () => ReadManifestUnguarded(bytes, spec, schema, manifest));
+
+    private static ManifestContents ReadManifestUnguarded(byte[] bytes, PartitionSpec spec, Schema schema, ManifestFile? manifest)
     {
         var c = AvroContainer.Read(bytes);
         var root = (AvroRecord)c.Schema;

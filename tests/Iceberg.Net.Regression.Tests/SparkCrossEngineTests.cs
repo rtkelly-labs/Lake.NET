@@ -1,0 +1,157 @@
+using System.Text.Json.Nodes;
+using Iceberg.Net.Catalog;
+using Iceberg.Net.Data;
+using Iceberg.Net.Metadata;
+using Iceberg.Net.Types;
+
+namespace Iceberg.Net.Regression.Tests;
+
+/// <summary>
+/// Builds one table per write path (copy-on-write, position deletes, deletion vectors, equality deletes, v2→v3
+/// upgrade, multi-transform partitioning) and has Spark + Iceberg Java read them all in a single JVM.
+/// </summary>
+public sealed class SparkTablesFixture : IAsyncLifetime
+{
+    public sealed record Built(Table Table, Dictionary<long, object?[]> Rows, List<LineageRow>? Lineage);
+
+    public Dictionary<string, Built> Tables { get; } = new();
+    public JsonObject? Spark { get; private set; }
+    private readonly string _warehouse = Path.Combine(SparkOracle.SharedRoot, Guid.NewGuid().ToString("N"));
+    private InMemoryCatalog? _catalog;
+
+    private static readonly Schema Keyed = new(0, CatalogConformanceTests.Schema.Columns, identifierFieldIds: [1]);
+
+    public async Task InitializeAsync()
+    {
+        if (SparkOracle.SkipReason is not null) return;
+        _catalog = new InMemoryCatalog(_warehouse);
+        await _catalog.CreateNamespaceAsync(Namespace.Of("db"));
+
+        foreach (var v in new[] { 2, 3 })
+        foreach (var s in new[] { DeleteStrategy.CopyOnWrite, DeleteStrategy.PositionDeletes, DeleteStrategy.EqualityDeletes })
+            await Build($"{s}_v{v}", v, async t =>
+            {
+                await TableMutations.UpsertAsync(t, CatalogConformanceTests.Rows(25, 10).Select(r => { r[1] = $"upserted-{r[0]}"; return r; }).ToList(), ["id"], s);
+                await TableMutations.DeleteByKeysAsync(t, ["id"], [[3L], [4L], [26L]], s);
+                if (s != DeleteStrategy.EqualityDeletes) // DeleteWhere needs row positions
+                    await TableMutations.DeleteWhereAsync(t, r => (long)r[0]! % 7 == 1, s);
+                await TableMutations.UpsertAsync(t, CatalogConformanceTests.Rows(5, 1).Select(r => { r[1] = "again"; return r; }).ToList(), ["id"], s);
+            });
+
+        await Build("upgraded_v2_to_v3", 2, async t =>
+        {
+            await TableMutations.DeleteByKeysAsync(t, ["id"], [[1L], [2L]], DeleteStrategy.PositionDeletes);
+            await t.CommitAsync([], [new MetadataUpdate.UpgradeFormatVersion(3)]);
+            await SnapshotProducer.ConvertPositionDeletesToDeletionVectors(t).CommitAsync();
+            await TableMutations.DeleteByKeysAsync(t, ["id"], [[10L]], DeleteStrategy.PositionDeletes);
+            await TableMutations.InsertAsync(t, CatalogConformanceTests.Rows(100, 3));
+        });
+
+        // Day + bucket + identity partitioning: Java must find every row in the partition our transforms chose.
+        await Build("partitioned_v3", 3, async t =>
+        {
+            await TableMutations.ReplaceGroupsAsync(t, CatalogConformanceTests.Rows(200, 4).Select(r => { r[4] = "eu"; return r; }).ToList(), ["region"], DeleteStrategy.CopyOnWrite);
+            await TableMutations.DeleteByKeysAsync(t, ["id", "event_ts", "region"], [[201L, CatalogConformanceTests.Rows(201, 1)[0][3], "eu"]], DeleteStrategy.PositionDeletes);
+        }, CatalogConformanceTests.Spec);
+
+        Spark = await SparkOracle.ReadTablesAsync(Tables.Values.Select(b => b.Table.MetadataLocation!));
+    }
+
+    private async Task Build(string name, int formatVersion, Func<Table, Task> mutate, Partitioning.PartitionSpec? spec = null)
+    {
+        var t = await _catalog!.CreateTableAsync(new CreateTableRequest(TableIdentifier.Of("db", name), Keyed, spec, FormatVersion: formatVersion));
+        await TableMutations.InsertAsync(t, CatalogConformanceTests.Rows(0, 30));
+        await mutate(t);
+        t = await _catalog.LoadTableAsync(t.Identifier);
+        var rows = (await TableScan.ReadAllAsync(t)).ToDictionary(r => (long)r[0]!);
+        Tables[name] = new Built(t, rows, t.Metadata.FormatVersion >= 3 ? await TableScan.ReadWithLineageAsync(t) : null);
+    }
+
+    public Task DisposeAsync()
+    {
+        _catalog?.Dispose();
+        // ICEBERG_SPARK_KEEP=1 keeps the tables for debugging with the oracle by hand.
+        if (Directory.Exists(_warehouse) && Environment.GetEnvironmentVariable("ICEBERG_SPARK_KEEP") != "1") Directory.Delete(_warehouse, recursive: true);
+        return Task.CompletedTask;
+    }
+}
+
+/// <summary>Spark + Iceberg Java (the reference implementation) reads every table we write exactly as we do.</summary>
+[Trait("Category", "Regression")]
+public sealed class SparkCrossEngineTests(SparkTablesFixture fx) : IClassFixture<SparkTablesFixture>
+{
+    public static TheoryData<string> Names() => new()
+    {
+        "CopyOnWrite_v2", "PositionDeletes_v2", "EqualityDeletes_v2",
+        "CopyOnWrite_v3", "PositionDeletes_v3", "EqualityDeletes_v3",
+        "upgraded_v2_to_v3", "partitioned_v3",
+    };
+
+    private JsonNode SparkView(string name)
+    {
+        var view = fx.Spark![fx.Tables[name].Table.MetadataLocation!]!;
+        Assert.True(view["error"] is null, $"Spark failed to read {name}: {view["error"]}");
+        return view;
+    }
+
+    [SkippableTheory]
+    [MemberData(nameof(Names))]
+    public void Spark_reads_the_same_rows(string name)
+    {
+        Require.Spark();
+        var ours = fx.Tables[name].Rows;
+        var spark = SparkView(name)["rows"]!.AsArray().ToDictionary(r => r!["id"]!.GetValue<long>(), r => r!.AsObject());
+
+        Assert.Equal(ours.Keys.Order(), spark.Keys.Order());
+        foreach (var (id, row) in ours)
+        {
+            var s = spark[id];
+            Assert.Equal((string?)row[1], s["name"]?.GetValue<string>());
+            Assert.Equal((double?)row[2], s["amount"]?.GetValue<double>());
+            Assert.Equal((long?)row[3], s["event_ts"]?.GetValue<long>());
+            Assert.Equal((string?)row[4], s["region"]?.GetValue<string>());
+            Assert.Equal((int?)row[5], s["qty"]?.GetValue<int>());
+        }
+    }
+
+    [SkippableTheory]
+    [MemberData(nameof(Names))]
+    public void Spark_sees_the_same_snapshots_and_format(string name)
+    {
+        Require.Spark();
+        var t = fx.Tables[name].Table;
+        var view = SparkView(name);
+        Assert.Equal(t.Metadata.FormatVersion, view["format_version"]!.GetValue<int>());
+        Assert.Equal(t.Metadata.Snapshots.Count, view["snapshot_count"]!.GetValue<int>());
+    }
+
+    [SkippableTheory]
+    [InlineData("PositionDeletes_v3", "1:PUFFIN")]
+    [InlineData("PositionDeletes_v2", "1:PARQUET")]
+    [InlineData("EqualityDeletes_v2", "2:PARQUET")]
+    [InlineData("EqualityDeletes_v3", "2:PARQUET")]
+    [InlineData("upgraded_v2_to_v3", "1:PUFFIN")]
+    public void Spark_sees_our_delete_files_by_kind(string name, string kind)
+    {
+        Require.Spark();
+        var deletes = SparkView(name)["delete_files"]!.AsArray().Select(d => d!.GetValue<string>()).ToList();
+        Assert.Contains(kind, deletes);
+        if (name.EndsWith("_v3", StringComparison.Ordinal) && kind == "1:PUFFIN") Assert.DoesNotContain("1:PARQUET", deletes); // v3: DVs only
+    }
+
+    [SkippableTheory]
+    [InlineData("CopyOnWrite_v3")]
+    [InlineData("PositionDeletes_v3")]
+    [InlineData("EqualityDeletes_v3")]
+    [InlineData("partitioned_v3")]
+    [InlineData("upgraded_v2_to_v3")]
+    public void Spark_derives_the_same_row_lineage(string name)
+    {
+        Require.Spark();
+        var ours = fx.Tables[name].Lineage!.ToDictionary(r => (long)r.Row[0]!, r => (r.RowId, r.LastUpdatedSequenceNumber));
+        var spark = SparkView(name)["row_lineage"]!.AsArray().ToDictionary(
+            r => r!["id"]!.GetValue<long>(),
+            r => (r!["row_id"]?.GetValue<long>(), r["last_updated_seq"]?.GetValue<long>()));
+        Assert.Equal(ours.OrderBy(kv => kv.Key), spark.OrderBy(kv => kv.Key));
+    }
+}

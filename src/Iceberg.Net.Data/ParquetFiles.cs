@@ -93,7 +93,7 @@ public static class ParquetFiles
             Partition = partition,
             RecordCount = rows.Count,
             FileSizeInBytes = bytes.Length,
-            ColumnSizes = columns.Select((f, i) => (f.Id, chunkSizes[i])).ToDictionary(x => x.Id, x => x.Item2),
+            ColumnSizes = columns.Select((f, i) => (f.Id, chunkSizes[i])).Where(x => !RowLineage.IsReserved(x.Id)).ToDictionary(x => x.Id, x => x.Item2),
             ValueCounts = metrics.ValueCounts,
             NullValueCounts = metrics.NullCounts,
             NanValueCounts = metrics.NanCounts.Count > 0 ? metrics.NanCounts : null,
@@ -256,6 +256,7 @@ internal sealed record Metrics(
         for (var c = 0; c < schema.Columns.Count; c++)
         {
             var f = schema.Columns[c];
+            if (RowLineage.IsReserved(f.Id)) continue; // metadata columns carry no column metrics
             var values = rows.Select(r => r[c]).ToList();
             m.ValueCounts[f.Id] = values.Count;
             m.NullCounts[f.Id] = values.Count(v => v is null);
