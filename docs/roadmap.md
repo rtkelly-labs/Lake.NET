@@ -107,7 +107,8 @@ Runs weekly in `.github/workflows/iceberg-dotnet-mutation.yml` (Puffin, and Core
 5. **Upstream issues**: Parquet.Net group field IDs ([drafted](upstream/parquet-net-group-field-ids.md), patch
    verified), PyIceberg reading a null `list<struct>` as empty ([drafted](upstream/pyiceberg-null-list-of-struct.md)), Gravitino
    misattributing deletion vectors in scan plans ([drafted](upstream/gravitino-dv-references.md))
-   and the Parquet.SourceGenerator Iceberg profile ([gaps](parquet-sourcegenerator.md)).
+   and the Parquet.SourceGenerator Iceberg columns: field IDs, local timestamps and INT32 dates
+   ([patch verified](upstream/parquet-sourcegenerator-iceberg-columns.patch), [gaps](parquet-sourcegenerator.md)).
 
 ## Breaking out
 

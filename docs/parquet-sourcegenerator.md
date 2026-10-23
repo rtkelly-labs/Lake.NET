@@ -57,9 +57,9 @@ fail and move into the compatible model.
 
 | Gap | Fix in | Proposal | Effort |
 |---|---|---|---|
-| No field IDs | **generator** | `[ParquetFieldId(n)]` (or `[ParquetColumn(Id = n)]`) → set `DataField.FieldId` (settable in Parquet.Net 6.1; verified it reaches the file). Lets files skip name mapping and survive renames | S |
-| `timestamp` vs `timestamptz` | **generator** | `[ParquetTimestamp(Microseconds, AdjustedToUtc = false)]` → `DateTimeDataField(..., isAdjustedToUTC: false)` (the constructor parameter exists in 6.1) | S |
-| `DateOnly` → INT96 on main | **generator** (bug) | emit `DateTimeDataField(name, DateTimeFormat.Date)` → INT32 DATE (what 0.0.3 wrote), and fix 0.0.3's read path | S |
+| No field IDs | **generator** | `[ParquetColumn(FieldId = n)]` → `DataField.FieldId` (Parquet.Net 6 backend; 4.x has no field IDs). **Patch ready** (below) | S |
+| `timestamp` vs `timestamptz` | **generator** | `[ParquetTimestamp(Microseconds, AdjustedToUtc = false)]`. Measured: Parquet.Net 6.1 **ignores** `isAdjustedToUTC` (and `unit`) for `DateTimeFormat.DateAndTimeMicros`, which it writes as the legacy `TIMESTAMP_MICROS` converted type (always UTC); `DateTimeFormat.Timestamp` + `unit` writes the logical type and honours the flag. **Patch ready** | S |
+| `DateOnly` → INT96 on main | **generator** (bug) | emit `DateTimeFormat.Date` → INT32 DATE; measured on 6.1: writes and reads `DateTime` values, pyarrow reads `date32`. **Patch ready** | S |
 | `DateTime` default INT96 | **generator** | default to `DateAndTimeMicros`; INT96 is deprecated in Parquet and rejected by Iceberg | S (behaviour change → semver note) |
 | `TimeSpan` as TIME(ms) | **generator** | an opt-in `Iceberg` profile that rejects `TimeSpan` (diagnostic) or maps it to `long` micros explicitly | S |
 | Unsigned types | **generator** | same profile: diagnostic for unsigned members | XS |
@@ -67,7 +67,7 @@ fail and move into the compatible model.
 | Per-file Iceberg metrics without a re-read | **generator** | expose written column stats (value/null/NaN counts, min/max) per file from the generated writer; `ParquetImport` currently re-reads the file to compute them | M |
 | NDV sketches at write time (Puffin) | **generator** + this library | an optional per-column hook fed with Iceberg single-value bytes during write → `ThetaSketch.Update`; produces Puffin statistics with no second scan | M |
 | Field IDs on nested groups | **Parquet.Net upstream** | lift `FieldId` to `Field` and emit/read it for struct/list/map — drafted issue + verified 19-line patch: [upstream/parquet-net-group-field-ids.md](upstream/parquet-net-group-field-ids.md) | S (upstream PR) |
-| `timestamp_ns` | **Parquet.Net upstream** | a nanosecond `DateTimeFormat` / logical-type override for `DataField<long>` | S–M (upstream) |
+| `timestamp_ns` | **generator** (not upstream) | Measured: Parquet.Net 6.1 (and 4.25) has `DateTimeFormat.Timestamp` with `DateTimeTimeUnit.Nanos`, which writes `TIMESTAMP(NANOS)` and round-trips `DateTime` at its 100 ns precision (pyarrow: `timestamp[ns]`). The generator needs a `Nanoseconds` unit mapped to it, plus its Arrow bridge (which assumes µs) | S |
 | Decimal precision > 28 | generator + upstream | `System.Decimal` limit; would need a `BigInteger`-backed member type (Parquet.Net's plain encoder can't encode `BigInteger` today — generator rejects it with PARQ006) | M |
 
 A suggested shape for the generator side is a single opt-in profile, so the default behaviour of the generator does
@@ -84,6 +84,29 @@ public partial record Event
 }
 // generated: Event.IcebergSchemaJson, writer returns per-column stats (+ optional theta sketch feed)
 ```
+
+## The patch
+
+`docs/upstream/parquet-sourcegenerator-iceberg-columns.patch` (against `main` at `216f6fc`, not yet proposed
+upstream) closes the first three rows:
+
+- `ParquetColumnAttribute.FieldId` (default -1 = none) → `DataField.FieldId` on the Parquet.Net 6 backend. The
+  legacy backend leaves it out, because Parquet.Net 4.x has no field IDs.
+- `ParquetTimestampAttribute.AdjustedToUtc` (default true). False emits
+  `DateTimeFormat.Timestamp, isAdjustedToUTC: false, unit: Micros`. True keeps the exact output of earlier releases.
+- `DateOnly` → `DateTimeFormat.Date` (INT32 DATE).
+- `PublicAPI.Unshipped.txt` lines, a `docs/api/LEDGER.md` entry, and `IcebergColumnTests` (field IDs only where
+  declared, the UTC flag, INT32 DATE, round-trip with nulls).
+
+Verified three ways:
+
+- The generator's suite: 1779 passed. The 15 failures are tests reading benchmark datasets that are Git LFS
+  pointers in this checkout; they fail identically without the patch.
+- pyarrow reads `field_id` 1–4, `timestamp[us]`, `timestamp[us, tz=UTC]` and `date32`.
+- An end-to-end check: a generated file whose column names differ from the table's is adopted by
+  `ParquetImport` through **field IDs alone (no name mapping)**, and its `timestamp`, `timestamptz` and `date`
+  values match. Once a release carries it, the `Gap_no_field_ids_requires_a_name_mapping` and
+  `Gap_timestamps_are_always_utc_adjusted` tests here flip to compatible.
 
 ## What iceberg-dotnet did on its side
 

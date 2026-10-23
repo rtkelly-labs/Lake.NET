@@ -1,0 +1,412 @@
+From eede7870700fc1068e2b493178d5249aeeefc012 Mon Sep 17 00:00:00 2001
+From: Ryan Kelly <94ryan.kelly@gmail.com>
+Date: Fri, 23 Oct 2026 14:13:58 +0000
+Subject: [PATCH] feat: Iceberg-ready columns: field IDs, local timestamps,
+ INT32 dates
+
+- [ParquetColumn(FieldId = n)] writes DataField.FieldId (Parquet.Net 6 backend).
+- [ParquetTimestamp(Microseconds, AdjustedToUtc = false)] writes TIMESTAMP(MICROS,
+  isAdjustedToUTC=false) via DateTimeFormat.Timestamp; Parquet.Net ignores the flag
+  for DateAndTimeMicros.
+- DateOnly is written as INT32 DATE instead of INT96.
+
+Co-Authored-By: Claude Opus 5.5 <noreply@anthropic.com>
+Claude-Session: https://claude.ai/code/session_01PVn475QgE8Z6Ebw9JALGzM
+---
+ docs/api/LEDGER.md                            |  15 +++
+ .../ParquetColumnAttribute.cs                 |   9 ++
+ .../ParquetTimestampAttribute.cs              |   8 ++
+ .../PublicAPI.Unshipped.txt                   |   4 +
+ .../Emitter/LegacyCodeEmitter.cs              |   3 +-
+ .../Emitter/Components/SchemaComponent.cs     |  37 +++++-
+ .../Models/PropertyModel.cs                   |  13 ++
+ .../Parser/TargetParser.cs                    |  33 +++++-
+ .../IcebergColumnTests.cs                     | 111 ++++++++++++++++++
+ 9 files changed, 226 insertions(+), 7 deletions(-)
+ create mode 100644 test/Parquet.SourceGenerator.Tests/IcebergColumnTests.cs
+
+diff --git a/docs/api/LEDGER.md b/docs/api/LEDGER.md
+index 0586d94..088e845 100644
+--- a/docs/api/LEDGER.md
++++ b/docs/api/LEDGER.md
+@@ -16,6 +16,21 @@ The rule, the three surfaces and the author process are in
+ 
+ <!-- Add new entries directly below this line, newest first. -->
+ 
++### 2026-10-23 — Iceberg-ready columns: field IDs, local timestamps, INT32 dates
++
++- **Surface:** package
++- **Semver:** additive-minor
++- **Issue:** not yet filed — proposed from the Apache Iceberg interop study (iceberg-dotnet `docs/parquet-sourcegenerator.md`)
++- **Change:** Added `ParquetColumnAttribute.FieldId` (default -1, no ID written) and
++  `ParquetTimestampAttribute.AdjustedToUtc` (default true, today's annotation). The emitter writes
++  `DataField.FieldId` and `isAdjustedToUTC: false` only when a member sets them, so the output for
++  existing models does not change. Separately, `DateOnly` columns are written as INT32 DATE again
++  (main had regressed to INT96).
++- **Rationale:** Apache Iceberg resolves Parquet columns by field ID and distinguishes `timestamp`
++  (local) from `timestamptz` (UTC-adjusted). Without these, generated files can join an Iceberg table
++  only through a name mapping, and only as `timestamptz`. INT96 is deprecated in Parquet and
++  rejected by Iceberg, and pyarrow reads an INT96 "date" as a datetime.
++
+ ### 2026-10-07 — Promote `PublicAPI.Unshipped.txt` to `PublicAPI.Shipped.txt` (0.1 baseline) (#592)
+ 
+ - **Surface:** package
+diff --git a/src/Parquet.SourceGenerator.Attributes/ParquetColumnAttribute.cs b/src/Parquet.SourceGenerator.Attributes/ParquetColumnAttribute.cs
+index 124f5c9..cca89f9 100644
+--- a/src/Parquet.SourceGenerator.Attributes/ParquetColumnAttribute.cs
++++ b/src/Parquet.SourceGenerator.Attributes/ParquetColumnAttribute.cs
+@@ -64,6 +64,15 @@ public sealed class ParquetColumnAttribute : Attribute
+     /// </para>
+     /// </summary>
+     public ParquetColumnEncoding Encoding { get; set; } = ParquetColumnEncoding.Default;
++
++    /// <summary>
++    /// Gets or sets the Parquet field ID written to this column's schema element (<c>field_id</c>).
++    /// Table formats such as Apache Iceberg resolve columns by this ID rather than by name, so a
++    /// column keeps its identity across renames. Negative (the default) writes no field ID. Only
++    /// leaf columns carry one: Parquet.Net does not write field IDs on group nodes. Written by the
++    /// Parquet.Net 6 backend; the Legacy package (Parquet.Net 4.x has no field IDs) does not write it.
++    /// </summary>
++    public int FieldId { get; set; } = -1;
+ }
+ 
+ /// <summary>
+diff --git a/src/Parquet.SourceGenerator.Attributes/ParquetTimestampAttribute.cs b/src/Parquet.SourceGenerator.Attributes/ParquetTimestampAttribute.cs
+index 8d5c39d..8fbd1d2 100644
+--- a/src/Parquet.SourceGenerator.Attributes/ParquetTimestampAttribute.cs
++++ b/src/Parquet.SourceGenerator.Attributes/ParquetTimestampAttribute.cs
+@@ -46,4 +46,12 @@ public sealed class ParquetTimestampAttribute : Attribute
+     /// Gets the timestamp resolution unit.
+     /// </summary>
+     public ParquetTimestampUnit Unit { get; }
++
++    /// <summary>
++    /// Gets or sets whether a microsecond timestamp is annotated <c>isAdjustedToUTC</c>. True (the
++    /// default) marks an instant, such as Iceberg's <c>timestamptz</c>. False marks a local wall-clock
++    /// value, such as Iceberg's <c>timestamp</c>. The stored microseconds are the same either way;
++    /// only the annotation readers see differs.
++    /// </summary>
++    public bool AdjustedToUtc { get; set; } = true;
+ }
+diff --git a/src/Parquet.SourceGenerator.Attributes/PublicAPI.Unshipped.txt b/src/Parquet.SourceGenerator.Attributes/PublicAPI.Unshipped.txt
+index 7dc5c58..42189c1 100644
+--- a/src/Parquet.SourceGenerator.Attributes/PublicAPI.Unshipped.txt
++++ b/src/Parquet.SourceGenerator.Attributes/PublicAPI.Unshipped.txt
+@@ -1 +1,5 @@
+ #nullable enable
++Parquet.SourceGenerator.ParquetColumnAttribute.FieldId.get -> int
++Parquet.SourceGenerator.ParquetColumnAttribute.FieldId.set -> void
++Parquet.SourceGenerator.ParquetTimestampAttribute.AdjustedToUtc.get -> bool
++Parquet.SourceGenerator.ParquetTimestampAttribute.AdjustedToUtc.set -> void
+diff --git a/src/Parquet.SourceGenerator.Legacy/Emitter/LegacyCodeEmitter.cs b/src/Parquet.SourceGenerator.Legacy/Emitter/LegacyCodeEmitter.cs
+index 8566e09..f70fef5 100644
+--- a/src/Parquet.SourceGenerator.Legacy/Emitter/LegacyCodeEmitter.cs
++++ b/src/Parquet.SourceGenerator.Legacy/Emitter/LegacyCodeEmitter.cs
+@@ -115,7 +115,8 @@ internal static class LegacyCodeEmitter
+ 
+     private static void EmitSchema(StringBuilder builder, TargetClassModel model)
+     {
+-        SchemaComponent.EmitSchema(builder, model);
++        // Parquet.Net 4.x has no DataField.FieldId, so [ParquetColumn(FieldId = n)] is not written here.
++        SchemaComponent.EmitSchema(builder, model, writeFieldIds: false);
+     }
+ 
+     private static void EmitStaticFields(StringBuilder builder, TargetClassModel model)
+diff --git a/src/Parquet.SourceGenerator/Emitter/Components/SchemaComponent.cs b/src/Parquet.SourceGenerator/Emitter/Components/SchemaComponent.cs
+index 8179ea3..00974b3 100644
+--- a/src/Parquet.SourceGenerator/Emitter/Components/SchemaComponent.cs
++++ b/src/Parquet.SourceGenerator/Emitter/Components/SchemaComponent.cs
+@@ -16,7 +16,20 @@ internal static class SchemaComponent
+     /// <summary>
+     /// Generates compile-time ParquetSchema DataField instantiation code.
+     /// </summary>
+-    public static string GetFieldCreationExpression(PropertyModel prop)
++    /// <param name="prop">The member's model.</param>
++    /// <param name="writeFieldIds">
++    /// Whether to set <c>DataField.FieldId</c> from <c>[ParquetColumn(FieldId = n)]</c>. Parquet.Net 6
++    /// has the property; 4.x does not, so the legacy backend passes false.
++    /// </param>
++    public static string GetFieldCreationExpression(
++        PropertyModel prop,
++        bool writeFieldIds = true
++    ) =>
++        writeFieldIds && prop.FieldId is int fieldId
++            ? $"{GetFieldConstructorExpression(prop)} {{ FieldId = {fieldId} }}"
++            : GetFieldConstructorExpression(prop);
++
++    private static string GetFieldConstructorExpression(PropertyModel prop)
+     {
+         string name = EmittedText.Literal(prop.ParquetColumnName);
+ 
+@@ -29,6 +42,16 @@ internal static class SchemaComponent
+             PropertyKind.Decimal =>
+                 $"new global::Parquet.Schema.DecimalDataField({name}, 38, 18, isNullable: {BoolLiteral(prop.IsNullable)})",
+ 
++            PropertyKind.DateTime
++                when (
++                    prop.TimestampUnit == "1"
++                    || prop.TimestampUnit?.Contains("Microseconds") == true
++                ) && !prop.TimestampAdjustedToUtc =>
++            // DateTimeFormat.Timestamp, not DateAndTimeMicros: Parquet.Net writes the latter as the
++            // legacy TIMESTAMP_MICROS converted type, which always means UTC-adjusted and ignores
++            // isAdjustedToUTC. Timestamp writes the logical type, which carries the flag.
++            $"new global::Parquet.Schema.DateTimeDataField({name}, global::Parquet.Schema.DateTimeFormat.Timestamp, isAdjustedToUTC: false, unit: global::Parquet.Schema.DateTimeTimeUnit.Micros, isNullable: {BoolLiteral(prop.IsNullable)})",
++
+             PropertyKind.DateTime
+                 when prop.TimestampUnit == "1"
+                     || prop.TimestampUnit?.Contains("Microseconds") == true =>
+@@ -37,8 +60,10 @@ internal static class SchemaComponent
+             PropertyKind.DateTime =>
+                 $"new global::Parquet.Schema.DateTimeDataField({name}, global::Parquet.Schema.DateTimeFormat.Impala, isNullable: {BoolLiteral(prop.IsNullable)})",
+ 
++            // INT32 DATE, the column every reader expects for a calendar date. INT96 (Impala) here
++            // round-tripped in .NET but other readers saw a timestamp, and Iceberg rejects INT96.
+             PropertyKind.DateOnly =>
+-                $"new global::Parquet.Schema.DateTimeDataField({name}, global::Parquet.Schema.DateTimeFormat.Impala, isNullable: {BoolLiteral(prop.IsNullable)})",
++                $"new global::Parquet.Schema.DateTimeDataField({name}, global::Parquet.Schema.DateTimeFormat.Date, isNullable: {BoolLiteral(prop.IsNullable)})",
+ 
+             PropertyKind.TimeSpan =>
+                 $"new global::Parquet.Schema.TimeDataField({name}, global::Parquet.Schema.TimeUnitPrecision.Millis, isNullable: {BoolLiteral(prop.IsNullable)})",
+@@ -76,7 +101,11 @@ internal static class SchemaComponent
+     /// <summary>
+     /// Emits compile-time ParquetSchema definition.
+     /// </summary>
+-    public static void EmitSchema(StringBuilder builder, TargetClassModel model)
++    public static void EmitSchema(
++        StringBuilder builder,
++        TargetClassModel model,
++        bool writeFieldIds = true
++    )
+     {
+         builder.AppendLine("    /// <summary>");
+         builder.AppendLine(
+@@ -91,7 +120,7 @@ internal static class SchemaComponent
+         {
+             PropertyModel prop = model.Properties[i];
+             string comma = i < model.Properties.Length - 1 ? "," : "";
+-            builder.AppendLine($"        {GetFieldCreationExpression(prop)}{comma}");
++            builder.AppendLine($"        {GetFieldCreationExpression(prop, writeFieldIds)}{comma}");
+         }
+ 
+         builder.AppendLine("    );");
+diff --git a/src/Parquet.SourceGenerator/Models/PropertyModel.cs b/src/Parquet.SourceGenerator/Models/PropertyModel.cs
+index 642d525..132a97e 100644
+--- a/src/Parquet.SourceGenerator/Models/PropertyModel.cs
++++ b/src/Parquet.SourceGenerator/Models/PropertyModel.cs
+@@ -130,4 +130,17 @@ internal sealed record PropertyModel(
+     /// member can never be null at runtime.
+     /// </summary>
+     public bool CompoundIsValueType { get; init; }
++
++    /// <summary>
++    /// The Parquet field ID from <c>[ParquetColumn(FieldId = n)]</c>, written to the schema element's
++    /// <c>field_id</c> (what Iceberg resolves columns by); null when the member sets none. Off the
++    /// positional list for the same reason as <see cref="IsSortKey"/>.
++    /// </summary>
++    public int? FieldId { get; init; }
++
++    /// <summary>
++    /// The <c>isAdjustedToUTC</c> flag of a microsecond timestamp column; false only when the member
++    /// asks for <c>[ParquetTimestamp(Microseconds, AdjustedToUtc = false)]</c>.
++    /// </summary>
++    public bool TimestampAdjustedToUtc { get; init; } = true;
+ }
+diff --git a/src/Parquet.SourceGenerator/Parser/TargetParser.cs b/src/Parquet.SourceGenerator/Parser/TargetParser.cs
+index a96e8e0..98cf26b 100644
+--- a/src/Parquet.SourceGenerator/Parser/TargetParser.cs
++++ b/src/Parquet.SourceGenerator/Parser/TargetParser.cs
+@@ -774,7 +774,8 @@ internal static class TargetParser
+         int Order,
+         bool Deduplicate,
+         ColumnEncoding Encoding,
+-        bool IsSortKey
++        bool IsSortKey,
++        int? FieldId
+     );
+ 
+     /// <summary>
+@@ -1148,6 +1149,7 @@ internal static class TargetParser
+         int order = -1;
+         bool deduplicate = false;
+         ColumnEncoding encoding = ColumnEncoding.Default;
++        int? fieldId = null;
+ 
+         if (columnAttr is not null)
+         {
+@@ -1173,6 +1175,8 @@ internal static class TargetParser
+                     deduplicate = dedupe;
+                 else if (namedArg.Key == "Encoding" && namedArg.Value.Value is int encodingInt)
+                     encoding = (ColumnEncoding)encodingInt;
++                else if (namedArg.Key == "FieldId" && namedArg.Value.Value is int id && id >= 0)
++                    fieldId = id;
+             }
+         }
+ 
+@@ -1213,7 +1217,7 @@ internal static class TargetParser
+         // per eligible column whether or not anything looks them up.
+         bool isSortKey = HasAttribute(member, SortKeyFullNames, SortKeyShortNames);
+ 
+-        return new ColumnOptions(columnName, order, deduplicate, encoding, isSortKey);
++        return new ColumnOptions(columnName, order, deduplicate, encoding, isSortKey, fieldId);
+     }
+ 
+     private static (int? Precision, int? Scale) ReadDecimalOptions(
+@@ -1268,6 +1272,29 @@ internal static class TargetParser
+         return null;
+     }
+ 
++    /// <summary>
++    /// <c>[ParquetTimestamp(..., AdjustedToUtc = false)]</c>: a local (wall-clock) timestamp. Absent
++    /// or true keeps the UTC-adjusted annotation every earlier release wrote.
++    /// </summary>
++    private static bool ReadTimestampAdjustedToUtc(ISymbol member)
++    {
++        AttributeData? timestampAttr = FindAttribute(
++            member,
++            TimestampFullNames,
++            TimestampShortNames
++        );
++        if (timestampAttr is null)
++            return true;
++
++        foreach (KeyValuePair<string, TypedConstant> namedArg in timestampAttr.NamedArguments)
++        {
++            if (namedArg.Key == "AdjustedToUtc" && namedArg.Value.Value is bool adjusted)
++                return adjusted;
++        }
++
++        return true;
++    }
++
+     private static (ITypeSymbol UnderlyingType, bool IsNullable) UnwrapNullable(
+         ITypeSymbol memberType
+     )
+@@ -1406,6 +1433,8 @@ internal static class TargetParser
+         )
+         {
+             IsSortKey = column.IsSortKey,
++            FieldId = column.FieldId,
++            TimestampAdjustedToUtc = ReadTimestampAdjustedToUtc(member),
+         };
+     }
+ 
+diff --git a/test/Parquet.SourceGenerator.Tests/IcebergColumnTests.cs b/test/Parquet.SourceGenerator.Tests/IcebergColumnTests.cs
+new file mode 100644
+index 0000000..e61ac18
+--- /dev/null
++++ b/test/Parquet.SourceGenerator.Tests/IcebergColumnTests.cs
+@@ -0,0 +1,111 @@
++using System;
++using System.IO;
++using System.Linq;
++using System.Threading.Tasks;
++using Parquet;
++using Parquet.Meta;
++using Parquet.SourceGenerator;
++using Shouldly;
++using Xunit;
++
++namespace Parquet.SourceGenerator.Tests;
++
++[ParquetSerializable]
++public partial record IcebergColumnsRecord
++{
++    [ParquetColumn("id", Order = 1, FieldId = 1)]
++    public long Id { get; init; }
++
++    [ParquetColumn("local_ts", Order = 2, FieldId = 2)]
++    [ParquetTimestamp(ParquetTimestampUnit.Microseconds, AdjustedToUtc = false)]
++    public DateTime LocalTs { get; init; }
++
++    [ParquetColumn("event_ts", Order = 3, FieldId = 3)]
++    [ParquetTimestamp(ParquetTimestampUnit.Microseconds)]
++    public DateTime EventTs { get; init; }
++
++    [ParquetColumn("day", Order = 4, FieldId = 4)]
++    public DateOnly Day { get; init; }
++
++    [ParquetColumn("note", Order = 5)]
++    public string? Note { get; init; }
++
++    [ParquetColumn("maybe_day", Order = 6)]
++    public DateOnly? MaybeDay { get; init; }
++}
++
++/// <summary>
++/// The column shapes Apache Iceberg (and every engine reading by Parquet field ID) needs: field IDs,
++/// a local (not UTC-adjusted) timestamp and INT32 DATE for <c>DateOnly</c>.
++/// </summary>
++public sealed class IcebergColumnTests
++{
++    private static readonly IcebergColumnsRecord[] Rows = Enumerable
++        .Range(0, 3)
++        .Select(i => new IcebergColumnsRecord
++        {
++            Id = i,
++            LocalTs = new DateTime(2026, 1, 2, 3, 4, 5, DateTimeKind.Unspecified).AddTicks(10 * i),
++            EventTs = new DateTime(2026, 1, 2, 3, 4, 5, DateTimeKind.Utc).AddMinutes(i),
++            Day = new DateOnly(2026, 1, 1).AddDays(i),
++            Note = i == 1 ? null : $"n{i}",
++            MaybeDay = i == 2 ? null : new DateOnly(1970, 1, 1).AddDays(-i),
++        })
++        .ToArray();
++
++    private static async Task<(MemoryStream Stream, SchemaElement[] Leaves)> WriteAsync()
++    {
++        var stream = new MemoryStream();
++        await Rows.WriteParquetAsync(stream);
++        stream.Position = 0;
++        await using var reader = await ParquetReader.CreateAsync(stream, leaveStreamOpen: true);
++        var leaves = reader.Metadata!.Schema.Skip(1).ToArray();
++        stream.Position = 0;
++        return (stream, leaves);
++    }
++
++    [Fact]
++    public async Task FieldIdsAreWrittenOnlyWhereDeclared()
++    {
++        var (_, leaves) = await WriteAsync();
++        leaves.Select(l => l.FieldId).ShouldBe(new int?[] { 1, 2, 3, 4, null, null });
++    }
++
++    [Fact]
++    public async Task TimestampsCarryTheDeclaredUtcAdjustment()
++    {
++        var (_, leaves) = await WriteAsync();
++        leaves[1].Type.ShouldBe(Parquet.Meta.Type.INT64);
++        leaves[1].LogicalType!.TIMESTAMP!.IsAdjustedToUTC.ShouldBeFalse();
++        leaves[1].LogicalType!.TIMESTAMP!.Unit.MICROS.ShouldNotBeNull();
++        // Unchanged: the UTC-adjusted column keeps the encoding earlier releases wrote.
++        leaves[2].Type.ShouldBe(Parquet.Meta.Type.INT64);
++        leaves[2].ConvertedType.ShouldBe(ConvertedType.TIMESTAMP_MICROS);
++    }
++
++    [Fact]
++    public async Task DateOnlyIsInt32Date()
++    {
++        var (_, leaves) = await WriteAsync();
++        leaves[3].Type.ShouldBe(Parquet.Meta.Type.INT32);
++        leaves[3].ConvertedType.ShouldBe(ConvertedType.DATE);
++        leaves[5].Type.ShouldBe(Parquet.Meta.Type.INT32);
++    }
++
++    [Fact]
++    public async Task IcebergColumnsRoundTrip()
++    {
++        var (stream, _) = await WriteAsync();
++        var back = await IcebergColumnsRecordParquet.From(stream).ToArrayAsync();
++        back.Length.ShouldBe(Rows.Length);
++        for (int i = 0; i < Rows.Length; i++)
++        {
++            back[i].Id.ShouldBe(Rows[i].Id);
++            back[i].LocalTs.Ticks.ShouldBe(Rows[i].LocalTs.Ticks);
++            back[i].EventTs.ShouldBe(Rows[i].EventTs);
++            back[i].Day.ShouldBe(Rows[i].Day);
++            back[i].Note.ShouldBe(Rows[i].Note);
++            back[i].MaybeDay.ShouldBe(Rows[i].MaybeDay);
++        }
++    }
++}
+-- 
+2.43.0
+
