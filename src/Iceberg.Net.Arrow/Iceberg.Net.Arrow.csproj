@@ -1,0 +1,11 @@
+<Project Sdk="Microsoft.NET.Sdk">
+  <PropertyGroup>
+    <RootNamespace>Iceberg.Net.Arrow</RootNamespace>
+    <Description>Apache Arrow interop: Iceberg schemas as Arrow schemas (with field IDs), RecordBatch reads and writes.</Description>
+    <AllowUnsafeBlocks>false</AllowUnsafeBlocks>
+  </PropertyGroup>
+  <ItemGroup>
+    <PackageReference Include="Apache.Arrow" />
+    <ProjectReference Include="../Iceberg.Net.Data/Iceberg.Net.Data.csproj" />
+  </ItemGroup>
+</Project>

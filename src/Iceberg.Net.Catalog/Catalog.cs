@@ -67,6 +67,13 @@ public interface ICatalog : IDisposable
     /// refresh and retry) or <see cref="CommitStateUnknownException"/> when the outcome is unknown.
     /// </summary>
     Task<TableMetadata> CommitTableAsync(TableCommit commit, CancellationToken ct = default);
+
+    /// <summary>
+    /// Commit changes to several tables atomically (REST <c>commitTransaction</c>): every table's requirements are
+    /// checked and either all changes apply or none do (<see cref="CommitFailedException"/>). Catalogs without
+    /// multi-table atomicity (Glue) throw <see cref="NotSupportedException"/>.
+    /// </summary>
+    Task CommitTransactionAsync(IReadOnlyList<TableCommit> commits, CancellationToken ct = default);
 }
 
 /// <summary>A loaded table: identity, current metadata, and the catalog/FileIO to change it.</summary>
@@ -212,6 +219,45 @@ public abstract partial class MetastoreCatalog(string name, IFileIO io) : ICatal
         if (builder.Changes.Count == 0) return current;
         return await WriteAndSwapAsync(commit.Identifier, current, builder.Build, ct);
     }
+
+    public async Task CommitTransactionAsync(IReadOnlyList<TableCommit> commits, CancellationToken ct = default)
+    {
+        if (commits.Select(c => c.Identifier).Distinct().Count() != commits.Count) throw new ArgumentException("A transaction may change each table once");
+        var swaps = new List<MetadataSwap>();
+        try
+        {
+            foreach (var commit in commits)
+            {
+                var currentLocation = await CurrentMetadataLocationAsync(commit.Identifier, ct);
+                var current = currentLocation is null ? null : await ReadMetadataAsync(currentLocation, ct);
+                foreach (var req in commit.Requirements) req.Validate(current);
+                if (current is null) throw new NoSuchTableException($"Table {commit.Identifier} does not exist");
+                var builder = TableMetadataBuilder.From(current, Clock).ApplyAll(commit.Updates);
+                if (builder.Changes.Count == 0) continue;
+                var newLocation = NewMetadataLocation(builder.Build(""), current.MetadataFileLocation);
+                var updated = builder.Build(newLocation);
+                await FileIO.WriteAsync(newLocation, Encoding.UTF8.GetBytes(MetadataJson.Write(updated)), overwrite: false, ct);
+                swaps.Add(new MetadataSwap(commit.Identifier, current.MetadataFileLocation!, newLocation, updated));
+            }
+            if (swaps.Count > 0) await SwapMetadataLocationsAsync(swaps, ct);
+        }
+        catch (Exception e) when (e is CommitFailedException or NoSuchTableException or NotSupportedException or ArgumentException)
+        {
+            // Nothing was swapped: the new metadata files are unreferenced.
+            foreach (var swap in swaps) await TryDeleteAsync(swap.NewLocation, ct);
+            throw;
+        }
+    }
+
+    /// <summary>One pointer move of a multi-table commit.</summary>
+    protected sealed record MetadataSwap(TableIdentifier Id, string ExpectedLocation, string NewLocation, TableMetadata Metadata);
+
+    /// <summary>
+    /// Move every pointer, or none (throwing <see cref="CommitFailedException"/>). The default refuses: a metastore
+    /// needs a native multi-row transaction for this, which Glue does not have.
+    /// </summary>
+    protected virtual Task SwapMetadataLocationsAsync(IReadOnlyList<MetadataSwap> swaps, CancellationToken ct) =>
+        throw new NotSupportedException($"The {Name} catalog cannot commit several tables atomically");
 
     /// <summary>Write the next metadata file (never overwriting), then CAS the catalog pointer to it.</summary>
     private async Task<TableMetadata> WriteAndSwapAsync(TableIdentifier id, TableMetadata? @base, Func<string, TableMetadata> build, CancellationToken ct)
@@ -364,6 +410,17 @@ public class InMemoryCatalog(string warehouse, IFileIO? io = null, string name =
     protected override Task RemoveTableEntryAsync(TableIdentifier id, CancellationToken ct)
     {
         lock (_lock) _tables.Remove(id);
+        return Task.CompletedTask;
+    }
+
+    protected override Task SwapMetadataLocationsAsync(IReadOnlyList<MetadataSwap> swaps, CancellationToken ct)
+    {
+        lock (_lock)
+        {
+            foreach (var swap in swaps)
+                if (_tables.GetValueOrDefault(swap.Id) != swap.ExpectedLocation) throw new CommitFailedException($"Table {swap.Id} changed concurrently");
+            foreach (var swap in swaps) _tables[swap.Id] = swap.NewLocation;
+        }
         return Task.CompletedTask;
     }
 

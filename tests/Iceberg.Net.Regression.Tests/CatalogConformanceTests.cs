@@ -218,4 +218,35 @@ public sealed class CatalogConformanceTests
         Assert.Equal(20, loaded.Metadata.NextRowId);
         Assert.Equal(12, loaded.Metadata.CurrentSnapshot!.FirstRowId);
     }
+
+    [Spec("rest: commitTransaction")]
+    [SkippableTheory]
+    [MemberData(nameof(Catalogs))]
+    public async Task Multi_table_transactions_apply_all_or_nothing(string kind)
+    {
+        Require.Catalog(kind);
+        await using var s = await ScopeAsync(kind, "tx");
+        var a = await s.Catalog.CreateTableAsync(new CreateTableRequest(s.Id("a"), Schema, Spec));
+        var b = await s.Catalog.CreateTableAsync(new CreateTableRequest(s.Id("b"), Schema, Spec));
+        async Task<TableCommit> Stage(Table t, int from) =>
+            await SnapshotProducer.Append(t).AddFiles(await TableWriter.WriteAsync(t, Rows(from, 3))).StageAsync();
+
+        if (kind == "glue")
+        {
+            // Glue has no multi-table atomic update.
+            await Assert.ThrowsAsync<NotSupportedException>(async () => await s.Catalog.CommitTransactionAsync([await Stage(a, 0), await Stage(b, 0)]));
+            return;
+        }
+        await s.Catalog.CommitTransactionAsync([await Stage(a, 0), await Stage(b, 100)]);
+        Assert.Equal(3, (await TableScan.ReadAllAsync(await s.Catalog.LoadTableAsync(a.Identifier))).Count);
+        Assert.Equal(3, (await TableScan.ReadAllAsync(await s.Catalog.LoadTableAsync(b.Identifier))).Count);
+
+        // a moves underneath a staged transaction: neither table may change.
+        var staleA = await Stage(await s.Catalog.LoadTableAsync(a.Identifier), 10);
+        var stagedB = await Stage(await s.Catalog.LoadTableAsync(b.Identifier), 110);
+        await SnapshotProducer.Append(await s.Catalog.LoadTableAsync(a.Identifier)).AddFiles(await TableWriter.WriteAsync(a, Rows(20, 1))).CommitAsync();
+        await Assert.ThrowsAsync<CommitFailedException>(() => s.Catalog.CommitTransactionAsync([staleA, stagedB]));
+        Assert.Equal(4, (await TableScan.ReadAllAsync(await s.Catalog.LoadTableAsync(a.Identifier))).Count);
+        Assert.Equal(3, (await TableScan.ReadAllAsync(await s.Catalog.LoadTableAsync(b.Identifier))).Count);
+    }
 }

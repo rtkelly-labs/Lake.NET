@@ -332,6 +332,16 @@ public sealed class SnapshotProducer
     /// </summary>
     public static SnapshotProducer RowDelta(Table table) => new(table) { _operation = null };
 
+    /// <summary>
+    /// Rewrite manifests (Java's <c>RewriteManifests</c>): regroup every live data file into new manifests of about
+    /// <paramref name="targetSizeBytes"/>, clustered by partition so planning prunes well; no data changes
+    /// (operation <c>replace</c>). Entries keep their sequence numbers, snapshot IDs and v3 <c>first_row_id</c>s.
+    /// </summary>
+    public static SnapshotProducer RewriteManifests(Table table, long targetSizeBytes = 8L * 1024 * 1024) =>
+        new(table) { _operation = Operations.Replace, _rewriteManifestsTarget = targetSizeBytes };
+
+    private long? _rewriteManifestsTarget;
+
     /// <summary>Compaction: replace data files with rewritten ones holding the same rows (operation <c>replace</c>).</summary>
     public static SnapshotProducer Rewrite(Table table) => new(table) { _operation = Operations.Replace };
 
@@ -423,6 +433,20 @@ public sealed class SnapshotProducer
         }
     }
 
+    /// <summary>
+    /// Write this snapshot's files and return the commit instead of applying it, for
+    /// <see cref="ICatalog.CommitTransactionAsync"/> across tables. On a conflict, re-stage from refreshed tables;
+    /// files of an abandoned stage are left for orphan-file cleanup.
+    /// </summary>
+    public async Task<TableCommit> StageAsync(CancellationToken ct = default)
+    {
+        var snapshot = await ApplyAsync(ct);
+        _attemptArtifacts.Clear();
+        return new TableCommit(_table.Identifier,
+            [new UpdateRequirement.AssertTableUuid(_table.Metadata.TableUuid), new UpdateRequirement.AssertRefSnapshotId(SnapshotRef.Main, _table.Metadata.CurrentSnapshotId)],
+            [new MetadataUpdate.AddSnapshot(snapshot), new MetadataUpdate.SetSnapshotRef(SnapshotRef.Main, SnapshotRef.Branch(snapshot.SnapshotId))]);
+    }
+
     private async Task<bool> AppliedAsync(long snapshotId, CommitStateUnknownException unknown, CancellationToken ct)
     {
         try
@@ -463,11 +487,17 @@ public sealed class SnapshotProducer
             : DeleteChange.None;
 
         // 1. Carry forward (or rewrite, when deleting) the parent's manifests.
+        var toRegroup = new List<ManifestFile>();
         if (parent is not null)
         {
             var rewriteIndex = 0;
             foreach (var manifest in parentManifests)
             {
+                if (_rewriteManifestsTarget is not null && manifest.Content == ManifestContent.Data)
+                {
+                    toRegroup.Add(manifest);
+                    continue;
+                }
                 if (manifest.Content == ManifestContent.Deletes)
                 {
                     manifests.Add(await RewriteDeleteManifestAsync(manifest, deleteChange.Removed, snapshotId, sequenceNumber, $"{metaDir}/{commitUuid}-d{rewriteIndex++}.avro", ct));
@@ -499,6 +529,32 @@ public sealed class SnapshotProducer
                 _attemptArtifacts.Add(path);
             }
         }
+
+        // 1a. Rewrite manifests: all live data entries, sorted by partition, cut into target-sized manifests.
+        var regroupIndex = 0;
+        foreach (var bySpec in toRegroup.GroupBy(mf => mf.PartitionSpecId))
+        {
+            var spec = m.SpecById(bySpec.Key);
+            var entries = new List<ManifestEntry>();
+            long bytes = 0;
+            foreach (var mf in bySpec)
+            {
+                bytes += mf.ManifestLength;
+                entries.AddRange(ManifestCodec.ReadManifest(await _table.IO.ReadAllAsync(mf.ManifestPath, ct), spec, m.CurrentSchema, mf).Entries
+                    .Where(e => e.Status != ManifestEntryStatus.Deleted)
+                    .Select(e => e with { Status = ManifestEntryStatus.Existing }));
+            }
+            var perEntry = entries.Count == 0 ? 1 : Math.Max(1, bytes / entries.Count);
+            var chunk = (int)Math.Max(1, _rewriteManifestsTarget!.Value / perEntry);
+            var sorted = entries.OrderBy(e => string.Join('\u001f', e.DataFile.Partition.Select(v => v is byte[] b ? Convert.ToHexString(b) : Convert.ToString(v, CultureInfo.InvariantCulture) ?? "\0")), StringComparer.Ordinal).ToList();
+            for (var i = 0; i < sorted.Count; i += chunk)
+            {
+                var path = $"{metaDir}/{commitUuid}-m-rewritten{regroupIndex++}.avro";
+                manifests.Add(await WriteManifestAsync(path, spec, ManifestContent.Data, sorted.GetRange(i, Math.Min(chunk, sorted.Count - i)), snapshotId, sequenceNumber, ct));
+                _attemptArtifacts.Add(path);
+            }
+        }
+        if (_rewriteManifestsTarget is not null) _extraSummary["manifests-replaced"] = toRegroup.Count.ToString(CultureInfo.InvariantCulture);
 
         // 1b. New delete files: one delete manifest per partition spec.
         var deleteManifestIndex = 0;
@@ -903,6 +959,10 @@ public static class Maintenance
         await TableFiles.DeleteAllAsync(table.IO, candidates, ct);
         return new ExpireResult(expire.Select(s => s.SnapshotId).ToList(), candidates.Order(StringComparer.Ordinal).ToList());
     }
+
+    /// <summary>Regroup data manifests by partition into about <paramref name="targetSizeBytes"/> each (see <see cref="SnapshotProducer.RewriteManifests"/>).</summary>
+    public static Task<Snapshot> RewriteManifestsAsync(Table table, long targetSizeBytes = 8L * 1024 * 1024, CancellationToken ct = default) =>
+        SnapshotProducer.RewriteManifests(table, targetSizeBytes).CommitAsync(ct);
 
     /// <summary>
     /// Delete files under the table location that no snapshot or metadata file references (Java's

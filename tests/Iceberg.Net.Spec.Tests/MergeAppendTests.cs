@@ -100,4 +100,31 @@ public sealed class MergeAppendTests : IDisposable
         for (var i = 0; i < 5; i++) await TableMutations.InsertAsync(t, Rows(i * 10, 10));
         Assert.Equal(5, await DataManifests(t));
     }
+
+    [Theory]
+    [InlineData(2)]
+    [InlineData(3)]
+    public async Task Rewriting_manifests_clusters_by_partition_and_changes_nothing_else(int formatVersion)
+    {
+        var t = await Create($"rw{formatVersion}", formatVersion, minCount: 1000);
+        // Each append touches both partitions, so every manifest overlaps every partition: nothing to prune.
+        for (var i = 0; i < 12; i++) await TableMutations.InsertAsync(t, Rows(i * 10, 10));
+        await TableMutations.DeleteByKeysAsync(t, ["id", "p"], [[3L, 1], [4L, 0]], DeleteStrategy.PositionDeletes);
+        var before = await Snapshot(t);
+        Assert.Equal(12, await DataManifests(t));
+        Assert.Equal(0, (await TableScan.PlanAsync(t, Expressions.Expr.Equal("p", 0))).ManifestsSkipped);
+
+        var snapshot = await Maintenance.RewriteManifestsAsync(t, targetSizeBytes: 1); // one manifest per entry-chunk
+        Assert.Equal("replace", snapshot.Operation);
+        await Maintenance.RewriteManifestsAsync(t, targetSizeBytes: 8L * 1024 * 1024);
+        Assert.Equal(1, await DataManifests(t));
+        Assert.Equal(before, await Snapshot(t));
+
+        // Small targets cut at partition boundaries often enough for summaries to prune.
+        await Maintenance.RewriteManifestsAsync(t, targetSizeBytes: 3000);
+        Assert.True(await DataManifests(t) > 1);
+        Assert.True((await TableScan.PlanAsync(t, Expressions.Expr.Equal("p", 0))).ManifestsSkipped > 0);
+        Assert.Equal(before, await Snapshot(t));
+        await TableValidator.AssertValidAsync(t, new ValidationOptions { AllSnapshots = true, Deep = true });
+    }
 }

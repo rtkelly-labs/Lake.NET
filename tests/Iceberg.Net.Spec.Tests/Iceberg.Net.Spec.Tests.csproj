@@ -18,6 +18,7 @@
     <ProjectReference Include="../../src/Iceberg.Net.IO/Iceberg.Net.IO.csproj" />
     <ProjectReference Include="../../src/Iceberg.Net.Catalog/Iceberg.Net.Catalog.csproj" />
     <ProjectReference Include="../../src/Iceberg.Net.Data/Iceberg.Net.Data.csproj" />
+    <ProjectReference Include="../../src/Iceberg.Net.Arrow/Iceberg.Net.Arrow.csproj" />
     <ProjectReference Include="../Iceberg.Net.TestSupport/Iceberg.Net.TestSupport.csproj" />
   </ItemGroup>
   <ItemGroup>

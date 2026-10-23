@@ -199,6 +199,26 @@ public sealed class JdbcCatalog : MetastoreCatalog
         if (changed != 1) throw new CommitFailedException($"Table {id} metadata is no longer {expectedLocation ?? "(none)"}");
     }
 
+    /// <summary>All pointer moves in one database transaction: any stale row rolls every move back.</summary>
+    protected override async Task SwapMetadataLocationsAsync(IReadOnlyList<MetadataSwap> swaps, CancellationToken ct)
+    {
+        await using var c = await OpenAsync(ct);
+        await using var tx = await c.BeginTransactionAsync(ct);
+        foreach (var swap in swaps)
+        {
+            var changed = await ExecuteAsync(c, """
+                UPDATE iceberg_tables SET metadata_location = @new, previous_metadata_location = @old
+                WHERE catalog_name = @c AND table_namespace = @n AND table_name = @t AND metadata_location = @old
+                """, [("@c", _catalogName), ("@n", Ns(swap.Id.Namespace)), ("@t", swap.Id.Name), ("@new", swap.NewLocation), ("@old", swap.ExpectedLocation)], ct, tx);
+            if (changed != 1)
+            {
+                await tx.RollbackAsync(ct);
+                throw new CommitFailedException($"Table {swap.Id} changed concurrently");
+            }
+        }
+        await tx.CommitAsync(ct);
+    }
+
     protected override async Task RemoveTableEntryAsync(TableIdentifier id, CancellationToken ct)
     {
         await using var c = await OpenAsync(ct);

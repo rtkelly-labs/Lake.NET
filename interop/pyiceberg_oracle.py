@@ -7,6 +7,9 @@ Commands (all output is JSON on stdout so the C# suite can assert on it):
     read <catalog> <table>           print row count, rows, snapshot summary and spec details
     read-metadata <metadata.json>    same, for a table addressed only by its metadata file
     fingerprint <metadata.json>      order-independent per-column + per-row hashes (shadow comparison; streams batches)
+    compare-arrow <metadata.json> <file.arrow>
+                                     compare an Arrow IPC file of the table's rows (written by iceberg-dotnet) with
+                                     PyIceberg's scan().to_arrow(): column types, field IDs and values
     sigv4 <request-json>             botocore's SigV4 canonical request and Authorization for a request, at a fixed
                                      timestamp (cross-checks Iceberg.Net.Catalog.SigV4Handler)
     read-filter <metadata.json> <expression-json>
@@ -415,6 +418,63 @@ def cmd_read_filter(location: str, expression: str) -> dict[str, Any]:
     }
 
 
+def _normalise_arrow_type(t: pa.DataType) -> str:
+    if pa.types.is_large_string(t) or pa.types.is_string_view(t):
+        return "string"
+    if pa.types.is_large_binary(t) or pa.types.is_binary_view(t):
+        return "binary"
+    return str(t)
+
+
+def cmd_compare_arrow(location: str, ipc_path: str) -> dict[str, Any]:
+    ours = pa.ipc.open_file(ipc_path).read_all()
+    s3 = {"client.region": os.environ.get("AWS_REGION", "eu-west-1")}
+    theirs = StaticTable.from_metadata(location, properties=s3).scan().to_arrow()
+    key = ours.schema.field(0).name
+
+    def rows(t: pa.Table) -> list[dict[str, Any]]:
+        t = t.cast(
+            pa.schema(
+                [pa.field(f.name, ours.schema.field(f.name).type) for f in t.schema]
+            ),
+            safe=False,
+        )
+        out = t.sort_by(key).to_pylist()
+        return [
+            {k: ("NaN" if isinstance(v, float) and v != v else v) for k, v in r.items()}
+            for r in out
+        ]
+
+    def field_id(f: pa.Field) -> str | None:
+        return (f.metadata or {}).get(b"PARQUET:field_id", b"").decode() or None
+
+    types = {
+        f.name: [
+            _normalise_arrow_type(f.type),
+            _normalise_arrow_type(theirs.schema.field(f.name).type),
+        ]
+        for f in ours.schema
+    }
+    mine, other = rows(ours), rows(theirs)
+    mismatch = next(
+        (
+            f"row {i}: {a} != {b}"
+            for i, (a, b) in enumerate(zip(mine, other, strict=False))
+            if a != b
+        ),
+        None,
+    )
+    return {
+        "types": types,
+        "field_ids": {
+            f.name: [field_id(f), field_id(theirs.schema.field(f.name))]
+            for f in ours.schema
+        },
+        "rows": [len(mine), len(other)],
+        "mismatch": mismatch,
+    }
+
+
 def cmd_sigv4(request_json: str) -> dict[str, Any]:
     from botocore.auth import SigV4Auth
     from botocore.awsrequest import AWSRequest
@@ -546,6 +606,8 @@ def main(argv: list[str]) -> None:
             result = describe_table(StaticTable.from_metadata(location))
         case ["fingerprint", location]:
             result = cmd_fingerprint(location)
+        case ["compare-arrow", location, ipc_path]:
+            result = cmd_compare_arrow(location, ipc_path)
         case ["sigv4", request_json]:
             result = cmd_sigv4(request_json)
         case ["read-filter", location, expression]:

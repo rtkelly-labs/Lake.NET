@@ -257,6 +257,24 @@ public sealed class RestCatalog : ICatalog
         return MetadataJson.FromJson(resp!["metadata"]!) with { MetadataFileLocation = resp["metadata-location"]?.GetValue<string>() };
     }
 
+    public async Task CommitTransactionAsync(IReadOnlyList<TableCommit> commits, CancellationToken ct = default)
+    {
+        var body = new JsonObject
+        {
+            ["table-changes"] = new JsonArray(commits.Select(c => (JsonNode)new JsonObject
+            {
+                ["identifier"] = new JsonObject
+                {
+                    ["namespace"] = new JsonArray(c.Identifier.Namespace.Levels.Select(l => (JsonNode)l).ToArray()),
+                    ["name"] = c.Identifier.Name,
+                },
+                ["requirements"] = new JsonArray(c.Requirements.Select(r => (JsonNode)UpdateJson.ToJson(r)).ToArray()),
+                ["updates"] = new JsonArray(c.Updates.Select(u => (JsonNode)UpdateJson.ToJson(u)).ToArray()),
+            }).ToArray()),
+        };
+        await SendAsync(HttpMethod.Post, $"v1/{_prefix}transactions/commit", body, ct, conflict: m => new CommitFailedException(m), commit: true);
+    }
+
     private Table ToTable(TableIdentifier id, JsonNode loadResult)
     {
         var metadata = MetadataJson.FromJson(loadResult["metadata"]!) with { MetadataFileLocation = loadResult["metadata-location"]?.GetValue<string>() };
