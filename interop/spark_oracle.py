@@ -4,6 +4,7 @@ Runs inside the apache/spark image via spark-submit (see TestSupport/SparkOracle
 
     read-metadata <metadata.json>   load the table from its metadata file and print rows, snapshots, deletes, lineage
     read-tables <metadata.json>...  the same for many tables in one JVM: {location: description | {"error": ...}}
+                                    an argument "merge:<spec.json>" instead replays a MERGE in Spark (see merge_in_spark)
     fixtures <out_dir>              write reference tables (DVs, position deletes, row lineage) with Spark
 
 Output is the JSON document after the last @@ORACLE@@ marker on stdout; Spark's own logging goes to stderr.
@@ -140,11 +141,42 @@ def describe_metadata_file(spark: SparkSession, location: str) -> dict[str, Any]
     )
 
 
+MERGE_PREFIX = "merge:"
+
+
+def merge_in_spark(spark: SparkSession, spec_path: str) -> dict[str, Any]:
+    """Copy snapshot_id of target into a Spark table, run sql (MERGE INTO {target} USING {source}) with source, describe.
+
+    spec: {"target": metadata.json, "snapshot_id": id, "format_version": n, "source": metadata.json, "sql": template}.
+    """
+    spec = json.loads(Path(spec_path).read_text())
+    target = f"fx.merges.t_{uuid.uuid4().hex}"
+    spark.sql("CREATE NAMESPACE IF NOT EXISTS fx.merges")
+    (
+        spark.read.format("iceberg")
+        .option("snapshot-id", str(spec["snapshot_id"]))
+        .load(spec["target"])
+        .writeTo(target)
+        .tableProperty("format-version", str(spec["format_version"]))
+        .create()
+    )
+    spark.read.format("iceberg").load(spec["source"]).createOrReplaceTempView(
+        "merge_source"
+    )
+    spark.sql(spec["sql"].format(target=target, source="merge_source"))
+    return describe_catalog_table(spark, target)
+
+
 def cmd_read_tables(locations: list[str]) -> dict[str, Any]:
     spark = session()
     result: dict[str, Any] = {}
     for location in locations:
         try:
+            if location.startswith(MERGE_PREFIX):
+                result[location] = merge_in_spark(
+                    spark, location.removeprefix(MERGE_PREFIX)
+                )
+                continue
             result[location] = describe_metadata_file(spark, location)
         except Exception as e:  # noqa: BLE001 - report per table; one bad table must not hide the others
             java = getattr(e, "java_exception", None)

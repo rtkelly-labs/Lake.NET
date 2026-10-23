@@ -125,7 +125,69 @@ public sealed class SparkTablesFixture : IAsyncLifetime
             Tables[$"avro_nested_v{v}"] = new Built(t, (await TableScan.ReadAllAsync(t)).ToDictionary(r => (long)r[0]!), v >= 3 ? await TableScan.ReadWithLineageAsync(t) : null);
         }
 
-        Spark = await SparkOracle.ReadTablesAsync(Tables.Values.Select(b => b.Table.MetadataLocation!));
+        await BuildUpdateMergeAsync();
+
+        Spark = await SparkOracle.ReadTablesAsync(Tables.Values.Select(b => b.Table.MetadataLocation!).Concat(SparkMerges.Values));
+    }
+
+    /// <summary>
+    /// Keys of <see cref="Spark"/> for MERGEs Spark replays itself (interop/spark_oracle.py "merge:" entries): Spark
+    /// copies our table's pre-merge snapshot, runs <see cref="MergeSql"/> with our source table, and describes the result.
+    /// </summary>
+    public Dictionary<string, string> SparkMerges { get; } = new();
+
+    /// <summary>The MERGE that <see cref="MergeClauses"/> expresses, in Spark SQL.</summary>
+    public const string MergeSql = """
+        MERGE INTO {target} t USING {source} s ON t.id = s.id
+        WHEN MATCHED AND s.qty = 0 THEN DELETE
+        WHEN MATCHED THEN UPDATE SET name = s.name, amount = t.amount + 1
+        WHEN NOT MATCHED AND s.qty > 2 THEN INSERT *
+        WHEN NOT MATCHED BY SOURCE AND t.region = 'us' THEN DELETE
+        """;
+
+    public static void MergeClauses(MergeBuilder m) => m
+        .WhenMatchedDelete((t, s) => (int?)s[5] == 0)
+        .WhenMatchedUpdate((t, s) => [t[0], s[1], (double)t[2]! + 1, t[3], t[4], t[5]])
+        .WhenNotMatchedInsert(s => (int?)s[5] > 2)
+        .WhenNotMatchedBySourceDelete(Expr.Equal("region", "us"));
+
+    /// <summary>UPDATE (with a partition move) and MERGE (every clause kind) on v2 copy-on-write and v3 deletion vectors.</summary>
+    private async Task BuildUpdateMergeAsync()
+    {
+        var sourceTable = await _catalog!.CreateTableAsync(new CreateTableRequest(TableIdentifier.Of("db", "merge_source"), Keyed, FormatVersion: 2));
+        var source = CatalogConformanceTests.Rows(20, 20).Select(r => { r[1] = $"src-{r[0]}"; return r; }).ToList(); // 20..29 match, 30..39 do not
+        await TableMutations.InsertAsync(sourceTable, source);
+        sourceTable = await _catalog.LoadTableAsync(sourceTable.Identifier);
+
+        foreach (var v in new[] { 2, 3 })
+        {
+            var strategy = v == 2 ? DeleteStrategy.CopyOnWrite : DeleteStrategy.PositionDeletes;
+            await Build($"updated_v{v}", v, async t =>
+            {
+                // region is an identity partition source: these rows move partition.
+                await TableMutations.UpdateAsync(t, Expr.LessThan("id", 6L), u => u.Set("region", "apac").Set("name", r => $"moved-{r[0]}"), strategy);
+                await TableMutations.UpdateAsync(t, Expr.Equal("region", "eu"), u => u.Set("qty", r => r[5] is int q ? q + 100 : null), strategy);
+            }, CatalogConformanceTests.Spec);
+
+            long? before = null;
+            var name = $"merged_into_v{v}";
+            await Build(name, v, async t =>
+            {
+                await t.RefreshAsync();
+                before = t.Metadata.CurrentSnapshotId;
+                await TableMutations.MergeAsync(t, source, ["id"], MergeClauses, strategy);
+            }, v == 3 ? CatalogConformanceTests.Spec : null);
+            var spec = Path.Combine(_warehouse, $"{name}.merge.json");
+            await File.WriteAllTextAsync(spec, new JsonObject
+            {
+                ["target"] = Tables[name].Table.MetadataLocation,
+                ["snapshot_id"] = before,
+                ["format_version"] = v,
+                ["source"] = sourceTable.MetadataLocation,
+                ["sql"] = MergeSql,
+            }.ToJsonString());
+            SparkMerges[name] = $"merge:{spec}";
+        }
     }
 
     private async Task Build(string name, int formatVersion, Func<Table, Task> mutate, Partitioning.PartitionSpec? spec = null)
@@ -156,6 +218,7 @@ public sealed class SparkCrossEngineTests(SparkTablesFixture fx) : IClassFixture
         "CopyOnWrite_v2", "PositionDeletes_v2", "EqualityDeletes_v2",
         "CopyOnWrite_v3", "PositionDeletes_v3", "EqualityDeletes_v3",
         "upgraded_v2_to_v3", "partitioned_v3", "compacted_v3", "merged_v3", "evolved_v2", "expired_v2", "spec_evolved_v2",
+        "updated_v2", "updated_v3", "merged_into_v2", "merged_into_v3",
     };
 
     public static TheoryData<string> AllNames() { var all = Names(); all.Add("nested_v3"); return all; }
@@ -284,6 +347,8 @@ public sealed class SparkCrossEngineTests(SparkTablesFixture fx) : IClassFixture
     [InlineData("merged_v3")]
     [InlineData("nested_v3")]
     [InlineData("avro_nested_v3")]
+    [InlineData("updated_v3")]
+    [InlineData("merged_into_v3")]
     public void Spark_derives_the_same_row_lineage(string name)
     {
         Require.Spark();
@@ -292,5 +357,35 @@ public sealed class SparkCrossEngineTests(SparkTablesFixture fx) : IClassFixture
             r => r!["id"]!.GetValue<long>(),
             r => (r!["row_id"]?.GetValue<long>(), r["last_updated_seq"]?.GetValue<long>()));
         Assert.Equal(ours.OrderBy(kv => kv.Key), spark.OrderBy(kv => kv.Key));
+    }
+
+    /// <summary>Spark runs the same MERGE (SQL) on a copy of the pre-merge table and ends with the rows we committed.</summary>
+    [Spec("Row-level Deletes")]
+    [SkippableTheory]
+    [InlineData("merged_into_v2")]
+    [InlineData("merged_into_v3")]
+    public void Spark_merge_on_a_copy_matches_ours(string name)
+    {
+        Require.Spark();
+        var view = fx.Spark![fx.SparkMerges[name]]!;
+        Assert.True(view["error"] is null, $"Spark failed to merge {name}: {view["error"]}");
+        var spark = view["rows"]!.AsArray().ToDictionary(r => r!["id"]!.GetValue<long>(), r => r!.AsObject());
+        var ours = fx.Tables[name].Rows;
+        Assert.Equal(ours.Keys.Order(), spark.Keys.Order());
+        foreach (var (id, row) in ours)
+        {
+            var s = spark[id];
+            Assert.Equal((string?)row[1], s["name"]?.GetValue<string>());
+            Assert.Equal((double?)row[2], s["amount"]?.GetValue<double>());
+            Assert.Equal((long?)row[3], s["event_ts"]?.GetValue<long>());
+            Assert.Equal((string?)row[4], s["region"]?.GetValue<string>());
+            Assert.Equal(row[5] is null ? null : Convert.ToInt64(row[5]), s["qty"]?.GetValue<long>());
+        }
+        // The merge did exercise every clause: matched update and delete, conditional insert, not matched by source.
+        Assert.Contains(ours.Values, r => (string?)r[1] == "src-21");
+        Assert.DoesNotContain(20L, ours.Keys);
+        Assert.Contains(33L, ours.Keys);
+        Assert.DoesNotContain(31L, ours.Keys);
+        Assert.DoesNotContain(1L, ours.Keys);
     }
 }
