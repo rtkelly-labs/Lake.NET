@@ -43,7 +43,7 @@ Status: ✅ built and running in CI · 🟡 built, the rest needs something exte
 | 6 | **Concurrency soak** | ✅ | `SoakTests`: 4 writers × random modes against memory v2/v3, Glue, the Java REST fixture and Polaris; per-writer models plus hot keys contended by all writers; `ICEBERG_SOAK_SECONDS` for long runs. It found that the REST fixture's SQLite returned HTTP 500 under contention, and that unknown commit outcomes were never resolved; both are fixed | Hours-long runs on a schedule | AWS soak once #4 is configured |
 | 7 | **Reference files from other writers** | ✅ | Committed fixtures from PyIceberg (`fixtures/pyiceberg`) and Spark (`fixtures/spark`: v2 position deletes, v3 DVs + row lineage, a format v1 table, and a table evolved through add/rename/widen/drop/re-add columns and partition evolution), read in the network-free L0 tier, with our writes on top | — | Athena-written fixtures (the L3 test that reads one exists; it needs AWS) |
 | 8 | **Decoder fuzzing** | ✅ | `CorruptionTests`: bit flips, truncation, insertion and hostile length fields against metadata JSON, manifest lists, manifests, Puffin, DVs, Roaring and Theta, plus structural JSON damage and required-field removal (`ICEBERG_FUZZ_RUNS`, `ICEBERG_FUZZ_SEED`). Contract (`Corruption`): fail with a format error, never a crash or a silent wrong answer. Found and fixed: unchecked lengths sizing allocations (Avro, Roaring), DV length overflow, negative Theta counts accepted, unchecked Avro union branches and varints, v2/v3 metadata silently defaulting required fields | Coverage-guided fuzzing (SharpFuzz + libFuzzer) for long unattended runs | — |
-| 9 | **Mutation testing** | ✅ | Stryker.NET 5 (`dotnet-tools.json`, `mutation/`); Puffin baseline 66.2%, raised by `PuffinEdgeTests` written from the survivors: see [Mutation testing](#mutation-testing) | Extend to transforms, the metadata state machine and delete applicability; schedule it (too slow for PR CI) | — |
+| 9 | **Mutation testing** | ✅ | Stryker.NET 5 (`dotnet-tools.json`, `mutation/`); Puffin baseline 66.2%, raised by `PuffinEdgeTests` written from the survivors: see [Mutation testing](#mutation-testing) | Extend to the metadata state machine and delete applicability (transforms and expressions: `stryker-core.json`; scheduled weekly) | — |
 | 10 | **Spec traceability + drift** | ✅ | `[Spec("…")]` (C#, also an xunit trait: `--filter Spec=row-lineage`) and `@spec:` (Gherkin) tags; `tools/spec_trace.py` builds [spec-traceability.md](spec-traceability.md) from sections pinned at apache-iceberg-1.12.0 (CI fails if it is stale or links to unknown sections); the weekly `drift` job diffs upstream `main` and fails on changes nobody has reviewed yet (`drift --acknowledge` records a review in `docs/spec/acknowledged-drift.json`; the v4 changes above are acknowledged as of 2026-10-23). Today 69/88 implementable table + Puffin sections and 22/23 implemented REST operations have linked tests | The ⬜ rows of the matrix: untagged tests, or real gaps such as default values and path relativization | — |
 | 11 | **More REST servers** | 🟡 | **Apache Polaris 1.8** (`--polaris`) runs the full catalog conformance suite, the soak and the PyIceberg cross-engine tests. It caught a test that registered two live tables at one location, which Polaris rightly refuses. The new **JDBC catalog** runs the same suites over SQLite, shared with PyIceberg's `SqlCatalog` | Nessie, Lakekeeper | Their current images are on quay.io/ghcr.io, which this sandbox's proxy blocks; Docker Hub's `projectnessie/nessie:latest` is from January 2024, before Nessie served the Iceberg REST API. GitHub Actions can reach them: add them as compose profiles from a machine with access |
 | 12 | **BDD across engines** | 🟡 | `Then Spark reads the same rows` (rows, and row lineage on v3) and the PyIceberg steps; `CrossEngine.feature` runs upsert + delete under every mechanism past Spark. Trino and Spark are also asserted in xunit (`SparkCrossEngineTests`, `TrinoCrossEngineTests`, `ViewConformanceTests`) | Trino step (needs the scenario's table in the REST catalog) | Athena step needs #4 |
@@ -77,20 +77,25 @@ catches.
 
 | Project | Mutants | Killed | Survived | No coverage | Score | Date |
 |---|---|---|---|---|---|---|
-| Iceberg.Net.Puffin | — | — | — | — | — | pending first full run |
+| Iceberg.Net.Puffin | 526 | 346 + 2 timeouts | 128 | 50 | 66.2% | 2026-10-23 (baseline) |
+| Iceberg.Net.Puffin | 526 | 375 + 10 timeouts | 97 | 44 | 73.2% | 2026-10-23, after `PuffinEdgeTests` |
+
+Runs weekly in `.github/workflows/iceberg-dotnet-mutation.yml` (Puffin, and Core's transforms and expressions via
+`stryker-core.json`), uploading the reports.
 
 ## Needs action outside this repository
 
 1. **AWS sandbox for CI** (#4, #6, #7, #13, M1): an OIDC role trusted by this repository, with S3 on the regression
    prefix, Glue on `regr_*` databases and Athena on one workgroup; set the repository variables listed in row 4.
    The nightly workflow then starts on its own.
-2. **S3 lifecycle rule** on the regression prefix (expire after 3 days), because `DropTable(purge)` does not delete
-   data files yet.
+2. **S3 lifecycle rule** on the regression prefix (expire after 3 days) as a backstop for runs that die before their
+   cleanup (`DropTable(purge)` deletes every reachable file).
 3. **Shadow tables**: choose the production tables to shadow-read nightly (`ICEBERG_SHADOW_TABLES`). The tool only
    reads.
 4. **Registry access for Nessie/Lakekeeper** (#11), or add them from a machine that can pull from quay.io/ghcr.io.
 5. **Upstream issues**: Parquet.Net group field IDs ([drafted](upstream/parquet-net-group-field-ids.md), patch
-   verified) and the Parquet.SourceGenerator Iceberg profile ([gaps](parquet-sourcegenerator.md)).
+   verified), PyIceberg reading a null `list<struct>` as empty ([drafted](upstream/pyiceberg-null-list-of-struct.md))
+   and the Parquet.SourceGenerator Iceberg profile ([gaps](parquet-sourcegenerator.md)).
 
 ## Breaking out
 
