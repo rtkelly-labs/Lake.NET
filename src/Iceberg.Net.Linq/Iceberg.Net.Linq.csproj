@@ -1,0 +1,12 @@
+<Project Sdk="Microsoft.NET.Sdk">
+  <PropertyGroup>
+    <RootNamespace>Iceberg.Net.Linq</RootNamespace>
+    <Description>Typed queries and writes over Iceberg tables: row mapping by field ID, a LINQ provider that pushes filters and projections into scans, and EF Core-shaped bulk writes.</Description>
+  </PropertyGroup>
+  <ItemGroup>
+    <ProjectReference Include="../Iceberg.Net.Data/Iceberg.Net.Data.csproj" />
+  </ItemGroup>
+  <ItemGroup>
+    <InternalsVisibleTo Include="Iceberg.Net.Linq.Tests" />
+  </ItemGroup>
+</Project>
