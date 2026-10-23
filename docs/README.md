@@ -15,5 +15,6 @@
 | [emulation.md](emulation.md) | The local AWS + REST emulation stack, its fidelity shims, and known gaps |
 | [regression-suite.md](regression-suite.md) | Test tiers, running in emulation and AWS, environment variables, CI, shadow comparison |
 | [spec-traceability.md](spec-traceability.md) | Generated: every upstream spec section (pinned at 1.12.0) and the tests linked to it |
+| [iceberg-v4.md](iceberg-v4.md) | Following the Iceberg v4 proposals: status of each, what adopting it would mean here, and the plan |
 | [roadmap.md](roadmap.md) | Delivery milestones M0–M4, the 13 verification paths (built / left / needs action), upstream v4 changes, breaking out, open questions |
 | [research/ecosystem-2026-10.md](research/ecosystem-2026-10.md) | Sourced research snapshot (specs, releases, ports, engines, catalogs, .NET libraries) |

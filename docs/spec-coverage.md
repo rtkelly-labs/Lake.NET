@@ -7,7 +7,7 @@ Specs tracked (all in `apache/iceberg` `format/` and `open-api/`):
 
 | Spec | Version tracked | Notes |
 |---|---|---|
-| Table spec (`format/spec.md`) | v1, v2, v3 (v4 in development, not adopted) | v4 adds an adaptive metadata tree, relative paths, a `file` type and bans new equality deletes ([research](research/ecosystem-2026-10.md#11-table-format-versions)) |
+| Table spec (`format/spec.md`) | v1, v2, v3 (v4 in development, not adopted) | v4 adds an adaptive metadata tree, relative paths, a `file` type and bans new equality deletes ([v4 plan](iceberg-v4.md), [research](research/ecosystem-2026-10.md#11-table-format-versions)) |
 | REST catalog (`open-api/rest-catalog-open-api.yaml`) | as of Java 1.12.0 (`info.version` still 0.0.1) | capability negotiation via `GET /v1/config` `endpoints` |
 | Puffin (`format/puffin-spec.md`) | v1 | needed for v3 deletion vectors and statistics |
 | View spec (`format/view-spec.md`) | v1 | |

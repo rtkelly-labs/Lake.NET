@@ -21,13 +21,17 @@ needs action outside this repository.
 `python tools/spec_trace.py drift` compares apache/iceberg `main` with the sections pinned at the 1.12.0 release.
 Today it reports the in-progress **v4** work. Two items affect our design:
 
-- **v4 forbids new equality deletes** ("Equality delete files must not be added to v4 tables"; existing v2/v3 ones
-  must still be applied). When v4 support lands (we read and write up to v3 today), `DeleteStrategy.EqualityDeletes`
+What each v4 proposal would mean for this library, its status, and the plan are in [iceberg-v4.md](iceberg-v4.md).
+In short:
+
+- **v4 allows only deletion vectors for new row-level deletes**: no new equality deletes *and* no new position-delete
+  files (existing v2/v3 ones must still be applied). When v4 support lands (we read and write up to v3 today), `DeleteStrategy.EqualityDeletes`
   must refuse v4 tables, and producers that rely on
   equality deletes for cheap upserts need a v4 answer: deletion vectors after a key lookup, which our
   `PositionDeletes` strategy already does.
-- **Manifests are being restructured** (root manifests, content stats, manifest deletion vectors, relative paths).
-  This is additive for v1–v3 readers, but it is the biggest change to plan for if we adopt v4.
+- **Manifests are being restructured**: a root manifest replaces the manifest list, manifests become Parquet with a
+  new `tracked_file` schema, and there are manifest deletion vectors, typed content stats and relative paths. None of
+  this affects v1–v3 tables, but it is the biggest change to plan for if we adopt v4.
 
 ## Verification roadmap
 
