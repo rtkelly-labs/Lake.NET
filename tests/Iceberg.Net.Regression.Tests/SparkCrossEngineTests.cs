@@ -2,6 +2,7 @@ using System.Text.Json.Nodes;
 using Iceberg.Net.Catalog;
 using Iceberg.Net.Data;
 using Iceberg.Net.Metadata;
+using Iceberg.Net.TestSupport;
 using Iceberg.Net.Types;
 
 namespace Iceberg.Net.Regression.Tests;
@@ -80,6 +81,17 @@ public sealed class SparkTablesFixture : IAsyncLifetime
             await Maintenance.ExpireAsync(t, long.MaxValue, retainLast: 1);
         });
 
+        // Struct, list and map columns (with null lists of structs, which PyIceberg cannot check) after deletes and compaction.
+        {
+            var t = await _catalog.CreateTableAsync(new CreateTableRequest(TableIdentifier.Of("db", "nested_v3"), ShadowCompareTests.Nested, FormatVersion: 3));
+            await TableMutations.InsertAsync(t, ShadowCompareTests.NestedRows(40, nullStructLists: true));
+            await TableMutations.InsertAsync(t, ShadowCompareTests.NestedRows(60, nullStructLists: true).Skip(40).ToList());
+            await TableMutations.DeleteWhereAsync(t, r => (long)r[0]! % 13 == 4, DeleteStrategy.PositionDeletes);
+            await Compaction.RewriteDataFilesAsync(t, new RewriteOptions(MinInputFiles: 2));
+            t = await _catalog.LoadTableAsync(t.Identifier);
+            Tables["nested_v3"] = new Built(t, (await TableScan.ReadAllAsync(t)).ToDictionary(r => (long)r[0]!), await TableScan.ReadWithLineageAsync(t));
+        }
+
         Spark = await SparkOracle.ReadTablesAsync(Tables.Values.Select(b => b.Table.MetadataLocation!));
     }
 
@@ -113,6 +125,8 @@ public sealed class SparkCrossEngineTests(SparkTablesFixture fx) : IClassFixture
         "upgraded_v2_to_v3", "partitioned_v3", "compacted_v3", "merged_v3", "evolved_v2", "expired_v2",
     };
 
+    public static TheoryData<string> AllNames() { var all = Names(); all.Add("nested_v3"); return all; }
+
     private JsonNode SparkView(string name)
     {
         var view = fx.Spark![fx.Tables[name].Table.MetadataLocation!]!;
@@ -144,9 +158,20 @@ public sealed class SparkCrossEngineTests(SparkTablesFixture fx) : IClassFixture
         }
     }
 
+    [Spec("Nested Types")]
+    [SkippableFact]
+    public void Spark_reads_the_same_nested_values()
+    {
+        Require.Spark();
+        var built = fx.Tables["nested_v3"];
+        var schema = built.Table.Schema;
+        Assert.Equal(SparkJson.Rows(schema, built.Rows.Values), SparkJson.Rows(schema, SparkView("nested_v3")["rows"]!.AsArray()));
+        Assert.Contains(built.Rows.Values, r => r[4] is null); // the null list<struct> case really is covered
+    }
+
     [Spec("Snapshots")]
     [SkippableTheory]
-    [MemberData(nameof(Names))]
+    [MemberData(nameof(AllNames))]
     public void Spark_sees_the_same_snapshots_and_format(string name)
     {
         Require.Spark();
@@ -181,6 +206,7 @@ public sealed class SparkCrossEngineTests(SparkTablesFixture fx) : IClassFixture
     [InlineData("upgraded_v2_to_v3")]
     [InlineData("compacted_v3")]
     [InlineData("merged_v3")]
+    [InlineData("nested_v3")]
     public void Spark_derives_the_same_row_lineage(string name)
     {
         Require.Spark();

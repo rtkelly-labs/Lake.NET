@@ -4,7 +4,9 @@ namespace Iceberg.Net.Types;
 
 /// <summary>
 /// Schema evolution (spec "Schema Evolution"), as Java's <c>UpdateSchema</c>: add, delete, rename, widen, reorder,
-/// document and re-key top-level columns. Changes are applied in order to a copy of the table's current schema; new
+/// document and re-key columns. Nested fields are named by dotted path (<c>location.lat</c>; list elements and map
+/// keys/values are <c>element</c>, <c>key</c> and <c>value</c>, e.g. <c>events.element.kind</c>), except where a
+/// top-level column has that exact name. Changes are applied in order to a copy of the table's current schema; new
 /// field IDs continue from the table's <c>last-column-id</c> and are never reused. Changes that could break existing
 /// readers or data (making a column required, adding a required column without a default) need
 /// <see cref="AllowIncompatibleChanges"/>.
@@ -37,6 +39,20 @@ public sealed class SchemaUpdate
         return this;
     }
 
+    /// <summary>Add an optional field to the struct at <paramref name="parent"/> (a dotted path).</summary>
+    public SchemaUpdate AddColumn(string parent, string name, IcebergType type, string? doc = null)
+    {
+        if (string.IsNullOrWhiteSpace(name)) throw new ArgumentException("Column name is empty");
+        UpdateNested(parent, f =>
+        {
+            if (f.Type is not StructType s) throw new ArgumentException($"'{parent}' is not a struct");
+            if (s.Fields.Any(x => x.Name == name)) throw new ArgumentException($"Field '{parent}.{name}' already exists");
+            var id = ++_lastColumnId;
+            return f with { Type = new StructType([.. s.Fields, new NestedField(id, name, FreshIds(type), false, doc)]) };
+        });
+        return this;
+    }
+
     /// <summary>
     /// A required column: existing rows need a value, so v3 tables need <paramref name="initialDefault"/> (the value
     /// readers fill in for files written before the column existed); otherwise only with incompatible changes allowed.
@@ -56,6 +72,18 @@ public sealed class SchemaUpdate
 
     public SchemaUpdate DeleteColumn(string name)
     {
+        if (!IsTopLevel(name))
+        {
+            UpdateNested(name, f =>
+            {
+                var ids = AllIds(f).ToHashSet();
+                if (_identifiers.Any(ids.Contains)) throw new InvalidOperationException($"Cannot delete identifier field '{name}'");
+                if (_base.DefaultSpec.Fields.Any(pf => pf.AllSourceIds.Any(ids.Contains))) throw new InvalidOperationException($"Cannot delete '{name}': the current partition spec uses it");
+                if (_base.DefaultSortOrder.Fields.Any(sf => ids.Contains(sf.SourceId))) throw new InvalidOperationException($"Cannot delete '{name}': the default sort order uses it");
+                return null;
+            });
+            return this;
+        }
         var field = _columns[IndexOf(name)];
         if (_identifiers.Contains(field.Id)) throw new InvalidOperationException($"Cannot delete identifier column '{name}'; change the identifier fields first");
         if (_base.DefaultSpec.Fields.Any(f => f.AllSourceIds.Contains(field.Id)))
@@ -69,6 +97,7 @@ public sealed class SchemaUpdate
     /// <summary>Rename: data files are read by field ID, so existing data is untouched.</summary>
     public SchemaUpdate RenameColumn(string name, string newName)
     {
+        if (!IsTopLevel(name)) { UpdateNested(name, f => f with { Name = newName }); return this; }
         var i = IndexOf(name);
         EnsureFree(newName);
         _columns[i] = _columns[i] with { Name = newName };
@@ -78,6 +107,13 @@ public sealed class SchemaUpdate
     /// <summary>Widen a column's type (int→long, float→double, decimal precision, v3 date→timestamp).</summary>
     public SchemaUpdate UpdateColumn(string name, PrimitiveType newType)
     {
+        if (!IsTopLevel(name))
+        {
+            UpdateNested(name, f => TypeUtil.IsPromotionAllowed(f.Type, newType, _base.FormatVersion)
+                ? f with { Type = newType }
+                : throw new InvalidOperationException($"Cannot change '{name}' from {f.Type} to {newType}"));
+            return this;
+        }
         var i = IndexOf(name);
         if (!TypeUtil.IsPromotionAllowed(_columns[i].Type, newType, _base.FormatVersion))
             throw new InvalidOperationException($"Cannot change '{name}' from {_columns[i].Type} to {newType}");
@@ -87,6 +123,7 @@ public sealed class SchemaUpdate
 
     public SchemaUpdate UpdateDoc(string name, string? doc)
     {
+        if (!IsTopLevel(name)) { UpdateNested(name, f => f with { Doc = doc }); return this; }
         var i = IndexOf(name);
         _columns[i] = _columns[i] with { Doc = doc };
         return this;
@@ -94,6 +131,11 @@ public sealed class SchemaUpdate
 
     public SchemaUpdate MakeOptional(string name)
     {
+        if (!IsTopLevel(name))
+        {
+            UpdateNested(name, f => _identifiers.Contains(f.Id) ? throw new InvalidOperationException($"Identifier field '{name}' must stay required") : f with { Required = false });
+            return this;
+        }
         var i = IndexOf(name);
         if (_identifiers.Contains(_columns[i].Id)) throw new InvalidOperationException($"Identifier column '{name}' must stay required");
         _columns[i] = _columns[i] with { Required = false };
@@ -142,6 +184,72 @@ public sealed class SchemaUpdate
     public (IReadOnlyList<UpdateRequirement> Requirements, IReadOnlyList<MetadataUpdate> Updates) ToCommit() =>
         ([new UpdateRequirement.AssertCurrentSchemaId(_base.CurrentSchemaId), new UpdateRequirement.AssertLastAssignedFieldId(_base.LastColumnId)],
          [new MetadataUpdate.AddSchema(Apply()), new MetadataUpdate.SetCurrentSchema(MetadataUpdate.LastAdded)]);
+
+    private bool IsTopLevel(string name) => !name.Contains('.') || _columns.Any(c => c.Name == name);
+
+    /// <summary>Replace (or with null, remove) the nested field at a dotted path, rebuilding its ancestors.</summary>
+    private void UpdateNested(string path, Func<NestedField, NestedField?> change)
+    {
+        string[] rest;
+        var top = _columns.FindIndex(c => c.Name == path);
+        if (top >= 0) rest = [];
+        else
+        {
+            var parts = path.Split('.');
+            top = IndexOf(parts[0]);
+            rest = parts[1..];
+        }
+        var updated = Descend(_columns[top], rest, change, path);
+        if (updated is null) throw new InvalidOperationException($"Use DeleteColumn on top-level column '{path}'");
+        _columns[top] = updated;
+    }
+
+    private static NestedField? Descend(NestedField f, string[] rest, Func<NestedField, NestedField?> change, string path)
+    {
+        if (rest.Length == 0) return change(f);
+        var (segment, tail) = (rest[0], rest[1..]);
+        switch (f.Type)
+        {
+            case StructType s:
+            {
+                var fields = s.Fields.ToList();
+                var i = fields.FindIndex(x => x.Name == segment);
+                if (i < 0) throw new ArgumentException($"Field '{path}' does not exist");
+                var child = Descend(fields[i], tail, change, path);
+                if (child is null) fields.RemoveAt(i); else fields[i] = child;
+                if (fields.Count == 0) throw new InvalidOperationException($"Cannot delete the last field of struct '{f.Name}'");
+                return f with { Type = new StructType(fields) };
+            }
+            case ListType l when segment == "element":
+            {
+                var e = Descend(l.ElementField, tail, change, path) ?? throw new InvalidOperationException("Cannot delete a list element");
+                if (e.Name != "element") throw new InvalidOperationException("Cannot rename a list element");
+                return f with { Type = new ListType(l.ElementId, e.Type, e.Required) };
+            }
+            case MapType m when segment == "value":
+            {
+                var v = Descend(m.ValueField, tail, change, path) ?? throw new InvalidOperationException("Cannot delete a map value");
+                if (v.Name != "value") throw new InvalidOperationException("Cannot rename a map value");
+                return f with { Type = new MapType(m.KeyId, m.KeyType, m.ValueId, v.Type, v.Required) };
+            }
+            case MapType m when segment == "key":
+            {
+                var k = Descend(m.KeyField, tail, change, path) ?? throw new InvalidOperationException("Cannot delete a map key");
+                if (k.Name != "key" || !k.Required) throw new InvalidOperationException("Map keys keep their name and stay required");
+                if (k.Type is PrimitiveType && !k.Type.Equals(m.KeyType)) throw new InvalidOperationException("Map key types cannot change");
+                return f with { Type = new MapType(m.KeyId, k.Type, m.ValueId, m.ValueType, m.ValueRequired) };
+            }
+            default: throw new ArgumentException($"Field '{path}' does not exist");
+        }
+    }
+
+    private static IEnumerable<int> AllIds(NestedField f) => f.Type switch
+    {
+        StructType s => s.Fields.SelectMany(AllIds).Prepend(f.Id),
+        ListType l => AllIds(l.ElementField).Prepend(f.Id),
+        MapType m => AllIds(m.KeyField).Concat(AllIds(m.ValueField)).Prepend(f.Id),
+        _ => [f.Id],
+    };
 
     private void EnsureFree(string name)
     {

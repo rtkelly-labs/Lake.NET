@@ -2,6 +2,7 @@ using System.Text.Json.Nodes;
 using Iceberg.Net.Catalog;
 using Iceberg.Net.Data;
 using Iceberg.Net.TestSupport;
+using Iceberg.Net.Types;
 
 namespace Iceberg.Net.Spec.Tests;
 
@@ -68,6 +69,29 @@ public sealed class SparkFixtureTests : IDisposable
         var spark = expected["rows"]!.AsArray()
             .Select(r => string.Join("|", names.Select(n => Canon(r![n])))).Order().ToList();
         Assert.Equal(spark, ours);
+    }
+
+    [Spec("Nested Types")]
+    [Fact]
+    public async Task Reads_spark_nested_types_and_writes_on_top()
+    {
+        var table = await Load("nested_v2");
+        var expected = Expected["nested_v2"]!["rows"]!.AsArray();
+        Assert.Equal(SparkJson.Rows(table.Schema, expected), SparkJson.Rows(table.Schema, await TableScan.ReadAllAsync(table)));
+        // A field Spark added inside the struct: older rows read it as null, newer ones have it.
+        var point = Assert.IsType<StructType>(table.Schema.FindField("point")!.Type);
+        Assert.Equal(["x", "y", "label", "z"], point.Fields.Select(f => f.Name));
+
+        var rows = (await TableScan.ReadAllAsync(table)).ToDictionary(r => (long)r[0]!);
+        var changed = (object?[])rows[1].Clone();
+        changed[2] = new List<object?> { "ours", null };
+        changed[3] = new Dictionary<object, object?> { ["q"] = 9 };
+        await TableMutations.UpsertAsync(table, [changed], ["id"], DeleteStrategy.PositionDeletes);
+        await TableMutations.InsertAsync(table, [[100L, new object?[] { 1.0, 2.0, null, 4.0 }, null, new Dictionary<object, object?>(), new List<object?> { null }, new List<object?> { new List<object?> { 7 } }]]);
+        var after = (await TableScan.ReadAllAsync(table)).ToDictionary(r => (long)r[0]!);
+        Assert.Equal(rows.Count + 1, after.Count);
+        Assert.Equal(SparkJson.Ours(table.Schema.Columns[2].Type, changed[2]), SparkJson.Ours(table.Schema.Columns[2].Type, after[1][2]));
+        await TableValidator.AssertValidAsync(table, new ValidationOptions { AllSnapshots = true, Deep = true });
     }
 
     [Theory]

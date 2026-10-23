@@ -89,6 +89,55 @@ public sealed class ShadowCompareTests : IDisposable
         Assert.Equal(ours.RowHash, theirs.RowHash);
     }
 
+    internal static readonly Schema Nested = new(0,
+    [
+        NestedField.Require(1, "id", PrimitiveType.Long),
+        NestedField.Optional(2, "place", new StructType([
+            NestedField.Require(3, "lat", PrimitiveType.Double),
+            NestedField.Optional(4, "since", PrimitiveType.Date),
+            NestedField.Optional(5, "label", PrimitiveType.String)])),
+        NestedField.Optional(6, "tags", new ListType(7, PrimitiveType.String, ElementRequired: false)),
+        NestedField.Optional(8, "counts", new MapType(9, PrimitiveType.String, 10, PrimitiveType.Long, ValueRequired: false)),
+        NestedField.Optional(11, "events", new ListType(12, new StructType([
+            NestedField.Require(13, "at", PrimitiveType.TimestampTz),
+            NestedField.Optional(14, "amount", new DecimalType(20, 3)),
+            NestedField.Optional(15, "ref", PrimitiveType.Uuid)]), ElementRequired: false)),
+        NestedField.Optional(16, "grid", new ListType(17, new ListType(18, PrimitiveType.Int, ElementRequired: true), ElementRequired: false)),
+    ]);
+
+    internal static List<object?[]> NestedRows(int count, bool nullStructLists = false) => Enumerable.Range(0, count).Select(i => new object?[]
+    {
+        (long)i,
+        i % 7 == 0 ? null : new object?[] { i / 3.0, i % 2 == 0 ? null : 19_000 + i, i % 3 == 0 ? null : $"p{i}" },
+        i % 5 == 0 ? null : Enumerable.Range(0, i % 4).Select(k => k == 1 ? null : (object?)$"t{i}-{k}").ToList(),
+        i % 6 == 0 ? null : Enumerable.Range(0, i % 3).ToDictionary(k => (object)$"k{k}", k => k == 2 ? null : (object?)(long)(i * k)),
+        // No null lists of structs for PyIceberg: 0.12's projection rebuilds those from offsets alone
+        // (LargeListArray.from_arrays) and reads them as empty. Spark checks those nulls (SparkCrossEngineTests).
+        i % 4 == 0 && nullStructLists ? null : Enumerable.Range(0, i % 4 == 0 ? 0 : i % 3).Select(k => k == 1 && i % 2 == 0 ? null : (object?)new object?[]
+        {
+            1_700_000_000_000_000L + i * 1_000_001L + k,
+            k == 0 ? null : new IcebergDecimal(i * 12_345L - k, 3),
+            new Guid($"{i:x8}-{k:x4}-4000-8000-{i * 31:x12}"),
+        }).ToList(),
+        i % 9 == 0 ? null : Enumerable.Range(0, i % 3).Select(k => (object?)Enumerable.Range(0, k).Select(x => (object?)(x * i)).ToList()).ToList(),
+    }).ToList();
+
+    [SkippableTheory]
+    [InlineData(2)]
+    [InlineData(3)]
+    [Spec("Nested Types")]
+    public async Task Fingerprints_agree_with_pyiceberg_for_nested_types(int formatVersion)
+    {
+        Require.LocalOracle();
+        var t = await _catalog.CreateTableAsync(new CreateTableRequest(TableIdentifier.Of("db", $"nested_v{formatVersion}"), Nested, FormatVersion: formatVersion));
+        await TableMutations.InsertAsync(t, NestedRows(80));
+        await TableMutations.DeleteWhereAsync(t, r => (long)r[0]! % 13 == 4, DeleteStrategy.PositionDeletes);
+        var ours = await TableFingerprint.ComputeAsync(t);
+        var theirs = await PyIceberg(t);
+        Assert.Empty(ours.DifferencesFrom(theirs));
+        Assert.Equal(ours.RowHash, theirs.RowHash);
+    }
+
     [SkippableFact]
     public async Task A_lost_delete_or_changed_value_is_reported()
     {

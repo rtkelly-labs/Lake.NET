@@ -290,9 +290,35 @@ def _canonical(field_type: Any) -> Callable[[Any], str]:
         DecimalType,
         FixedType,
         FloatType,
+        ListType,
+        MapType,
+        StructType,
         UUIDType,
     )
 
+    if isinstance(field_type, StructType):
+        parts = [(f.name, _canonical(f.field_type)) for f in field_type.fields]
+        return lambda v: (
+            "("
+            + ",".join("\u0000" if v[n] is None else c(v[n]) for n, c in parts)
+            + ")"
+        )
+    if isinstance(field_type, ListType):
+        element = _canonical(field_type.element_type)
+        return lambda v: (
+            "[" + ",".join("\u0000" if e is None else element(e) for e in v) + "]"
+        )
+    if isinstance(field_type, MapType):
+        key, value = _canonical(field_type.key_type), _canonical(field_type.value_type)
+
+        def canon_map(v: Any) -> str:
+            items = v.items() if isinstance(v, dict) else v
+            pairs = sorted(
+                (key(k), "\u0000" if x is None else value(x)) for k, x in items
+            )
+            return "{" + ",".join(f"{k}={x}" for k, x in pairs) + "}"
+
+        return canon_map
     if isinstance(field_type, BooleanType):
         return lambda v: "true" if v else "false"
     if isinstance(field_type, FloatType):
@@ -308,7 +334,26 @@ def _canonical(field_type: Any) -> Callable[[Any], str]:
         )
     if isinstance(field_type, (BinaryType, FixedType)):
         return lambda v: bytes(v).hex()
-    return str  # int/long, temporal types (pre-cast to integers), strings
+    return _temporal_or_str  # int/long, temporal types (top level: pre-cast to integers), strings
+
+
+def _temporal_or_str(v: Any) -> str:
+    """Temporal values inside nested columns arrive as Python objects: render them as days / micros like the rest."""
+    import datetime as dt
+
+    if isinstance(v, dt.datetime):
+        epoch = dt.datetime(1970, 1, 1, tzinfo=v.tzinfo and dt.timezone.utc)
+        delta = v - epoch
+        return str(
+            (delta.days * 86_400 + delta.seconds) * 1_000_000 + delta.microseconds
+        )
+    if isinstance(v, dt.date):
+        return str((v - dt.date(1970, 1, 1)).days)
+    if isinstance(v, dt.time):
+        return str(
+            ((v.hour * 60 + v.minute) * 60 + v.second) * 1_000_000 + v.microsecond
+        )
+    return str(v)
 
 
 def _h(text: str) -> int:

@@ -818,5 +818,764 @@
       }
     ],
     "snapshot_count": 4
+  },
+  "nested_v2": {
+    "delete_files": [
+      "1:PARQUET",
+      "1:PARQUET"
+    ],
+    "engine": "spark 4.0.1",
+    "format_version": 2,
+    "ids": [
+      0,
+      1,
+      2,
+      4,
+      5,
+      6,
+      7,
+      8,
+      9,
+      10,
+      11,
+      12,
+      13,
+      14,
+      15,
+      16,
+      18,
+      19,
+      20,
+      21,
+      22,
+      23,
+      24,
+      25,
+      26,
+      27,
+      28,
+      29,
+      30,
+      31
+    ],
+    "metadata_location": "file:///tmp/sentric-spark-fixture-root/warehouse/ref/nested_v2/metadata/v5.metadata.json",
+    "operation": "append",
+    "row_count": 30,
+    "rows": [
+      {
+        "counts": null,
+        "events": null,
+        "grid": null,
+        "id": 0,
+        "point": null,
+        "tags": null
+      },
+      {
+        "counts": {},
+        "events": [],
+        "grid": [
+          [
+            1
+          ],
+          [],
+          null
+        ],
+        "id": 1,
+        "point": {
+          "label": "p1",
+          "x": 0.5,
+          "y": -1.5,
+          "z": null
+        },
+        "tags": []
+      },
+      {
+        "counts": {
+          "a": 2,
+          "b": null
+        },
+        "events": [
+          {
+            "at": 1704164647000006,
+            "kind": "k"
+          },
+          null
+        ],
+        "grid": [
+          [
+            2
+          ],
+          [],
+          null
+        ],
+        "id": 2,
+        "point": {
+          "label": "p2",
+          "x": 1.0,
+          "y": -3.0,
+          "z": null
+        },
+        "tags": [
+          "t2",
+          null,
+          "z"
+        ]
+      },
+      {
+        "counts": {
+          "a": 4,
+          "b": null
+        },
+        "events": null,
+        "grid": [
+          [
+            4
+          ],
+          [],
+          null
+        ],
+        "id": 4,
+        "point": {
+          "label": "p4",
+          "x": 2.0,
+          "y": -6.0,
+          "z": null
+        },
+        "tags": [
+          "t4",
+          null,
+          "z"
+        ]
+      },
+      {
+        "counts": {
+          "a": 5,
+          "b": null
+        },
+        "events": [],
+        "grid": [
+          [
+            5
+          ],
+          [],
+          null
+        ],
+        "id": 5,
+        "point": {
+          "label": "p5",
+          "x": 2.5,
+          "y": -7.5,
+          "z": null
+        },
+        "tags": null
+      },
+      {
+        "counts": null,
+        "events": [
+          {
+            "at": 1704164651000006,
+            "kind": "k"
+          },
+          null
+        ],
+        "grid": [
+          [
+            6
+          ],
+          [],
+          null
+        ],
+        "id": 6,
+        "point": {
+          "label": null,
+          "x": 3.0,
+          "y": -9.0,
+          "z": null
+        },
+        "tags": []
+      },
+      {
+        "counts": {},
+        "events": [
+          {
+            "at": 1704164652000006,
+            "kind": "k"
+          },
+          null
+        ],
+        "grid": [
+          [
+            7
+          ],
+          [],
+          null
+        ],
+        "id": 7,
+        "point": null,
+        "tags": [
+          "t7",
+          null,
+          "z"
+        ]
+      },
+      {
+        "counts": {
+          "a": 8,
+          "b": null
+        },
+        "events": null,
+        "grid": [
+          [
+            8
+          ],
+          [],
+          null
+        ],
+        "id": 8,
+        "point": {
+          "label": "p8",
+          "x": 4.0,
+          "y": -12.0,
+          "z": null
+        },
+        "tags": [
+          "t8",
+          null,
+          "z"
+        ]
+      },
+      {
+        "counts": {
+          "a": 9,
+          "b": null
+        },
+        "events": [],
+        "grid": null,
+        "id": 9,
+        "point": {
+          "label": null,
+          "x": 4.5,
+          "y": -13.5,
+          "z": null
+        },
+        "tags": [
+          "t9",
+          null,
+          "z"
+        ]
+      },
+      {
+        "counts": {
+          "a": 10,
+          "b": null
+        },
+        "events": [
+          {
+            "at": 1704164655000006,
+            "kind": "k"
+          },
+          null
+        ],
+        "grid": [
+          [
+            10
+          ],
+          [],
+          null
+        ],
+        "id": 10,
+        "point": {
+          "label": "p10",
+          "x": 5.0,
+          "y": -15.0,
+          "z": null
+        },
+        "tags": null
+      },
+      {
+        "counts": {
+          "a": 11,
+          "b": null
+        },
+        "events": [
+          {
+            "at": 1704164656000006,
+            "kind": "k"
+          },
+          null
+        ],
+        "grid": [
+          [
+            11
+          ],
+          [],
+          null
+        ],
+        "id": 11,
+        "point": {
+          "label": "p11",
+          "x": 5.5,
+          "y": -16.5,
+          "z": null
+        },
+        "tags": []
+      },
+      {
+        "counts": null,
+        "events": null,
+        "grid": [
+          [
+            12
+          ],
+          [],
+          null
+        ],
+        "id": 12,
+        "point": {
+          "label": null,
+          "x": 6.0,
+          "y": -18.0,
+          "z": null
+        },
+        "tags": [
+          "t12",
+          null,
+          "z"
+        ]
+      },
+      {
+        "counts": {},
+        "events": [],
+        "grid": [
+          [
+            13
+          ],
+          [],
+          null
+        ],
+        "id": 13,
+        "point": {
+          "label": "p13",
+          "x": 6.5,
+          "y": -19.5,
+          "z": null
+        },
+        "tags": [
+          "t13",
+          null,
+          "z"
+        ]
+      },
+      {
+        "counts": {
+          "a": 14,
+          "b": null
+        },
+        "events": [
+          {
+            "at": 1704164659000006,
+            "kind": "k"
+          },
+          null
+        ],
+        "grid": [
+          [
+            14
+          ],
+          [],
+          null
+        ],
+        "id": 14,
+        "point": null,
+        "tags": [
+          "t14",
+          null,
+          "z"
+        ]
+      },
+      {
+        "counts": {
+          "a": 15,
+          "b": null
+        },
+        "events": [
+          {
+            "at": 1704164660000006,
+            "kind": "k"
+          },
+          null
+        ],
+        "grid": [
+          [
+            15
+          ],
+          [],
+          null
+        ],
+        "id": 15,
+        "point": {
+          "label": null,
+          "x": 7.5,
+          "y": -22.5,
+          "z": null
+        },
+        "tags": null
+      },
+      {
+        "counts": {
+          "a": 16,
+          "b": null
+        },
+        "events": null,
+        "grid": [
+          [
+            16
+          ],
+          [],
+          null
+        ],
+        "id": 16,
+        "point": {
+          "label": "p16",
+          "x": 8.0,
+          "y": -24.0,
+          "z": null
+        },
+        "tags": []
+      },
+      {
+        "counts": null,
+        "events": [
+          {
+            "at": 1704164663000006,
+            "kind": "k"
+          },
+          null
+        ],
+        "grid": null,
+        "id": 18,
+        "point": {
+          "label": null,
+          "x": 9.0,
+          "y": -27.0,
+          "z": null
+        },
+        "tags": [
+          "t18",
+          null,
+          "z"
+        ]
+      },
+      {
+        "counts": {},
+        "events": [
+          {
+            "at": 1704164664000006,
+            "kind": "k"
+          },
+          null
+        ],
+        "grid": [
+          [
+            19
+          ],
+          [],
+          null
+        ],
+        "id": 19,
+        "point": {
+          "label": "p19",
+          "x": 9.5,
+          "y": -28.5,
+          "z": null
+        },
+        "tags": [
+          "t19",
+          null,
+          "z"
+        ]
+      },
+      {
+        "counts": {
+          "a": 20,
+          "b": null
+        },
+        "events": null,
+        "grid": [
+          [
+            20
+          ],
+          [],
+          null
+        ],
+        "id": 20,
+        "point": {
+          "label": "p20",
+          "x": 10.0,
+          "y": -30.0,
+          "z": null
+        },
+        "tags": null
+      },
+      {
+        "counts": {
+          "a": 21,
+          "b": null
+        },
+        "events": [],
+        "grid": [
+          [
+            21
+          ],
+          [],
+          null
+        ],
+        "id": 21,
+        "point": null,
+        "tags": []
+      },
+      {
+        "counts": {
+          "a": 22,
+          "b": null
+        },
+        "events": [
+          {
+            "at": 1704164667000006,
+            "kind": "k"
+          },
+          null
+        ],
+        "grid": [
+          [
+            22
+          ],
+          [],
+          null
+        ],
+        "id": 22,
+        "point": {
+          "label": "p22",
+          "x": 11.0,
+          "y": -33.0,
+          "z": null
+        },
+        "tags": [
+          "t22",
+          null,
+          "z"
+        ]
+      },
+      {
+        "counts": {
+          "a": 23,
+          "b": null
+        },
+        "events": [
+          {
+            "at": 1704164668000006,
+            "kind": "k"
+          },
+          null
+        ],
+        "grid": [
+          [
+            23
+          ],
+          [],
+          null
+        ],
+        "id": 23,
+        "point": {
+          "label": "p23",
+          "x": 11.5,
+          "y": -34.5,
+          "z": null
+        },
+        "tags": [
+          "t23",
+          null,
+          "z"
+        ]
+      },
+      {
+        "counts": null,
+        "events": null,
+        "grid": [
+          [
+            24
+          ],
+          [],
+          null
+        ],
+        "id": 24,
+        "point": {
+          "label": null,
+          "x": 12.0,
+          "y": -36.0,
+          "z": null
+        },
+        "tags": [
+          "t24",
+          null,
+          "z"
+        ]
+      },
+      {
+        "counts": {},
+        "events": [],
+        "grid": [
+          [
+            25
+          ],
+          [],
+          null
+        ],
+        "id": 25,
+        "point": {
+          "label": "p25",
+          "x": 12.5,
+          "y": -37.5,
+          "z": null
+        },
+        "tags": null
+      },
+      {
+        "counts": {
+          "a": 26,
+          "b": null
+        },
+        "events": [
+          {
+            "at": 1704164671000006,
+            "kind": "k"
+          },
+          null
+        ],
+        "grid": [
+          [
+            26
+          ],
+          [],
+          null
+        ],
+        "id": 26,
+        "point": {
+          "label": "p26",
+          "x": 13.0,
+          "y": -39.0,
+          "z": null
+        },
+        "tags": []
+      },
+      {
+        "counts": {
+          "a": 27,
+          "b": null
+        },
+        "events": [
+          {
+            "at": 1704164672000006,
+            "kind": "k"
+          },
+          null
+        ],
+        "grid": null,
+        "id": 27,
+        "point": {
+          "label": null,
+          "x": 13.5,
+          "y": -40.5,
+          "z": null
+        },
+        "tags": [
+          "t27",
+          null,
+          "z"
+        ]
+      },
+      {
+        "counts": {
+          "a": 28,
+          "b": null
+        },
+        "events": null,
+        "grid": [
+          [
+            28
+          ],
+          [],
+          null
+        ],
+        "id": 28,
+        "point": null,
+        "tags": [
+          "t28",
+          null,
+          "z"
+        ]
+      },
+      {
+        "counts": {
+          "a": 29,
+          "b": null
+        },
+        "events": [],
+        "grid": [
+          [
+            29
+          ],
+          [],
+          null
+        ],
+        "id": 29,
+        "point": {
+          "label": "p29",
+          "x": 14.5,
+          "y": -43.5,
+          "z": null
+        },
+        "tags": [
+          "t29",
+          null,
+          "z"
+        ]
+      },
+      {
+        "counts": {
+          "c": 1
+        },
+        "events": [],
+        "grid": [],
+        "id": 30,
+        "point": {
+          "label": "new",
+          "x": 1.0,
+          "y": 2.0,
+          "z": 3.0
+        },
+        "tags": [
+          "n"
+        ]
+      },
+      {
+        "counts": {
+          "c": 1
+        },
+        "events": [],
+        "grid": [],
+        "id": 31,
+        "point": {
+          "label": "new",
+          "x": 1.0,
+          "y": 2.0,
+          "z": 3.0
+        },
+        "tags": [
+          "n"
+        ]
+      }
+    ],
+    "snapshot_count": 3
   }
 }

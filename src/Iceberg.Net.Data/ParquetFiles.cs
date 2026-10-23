@@ -17,8 +17,9 @@ namespace Iceberg.Net.Data;
 /// </summary>
 public static class ParquetFiles
 {
-    private static Node ToNode(NestedField f)
+    internal static Node ToNode(NestedField f)
     {
+        if (!f.Type.IsPrimitive) return NestedColumns.ToNode(f);
         var rep = f.Required ? Repetition.Required : Repetition.Optional;
         return f.Type.TypeId switch
         {
@@ -54,7 +55,7 @@ public static class ParquetFiles
         return bytes;
     }
 
-    private static byte[] FixedDecimal(System.Numerics.BigInteger unscaled, int width)
+    internal static byte[] FixedDecimal(System.Numerics.BigInteger unscaled, int width)
     {
         var raw = unscaled.ToByteArray(isUnsigned: false, isBigEndian: true);
         if (raw.Length > width) throw new ArgumentException($"Decimal {unscaled} does not fit in {width} bytes");
@@ -77,6 +78,7 @@ public static class ParquetFiles
         var columns = schema.Columns;
         using var root = new GroupNode("table", Repetition.Required, columns.Select(ToNode).ToArray());
         using var props = new WriterPropertiesBuilder().Compression(Compression.Zstd).Build();
+        var leafIds = new List<int>(); // field ID of each Parquet leaf column, in file order
         byte[] bytes;
         using (var ms = new MemoryStream())
         {
@@ -87,8 +89,21 @@ public static class ParquetFiles
                 {
                     for (var c = 0; c < columns.Count; c++)
                     {
-                        using var col = rg.NextColumn();
-                        WriteColumn(col, columns[c], rows.Select(r => r[c]).ToArray());
+                        if (columns[c].Type.IsPrimitive)
+                        {
+                            using var col = rg.NextColumn();
+                            WriteColumn(col, columns[c], rows.Select(r => r[c]).ToArray());
+                            leafIds.Add(columns[c].Id);
+                            continue;
+                        }
+                        var plan = NestedColumns.Plan(columns[c], leafIds.Count);
+                        NestedColumns.Shred(plan, rows.Select(r => r[c]));
+                        foreach (var leaf in plan.Leaves)
+                        {
+                            using var col = rg.NextColumn();
+                            NestedColumns.WriteLeaf(col, leaf);
+                            leafIds.Add(leaf.FieldId);
+                        }
                     }
                 }
                 writer.Close();
@@ -101,7 +116,7 @@ public static class ParquetFiles
         using (var check = new ParquetFileReader(input))
         using (var group = check.RowGroup(0))
         {
-            chunkSizes = Enumerable.Range(0, columns.Count).Select(i => group.MetaData.GetColumnChunkMetaData(i).TotalCompressedSize).ToArray();
+            chunkSizes = Enumerable.Range(0, leafIds.Count).Select(i => group.MetaData.GetColumnChunkMetaData(i).TotalCompressedSize).ToArray();
         }
         await io.WriteAsync(location, bytes, overwrite: false, ct);
 
@@ -114,7 +129,7 @@ public static class ParquetFiles
             Partition = partition,
             RecordCount = rows.Count,
             FileSizeInBytes = bytes.Length,
-            ColumnSizes = columns.Select((f, i) => (f.Id, chunkSizes[i])).Where(x => !RowLineage.IsReserved(x.Id)).ToDictionary(x => x.Id, x => x.Item2),
+            ColumnSizes = leafIds.Select((id, i) => (Id: id, chunkSizes[i])).Where(x => !RowLineage.IsReserved(x.Id)).ToDictionary(x => x.Id, x => x.Item2),
             ValueCounts = metrics.ValueCounts,
             NullValueCounts = metrics.NullCounts,
             NanValueCounts = metrics.NanCounts.Count > 0 ? metrics.NanCounts : null,
@@ -257,12 +272,46 @@ public static class ParquetFiles
             if (node.FieldId >= 0) byFieldId[node.FieldId] = i;
             byName[descr.Path.ToDotString()] = i;
         }
+        // Top-level fields (nested columns span several leaves), with the index of their first leaf column.
+        var topLevel = new List<(Node Node, int FirstColumn)>();
+        {
+            var root = meta.Schema.GroupNode;
+            var column = 0;
+            foreach (var child in root.Fields)
+            {
+                topLevel.Add((child, column));
+                column += CountLeaves(child);
+            }
+        }
 
         var result = Enumerable.Range(0, numRows).Select(_ => new object?[projection.Columns.Count]).ToList();
         for (var c = 0; c < projection.Columns.Count; c++)
         {
             var f = projection.Columns[c];
-            if (!f.Type.IsPrimitive) throw new NotSupportedException($"Nested column {f.Name} is not supported by the phase-0 reader");
+            if (!f.Type.IsPrimitive)
+            {
+                var top = byFieldId.Count > 0
+                    ? topLevel.FindIndex(t => t.Node.FieldId == f.Id)
+                    : topLevel.FindIndex(t => (mapping?.NamesFor(f.Id) is { Count: > 0 } ns ? ns : [f.Name]).Contains(t.Node.Name));
+                if (top < 0)
+                {
+                    var missing = Defaults.ToValue(f.Type, f.InitialDefault);
+                    foreach (var row in result) row[c] = missing;
+                    continue;
+                }
+                var column = topLevel[top].FirstColumn;
+                var tree = NestedColumns.FromFile(topLevel[top].Node, ref column);
+                var at = 0;
+                for (var rg = 0; rg < reader.FileMetaData.NumRowGroups; rg++)
+                {
+                    using var group = reader.RowGroup(rg);
+                    var rgRows = checked((int)group.MetaData.NumRows);
+                    NestedColumns.Load(group, tree);
+                    for (var r = 0; r < rgRows; r++) result[at + r][c] = NestedColumns.Project(NestedColumns.Assemble(tree), tree, f.Type, FromPhysical);
+                    at += rgRows;
+                }
+                continue;
+            }
             var colIndex = -1;
             var found = byFieldId.TryGetValue(f.Id, out colIndex)
                 || (byFieldId.Count == 0 && (mapping?.NamesFor(f.Id) is { Count: > 0 } names ? names : [f.Name]).Any(n => byName.TryGetValue(n, out colIndex)));
@@ -316,6 +365,25 @@ public static class ParquetFiles
         _ => throw new NotSupportedException($"Reading {type} is not supported yet"),
     };
 
+    private static int CountLeaves(Node n) => n is GroupNode g ? g.Fields.Sum(CountLeaves) : 1;
+
+    /// <summary>A raw physical value of a nested leaf as an Iceberg value of <paramref name="type"/>.</summary>
+    private static object FromPhysical(IcebergType type, PhysicalType physical, int typeLength, object raw) => type switch
+    {
+        PrimitiveType { TypeId: TypeId.String } => System.Text.Encoding.UTF8.GetString((byte[])raw),
+        PrimitiveType { TypeId: TypeId.Uuid } => new Guid((byte[])raw, bigEndian: true),
+        DecimalType d => new IcebergDecimal(raw switch
+        {
+            int i => i,
+            long l => l,
+            byte[] b => new System.Numerics.BigInteger(b, isUnsigned: false, isBigEndian: true),
+            _ => throw new InvalidDataException($"Decimal stored as {physical}"),
+        }, d.Scale),
+        PrimitiveType { TypeId: TypeId.Long } when raw is int i => (long)i,
+        PrimitiveType { TypeId: TypeId.Double } when raw is float x => (double)x,
+        _ => raw,
+    };
+
     /// <summary>ParquetSharp's non-override logical readers require <c>T</c> for required columns and <c>T?</c> for optional ones.</summary>
     private static object?[] ReadStruct<T>(ColumnReader col, int n) where T : struct =>
         col.ColumnDescriptor.MaxDefinitionLevel == 0
@@ -341,6 +409,7 @@ internal sealed record Metrics(
         {
             var f = schema.Columns[c];
             if (RowLineage.IsReserved(f.Id)) continue; // metadata columns carry no column metrics
+            if (!f.Type.IsPrimitive) continue; // nested: metrics are optional, and leaves inside lists/maps have none in Java either
             var values = rows.Select(r => r[c]).ToList();
             m.ValueCounts[f.Id] = values.Count;
             m.NullCounts[f.Id] = values.Count(v => v is null);

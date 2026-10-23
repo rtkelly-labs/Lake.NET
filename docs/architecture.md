@@ -95,7 +95,8 @@ expression engine yet, so filters are `Func<DataFile,bool>` over partition tuple
 
 Rows are `object?[]` aligned to the schema's top-level columns, holding Iceberg's *physical* values: `int`
 days for `date`, `long` micros for `time`/`timestamp(tz)`, `long` nanos for `timestamp_ns`,
-`IcebergDecimal` (BigInteger + scale) for decimals, `Guid` for uuid, `byte[]` for binary/fixed. This is
-deliberately low-level; an Arrow `RecordBatch` surface (Apache.Arrow) is the intended public API once nested
-types land (roadmap M3). Reasons the CLR types are not used directly are in
+`IcebergDecimal` (BigInteger + scale) for decimals, `Guid` for uuid, `byte[]` for binary/fixed; structs are
+`object?[]` aligned to their fields, lists `List<object?>`, maps `Dictionary<object, object?>` (any `IEnumerable` /
+`IDictionary` is accepted on write). This is deliberately low-level; `Iceberg.Net.Arrow` adds an Arrow
+`RecordBatch` surface for flat schemas. Reasons the CLR types are not used directly are in
 [libraries.md](libraries.md#clr-type-pitfalls).

@@ -22,8 +22,6 @@ public sealed record TableFingerprint(long Rows, ulong RowHash, IReadOnlyDiction
     {
         var schema = table.Schema;
         var fields = schema.Columns.ToList();
-        if (fields.FirstOrDefault(f => f.Type is not PrimitiveType) is { } nested)
-            throw new NotSupportedException($"Fingerprints cover flat primitive schemas; '{nested.Name}' is {nested.Type}");
         var deletes = await TableScan.DeletesAsync(table, snapshotId, ct);
         var mapping = NameMapping.ForTable(table.Metadata.Properties);
         var counts = new long[fields.Count];
@@ -62,7 +60,21 @@ public sealed record TableFingerprint(long Rows, ulong RowHash, IReadOnlyDiction
 
     /// <summary>Canonical text: integers for integral and temporal types (days/micros/nanos), IEEE-754 big-endian bit
     /// patterns for floats ("NaN" for any NaN), unscaled integers for decimals, hex for binary, RFC 4122 text for UUIDs.</summary>
-    public static string Canonical(IcebergType type, object value) => (((PrimitiveType)type).TypeId, value) switch
+    /// <remarks>Nested values: structs <c>(a,b)</c> in field order, lists <c>[a,b]</c>, maps <c>{k=v,…}</c> sorted by
+    /// canonical key (ordinal); a nested null is <c>\0</c>.</remarks>
+    public static string Canonical(IcebergType type, object value) => type switch
+    {
+        StructType st => "(" + string.Join(",", st.Fields.Select((f, i) => Nested(f.Type, ((object?[])value)[i]))) + ")",
+        ListType lt => "[" + string.Join(",", ((System.Collections.IEnumerable)value).Cast<object?>().Select(e => Nested(lt.ElementType, e))) + "]",
+        MapType mt => "{" + string.Join(",", ((System.Collections.IDictionary)value).Keys.Cast<object>()
+            .Select(k => (K: Canonical(mt.KeyType, k), V: Nested(mt.ValueType, ((System.Collections.IDictionary)value)[k])))
+            .OrderBy(x => x.K, StringComparer.Ordinal).Select(x => $"{x.K}={x.V}")) + "}",
+        _ => CanonicalPrimitive(type, value),
+    };
+
+    private static string Nested(IcebergType type, object? value) => value is null ? "\u0000" : Canonical(type, value);
+
+    private static string CanonicalPrimitive(IcebergType type, object value) => (((PrimitiveType)type).TypeId, value) switch
     {
         (TypeId.Boolean, bool b) => b ? "true" : "false",
         // Hex of the bit pattern as an integer == hex of its big-endian bytes (Python: struct.pack(">f", v).hex()).

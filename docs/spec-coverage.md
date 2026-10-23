@@ -26,7 +26,7 @@ Legend: ✅ implemented and tested · 🟡 partial · ⬜ not started · — not
 | `variant` | | | ✓ | 🟡 model + JSON only (no shredding/encoding) | `MetadataSpecTests` |
 | `geometry`, `geography` (CRS, algorithm) | | | ✓ | 🟡 model + JSON only (WKB I/O and bounds not done) | `MetadataSpecTests` |
 | `unknown` | | | ✓ | 🟡 model + JSON + promotion rule | `MetadataSpecTests` |
-| struct / list / map with field IDs | ✓ | ✓ | ✓ | ✅ model + JSON; ⬜ Parquet I/O for nested | `MetadataSpecTests` |
+| struct / list / map with field IDs | ✓ | ✓ | ✓ | ✅ model, JSON, Parquet read/write (3-level lists/maps; 2-level lists read), nested schema evolution (dotted paths); metrics only for top-level primitives; filters and partition sources must be top-level | `MetadataSpecTests`, `NestedTypesTests`, Spark/PyIceberg cross-checks |
 | `initial-default` / `write-default` | | | ✓ | ✅ JSON single-value form (Appendix D) round-trips; reader applies initial defaults; `AddRequiredColumn(…, initialDefault)` | `MetadataSpecTests`, `SingleValueJsonTests`, `SchemaUpdateTests` |
 | Identifier field IDs (required, non-float) | ✓ | ✓ | ✓ | ✅ | `MetadataSpecTests` |
 | Schema evolution & type promotion (int→long, float→double, decimal widening, v3 date→timestamp, unknown→any) | ✓ | ✓ | ✓ | ✅ rules and `Table.UpdateSchemaAsync(s => s.AddColumn(…).RenameColumn(…).UpdateColumn(…).DeleteColumn(…).Move…)`, re-applied on conflict; top-level columns | `MetadataSpecTests`, `LocalTableTests`, `SchemaUpdateTests` |

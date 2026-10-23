@@ -27,7 +27,7 @@ import uuid
 from pathlib import Path
 from typing import Any, Callable
 
-from pyspark.sql import DataFrame, SparkSession
+from pyspark.sql import DataFrame, Row, SparkSession
 
 FIXTURE_ROOT = "/tmp/sentric-spark-fixture-root"
 
@@ -52,6 +52,13 @@ def session() -> SparkSession:
 
 
 def to_jsonable(value: Any) -> Any:
+    """JSON for a Spark value; structs are objects by field name, arrays lists, maps objects (keys as text)."""
+    if isinstance(value, Row):
+        value = value.asDict()
+    if isinstance(value, dict):
+        return {str(to_jsonable(k)): to_jsonable(v) for k, v in value.items()}
+    if isinstance(value, (list, tuple)):
+        return [to_jsonable(v) for v in value]
     if isinstance(value, dt.datetime):
         if value.tzinfo is None:
             # The Spark image ships Python 3.10, which has no datetime.UTC.
@@ -225,6 +232,30 @@ def cmd_fixtures(out_dir: Path) -> dict[str, Any]:
         f"INSERT INTO {t} SELECT id, id, 'us', 1.5, concat('new', id) FROM range(15, 20)"
     )
     result["evolved_v2"] = describe_fixture(spark, "evolved_v2")
+
+    # Nested types with every null/empty shape, a merge-on-read delete, and a field added inside a struct.
+    t = "fx.ref.nested_v2"
+    spark.sql(
+        f"CREATE TABLE {t} (id bigint NOT NULL, point struct<x: double, y: double, label: string>, "
+        "tags array<string>, counts map<string, int>, events array<struct<at: timestamp, kind: string>>, "
+        "grid array<array<int>>) USING iceberg "
+        f"TBLPROPERTIES ('format-version'='2', {mor})"
+    )
+    spark.sql(
+        f"""INSERT INTO {t} SELECT id,
+          IF(id % 7 = 0, NULL, named_struct('x', id / 2.0, 'y', -id * 1.5, 'label', IF(id % 3 = 0, NULL, concat('p', id)))),
+          IF(id % 5 = 0, NULL, IF(id % 5 = 1, array(), array(concat('t', id), NULL, 'z'))),
+          IF(id % 6 = 0, NULL, IF(id % 6 = 1, map(), map('a', CAST(id AS int), 'b', NULL))),
+          IF(id % 4 = 0, NULL, IF(id % 4 = 1, array(), array(named_struct('at', TIMESTAMP '2024-01-02 03:04:05.000006' + make_interval(0, 0, 0, 0, 0, 0, id), 'kind', 'k'), NULL))),
+          IF(id % 9 = 0, NULL, array(array(CAST(id AS int)), array(), NULL))
+        FROM range(0, 30)"""
+    )
+    spark.sql(f"DELETE FROM {t} WHERE id IN (3, 17)")
+    spark.sql(f"ALTER TABLE {t} ADD COLUMN point.z double")
+    spark.sql(
+        f"INSERT INTO {t} SELECT id, named_struct('x', 1.0, 'y', 2.0, 'label', 'new', 'z', 3.0), array('n'), map('c', 1), array(), array() FROM range(30, 32)"
+    )
+    result["nested_v2"] = describe_fixture(spark, "nested_v2")
 
     shutil.rmtree(out_dir, ignore_errors=True)
     shutil.copytree(f"{FIXTURE_ROOT}/warehouse", out_dir)
