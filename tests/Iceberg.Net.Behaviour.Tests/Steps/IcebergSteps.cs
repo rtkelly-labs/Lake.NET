@@ -14,7 +14,8 @@ namespace Iceberg.Net.Behaviour.Tests.Steps;
 /// <summary>Per-scenario state (Reqnroll context injection gives every scenario a fresh instance).</summary>
 public sealed class IcebergWorld : IDisposable
 {
-    public string Warehouse { get; } = Path.Combine(Path.GetTempPath(), "iceberg-dotnet-bdd", Guid.NewGuid().ToString("N"));
+    // Under the directory shared with the Spark oracle's container, so "Spark reads the same rows" can see the table.
+    public string Warehouse { get; } = Path.Combine(SparkOracle.SharedRoot, "bdd", Guid.NewGuid().ToString("N"));
     public InMemoryCatalog Catalog { get; }
     public Table? Table { get; set; }
     public Table? SecondWriter { get; set; }
@@ -210,5 +211,24 @@ public sealed class IcebergSteps(IcebergWorld world)
         var table = await world.Catalog.LoadTableAsync(world.T.Identifier);
         var e = await Assert.ThrowsAsync<InvalidOperationException>(() => TestEnvironment.Current.OracleAsync("read-metadata", table.MetadataLocation!));
         Assert.Contains("equality deletes", e.Message);
+    }
+
+    /// <summary>Spark + Iceberg Java (the reference implementation) sees the same rows and, on v3, the same row lineage.</summary>
+    [Then(@"^Spark reads the same rows$")]
+    public async Task ThenSparkAgrees()
+    {
+        Skip.If(SparkOracle.SkipReason is not null, SparkOracle.SkipReason);
+        var table = await world.Catalog.LoadTableAsync(world.T.Identifier);
+        var spark = (await SparkOracle.ReadTablesAsync([table.MetadataLocation!]))[table.MetadataLocation!]!;
+        Assert.True(spark["error"] is null, $"Spark failed: {spark["error"]}");
+        var theirs = spark["rows"]!.AsArray().Select(r => $"{r!["id"]}|{r["name"]?.GetValue<string>() ?? "null"}|{r["region"]}").ToList();
+        var ours = (await TableScan.ReadAllAsync(table)).OrderBy(r => (long)r[0]!).Select(Describe).ToList();
+        Assert.Equal(ours, theirs);
+        if (table.Metadata.FormatVersion >= 3)
+        {
+            var lineage = (await TableScan.ReadWithLineageAsync(table)).OrderBy(r => (long)r.Row[0]!).Select(r => $"{r.Row[0]}:{r.RowId}:{r.LastUpdatedSequenceNumber}");
+            var sparkLineage = spark["row_lineage"]!.AsArray().Select(r => $"{r!["id"]}:{r["row_id"]}:{r["last_updated_seq"]}");
+            Assert.Equal(lineage, sparkLineage);
+        }
     }
 }

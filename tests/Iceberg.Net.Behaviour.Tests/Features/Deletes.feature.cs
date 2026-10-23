@@ -113,28 +113,28 @@ namespace Iceberg.Net.Behaviour.Tests.Features
         {
 #line 7
   #line hidden
-            global::Reqnroll.Table table10 = new global::Reqnroll.Table(new string[] {
+            global::Reqnroll.Table table13 = new global::Reqnroll.Table(new string[] {
                         "id",
                         "name",
                         "region"});
-            table10.AddRow(new string[] {
+            table13.AddRow(new string[] {
                         "1",
                         "a",
                         "eu"});
-            table10.AddRow(new string[] {
+            table13.AddRow(new string[] {
                         "2",
                         "b",
                         "us"});
-            table10.AddRow(new string[] {
+            table13.AddRow(new string[] {
                         "3",
                         "c",
                         "eu"});
-            table10.AddRow(new string[] {
+            table13.AddRow(new string[] {
                         "4",
                         "d",
                         "us"});
 #line 8
-    await testRunner.GivenAsync("the default rows are:", ((string)(null)), table10, "Given ");
+    await testRunner.GivenAsync("the default rows are:", ((string)(null)), table13, "Given ");
 #line hidden
         }
         
@@ -207,20 +207,20 @@ namespace Iceberg.Net.Behaviour.Tests.Features
 #line 17
     await testRunner.WhenAsync(string.Format("I delete keys 2 and 3 with {0}", strategy), ((string)(null)), ((global::Reqnroll.Table)(null)), "When ");
 #line hidden
-                global::Reqnroll.Table table11 = new global::Reqnroll.Table(new string[] {
+                global::Reqnroll.Table table14 = new global::Reqnroll.Table(new string[] {
                             "id",
                             "name",
                             "region"});
-                table11.AddRow(new string[] {
+                table14.AddRow(new string[] {
                             "1",
                             "a",
                             "eu"});
-                table11.AddRow(new string[] {
+                table14.AddRow(new string[] {
                             "4",
                             "d",
                             "us"});
 #line 18
-    await testRunner.ThenAsync("the table contains exactly:", ((string)(null)), table11, "Then ");
+    await testRunner.ThenAsync("the table contains exactly:", ((string)(null)), table14, "Then ");
 #line hidden
 #line 22
     await testRunner.AndAsync(string.Format("the last snapshot operation is \"{0}\"", operation), ((string)(null)), ((global::Reqnroll.Table)(null)), "And ");
@@ -265,20 +265,20 @@ namespace Iceberg.Net.Behaviour.Tests.Features
 #line 35
     await testRunner.WhenAsync(string.Format("I delete rows where region is \"us\" with {0}", strategy), ((string)(null)), ((global::Reqnroll.Table)(null)), "When ");
 #line hidden
-                global::Reqnroll.Table table12 = new global::Reqnroll.Table(new string[] {
+                global::Reqnroll.Table table15 = new global::Reqnroll.Table(new string[] {
                             "id",
                             "name",
                             "region"});
-                table12.AddRow(new string[] {
+                table15.AddRow(new string[] {
                             "1",
                             "a",
                             "eu"});
-                table12.AddRow(new string[] {
+                table15.AddRow(new string[] {
                             "3",
                             "c",
                             "eu"});
 #line 36
-    await testRunner.ThenAsync("the table contains exactly:", ((string)(null)), table12, "Then ");
+    await testRunner.ThenAsync("the table contains exactly:", ((string)(null)), table15, "Then ");
 #line hidden
 #line 40
     await testRunner.AndAsync("PyIceberg reads the same rows", ((string)(null)), ((global::Reqnroll.Table)(null)), "And ");
@@ -401,20 +401,20 @@ namespace Iceberg.Net.Behaviour.Tests.Features
 #line 67
     await testRunner.WhenAsync("I drop the data files where region is \"us\"", ((string)(null)), ((global::Reqnroll.Table)(null)), "When ");
 #line hidden
-                global::Reqnroll.Table table13 = new global::Reqnroll.Table(new string[] {
+                global::Reqnroll.Table table16 = new global::Reqnroll.Table(new string[] {
                             "id",
                             "name",
                             "region"});
-                table13.AddRow(new string[] {
+                table16.AddRow(new string[] {
                             "1",
                             "a",
                             "eu"});
-                table13.AddRow(new string[] {
+                table16.AddRow(new string[] {
                             "3",
                             "c",
                             "eu"});
 #line 68
-    await testRunner.ThenAsync("the table contains exactly:", ((string)(null)), table13, "Then ");
+    await testRunner.ThenAsync("the table contains exactly:", ((string)(null)), table16, "Then ");
 #line hidden
 #line 72
     await testRunner.AndAsync("the table has no delete files", ((string)(null)), ((global::Reqnroll.Table)(null)), "And ");
@@ -458,16 +458,16 @@ namespace Iceberg.Net.Behaviour.Tests.Features
 #line 79
     await testRunner.AndAsync("I delete keys 4 and 4 with position deletes", ((string)(null)), ((global::Reqnroll.Table)(null)), "And ");
 #line hidden
-                global::Reqnroll.Table table14 = new global::Reqnroll.Table(new string[] {
+                global::Reqnroll.Table table17 = new global::Reqnroll.Table(new string[] {
                             "id",
                             "name",
                             "region"});
-                table14.AddRow(new string[] {
+                table17.AddRow(new string[] {
                             "1",
                             "a",
                             "eu"});
 #line 80
-    await testRunner.ThenAsync("the table contains exactly:", ((string)(null)), table14, "Then ");
+    await testRunner.ThenAsync("the table contains exactly:", ((string)(null)), table17, "Then ");
 #line hidden
 #line 83
     await testRunner.AndAsync("every data file has at most one deletion vector", ((string)(null)), ((global::Reqnroll.Table)(null)), "And ");
