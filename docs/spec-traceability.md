@@ -157,7 +157,7 @@ Status: ✅ linked tests · ⛔ deliberately not implemented · · informative h
 | &nbsp;&nbsp;fetchScanTasks | ✅ | `ServerScanPlanningTests` |
 | &nbsp;&nbsp;registerTable | ✅ | `CatalogConformanceTests.Rename_register_and_drop` |
 | &nbsp;&nbsp;loadTable | ✅ | `CatalogConformanceTests.Create_append_read_round_trip` |
-| &nbsp;&nbsp;updateTable | ✅ | `CatalogConformanceTests.Concurrent_commits_serialise_through_the_catalog`, `CatalogConformanceTests.Create_append_read_round_trip`, `StateManagementTests.Requirements_detect_concurrent_changes`, `StateManagementTests.Updates_and_requirements_round_trip_as_rest_json` |
+| &nbsp;&nbsp;updateTable | ✅ | `CatalogConformanceTests.Concurrent_commits_serialise_through_the_catalog`, `CatalogConformanceTests.Create_append_read_round_trip`, `MetadataBuilderTests`, `StateManagementTests.Requirements_detect_concurrent_changes`, `StateManagementTests.Updates_and_requirements_round_trip_as_rest_json` |
 | &nbsp;&nbsp;dropTable | ✅ | `CatalogConformanceTests.Rename_register_and_drop` |
 | &nbsp;&nbsp;tableExists | ✅ | `CatalogConformanceTests.Rename_register_and_drop` |
 | &nbsp;&nbsp;unregisterTable | ⛔ REST operation not implemented by RestCatalog |  |
@@ -174,7 +174,3 @@ Status: ✅ linked tests · ⛔ deliberately not implemented · · informative h
 | &nbsp;&nbsp;viewExists | ✅ | `ViewConformanceTests` |
 | &nbsp;&nbsp;renameView | ✅ | `ViewConformanceTests` |
 | &nbsp;&nbsp;registerView | ⛔ REST operation not implemented by RestCatalog |  |
-
-## Links to unknown sections
-
-- `rest:committable` from MetadataBuilderTests

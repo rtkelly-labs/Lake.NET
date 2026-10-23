@@ -11,7 +11,7 @@ namespace Iceberg.Net.Spec.Tests;
 /// metadata log.
 /// </summary>
 [Spec("Table Metadata")]
-[Spec("rest: commitTable")]
+[Spec("rest: updateTable")]
 public sealed class MetadataBuilderTests
 {
     private static readonly Schema Schema = new(0, [NestedField.Require(1, "id", PrimitiveType.Long), NestedField.Optional(2, "region", PrimitiveType.String)]);
