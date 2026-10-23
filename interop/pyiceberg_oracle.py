@@ -478,11 +478,19 @@ def cmd_compare_arrow(location: str, ipc_path: str) -> dict[str, Any]:
     key = ours.schema.field(0).name
 
     def rows(t: pa.Table) -> list[dict[str, Any]]:
-        t = t.cast(
-            pa.schema(
-                [pa.field(f.name, ours.schema.field(f.name).type) for f in t.schema]
-            ),
-            safe=False,
+        # Align primitive column types (e.g. large_string vs string). Nested columns are compared as Python values:
+        # pyarrow cannot cast a struct whose required child holds nulls under null parents.
+        t = pa.table(
+            {
+                f.name: (
+                    t.column(f.name)
+                    if pa.types.is_nested(f.type)
+                    else t.column(f.name).cast(
+                        ours.schema.field(f.name).type, safe=False
+                    )
+                )
+                for f in t.schema
+            }
         )
         out = t.sort_by(key).to_pylist()
         return [

@@ -98,5 +98,5 @@ days for `date`, `long` micros for `time`/`timestamp(tz)`, `long` nanos for `tim
 `IcebergDecimal` (BigInteger + scale) for decimals, `Guid` for uuid, `byte[]` for binary/fixed; structs are
 `object?[]` aligned to their fields, lists `List<object?>`, maps `Dictionary<object, object?>` (any `IEnumerable` /
 `IDictionary` is accepted on write). This is deliberately low-level; `Iceberg.Net.Arrow` adds an Arrow
-`RecordBatch` surface for flat schemas. Reasons the CLR types are not used directly are in
+`RecordBatch` surface (nested columns included). Reasons the CLR types are not used directly are in
 [libraries.md](libraries.md#clr-type-pitfalls).

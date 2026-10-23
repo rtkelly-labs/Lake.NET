@@ -10,18 +10,21 @@ using TimeUnit = Apache.Arrow.Types.TimeUnit;
 namespace Iceberg.Net.Arrow;
 
 /// <summary>
-/// Iceberg ↔ Apache Arrow for flat primitive schemas, the way PyIceberg and Java's Arrow readers map them:
+/// Iceberg ↔ Apache Arrow, the way PyIceberg and Java's Arrow readers map them:
 /// field IDs travel as <c>PARQUET:field_id</c> metadata; dates are <c>date32</c>, times <c>time64[us]</c>, timestamps
 /// <c>timestamp[us]</c> (<c>UTC</c> for <c>timestamptz</c>), nanosecond variants <c>timestamp[ns]</c>, decimals
-/// <c>decimal128(P,S)</c>, UUIDs and <c>fixed(L)</c> <c>fixed_size_binary</c>. Arrays are built from raw buffers, so values
-/// round-trip exactly (38-digit decimals included).
+/// <c>decimal128(P,S)</c>, UUIDs and <c>fixed(L)</c> <c>fixed_size_binary</c>; structs are <c>struct</c>, lists
+/// <c>list&lt;element&gt;</c>, maps <c>map&lt;key, value&gt;</c>, with field IDs on every child. Arrays are built from raw
+/// buffers, so values round-trip exactly (38-digit decimals included). Nested values use the row shapes of
+/// Iceberg.Net.Data: <c>object?[]</c> structs, <c>List&lt;object?&gt;</c> lists, <c>Dictionary&lt;object, object?&gt;</c> maps.
 /// </summary>
 public static class ArrowInterop
 {
     public const string FieldIdKey = "PARQUET:field_id";
 
-    public static ArrowSchema ToArrow(IcebergSchema schema) =>
-        new(schema.Columns.Select(f => new Field(f.Name, ToArrow(f.Type), !f.Required, FieldMetadata(f))), null);
+    public static ArrowSchema ToArrow(IcebergSchema schema) => new(schema.Columns.Select(ToField), null);
+
+    private static Field ToField(NestedField f) => new(f.Name, ToArrow(f.Type), !f.Required, FieldMetadata(f));
 
     /// <summary>The field ID, and for UUIDs Arrow's canonical <c>arrow.uuid</c> extension type (as PyIceberg produces).</summary>
     private static IEnumerable<KeyValuePair<string, string>> FieldMetadata(NestedField f)
@@ -52,7 +55,10 @@ public static class ArrowInterop
         PrimitiveType { TypeId: TypeId.Binary } => BinaryType.Default,
         PrimitiveType { TypeId: TypeId.Uuid } => new FixedSizeBinaryType(16),
         FixedType f => new FixedSizeBinaryType(f.Length),
-        _ => throw new NotSupportedException($"No Arrow mapping for {type} yet (nested types are not supported)"),
+        Types.StructType s => new Apache.Arrow.Types.StructType(s.Fields.Select(ToField).ToList()),
+        Types.ListType l => new Apache.Arrow.Types.ListType(ToField(l.ElementField)),
+        Types.MapType m => new Apache.Arrow.Types.MapType(ToField(m.KeyField), ToField(m.ValueField)),
+        _ => throw new NotSupportedException($"No Arrow mapping for {type}"),
     };
 
     /// <summary>Rows (aligned to <paramref name="schema"/>'s columns, physical values) as one record batch.</summary>
@@ -116,9 +122,61 @@ public static class ArrowInterop
             }
             case TypeId.Uuid: return Bytes(type, 16, values, v => ((Guid)v).ToByteArray(bigEndian: true));
             case TypeId.Fixed: return Bytes(type, ((FixedType)f.Type).Length, values, v => (byte[])v);
+            case TypeId.Struct:
+            {
+                var st = (Types.StructType)f.Type;
+                var children = st.Fields.Select((child, i) => Build(child, values.Select(v => v is null ? null : ((object?[])v)[i]).ToArray())).ToList();
+                var (bitmap, nulls) = Validity(values);
+                return new StructArray(type, values.Length, children, bitmap, nulls);
+            }
+            case TypeId.List:
+            {
+                var lt = (Types.ListType)f.Type;
+                var (offsets, flat) = Flatten(values, v => ((System.Collections.IEnumerable)v).Cast<object?>());
+                var (bitmap, nulls) = Validity(values);
+                return new ListArray(type, values.Length, offsets, Build(lt.ElementField, flat), bitmap, nulls);
+            }
+            case TypeId.Map:
+            {
+                var mt = (Types.MapType)f.Type;
+                var (offsets, flat) = Flatten(values, v => Entries(v).Select(e => (object?)e));
+                var keys = Build(mt.KeyField, flat.Select(e => ((KeyValuePair<object?, object?>)e!).Key).ToArray());
+                var vals = Build(mt.ValueField, flat.Select(e => ((KeyValuePair<object?, object?>)e!).Value).ToArray());
+                var entries = new StructArray(((Apache.Arrow.Types.MapType)type).KeyValueType, flat.Length, [keys, vals], ArrowBuffer.Empty, 0);
+                var (bitmap, nulls) = Validity(values);
+                return new MapArray(type, values.Length, offsets, entries, bitmap, nulls);
+            }
             default: throw new NotSupportedException(f.Type.ToString());
         }
     }
+
+    private static (ArrowBuffer Bitmap, int Nulls) Validity(object?[] values)
+    {
+        var validity = new ArrowBuffer.BitmapBuilder(values.Length);
+        foreach (var v in values) validity.Append(v is not null);
+        return (validity.Build(), values.Count(v => v is null));
+    }
+
+    /// <summary>Concatenate each value's items; offsets[i]..offsets[i+1] are row i's (a null row has none).</summary>
+    private static (ArrowBuffer Offsets, object?[] Items) Flatten(object?[] values, Func<object, IEnumerable<object?>> items)
+    {
+        var offsets = new ArrowBuffer.Builder<int>(values.Length + 1);
+        var flat = new List<object?>();
+        offsets.Append(0);
+        foreach (var v in values)
+        {
+            if (v is not null) flat.AddRange(items(v));
+            offsets.Append(flat.Count);
+        }
+        return (offsets.Build(), flat.ToArray());
+    }
+
+    private static IEnumerable<KeyValuePair<object?, object?>> Entries(object map) => map switch
+    {
+        System.Collections.IDictionary d => d.Keys.Cast<object>().Select(k => new KeyValuePair<object?, object?>(k, d[k])),
+        IEnumerable<KeyValuePair<object, object?>> pairs => pairs.Select(p => new KeyValuePair<object?, object?>(p.Key, p.Value)),
+        _ => throw new ArgumentException($"Map values must be dictionaries, got {map.GetType().Name}"),
+    };
 
     private static IArrowArray Fixed<T>(IArrowType type, object?[] values, Func<object, T> convert) where T : struct
     {
@@ -161,15 +219,17 @@ public static class ArrowInterop
         return result;
     }
 
-    private static object?[] Read(NestedField f, IArrowArray array)
+    private static object?[] Read(NestedField f, IArrowArray array) => Enumerable.Range(0, array.Length).Select(i => ReadValue(f, array, i)).ToArray();
+
+    private static object? ReadValue(NestedField f, IArrowArray array, int i)
     {
-        var n = array.Length;
-        var result = new object?[n];
-        for (var i = 0; i < n; i++)
-        {
-            if (array.IsNull(i)) continue;
-            result[i] = (f.Type.TypeId, array) switch
+        if (array.IsNull(i)) return null;
+        return (f.Type.TypeId, array) switch
             {
+                (TypeId.Struct, StructArray a) => ReadStruct((Types.StructType)f.Type, a, i),
+                (TypeId.List, ListArray a) => Enumerable.Range(a.ValueOffsets[i], a.ValueOffsets[i + 1] - a.ValueOffsets[i])
+                    .Select(k => ReadValue(((Types.ListType)f.Type).ElementField, a.Values, k)).ToList(),
+                (TypeId.Map, MapArray a) => ReadMap((Types.MapType)f.Type, a, i),
                 (TypeId.Boolean, BooleanArray a) => a.GetValue(i),
                 (TypeId.String, StringArray a) => a.GetString(i),
                 (TypeId.Binary, BinaryArray a) => a.GetBytes(i).ToArray(),
@@ -184,8 +244,26 @@ public static class ArrowInterop
                 (TypeId.Fixed, _) => Slice(array, i, ((FixedType)f.Type).Length).ToArray(),
                 _ => throw new NotSupportedException($"Reading {f.Type} from {array.GetType().Name}"),
             };
-        }
-        return result;
+    }
+
+    /// <summary>Struct children are matched by field ID metadata when present, else by name.</summary>
+    private static object?[] ReadStruct(Types.StructType type, StructArray a, int i)
+    {
+        var fields = ((Apache.Arrow.Types.StructType)a.Data.DataType).Fields;
+        return type.Fields.Select(f =>
+        {
+            var j = fields.ToList().FindIndex(x => x.Metadata is { } md && md.TryGetValue(FieldIdKey, out var id) && id == f.Id.ToString(System.Globalization.CultureInfo.InvariantCulture));
+            if (j < 0) j = fields.ToList().FindIndex(x => x.Name == f.Name);
+            return j < 0 ? null : ReadValue(f, a.Fields[j], i);
+        }).ToArray();
+    }
+
+    private static Dictionary<object, object?> ReadMap(Types.MapType type, MapArray a, int i)
+    {
+        var map = new Dictionary<object, object?>();
+        for (var k = a.ValueOffsets[i]; k < a.ValueOffsets[i + 1]; k++)
+            map[ReadValue(type.KeyField, a.Keys, k)!] = ReadValue(type.ValueField, a.Values, k);
+        return map;
     }
 
     private static T Value<T>(IArrowArray array, int i) where T : struct =>

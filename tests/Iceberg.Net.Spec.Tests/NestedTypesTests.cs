@@ -47,6 +47,8 @@ public sealed class NestedTypesTests : IDisposable
 
     private static IcebergDecimal D(string s) => IcebergDecimal.Parse(s);
 
+    internal static Schema SchemaForTests => Schema;
+
     internal static List<object?[]> Rows() =>
     [
         [1L, new object?[] { 51.5, -0.12, "London" }, new List<object?> { "a", null, "c" }, new Dictionary<object, object?> { ["x"] = 1, ["y"] = null },

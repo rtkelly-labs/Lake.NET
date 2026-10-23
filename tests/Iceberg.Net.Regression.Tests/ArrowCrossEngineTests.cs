@@ -17,15 +17,17 @@ public sealed class ArrowCrossEngineTests : IDisposable
     }
 
     [SkippableTheory]
-    [InlineData(2)]
-    [InlineData(3)]
-    public async Task Arrow_output_matches_pyiceberg_to_arrow(int formatVersion)
+    [InlineData(2, false)]
+    [InlineData(3, false)]
+    [InlineData(2, true)]
+    [InlineData(3, true)]
+    public async Task Arrow_output_matches_pyiceberg_to_arrow(int formatVersion, bool nested)
     {
         Require.LocalOracle();
         using var catalog = new InMemoryCatalog(_dir);
         await catalog.CreateNamespaceAsync(Namespace.Of("x"));
-        var t = await catalog.CreateTableAsync(new CreateTableRequest(TableIdentifier.Of("x", "t"), SampleData.AllTypes, FormatVersion: formatVersion));
-        await TableArrow.InsertAsync(t, ArrowInterop.ToRecordBatch(t.Schema, SampleData.AllTypeRows(25)));
+        var t = await catalog.CreateTableAsync(new CreateTableRequest(TableIdentifier.Of("x", "t"), nested ? ShadowCompareTests.Nested : SampleData.AllTypes, FormatVersion: formatVersion));
+        await TableArrow.InsertAsync(t, ArrowInterop.ToRecordBatch(t.Schema, nested ? ShadowCompareTests.NestedRows(25) : SampleData.AllTypeRows(25)));
         await TableMutations.DeleteWhereAsync(t, r => (long)r[0]! % 4 == 1, DeleteStrategy.PositionDeletes);
 
         var ipc = Path.Combine(_dir, "rows.arrow");

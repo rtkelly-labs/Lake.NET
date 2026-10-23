@@ -115,7 +115,8 @@ moment: when M1 starts and it needs NuGet publishing.
    PolySharp and a small `Compat`/`Polyfills` layer; `DateOnly`/`TimeOnly` overloads exist only on .NET 6+. Going
    further (Data, Catalog: writing tables from net472) needs ParquetSharp's `net471` build and the AWS SDK's
    `net472` one; decide when a net472 producer is in scope.
-2. **Arrow as the public row API** (M3) vs keeping `object?[]` for simple producers — likely both.
+2. **Arrow as the public row API** (M3) vs keeping `object?[]` for simple producers — likely both. Both exist now,
+   for every type including struct/list/map (Arrow output matches PyIceberg's `to_arrow()`).
 3. **Upstream?** An Apache `iceberg-dotnet` does not exist; if this matures, proposing it upstream (or contributing
    to an existing community effort) would share the maintenance cost. Decide after M2.
 4. **v4 adoption**: whether producers that use equality deletes move to deletion vectors before v4 tables
