@@ -114,7 +114,7 @@ Legend: ✅ implemented and tested · 🟡 partial · ⬜ not started · — not
 | Namespace `updateProperties` | ⬜ | |
 | Tables: list (paged), create, load, exists, drop (purge), rename, register | ✅ | `CatalogConformanceTests` against the Java reference server |
 | `updateTable` (requirements + updates) | ✅ | 409 → `CommitFailedException`; 500/502/503/504 → `CommitStateUnknownException` |
-| `Idempotency-Key` header | 🟡 sent on mutations; no automatic retry yet | |
+| `Idempotency-Key` header | ✅ UUIDv7 per mutation; retried with the same key after transport errors, 429 or 5xx only when the server advertises `idempotency-key-lifetime` (and within it) | `IdempotencyTests` |
 | Storage credentials / per-table `config` | ✅ longest-prefix credential selection | |
 | `loadCredentials` refresh, remote signing | ⬜ | |
 | Multi-table `transactions/commit` | ✅ `ICatalog.CommitTransactionAsync` + `SnapshotProducer.StageAsync` | `CatalogConformanceTests` (Java REST server, Polaris; JDBC via one SQL transaction; Glue refuses) |

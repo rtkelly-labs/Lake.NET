@@ -26,6 +26,14 @@ public sealed record RestCatalogOptions
     public IReadOnlyDictionary<string, string> Properties { get; init; } = new Dictionary<string, string>();
     /// <summary>Hook for request signing (e.g. a SigV4 handler for the Glue/S3 Tables REST endpoints).</summary>
     public HttpMessageHandler? Handler { get; init; }
+    /// <summary>
+    /// Retries of a mutation after a transport failure, 429 or 5xx, made only when the server advertises
+    /// <c>idempotency-key-lifetime</c> (so it deduplicates the replay by its <c>Idempotency-Key</c>) and within that
+    /// lifetime. Without it a lost commit response still surfaces as <see cref="Metadata.CommitStateUnknownException"/>.
+    /// </summary>
+    public int IdempotentRetries { get; init; } = 3;
+    /// <summary>Delay before the first idempotent retry; doubled for each further attempt.</summary>
+    public TimeSpan IdempotentRetryDelay { get; init; } = TimeSpan.FromMilliseconds(200);
 
     /// <summary>
     /// The AWS Glue Iceberg REST endpoint for <paramref name="warehouse"/> (an account ID, or
@@ -152,6 +160,8 @@ public sealed class RestCatalog : ICatalog, IViewCatalog
     public IReadOnlyDictionary<string, string> Properties { get; private set; } = new Dictionary<string, string>();
     /// <summary>Endpoints advertised by <c>GET /v1/config</c>; empty means "assume the default set".</summary>
     public IReadOnlyList<string> Endpoints { get; private set; } = [];
+    /// <summary>How long the server remembers an <c>Idempotency-Key</c> (<c>idempotency-key-lifetime</c>); null if it does not say.</summary>
+    public TimeSpan? IdempotencyKeyLifetime { get; private set; }
 
     private readonly Func<IReadOnlyDictionary<string, string>, IFileIO> _ioFactory;
 
@@ -190,6 +200,7 @@ public sealed class RestCatalog : ICatalog, IViewCatalog
         foreach (var (k, v) in MetadataJson.StringMapFrom(config?["overrides"])) merged[k] = v;
         Properties = merged;
         Endpoints = config?["endpoints"]?.AsArray().Select(e => e!.GetValue<string>()).ToList() ?? [];
+        IdempotencyKeyLifetime = config?["idempotency-key-lifetime"]?.GetValue<string>() is { } lifetime ? System.Xml.XmlConvert.ToTimeSpan(lifetime) : null;
         _prefix = merged.TryGetValue("prefix", out var p) && p.Length > 0 ? p.Trim('/') + "/" : "";
         FileIO = _ioFactory(merged);
     }
@@ -389,21 +400,39 @@ public sealed class RestCatalog : ICatalog, IViewCatalog
         Func<string, Exception>? conflict = null,
         bool commit = false)
     {
-        using var req = new HttpRequestMessage(method, path);
-        if (_token is not null) req.Headers.Authorization = new AuthenticationHeaderValue("Bearer", _token);
-        if (_options.AccessDelegation is not null) req.Headers.Add("X-Iceberg-Access-Delegation", _options.AccessDelegation);
-        if (body is not null) req.Content = new StringContent(body.ToJsonString(), Encoding.UTF8, "application/json");
-        // Spec 1.11+: lets a server deduplicate a mutation it already applied; servers that predate it ignore the header.
-        if (method != HttpMethod.Get && method != HttpMethod.Head) req.Headers.Add("Idempotency-Key", Guid.NewGuid().ToString());
+        // Spec 1.11+: one UUIDv7 key per logical mutation, reused on every retry, lets the server answer a replay of a
+        // mutation it already applied with the original response. Servers that predate it ignore the header.
+        var mutation = method != HttpMethod.Get && method != HttpMethod.Head;
+        var key = mutation ? UuidV7.New().ToString() : null;
+        var started = DateTimeOffset.UtcNow;
+        var retryable = mutation && IdempotencyKeyLifetime is { } lifetime ? lifetime : TimeSpan.Zero;
 
         HttpResponseMessage resp;
-        try
+        for (var attempt = 0; ; attempt++)
         {
-            resp = await _http.SendAsync(req, ct);
-        }
-        catch (HttpRequestException e) when (commit)
-        {
-            throw new CommitStateUnknownException($"Commit request to {path} failed in flight", e);
+            using var req = new HttpRequestMessage(method, path);
+            if (_token is not null) req.Headers.Authorization = new AuthenticationHeaderValue("Bearer", _token);
+            if (_options.AccessDelegation is not null) req.Headers.Add("X-Iceberg-Access-Delegation", _options.AccessDelegation);
+            if (body is not null) req.Content = new StringContent(body.ToJsonString(), Encoding.UTF8, "application/json");
+            if (key is not null) req.Headers.Add("Idempotency-Key", key);
+            var canRetry = attempt < _options.IdempotentRetries && DateTimeOffset.UtcNow - started < retryable;
+            try
+            {
+                resp = await _http.SendAsync(req, ct);
+            }
+            catch (Exception e) when (e is HttpRequestException || e is TaskCanceledException && !ct.IsCancellationRequested)
+            {
+                if (canRetry) { await Task.Delay(_options.IdempotentRetryDelay * (1 << attempt), ct); continue; }
+                if (commit) throw new CommitStateUnknownException($"Commit request to {path} failed in flight", e);
+                throw;
+            }
+            if (canRetry && ((int)resp.StatusCode == 429 || (int)resp.StatusCode is >= 500 and <= 504 and not 501))
+            {
+                resp.Dispose();
+                await Task.Delay(_options.IdempotentRetryDelay * (1 << attempt), ct);
+                continue;
+            }
+            break;
         }
 
         using (resp)
@@ -443,5 +472,20 @@ public sealed class RestCatalog : ICatalog, IViewCatalog
     {
         _http.Dispose();
         FileIO.Dispose();
+    }
+}
+
+/// <summary>RFC 9562 UUID version 7: 48-bit Unix-millisecond timestamp, then random bits (time-ordered keys).</summary>
+internal static class UuidV7
+{
+    public static Guid New(DateTimeOffset? now = null)
+    {
+        Span<byte> b = stackalloc byte[16];
+        System.Security.Cryptography.RandomNumberGenerator.Fill(b);
+        var ms = (now ?? DateTimeOffset.UtcNow).ToUnixTimeMilliseconds();
+        for (var i = 0; i < 6; i++) b[i] = (byte)(ms >> (8 * (5 - i)));
+        b[6] = (byte)(0x70 | (b[6] & 0x0F)); // version 7
+        b[8] = (byte)(0x80 | (b[8] & 0x3F)); // RFC variant
+        return new Guid(b, bigEndian: true);
     }
 }

@@ -27,7 +27,7 @@ and where this port stands. Release facts are sourced in [research/ecosystem-202
 | 1.9.0 | Row lineage on for all v3 tables; `current-snapshot-id` written as `null` for v3 | Readers must accept null **and** -1 | ✅ |
 | 1.10.0 | Stop retrying REST commits on 502/504; 503 on commit = **unknown** | Retrying an unknown commit can apply it twice or delete live files | ✅ 500/502/503/504 → `CommitStateUnknownException`, never retried |
 | 1.10.0 | `cleanExpiredMetadata` in ExpireSnapshots; dangling-DV cleanup on rewrite | Expiry must also prune unused specs/schemas and orphaned deletes | 🟡 expiry deletes unreachable files; unused specs/schemas are kept |
-| 1.11.0 | `Idempotency-Key` on mutating REST calls | Makes retry-after-timeout safe on servers that support it | 🟡 header sent; no retry yet |
+| 1.11.0 | `Idempotency-Key` on mutating REST calls | Makes retry-after-timeout safe on servers that support it | ✅ UUIDv7 key; same-key retries when the server advertises `idempotency-key-lifetime` |
 | 1.11.0 | Sequence-number conflicts retryable under concurrent commits (#15126) | A stale sequence number is a conflict, not a fatal error | ✅ (builder rejects; producer retries on refresh) |
 | 1.11.0 | Duplicate DVs for one data file merged before commit (#15006) | v3 MoR writers must merge, not add | ⬜ (no DVs yet) |
 | 1.11.0 | "Load snapshot after it has been committed to prevent accidental cleanup" (#15511) | Post-commit cleanup must use the *committed* state, not the attempted one | ✅ `SnapshotProducer.CleanupAsync` diffs against the reloaded winner |
