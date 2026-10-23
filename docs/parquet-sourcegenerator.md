@@ -87,8 +87,11 @@ public partial record Event
 
 ## The patch
 
-`docs/upstream/parquet-sourcegenerator-iceberg-columns.patch` (against `main` at `216f6fc`, not yet proposed
-upstream) closes the first three rows:
+Proposed upstream as [rtkelly-labs/Parquet.SourceGenerator#712](https://github.com/rtkelly-labs/Parquet.SourceGenerator/pull/712).
+`docs/upstream/parquet-sourcegenerator-iceberg-columns.patch` is its first commit (against `main` at `216f6fc`).
+The PR adds `PARQ023` on top: the Legacy (Parquet.Net 4.x/5.x) package rejects `FieldId` and local timestamps,
+because 4.x/5.x has no field IDs and Parquet.Net before 4.25 has no `DateTimeFormat.Timestamp`. The patch
+closes the first three rows:
 
 - `ParquetColumnAttribute.FieldId` (default -1 = none) → `DataField.FieldId` on the Parquet.Net 6 backend. The
   legacy backend leaves it out, because Parquet.Net 4.x has no field IDs.
