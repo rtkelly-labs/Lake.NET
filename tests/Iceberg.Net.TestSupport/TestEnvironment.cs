@@ -36,6 +36,9 @@ public sealed class TestEnvironment
     public string JdbcDatabase { get; } = Env("ICEBERG_JDBC_SQLITE") ?? Path.Combine(Path.GetTempPath(), "iceberg-dotnet-jdbc", "catalog.db");
     public Uri PolarisUri { get; } = new(Env("ICEBERG_POLARIS_URI") ?? "http://localhost:8182/api/catalog");
     public string? PolarisSkipReason { get; }
+    /// <summary>Apache Gravitino's Iceberg REST server (emulation/up.sh --gravitino): a third REST server, with scan planning.</summary>
+    public Uri GravitinoUri { get; } = new(Env("ICEBERG_GRAVITINO_URI") ?? "http://localhost:9001/iceberg");
+    public string? GravitinoSkipReason { get; } = "Gravitino only runs in emulation";
     public string? OracleSkipReason { get; }
     /// <summary>Oracle availability for tests that only use the local filesystem (no emulator or AWS).</summary>
     public string? LocalOracleSkipReason { get; }
@@ -65,6 +68,7 @@ public sealed class TestEnvironment
             SkipReason = Reachable(new Uri(S3Endpoint)) ? null : $"S3/Glue emulator not reachable at {S3Endpoint} (run emulation/up.sh)";
             RestSkipReason = SkipReason ?? (Reachable(RestUri) ? null : $"REST catalog fixture not reachable at {RestUri}");
             PolarisSkipReason = SkipReason ?? (Reachable(PolarisUri) ? null : $"Polaris not reachable at {PolarisUri} (run emulation/up.sh --polaris)");
+            GravitinoSkipReason = SkipReason ?? (Reachable(GravitinoUri) ? null : $"Gravitino not reachable at {GravitinoUri} (run emulation/up.sh --gravitino)");
             AthenaSkipReason = "Athena only runs with ICEBERG_TEST_TARGET=aws";
         }
         else
@@ -131,6 +135,9 @@ public sealed class TestEnvironment
                 AccessDelegation = null, Properties = S3Properties,
             },
             props => new S3FileIO(S3FileIOOptions.FromProperties(props)), "polaris"),
+        // Gravitino's Iceberg REST service (in-memory backend, S3FileIO on moto); clients bring S3 credentials.
+        "gravitino" => await RestCatalog.ConnectAsync(new RestCatalogOptions { Uri = GravitinoUri, AccessDelegation = null, Properties = S3Properties },
+            props => new S3FileIO(S3FileIOOptions.FromProperties(props)), "gravitino"),
         // Java JdbcCatalog / PyIceberg SqlCatalog tables in SQLite, data in S3 (moto or AWS); catalog name "regression".
         "jdbc" => await JdbcAsync(),
         _ => throw new ArgumentException(kind),
@@ -144,7 +151,7 @@ public sealed class TestEnvironment
         return catalog;
     }
 
-    public string? CatalogSkipReason(string kind) => kind switch { "rest" => RestSkipReason, "polaris" => PolarisSkipReason, _ => SkipReason };
+    public string? CatalogSkipReason(string kind) => kind switch { "rest" => RestSkipReason, "polaris" => PolarisSkipReason, "gravitino" => GravitinoSkipReason, _ => SkipReason };
 
     // ---------- PyIceberg oracle ----------
 

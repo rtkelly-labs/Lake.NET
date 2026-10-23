@@ -17,7 +17,7 @@ public sealed class CatalogConformanceTests
     /// "rest" is the Iceberg project's Java test server; "polaris" is Apache Polaris, implemented independently;
     /// "jdbc" is our JdbcCatalog over SQLite, in the tables PyIceberg's SqlCatalog and Java's JdbcCatalog share.
     /// </summary>
-    public static TheoryData<string> Catalogs => new() { "glue", "rest", "polaris", "jdbc" };
+    public static TheoryData<string> Catalogs => new() { "glue", "rest", "polaris", "gravitino", "jdbc" };
 
     public static readonly Schema Schema = new(
         NestedField.Require(1, "id", PrimitiveType.Long),
@@ -231,9 +231,9 @@ public sealed class CatalogConformanceTests
         async Task<TableCommit> Stage(Table t, int from) =>
             await SnapshotProducer.Append(t).AddFiles(await TableWriter.WriteAsync(t, Rows(from, 3))).StageAsync();
 
-        if (kind == "glue")
+        if (kind is "glue" or "gravitino")
         {
-            // Glue has no multi-table atomic update.
+            // Glue has no multi-table atomic update; Gravitino 1.3's REST service does not advertise one (checked from /v1/config).
             await Assert.ThrowsAsync<NotSupportedException>(async () => await s.Catalog.CommitTransactionAsync([await Stage(a, 0), await Stage(b, 0)]));
             return;
         }

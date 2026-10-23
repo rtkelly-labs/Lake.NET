@@ -47,7 +47,7 @@ Legend: ✅ implemented and tested · 🟡 partial · ⬜ not started · — not
 | year / month / day / hour (floor semantics before epoch) | ✅ | `TransformSpecTests` |
 | Unknown transforms round-trip unchanged; writers refuse them | ✅ | `TransformSpecTests` |
 | v3 multi-argument transforms (`source-ids`) | 🟡 JSON round-trip only | |
-| Partition evolution (new spec IDs, reuse of compatible specs) | ✅ | `StateManagementTests` |
+| Partition evolution (new spec IDs, reuse of compatible specs) | ✅ `Table.UpdateSpecAsync` / `PartitionSpecUpdate`: add/remove/rename fields, field IDs reused for a source+transform seen before and fresh above `last-partition-id` otherwise, v1 removals become `void` | `StateManagementTests`, `MetadataBuilderTests`, `SparkCrossEngineTests` (`spec_evolved_v2`) |
 | Hive-style partition paths (`name=human-value`) | ✅ | `TransformSpecTests` |
 | Sort orders (JSON, reuse, default) | ✅ metadata; writers sort each file by the default order (transforms, direction, null order, NaN greatest) and set `sort_order_id`; compaction rewrites files not in the current order | `MetadataSpecTests`, `SortOrderTests` |
 | Cross-implementation agreement on partition values | ✅ vs PyIceberg (Rust `pyiceberg-core`) | `PyIcebergFixtureTests`, `CrossEngineTests` |
@@ -119,7 +119,7 @@ Legend: ✅ implemented and tested · 🟡 partial · ⬜ not started · — not
 | Storage credentials / per-table `config` | ✅ longest-prefix credential selection | |
 | `loadCredentials` refresh, remote signing | ⬜ | |
 | Multi-table `transactions/commit` | ✅ `ICatalog.CommitTransactionAsync` + `SnapshotProducer.StageAsync` | `CatalogConformanceTests` (Java REST server, Polaris; JDBC via one SQL transaction; Glue refuses) |
-| Scan planning (`plan`, `plan/{id}`, `tasks`, cancel) | ✅ `RestCatalog.PlanTableScanAsync` (inline, submitted → polled, plan tasks followed recursively, cancel on abandon), `ServerSideScan` reads with the server-matched deletes; content files and expressions in both Java 1.10 and spec (1.12) forms | `ServerScanPlanningTests` (Java-made plans replayed), `ExpressionJsonTests`, `SparkCrossEngineTests.Java_plans_our_tables_and_we_read_its_plans` |
+| Scan planning (`plan`, `plan/{id}`, `tasks`, cancel) | ✅ `RestCatalog.PlanTableScanAsync` (inline, submitted → polled, plan tasks followed recursively, cancel on abandon), `ServerSideScan` reads with the server-matched deletes; content files and expressions in both Java 1.10 and spec (1.12) forms | `ServerScanPlanningLiveTests` (Gravitino plans our tables), `ServerScanPlanningTests` (Java-made plans replayed), `JavaMisreferencedDvTests`, `ExpressionJsonTests`, `SparkCrossEngineTests.Java_plans_our_tables_and_we_read_its_plans` |
 | Views (create, load, replace, list, exists, rename, drop) | ✅ `IViewCatalog` on `RestCatalog` and `InMemoryCatalog`; view spec v1 metadata (`ViewMetadata`, history trimming) | `ViewTests`, `ViewConformanceTests` (Java REST server, Polaris; Trino queries our view and we read Trino's) |
 | Metrics reporting | ⬜ | |
 | ETag / freshness-aware loading | ⬜ | |

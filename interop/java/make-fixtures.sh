@@ -37,3 +37,11 @@ docker run --rm --network none --hostname localhost --user root --entrypoint /op
   -v "$PWD/emulation/.cache:/jars:ro" -v "$PWD/$out:/out:ro" \
   "$image" -cp "/jars/$jar:/opt/spark/jars/*" /w/ScanPlanOracle.java exprs /out/expressions.json 2>/dev/null \
   | tail -1 > "$out/expressions-java.json"
+
+# The same mor_v3 plans serialized by Iceberg Java 1.10 (the REST fixture image), whose delete-file references are
+# wrong when deletion vectors share a Puffin file: the client must still read them right.
+python3 -c "import json,sys; c=json.load(open(sys.argv[1])); json.dump([x for x in c if x['table']=='mor_v3'], open(sys.argv[2],'w'), indent=2)" \
+  "$out/cases.json" "$out/cases-java110.json"
+docker run --rm --network none --hostname localhost --entrypoint java -v "$PWD/interop/java:/w:ro" -v "$PWD/$fixtures/spark:$root:ro" -v "$PWD/$out:/out:ro" \
+  apache/iceberg-rest-fixture:1.10.0 -cp /usr/lib/iceberg-rest/iceberg-rest-adapter.jar /w/ScanPlanOracle.java plans /out/cases-java110.json 2>/dev/null \
+  | tail -1 > "$out/responses-java110.json"

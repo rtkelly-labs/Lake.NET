@@ -1,5 +1,5 @@
 # Full-emulation stack for the regression suite. See ../docs/regression-suite.md.
-# Image tags are pinned; MOTO_TAG / REST_FIXTURE_TAG / TRINO_TAG / POLARIS_TAG override them (the weekly upkeep workflow runs
+# Image tags are pinned; MOTO_TAG / REST_FIXTURE_TAG / TRINO_TAG / POLARIS_TAG / GRAVITINO_TAG override them (the weekly upkeep workflow runs
 # the suite against :latest to catch upstream drift before a pin bump).
 #   moto  - AWS emulator: S3 (incl. conditional writes) + Glue Data Catalog + STS, one endpoint,
 #           started through moto_server.py so the Glue fidelity shims (docs/emulation.md) apply
@@ -7,6 +7,8 @@
 #           (Java reference implementation, JDBC-backed) storing metadata in moto's S3
 #   polaris - (profile "polaris": ./up.sh --polaris) Apache Polaris, a second, independently implemented REST
 #           catalog server (in-memory persistence, S3 storage on moto, no credential vending)
+#   gravitino - (profile "gravitino": ./up.sh --gravitino) Apache Gravitino's Iceberg REST server, a third REST server
+#           (Gravitino's own service over Iceberg 1.11's catalog code; SQLite JDBC backend, S3FileIO on moto)
 #   trino - (profile "trino": ./up.sh --trino) Trino's Iceberg connector over the same REST catalog + S3,
 #           a third independent reader (Java, but not the Iceberg core library's scan planner)
 name: iceberg-dotnet-emulation
@@ -74,6 +76,36 @@ services:
       quarkus.otel.sdk.disabled: "true"
     healthcheck:
       test: ["CMD", "curl", "-sf", "http://localhost:8182/q/health"]
+      interval: 3s
+      retries: 60
+
+  gravitino:
+    image: apache/gravitino-iceberg-rest:${GRAVITINO_TAG:-1.3.1}
+    profiles: ["gravitino"]
+    depends_on:
+      bucket: { condition: service_completed_successfully }
+    ports: ["9001:9001"]
+    # The memory backend keeps files in an in-memory FileIO (the server could not read our S3 files to plan scans or
+    # purge), so a JDBC backend on the bundled SQLite driver, initialised on start.
+    entrypoint: ["bash", "-c", "echo 'gravitino.iceberg-rest.jdbc-initialize = true' >> conf/gravitino-iceberg-rest-server.conf && exec bin/start-iceberg-rest-server.sh"]
+    environment:
+      GRAVITINO_ICEBERG_REST_CATALOG_BACKEND: jdbc
+      GRAVITINO_ICEBERG_REST_URI: jdbc:sqlite:/tmp/gravitino-catalog.db
+      GRAVITINO_ICEBERG_REST_JDBC_DRIVER: org.sqlite.JDBC
+      GRAVITINO_ICEBERG_REST_JDBC_USER: iceberg
+      GRAVITINO_ICEBERG_REST_JDBC_PASSWORD: iceberg
+      GRAVITINO_ICEBERG_REST_WAREHOUSE: s3://iceberg-regression/gravitino
+      GRAVITINO_ICEBERG_REST_IO_IMPL: org.apache.iceberg.aws.s3.S3FileIO
+      GRAVITINO_ICEBERG_REST_S3_ENDPOINT: http://moto:5000
+      GRAVITINO_ICEBERG_REST_S3_REGION: eu-west-1
+      GRAVITINO_ICEBERG_REST_S3_PATH_STYLE_ACCESS: "true"
+      GRAVITINO_ICEBERG_REST_S3_ACCESS_KEY: test
+      GRAVITINO_ICEBERG_REST_S3_SECRET_KEY: test
+      AWS_REGION: eu-west-1
+      AWS_ACCESS_KEY_ID: test
+      AWS_SECRET_ACCESS_KEY: test
+    healthcheck:
+      test: ["CMD", "bash", "-c", "exec 3<>/dev/tcp/localhost/9001 && printf 'GET /iceberg/v1/config HTTP/1.0\\r\\n\\r\\n' >&3 && grep -q '200' <&3"]
       interval: 3s
       retries: 60
 

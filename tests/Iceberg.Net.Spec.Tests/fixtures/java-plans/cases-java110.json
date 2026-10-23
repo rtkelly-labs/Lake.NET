@@ -1,0 +1,37 @@
+[
+  {
+    "name": "mor_v3_eu_from_3",
+    "table": "mor_v3",
+    "metadata": "file:///tmp/sentric-spark-fixture-root/warehouse/ref/mor_v3/metadata/v5.metadata.json",
+    "filter": {
+      "type": "and",
+      "left": {
+        "type": "gt-eq",
+        "term": "id",
+        "value": 3
+      },
+      "right": {
+        "type": "eq",
+        "term": "region",
+        "value": "eu"
+      }
+    }
+  },
+  {
+    "name": "mor_v3_id_in",
+    "table": "mor_v3",
+    "metadata": "file:///tmp/sentric-spark-fixture-root/warehouse/ref/mor_v3/metadata/v5.metadata.json",
+    "filter": {
+      "type": "in",
+      "term": "id",
+      "values": [
+        1,
+        2,
+        5,
+        8,
+        13,
+        21
+      ]
+    }
+  }
+]

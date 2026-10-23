@@ -137,6 +137,19 @@ def env_catalog(kind: str) -> Catalog:
             **{"header.X-Iceberg-Access-Delegation": ""},
             **s3,
         )
+    if kind == "gravitino":
+        # Gravitino's Iceberg REST service (emulation/up.sh --gravitino); no credential vending. PyIceberg 0.12 sends
+        # "Authorization: Bearer None" when it has no token, which Gravitino rejects: the noop auth manager sends none.
+        return load_catalog(
+            "gravitino",
+            type="rest",
+            auth={"type": "noop"},
+            uri=os.environ.get(
+                "ICEBERG_GRAVITINO_URI", "http://localhost:9001/iceberg"
+            ),
+            **{"header.X-Iceberg-Access-Delegation": ""},
+            **s3,
+        )
     if kind == "rest":
         return load_catalog(
             "rest",

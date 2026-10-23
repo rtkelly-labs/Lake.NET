@@ -119,6 +119,29 @@ public sealed class Table(ICatalog catalog, TableIdentifier identifier, TableMet
             ct);
 
     /// <summary>
+    /// Evolve the partition spec, e.g. <c>table.UpdateSpecAsync(p => p.AddField("event_ts", Transform.Day).RemoveField("region"))</c>.
+    /// New data is written under the new spec; existing files keep theirs. Re-applied on a concurrent change, as
+    /// <see cref="UpdateSchemaAsync(Action{SchemaUpdate}, int, CancellationToken)"/>.
+    /// </summary>
+    public async Task<TableMetadata> UpdateSpecAsync(Action<PartitionSpecUpdate> changes, int retries = 4, CancellationToken ct = default)
+    {
+        for (var attempt = 0; ; attempt++)
+        {
+            var update = new PartitionSpecUpdate(Metadata);
+            changes(update);
+            var (requirements, updates) = update.ToCommit();
+            try
+            {
+                return await CommitAsync(requirements, updates, ct);
+            }
+            catch (CommitFailedException) when (attempt < retries)
+            {
+                await RefreshAsync(ct);
+            }
+        }
+    }
+
+    /// <summary>
     /// Evolve the schema with <see cref="SchemaUpdate"/> operations, e.g.
     /// <c>table.UpdateSchemaAsync(s => s.AddColumn("region", PrimitiveType.String).RenameColumn("qty", "quantity"))</c>.
     /// If another writer changes the schema first, the operations are re-applied to the new schema (up to

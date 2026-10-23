@@ -3,6 +3,7 @@
 #   --spark   also fetch the Spark oracle (apache/spark image + pinned Iceberg runtime jar into .cache/)
 #   --trino   also start Trino (Iceberg connector over the REST fixture + moto S3) on :8080
 #   --polaris also start Apache Polaris (second REST catalog implementation) on :8182, catalog "regression"
+#   --gravitino also start Apache Gravitino's Iceberg REST server (third REST implementation) on :9001
 set -euo pipefail
 cd "$(dirname "$0")"
 SPARK=0; PROFILES=()
@@ -11,6 +12,7 @@ for arg in "$@"; do
     --spark) SPARK=1 ;;
     --trino) PROFILES+=(--profile trino) ;;
     --polaris) PROFILES+=(--profile polaris) ;;
+    --gravitino) PROFILES+=(--profile gravitino) ;;
     *) echo "unknown option: $arg" >&2; exit 2 ;;
   esac
 done
@@ -19,6 +21,7 @@ echo "moto (S3 + Glue):      http://localhost:5000"
 echo "Iceberg REST fixture:  http://localhost:8181"
 [[ " ${PROFILES[*]} " == *" trino "* ]] && echo "Trino:                 http://localhost:8080"
 [[ " ${PROFILES[*]} " == *" polaris "* ]] && echo "Polaris (REST):        http://localhost:8182/api/catalog (warehouse regression)"
+[[ " ${PROFILES[*]} " == *" gravitino "* ]] && echo "Gravitino (REST):      http://localhost:9001/iceberg"
 
 if [[ "$SPARK" == 1 ]]; then
   SPARK_IMAGE="${ICEBERG_SPARK_IMAGE:-apache/spark:4.0.1}"

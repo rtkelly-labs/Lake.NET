@@ -306,6 +306,8 @@ public sealed class RestCatalog : ICatalog, IViewCatalog
         return ToTable(r.Identifier, resp!);
     }
 
+    private const string TransactionsEndpoint = "POST /v1/{prefix}/transactions/commit";
+
     /// <summary>Whether the server advertises server-side scan planning (<c>planTableScan</c> in <c>/v1/config</c> endpoints).</summary>
     public bool SupportsScanPlanning => Endpoints.Contains(ScanPlanningProtocol.PlanEndpoint);
 
@@ -368,6 +370,9 @@ public sealed class RestCatalog : ICatalog, IViewCatalog
 
     public async Task CommitTransactionAsync(IReadOnlyList<TableCommit> commits, CancellationToken ct = default)
     {
+        // A server that lists its endpoints and not this one does not do atomic multi-table commits (e.g. Gravitino).
+        if (Endpoints.Count > 0 && !Endpoints.Contains(TransactionsEndpoint))
+            throw new NotSupportedException("This REST server does not advertise multi-table transactions (POST /v1/{prefix}/transactions/commit)");
         var body = new JsonObject
         {
             ["table-changes"] = new JsonArray(commits.Select(c => (JsonNode)new JsonObject

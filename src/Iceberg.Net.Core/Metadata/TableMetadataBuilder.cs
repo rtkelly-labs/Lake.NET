@@ -126,7 +126,7 @@ public sealed class TableMetadataBuilder
                 break;
 
             case MetadataUpdate.SetSnapshotRef u:
-                SetRef(u.RefName, u.Ref);
+                if (!SetRef(u.RefName, u.Ref)) return this; // already there: not a change
                 break;
 
             case MetadataUpdate.RemoveSnapshotRef u:
@@ -252,10 +252,10 @@ public sealed class TableMetadataBuilder
         };
     }
 
-    private void SetRef(string name, SnapshotRef r)
+    private bool SetRef(string name, SnapshotRef r)
     {
         var snapshot = _m.SnapshotById(r.SnapshotId) ?? throw new ArgumentException($"Cannot set {name} to unknown snapshot {r.SnapshotId}");
-        if (_m.Refs.TryGetValue(name, out var existing) && existing == r) return;
+        if (_m.Refs.TryGetValue(name, out var existing) && existing == r) return false;
         var refs = Compat.Copy(_m.Refs);
         refs[name] = r;
         _m = _m with { Refs = refs };
@@ -271,6 +271,7 @@ public sealed class TableMetadataBuilder
                 LastUpdatedMs = Math.Max(_m.LastUpdatedMs, ts),
             };
         }
+        return true;
     }
 
     private void RemoveSnapshots(IReadOnlyList<long> ids)

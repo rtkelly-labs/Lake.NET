@@ -76,6 +76,15 @@ public sealed class SparkTablesFixture : IAsyncLifetime
             await t.UpdateSchemaAsync(s => s.UpdateColumn("qty", Types.PrimitiveType.Long).AddColumn("note", Types.PrimitiveType.String));
             await TableMutations.InsertAsync(t, CatalogConformanceTests.Rows(300, 3).Select(r => (object?[])[.. r[..5], (long)(int)r[5]!, "new"]).ToList());
         });
+        // Partition evolution through UpdateSpecAsync: rows under the original and the evolved spec, then deletes across both.
+        await Build("spec_evolved_v2", 2, async t =>
+        {
+            await t.UpdateSpecAsync(p => p.AddField("region").AddField("id", Transforms.Transform.Bucket(4)));
+            await TableMutations.InsertAsync(t, CatalogConformanceTests.Rows(500, 10));
+            await t.UpdateSpecAsync(p => p.RemoveField("id_bucket").AddField("event_ts", Transforms.Transform.Day));
+            await TableMutations.InsertAsync(t, CatalogConformanceTests.Rows(600, 10));
+            await TableMutations.DeleteByKeysAsync(t, ["id"], [[1L], [501L], [601L]], DeleteStrategy.PositionDeletes);
+        });
         await Build("expired_v2", 2, async t =>
         {
             await TableMutations.UpsertAsync(t, CatalogConformanceTests.Rows(0, 10).Select(r => { r[1] = "expired"; return r; }).ToList(), ["id"], DeleteStrategy.CopyOnWrite);
@@ -146,7 +155,7 @@ public sealed class SparkCrossEngineTests(SparkTablesFixture fx) : IClassFixture
     {
         "CopyOnWrite_v2", "PositionDeletes_v2", "EqualityDeletes_v2",
         "CopyOnWrite_v3", "PositionDeletes_v3", "EqualityDeletes_v3",
-        "upgraded_v2_to_v3", "partitioned_v3", "compacted_v3", "merged_v3", "evolved_v2", "expired_v2",
+        "upgraded_v2_to_v3", "partitioned_v3", "compacted_v3", "merged_v3", "evolved_v2", "expired_v2", "spec_evolved_v2",
     };
 
     public static TheoryData<string> AllNames() { var all = Names(); all.Add("nested_v3"); return all; }

@@ -108,6 +108,22 @@ internal static class ScanPlanningProtocol
     private static string Status(JsonNode response) =>
         (response["status"] ?? response["plan-status"])?.GetValue<string>().ToLowerInvariant() ?? throw new InvalidDataException("Plan response without a status");
 
+    /// <summary>
+    /// The deletes for one task. A deletion vector names the one data file it applies to (<c>referenced_data_file</c> is
+    /// required for DVs), so DVs are matched by that, not only by the task's references: Iceberg Java up to 1.11 (and
+    /// servers built on it, such as Gravitino 1.3) serializes references by delete-file path, and DVs sharing one
+    /// Puffin file then point at the wrong data files. A referenced DV for another file is dropped; the response's DV
+    /// for this file is added.
+    /// </summary>
+    private static List<DataFile> ForTask(DataFile data, IEnumerable<DataFile> referenced, IReadOnlyList<DataFile> all)
+    {
+        static bool IsDv(DataFile d) => d.FileFormat == "PUFFIN" && d.ReferencedDataFile is not null;
+        var result = referenced.Where(d => !IsDv(d) || d.ReferencedDataFile == data.FilePath).ToList();
+        foreach (var dv in all.Where(d => IsDv(d) && d.ReferencedDataFile == data.FilePath))
+            if (!result.Any(d => d.FilePath == dv.FilePath && d.ContentOffset == dv.ContentOffset)) result.Add(dv);
+        return result;
+    }
+
     internal static void Collect(JsonNode response, TableMetadata metadata, List<ServerScanTask> tasks, Queue<string> pending)
     {
         var schema = metadata.CurrentSchema;
@@ -118,7 +134,7 @@ internal static class ScanPlanningProtocol
             var refs = t["delete-file-references"]?.AsArray().Select(r => r!.GetValue<int>()).ToList() ?? [];
             if (refs.Any(r => r < 0 || r >= deletes.Count)) throw new InvalidDataException($"Delete file reference out of range in the task for {data.FilePath}");
             var residual = t["residual-filter"] is { } rf ? ExpressionJson.FromJson(rf) : null;
-            tasks.Add(new ServerScanTask(data, refs.Select(r => deletes[r]).ToList(), residual));
+            tasks.Add(new ServerScanTask(data, ForTask(data, refs.Select(r => deletes[r]), deletes), residual));
         }
         foreach (var p in response["plan-tasks"]?.AsArray() ?? []) pending.Enqueue(p!.GetValue<string>());
     }

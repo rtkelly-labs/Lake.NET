@@ -239,3 +239,48 @@ public sealed class ExpressionJsonTests
             Assert.True(Corruption.IsFormatError(Record.Exception(() => ExpressionJson.FromJson(JsonNode.Parse(bad)))!), bad);
     }
 }
+
+/// <summary>
+/// Plans serialized by Iceberg Java 1.10 (fixtures/java-plans/responses-java110.json): its delete-file references are
+/// wrong when deletion vectors share a Puffin file. DVs name their data file, so the client still applies each one to
+/// the right file — and reads exactly what our own planner does.
+/// </summary>
+[Spec("rest: planTableScan")]
+[Spec("Deletion Vectors")]
+public sealed class JavaMisreferencedDvTests : IDisposable
+{
+    private const string FixtureRoot = "file:///tmp/sentric-spark-fixture-root/warehouse";
+    private static readonly string Fixtures = Path.Combine(AppContext.BaseDirectory, "fixtures");
+    private readonly string _copy = Path.Combine(Path.GetTempPath(), "iceberg-dotnet-dvref", Guid.NewGuid().ToString("N"));
+
+    public JavaMisreferencedDvTests() => PrefixMappingFileIO.CopyTree(Path.Combine(Fixtures, "spark"), _copy);
+
+    public void Dispose()
+    {
+        if (Directory.Exists(_copy)) Directory.Delete(_copy, true);
+    }
+
+    [Fact]
+    public async Task Deletion_vectors_reach_their_own_data_files()
+    {
+        var cases = JsonNode.Parse(File.ReadAllText(Path.Combine(Fixtures, "java-plans", "cases-java110.json")))!.AsArray();
+        var responses = JsonNode.Parse(File.ReadAllText(Path.Combine(Fixtures, "java-plans", "responses-java110.json")))!.AsArray();
+        using var catalog = new InMemoryCatalog(Path.Combine(_copy, "catalog"), new PrefixMappingFileIO(FixtureRoot, _copy));
+        await catalog.CreateNamespaceAsync(Namespace.Of("ref"));
+        var table = await catalog.RegisterTableAsync(TableIdentifier.Of("ref", "mor_v3"), cases[0]!["metadata"]!.GetValue<string>());
+        var broken = 0;
+        for (var i = 0; i < cases.Count; i++)
+        {
+            var response = responses[i]!;
+            var deletes = response["delete-files"]!.AsArray();
+            // The fixture really is broken: some task references a DV for another file.
+            broken += response["file-scan-tasks"]!.AsArray().Count(t => t!["delete-file-references"]!.AsArray()
+                .Any(r => deletes[r!.GetValue<int>()]!["referenced-data-file"]?.GetValue<string>() is { } f && f != t["data-file"]!["file-path"]!.GetValue<string>()));
+            var filter = cases[i]!["filter"] is { } f ? ExpressionJson.FromJson(f) : null;
+            var plan = ServerScanPlan.FromCompletedResponse(response, table.Metadata);
+            var ours = filter is null ? await TableScan.ReadAllAsync(table) : await TableScan.ReadAsync(table, filter);
+            Assert.Equal(SparkJson.Rows(table.Schema, ours).OrderBy(kv => kv.Key), SparkJson.Rows(table.Schema, await ServerSideScan.ReadAsync(table, plan, filter)).OrderBy(kv => kv.Key));
+        }
+        Assert.True(broken > 0);
+    }
+}
