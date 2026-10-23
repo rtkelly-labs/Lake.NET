@@ -9,6 +9,11 @@
     <!-- Interop target: rtkelly-labs/Parquet.SourceGenerator (Roslyn generator over Parquet.Net), used only by tests -->
     <PackageVersion Include="Parquet.SourceGenerator" Version="0.0.3" />
     <PackageVersion Include="Parquet.Net" Version="6.1.0" />
+    <!-- netstandard2.0 build of Core/Avro: language-feature polyfills and the BCL pieces netstandard2.0 lacks -->
+    <PackageVersion Include="PolySharp" Version="1.15.0" />
+    <PackageVersion Include="System.Memory" Version="4.6.0" />
+    <PackageVersion Include="System.Text.Json" Version="8.0.5" />
+    <PackageVersion Include="Microsoft.Bcl.HashCode" Version="6.0.0" />
     <!-- AWS -->
     <PackageVersion Include="AWSSDK.S3" Version="4.0.6" />
     <PackageVersion Include="AWSSDK.Glue" Version="4.0.6" />

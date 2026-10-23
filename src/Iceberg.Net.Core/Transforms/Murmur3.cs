@@ -22,10 +22,10 @@ public static class Murmur3
         {
             var k1 = BinaryPrimitives.ReadUInt32LittleEndian(data.Slice(i * 4, 4));
             k1 *= C1;
-            k1 = BitOperations.RotateLeft(k1, 15);
+            k1 = Compat.RotateLeft(k1, 15);
             k1 *= C2;
             h1 ^= k1;
-            h1 = BitOperations.RotateLeft(h1, 13);
+            h1 = Compat.RotateLeft(h1, 13);
             h1 = h1 * 5 + 0xe6546b64;
         }
 
@@ -38,7 +38,7 @@ public static class Murmur3
             case 1:
                 t ^= tail[0];
                 t *= C1;
-                t = BitOperations.RotateLeft(t, 15);
+                t = Compat.RotateLeft(t, 15);
                 t *= C2;
                 h1 ^= t;
                 break;

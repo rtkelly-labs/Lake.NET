@@ -56,8 +56,8 @@ public abstract record Transform
 
     internal static string HumanValue(IcebergType type, object value) => (type.TypeId, value) switch
     {
-        (TypeId.Date, int d) => IcebergTime.DateFromDays(d).ToString("yyyy-MM-dd", CultureInfo.InvariantCulture),
-        (TypeId.Time, long us) => IcebergTime.TimeFromMicros(us).ToString("HH:mm:ss.ffffff", CultureInfo.InvariantCulture),
+        (TypeId.Date, int d) => IcebergTime.Epoch.AddDays(d).ToString("yyyy-MM-dd", CultureInfo.InvariantCulture),
+        (TypeId.Time, long us) => IcebergTime.Epoch.AddTicks(us * 10).ToString("HH:mm:ss.ffffff", CultureInfo.InvariantCulture),
         (TypeId.Timestamp, long us) => IcebergTime.TimestampFromMicros(us).ToString("yyyy-MM-dd'T'HH:mm:ss.ffffff", CultureInfo.InvariantCulture),
         (TypeId.TimestampTz, long us) => IcebergTime.TimestampFromMicros(us).ToString("yyyy-MM-dd'T'HH:mm:ss.ffffff", CultureInfo.InvariantCulture) + "+00:00",
         (TypeId.Boolean, bool b) => b ? "true" : "false",
@@ -151,7 +151,7 @@ public sealed record TruncateTransform : Transform
         long l => l - (((l % Width) + Width) % Width),
         IcebergDecimal d => new IcebergDecimal(d.Unscaled - (((d.Unscaled % Width) + Width) % Width), d.Scale),
         string s => TruncateCodePoints(s, Width),
-        byte[] b => b.Length <= Width ? b : b[..Width],
+        byte[] b => b.Length <= Width ? b : b.AsSpan(0, Width).ToArray(),
         _ => throw new ArgumentException($"Cannot truncate {value.GetType().Name}"),
     };
 
@@ -213,7 +213,7 @@ public sealed record TimeTransform(TimeUnit Unit) : Transform
         {
             TimeUnit.Year => (1970 + v).ToString("D4", CultureInfo.InvariantCulture),
             TimeUnit.Month => IcebergTime.Epoch.AddMonths(v).ToString("yyyy-MM", CultureInfo.InvariantCulture),
-            TimeUnit.Day => IcebergTime.DateFromDays(v).ToString("yyyy-MM-dd", CultureInfo.InvariantCulture),
+            TimeUnit.Day => IcebergTime.Epoch.AddDays(v).ToString("yyyy-MM-dd", CultureInfo.InvariantCulture),
             TimeUnit.Hour => IcebergTime.Epoch.AddHours(v).ToString("yyyy-MM-dd-HH", CultureInfo.InvariantCulture),
             _ => throw new InvalidOperationException(),
         };

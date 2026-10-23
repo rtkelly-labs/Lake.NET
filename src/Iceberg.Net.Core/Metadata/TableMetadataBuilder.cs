@@ -131,7 +131,7 @@ public sealed class TableMetadataBuilder
 
             case MetadataUpdate.RemoveSnapshotRef u:
                 if (!_m.Refs.ContainsKey(u.RefName)) return this;
-                var refs = new Dictionary<string, SnapshotRef>(_m.Refs);
+                var refs = Compat.Copy(_m.Refs);
                 refs.Remove(u.RefName);
                 _m = _m with { Refs = refs, CurrentSnapshotId = u.RefName == SnapshotRef.Main ? null : _m.CurrentSnapshotId };
                 break;
@@ -146,7 +146,7 @@ public sealed class TableMetadataBuilder
 
             case MetadataUpdate.SetProperties u:
             {
-                var props = new Dictionary<string, string>(_m.Properties);
+                var props = Compat.Copy(_m.Properties);
                 foreach (var (k, v) in u.Updates) props[k] = v;
                 _m = _m with { Properties = props };
                 break;
@@ -154,7 +154,7 @@ public sealed class TableMetadataBuilder
 
             case MetadataUpdate.RemoveProperties u:
             {
-                var props = new Dictionary<string, string>(_m.Properties);
+                var props = Compat.Copy(_m.Properties);
                 foreach (var k in u.Removals) props.Remove(k);
                 _m = _m with { Properties = props };
                 break;
@@ -256,7 +256,8 @@ public sealed class TableMetadataBuilder
     {
         var snapshot = _m.SnapshotById(r.SnapshotId) ?? throw new ArgumentException($"Cannot set {name} to unknown snapshot {r.SnapshotId}");
         if (_m.Refs.TryGetValue(name, out var existing) && existing == r) return;
-        var refs = new Dictionary<string, SnapshotRef>(_m.Refs) { [name] = r };
+        var refs = Compat.Copy(_m.Refs);
+        refs[name] = r;
         _m = _m with { Refs = refs };
         if (name == SnapshotRef.Main)
         {

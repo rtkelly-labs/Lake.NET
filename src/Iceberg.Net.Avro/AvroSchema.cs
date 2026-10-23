@@ -27,12 +27,12 @@ public abstract record AvroSchema
     public AvroSchema WithLogical(string logicalType, params (string Key, JsonNode Value)[] props) => this with
     {
         LogicalType = logicalType,
-        Props = new Dictionary<string, JsonNode>(Props.Concat(props.Select(p => KeyValuePair.Create(p.Key, p.Value)))),
+        Props = Props.Concat(props.Select(p => KeyValuePair.Create(p.Key, p.Value))).ToDictionary(p => p.Key, p => p.Value),
     };
 
     public AvroSchema WithProp(string key, JsonNode value) => this with
     {
-        Props = new Dictionary<string, JsonNode>(Props) { [key] = value },
+        Props = Props.Where(p => p.Key != key).Append(KeyValuePair.Create(key, value)).ToDictionary(p => p.Key, p => p.Value),
     };
 
     public bool IsNullable => this is AvroUnion u && u.Branches.Any(b => b is AvroPrimitive { Kind: AvroKind.Null });

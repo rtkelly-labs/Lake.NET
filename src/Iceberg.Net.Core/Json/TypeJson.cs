@@ -10,17 +10,33 @@ namespace Iceberg.Net.Json;
 /// <summary>JSON for types, schemas, partition specs and sort orders (spec Appendix C).</summary>
 public static partial class TypeJson
 {
-    [GeneratedRegex(@"^decimal\(\s*(\d+)\s*,\s*(\d+)\s*\)$")]
+    private const string DecimalPattern = @"^decimal\(\s*(\d+)\s*,\s*(\d+)\s*\)$";
+    private const string FixedPattern = @"^fixed\[\s*(\d+)\s*\]$";
+    private const string GeometryPattern = @"^geometry\s*\(\s*([^)]*)\s*\)$";
+    private const string GeographyPattern = @"^geography\s*\(\s*([^,)]*)\s*(?:,\s*([^)]*))?\)$";
+
+#if NET7_0_OR_GREATER
+    [GeneratedRegex(DecimalPattern)]
     private static partial Regex DecimalRe();
 
-    [GeneratedRegex(@"^fixed\[\s*(\d+)\s*\]$")]
+    [GeneratedRegex(FixedPattern)]
     private static partial Regex FixedRe();
 
-    [GeneratedRegex(@"^geometry\s*\(\s*([^)]*)\s*\)$")]
+    [GeneratedRegex(GeometryPattern)]
     private static partial Regex GeometryRe();
 
-    [GeneratedRegex(@"^geography\s*\(\s*([^,)]*)\s*(?:,\s*([^)]*))?\)$")]
+    [GeneratedRegex(GeographyPattern)]
     private static partial Regex GeographyRe();
+#else
+    private static readonly Regex Decimal = new(DecimalPattern, RegexOptions.Compiled);
+    private static readonly Regex Fixed = new(FixedPattern, RegexOptions.Compiled);
+    private static readonly Regex Geometry = new(GeometryPattern, RegexOptions.Compiled);
+    private static readonly Regex Geography = new(GeographyPattern, RegexOptions.Compiled);
+    private static Regex DecimalRe() => Decimal;
+    private static Regex FixedRe() => Fixed;
+    private static Regex GeometryRe() => Geometry;
+    private static Regex GeographyRe() => Geography;
+#endif
 
     public static JsonNode ToJson(IcebergType type) => type switch
     {

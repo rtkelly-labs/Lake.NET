@@ -45,7 +45,7 @@ public sealed class PartitionSpec
     public string PartitionPath(Schema schema, object?[] partition)
     {
         var type = PartitionType(schema);
-        return string.Join('/', Fields.Select((f, i) =>
+        return string.Join("/", Fields.Select((f, i) =>
             $"{Uri.EscapeDataString(f.Name)}={Uri.EscapeDataString(f.Transform.ToHumanString(type.Fields[i].Type, partition[i]))}"));
     }
 

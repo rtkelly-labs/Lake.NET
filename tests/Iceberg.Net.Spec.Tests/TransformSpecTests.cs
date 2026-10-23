@@ -17,8 +17,8 @@ public class TransformSpecTests
         Assert.Equal(-142385009, Murmur3.HashDouble(1.0f));
         Assert.Equal(-142385009, Murmur3.HashDouble(1.0d));
         Assert.Equal(-500754589, Murmur3.HashDecimal(IcebergDecimal.Parse("14.20").Unscaled));
-        Assert.Equal(-653330422, Murmur3.HashInt(IcebergTime.DaysFromDate(new DateOnly(2017, 11, 16))));
-        Assert.Equal(-662762989, Murmur3.HashLong(IcebergTime.MicrosFromTime(new TimeOnly(22, 31, 8))));
+        Assert.Equal(-653330422, Murmur3.HashInt(IcebergTime.DaysFromIsoDate("2017-11-16")));
+        Assert.Equal(-662762989, Murmur3.HashLong(new TimeSpan(22, 31, 8).Ticks / 10));
         Assert.Equal(-2047944441, Murmur3.HashLong(IcebergTime.MicrosFromTimestamp(new DateTime(2017, 11, 16, 22, 31, 8, DateTimeKind.Utc))));
         Assert.Equal(-2047944441, Murmur3.HashLong(IcebergTime.MicrosFromTimestamp(new DateTimeOffset(2017, 11, 16, 14, 31, 8, TimeSpan.FromHours(-8)))));
         Assert.Equal(1210000089, Murmur3.HashString("iceberg"));

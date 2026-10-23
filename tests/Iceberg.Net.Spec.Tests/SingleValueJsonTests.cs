@@ -15,7 +15,7 @@ public sealed class SingleValueJsonTests
         { PrimitiveType.Long, 34L, "34" },
         { PrimitiveType.Double, 1.5, "1.5" },
         { new DecimalType(9, 2), new IcebergDecimal(1420, 2), "\"14.20\"" },
-        { PrimitiveType.Date, IcebergTime.DaysFromDate(new DateOnly(2017, 11, 16)), "\"2017-11-16\"" },
+        { PrimitiveType.Date, IcebergTime.DaysFromIsoDate("2017-11-16"), "\"2017-11-16\"" },
         { PrimitiveType.Time, (22 * 3600 + 31 * 60 + 8) * 1_000_000L + 123456, "\"22:31:08.123456\"" },
         { PrimitiveType.Timestamp, 1510871468123456L, "\"2017-11-16T22:31:08.123456\"" },
         { PrimitiveType.TimestampTz, 1510871468123456L, "\"2017-11-16T22:31:08.123456+00:00\"" },

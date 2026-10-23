@@ -114,7 +114,7 @@ public sealed record TableMetadata
             LastPartitionId = partitionId,
             SortOrders = freshOrder.IsUnsorted ? [SortOrder.Unsorted] : [freshOrder],
             DefaultSortOrderId = freshOrder.OrderId,
-            Properties = new Dictionary<string, string>(properties ?? new Dictionary<string, string>()),
+            Properties = Compat.Copy(properties ?? new Dictionary<string, string>()),
             NextRowId = formatVersion >= 3 ? InitialRowId : null,
         };
     }

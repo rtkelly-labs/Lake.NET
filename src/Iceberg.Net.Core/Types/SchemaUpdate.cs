@@ -197,7 +197,7 @@ public sealed class SchemaUpdate
         {
             var parts = path.Split('.');
             top = IndexOf(parts[0]);
-            rest = parts[1..];
+            rest = parts.Skip(1).ToArray();
         }
         var updated = Descend(_columns[top], rest, change, path);
         if (updated is null) throw new InvalidOperationException($"Use DeleteColumn on top-level column '{path}'");
@@ -207,7 +207,7 @@ public sealed class SchemaUpdate
     private static NestedField? Descend(NestedField f, string[] rest, Func<NestedField, NestedField?> change, string path)
     {
         if (rest.Length == 0) return change(f);
-        var (segment, tail) = (rest[0], rest[1..]);
+        var (segment, tail) = (rest[0], rest.Skip(1).ToArray());
         switch (f.Type)
         {
             case StructType s:

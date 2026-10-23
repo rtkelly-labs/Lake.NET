@@ -97,11 +97,11 @@ public static class AvroBinary
             case AvroKind.Int: WriteLong(s, Convert.ToInt32(value)); break;
             case AvroKind.Long: WriteLong(s, Convert.ToInt64(value)); break;
             case AvroKind.Float:
-                BinaryPrimitives.WriteSingleLittleEndian(buf, Convert.ToSingle(value));
+                Compat.WriteSingle(buf, Convert.ToSingle(value));
                 s.Write(buf[..4]);
                 break;
             case AvroKind.Double:
-                BinaryPrimitives.WriteDoubleLittleEndian(buf, Convert.ToDouble(value));
+                Compat.WriteDouble(buf, Convert.ToDouble(value));
                 s.Write(buf);
                 break;
             case AvroKind.Bytes:
@@ -203,10 +203,10 @@ public static class AvroBinary
             case AvroKind.Long: return ReadLong(s);
             case AvroKind.Float:
                 s.ReadExactly(buf[..4]);
-                return BinaryPrimitives.ReadSingleLittleEndian(buf);
+                return Compat.ReadSingle(buf);
             case AvroKind.Double:
                 s.ReadExactly(buf);
-                return BinaryPrimitives.ReadDoubleLittleEndian(buf);
+                return Compat.ReadDouble(buf);
             case AvroKind.Bytes:
                 var b = new byte[ReadLength(s)];
                 s.ReadExactly(b);
@@ -268,7 +268,7 @@ public static class AvroContainer
         };
         foreach (var (k, v) in metadata) meta[k] = Encoding.UTF8.GetBytes(v);
         AvroBinary.Write(output, MetaSchema, meta);
-        var sync = RandomNumberGenerator.GetBytes(16);
+        var sync = Compat.RandomBytes(16);
         output.Write(sync);
 
         foreach (var block in records.Chunk(blockSize))

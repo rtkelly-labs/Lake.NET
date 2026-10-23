@@ -1,9 +1,18 @@
 <Project Sdk="Microsoft.NET.Sdk">
   <PropertyGroup>
+    <!-- netstandard2.0 too, so .NET Framework 4.6.2+ services can read metadata and manifests -->
+    <TargetFramework></TargetFramework>
+    <TargetFrameworks>net8.0;netstandard2.0</TargetFrameworks>
     <RootNamespace>Iceberg.Net.Avro</RootNamespace>
     <Description>Iceberg manifest and manifest-list Avro encoding (format v1/v2/v3).</Description>
   </PropertyGroup>
   <ItemGroup>
     <ProjectReference Include="../Iceberg.Net.Core/Iceberg.Net.Core.csproj" />
+  </ItemGroup>
+  <ItemGroup Condition="'$(TargetFramework)' == 'netstandard2.0'">
+    <PackageReference Include="PolySharp" PrivateAssets="all" />
+    <PackageReference Include="System.Memory" />
+    <PackageReference Include="System.Text.Json" />
+    <PackageReference Include="Microsoft.Bcl.HashCode" />
   </ItemGroup>
 </Project>

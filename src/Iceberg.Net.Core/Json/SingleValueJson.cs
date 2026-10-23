@@ -20,10 +20,10 @@ public static class SingleValueJson
             (PrimitiveType { TypeId: TypeId.Boolean }, bool b) => b,
             (PrimitiveType { TypeId: TypeId.Int }, int i) => i,
             (PrimitiveType { TypeId: TypeId.Long }, long l) => l,
-            (PrimitiveType { TypeId: TypeId.Float }, float f) when float.IsFinite(f) => f,
-            (PrimitiveType { TypeId: TypeId.Double }, double d) when double.IsFinite(d) => d,
+            (PrimitiveType { TypeId: TypeId.Float }, float f) when Compat.IsFinite(f) => f,
+            (PrimitiveType { TypeId: TypeId.Double }, double d) when Compat.IsFinite(d) => d,
             (DecimalType, IcebergDecimal m) => m.ToString(),
-            (PrimitiveType { TypeId: TypeId.Date }, int days) => IcebergTime.DateFromDays(days).ToString("yyyy-MM-dd", CultureInfo.InvariantCulture),
+            (PrimitiveType { TypeId: TypeId.Date }, int days) => IcebergTime.Epoch.AddDays(days).ToString("yyyy-MM-dd", CultureInfo.InvariantCulture),
             (PrimitiveType { TypeId: TypeId.Time }, long us) => $"{TimeSpan.FromTicks(us * 10):hh\\:mm\\:ss}.{us % 1_000_000:D6}",
             (PrimitiveType { TypeId: TypeId.Timestamp }, long us) => Timestamp(us, 1_000_000, 6, ""),
             (PrimitiveType { TypeId: TypeId.TimestampTz }, long us) => Timestamp(us, 1_000_000, 6, "+00:00"),
@@ -31,7 +31,7 @@ public static class SingleValueJson
             (PrimitiveType { TypeId: TypeId.TimestampTzNs }, long ns) => Timestamp(ns, 1_000_000_000, 9, "+00:00"),
             (PrimitiveType { TypeId: TypeId.String }, string s) => s,
             (PrimitiveType { TypeId: TypeId.Uuid }, Guid g) => g.ToString("D"),
-            (_, byte[] bytes) when type.TypeId is TypeId.Binary or TypeId.Fixed => Convert.ToHexString(bytes).ToLowerInvariant(),
+            (_, byte[] bytes) when type.TypeId is TypeId.Binary or TypeId.Fixed => Compat.ToHex(bytes).ToLowerInvariant(),
             (StructType s, object?[] fields) => new JsonObject(s.Fields.Select((f, i) =>
                 KeyValuePair.Create(f.Id.ToString(CultureInfo.InvariantCulture), ToJson(f.Type, fields[i])))),
             (ListType l, IEnumerable<object?> items) => new JsonArray(items.Select(v => ToJson(l.ElementType, v)).ToArray()),
@@ -56,7 +56,7 @@ public static class SingleValueJson
             PrimitiveType { TypeId: TypeId.Float } => node.GetValue<float>(),
             PrimitiveType { TypeId: TypeId.Double } => node.GetValue<double>(),
             DecimalType => IcebergDecimal.Parse(Text()),
-            PrimitiveType { TypeId: TypeId.Date } => IcebergTime.DaysFromDate(DateOnly.ParseExact(Text(), "yyyy-MM-dd", CultureInfo.InvariantCulture)),
+            PrimitiveType { TypeId: TypeId.Date } => IcebergTime.DaysFromIsoDate(Text()),
             PrimitiveType { TypeId: TypeId.Time } => ParseTimeOfDay(Text(), 6),
             PrimitiveType { TypeId: TypeId.Timestamp } => ParseTimestamp(Text(), 6, zoned: false),
             PrimitiveType { TypeId: TypeId.TimestampTz } => ParseTimestamp(Text(), 6, zoned: true),
@@ -64,7 +64,7 @@ public static class SingleValueJson
             PrimitiveType { TypeId: TypeId.TimestampTzNs } => ParseTimestamp(Text(), 9, zoned: true),
             PrimitiveType { TypeId: TypeId.String } => Text(),
             PrimitiveType { TypeId: TypeId.Uuid } => Guid.Parse(Text()),
-            _ when type.TypeId is TypeId.Binary or TypeId.Fixed => Convert.FromHexString(Text()),
+            _ when type.TypeId is TypeId.Binary or TypeId.Fixed => Compat.FromHex(Text()),
             StructType s => s.Fields.Select(f => FromJson(f.Type, node[f.Id.ToString(CultureInfo.InvariantCulture)])).ToArray(),
             ListType l => node.AsArray().Select(v => FromJson(l.ElementType, v)).ToList(),
             MapType m => node["keys"]!.AsArray().Zip(node["values"]!.AsArray())
@@ -84,7 +84,7 @@ public static class SingleValueJson
     private static long ParseTimeOfDay(string text, int digits)
     {
         var (whole, fraction) = SplitFraction(text, digits);
-        var t = TimeOnly.ParseExact(whole, "HH:mm:ss", CultureInfo.InvariantCulture);
+        var t = TimeSpan.ParseExact(whole, @"hh\:mm\:ss", CultureInfo.InvariantCulture);
         return t.Ticks / TimeSpan.TicksPerSecond * Pow10(digits) + fraction;
     }
 
@@ -107,7 +107,7 @@ public static class SingleValueJson
         var dot = text.IndexOf('.');
         if (dot < 0) return (text, 0);
         var f = text[(dot + 1)..];
-        if (f.Length > digits || !f.All(char.IsAsciiDigit)) throw new FormatException($"Bad fractional seconds in '{text}'");
+        if (f.Length > digits || !f.All(c => c is >= '0' and <= '9')) throw new FormatException($"Bad fractional seconds in '{text}'");
         return (text[..dot], long.Parse(f.PadRight(digits, '0'), CultureInfo.InvariantCulture));
     }
 

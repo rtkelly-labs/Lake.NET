@@ -402,9 +402,9 @@ public static class ManifestCodec
     public static object? FromAvroValue(IcebergType type, object? value) => (type, value) switch
     {
         (_, null) => null,
-        ({ TypeId: TypeId.Uuid }, byte[] b) => new Guid(b, bigEndian: true),
+        ({ TypeId: TypeId.Uuid }, byte[] b) => Compat.GuidFromBigEndian(b),
         ({ TypeId: TypeId.Uuid }, string s) => Guid.Parse(s),
-        (DecimalType d, byte[] b) => new IcebergDecimal(new BigInteger(b, isUnsigned: false, isBigEndian: true), d.Scale),
+        (DecimalType d, byte[] b) => new IcebergDecimal(Compat.SignedBigEndian(b), d.Scale),
         ({ TypeId: TypeId.Long or TypeId.Timestamp or TypeId.TimestampTz or TypeId.Time }, int i) => (long)i, // int->long promotion
         ({ TypeId: TypeId.Double }, float f) => (double)f,
         _ => value,
@@ -414,7 +414,7 @@ public static class ManifestCodec
     {
         if (bigEndian.Length > size) throw new ArgumentException("Decimal value exceeds its precision");
         var result = new byte[size];
-        if (negative) Array.Fill(result, (byte)0xFF);
+        if (negative) result.AsSpan().Fill(0xFF);
         bigEndian.CopyTo(result, size - bigEndian.Length);
         return result;
     }

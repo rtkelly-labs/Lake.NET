@@ -30,13 +30,13 @@ public static class Conversions
             case (TypeId.Float, float f):
             {
                 var buf = new byte[4];
-                BinaryPrimitives.WriteSingleLittleEndian(buf, f);
+                Compat.WriteSingle(buf, f);
                 return buf;
             }
             case (TypeId.Double, double d):
             {
                 var buf = new byte[8];
-                BinaryPrimitives.WriteDoubleLittleEndian(buf, d);
+                Compat.WriteDouble(buf, d);
                 return buf;
             }
             case (TypeId.String, string s): return Encoding.UTF8.GetBytes(s);
@@ -54,12 +54,12 @@ public static class Conversions
         // A v3 date->timestamp promotion can leave 4-byte bounds on a long column.
         { TypeId: TypeId.Long or TypeId.Time or TypeId.Timestamp or TypeId.TimestampTz or TypeId.TimestampNs or TypeId.TimestampTzNs } =>
             bytes.Length == 4 ? (long)BinaryPrimitives.ReadInt32LittleEndian(bytes) : BinaryPrimitives.ReadInt64LittleEndian(bytes),
-        { TypeId: TypeId.Float } => BinaryPrimitives.ReadSingleLittleEndian(bytes),
-        { TypeId: TypeId.Double } => bytes.Length == 4 ? (double)BinaryPrimitives.ReadSingleLittleEndian(bytes) : BinaryPrimitives.ReadDoubleLittleEndian(bytes),
-        { TypeId: TypeId.String } => Encoding.UTF8.GetString(bytes),
-        { TypeId: TypeId.Uuid } => new Guid(bytes, bigEndian: true),
+        { TypeId: TypeId.Float } => Compat.ReadSingle(bytes),
+        { TypeId: TypeId.Double } => bytes.Length == 4 ? (double)Compat.ReadSingle(bytes) : Compat.ReadDouble(bytes),
+        { TypeId: TypeId.String } => Encoding.UTF8.GetString(bytes.ToArray()),
+        { TypeId: TypeId.Uuid } => Compat.GuidFromBigEndian(bytes),
         { TypeId: TypeId.Fixed or TypeId.Binary } => bytes.ToArray(),
-        DecimalType d => new IcebergDecimal(new BigInteger(bytes, isUnsigned: false, isBigEndian: true), d.Scale),
+        DecimalType d => new IcebergDecimal(Compat.SignedBigEndian(bytes), d.Scale),
         _ => throw new NotSupportedException($"Cannot deserialise bound for {type}"),
     };
 }

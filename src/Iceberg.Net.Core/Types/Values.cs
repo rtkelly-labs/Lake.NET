@@ -58,6 +58,15 @@ public readonly record struct IcebergDecimal(BigInteger Unscaled, int Scale) : I
 public static class IcebergTime
 {
     public static readonly DateTime Epoch = new(1970, 1, 1, 0, 0, 0, DateTimeKind.Utc);
+
+    /// <summary>Days from epoch of a <c>yyyy-MM-dd</c> date (the spec's text form).</summary>
+    public static int DaysFromIsoDate(string text) =>
+        DaysFromDate(DateTime.ParseExact(text, "yyyy-MM-dd", System.Globalization.CultureInfo.InvariantCulture, System.Globalization.DateTimeStyles.None));
+
+    /// <summary>Days from epoch of a date-time's calendar date (its time of day is ignored).</summary>
+    public static int DaysFromDate(DateTime date) => (int)((date.Date.Ticks - Epoch.Ticks) / TimeSpan.TicksPerDay);
+
+#if NET6_0_OR_GREATER
     public static readonly DateOnly EpochDate = new(1970, 1, 1);
 
     public static int DaysFromDate(DateOnly date) => date.DayNumber - EpochDate.DayNumber;
@@ -65,6 +74,7 @@ public static class IcebergTime
 
     public static long MicrosFromTime(TimeOnly time) => time.Ticks / 10;
     public static TimeOnly TimeFromMicros(long micros) => new(micros * 10);
+#endif
 
     public static long MicrosFromTimestamp(DateTime ts) => (ToUtc(ts).Ticks - Epoch.Ticks) / 10;
     public static long MicrosFromTimestamp(DateTimeOffset ts) => (ts.UtcTicks - Epoch.Ticks) / 10;

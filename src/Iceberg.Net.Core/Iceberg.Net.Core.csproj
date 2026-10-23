@@ -1,6 +1,19 @@
 <Project Sdk="Microsoft.NET.Sdk">
   <PropertyGroup>
+    <!-- netstandard2.0 too, so .NET Framework 4.6.2+ services can read metadata and manifests -->
+    <TargetFramework></TargetFramework>
+    <TargetFrameworks>net8.0;netstandard2.0</TargetFrameworks>
     <RootNamespace>Iceberg.Net</RootNamespace>
     <Description>Apache Iceberg table spec model: types, schemas, transforms, partitioning, snapshots, table metadata and its JSON serialisation.</Description>
   </PropertyGroup>
+  <ItemGroup Condition="'$(TargetFramework)' == 'netstandard2.0'">
+    <PackageReference Include="PolySharp" PrivateAssets="all" />
+    <PackageReference Include="System.Memory" />
+    <PackageReference Include="System.Text.Json" />
+    <PackageReference Include="Microsoft.Bcl.HashCode" />
+  </ItemGroup>
+  <ItemGroup>
+    <!-- Compat/polyfills are internal; Avro shares them -->
+    <InternalsVisibleTo Include="Iceberg.Net.Avro" />
+  </ItemGroup>
 </Project>

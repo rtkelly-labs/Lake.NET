@@ -8,6 +8,7 @@ cd "$(dirname "$0")"
 mode="${1:-emulation}"
 
 dotnet test tests/Iceberg.Net.Spec.Tests --nologo
+dotnet test tests/Iceberg.Net.NetStandard.Tests --nologo   # the netstandard2.0 builds of Core and Avro
 [[ "$mode" == "spec" ]] && exit 0
 dotnet test tests/Iceberg.Net.Behaviour.Tests --nologo
 

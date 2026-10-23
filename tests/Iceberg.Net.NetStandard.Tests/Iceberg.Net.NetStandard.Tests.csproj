@@ -1,0 +1,31 @@
+<Project Sdk="Microsoft.NET.Sdk">
+  <!--
+    The netstandard2.0 builds of Core and Avro, run on .NET 8: the spec tests that need only those two packages,
+    compiled again against the netstandard2.0 assemblies, so the polyfilled code paths (Compat.cs, Polyfills.cs) are
+    tested, not just compiled. .NET Framework itself cannot run on the Linux CI runners.
+  -->
+  <PropertyGroup>
+    <IsPackable>false</IsPackable>
+    <IsTestProject>true</IsTestProject>
+    <RootNamespace>Iceberg.Net.Spec.Tests</RootNamespace>
+  </PropertyGroup>
+  <ItemGroup>
+    <PackageReference Include="Microsoft.NET.Test.Sdk" />
+    <PackageReference Include="xunit" />
+    <PackageReference Include="xunit.runner.visualstudio" PrivateAssets="all" />
+  </ItemGroup>
+  <ItemGroup>
+    <ProjectReference Include="../../src/Iceberg.Net.Core/Iceberg.Net.Core.csproj" SetTargetFramework="TargetFramework=netstandard2.0" />
+    <ProjectReference Include="../../src/Iceberg.Net.Avro/Iceberg.Net.Avro.csproj" SetTargetFramework="TargetFramework=netstandard2.0" />
+  </ItemGroup>
+  <ItemGroup>
+    <Using Include="Xunit" />
+    <Compile Include="../Iceberg.Net.Spec.Tests/AvroSpecTests.cs" Link="Linked/%(Filename)%(Extension)" />
+    <Compile Include="../Iceberg.Net.Spec.Tests/ExpressionTests.cs" Link="Linked/%(Filename)%(Extension)" />
+    <Compile Include="../Iceberg.Net.Spec.Tests/MetadataSpecTests.cs" Link="Linked/%(Filename)%(Extension)" />
+    <Compile Include="../Iceberg.Net.Spec.Tests/SingleValueJsonTests.cs" Link="Linked/%(Filename)%(Extension)" />
+    <Compile Include="../Iceberg.Net.Spec.Tests/StateManagementTests.cs" Link="Linked/%(Filename)%(Extension)" />
+    <Compile Include="../Iceberg.Net.Spec.Tests/TransformSpecTests.cs" Link="Linked/%(Filename)%(Extension)" />
+    <None Include="../Iceberg.Net.Spec.Tests/fixtures/metadata/**/*" Link="fixtures/metadata/%(RecursiveDir)%(Filename)%(Extension)" CopyToOutputDirectory="PreserveNewest" />
+  </ItemGroup>
+</Project>

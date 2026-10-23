@@ -267,11 +267,18 @@ public static class Literals
             (TypeId.Decimal, string s) => Rescale(IcebergDecimal.Parse(s), ((DecimalType)t).Scale, column),
             (TypeId.Decimal, int or long) => Rescale(new IcebergDecimal(System.Convert.ToInt64(value, CultureInfo.InvariantCulture), 0), ((DecimalType)t).Scale, column),
             (TypeId.Date, int days) => days,
+#if NET6_0_OR_GREATER
             (TypeId.Date, DateOnly date) => IcebergTime.DaysFromDate(date),
-            (TypeId.Date, DateTime dt) => IcebergTime.DaysFromDate(DateOnly.FromDateTime(dt)),
-            (TypeId.Date, string s) => IcebergTime.DaysFromDate(DateOnly.ParseExact(s, "yyyy-MM-dd", CultureInfo.InvariantCulture)),
-            (TypeId.Time, long us) => us,
             (TypeId.Time, TimeOnly time) => IcebergTime.MicrosFromTime(time),
+#else
+            // The netstandard2.0 build loaded by a .NET 6+ app still gets DateOnly/TimeOnly values.
+            (TypeId.Date, _) when value.GetType().FullName == "System.DateOnly" => (int)value.GetType().GetProperty("DayNumber")!.GetValue(value)! - 719_162,
+            (TypeId.Time, _) when value.GetType().FullName == "System.TimeOnly" => (long)value.GetType().GetProperty("Ticks")!.GetValue(value)! / 10,
+#endif
+            (TypeId.Date, DateTime dt) => IcebergTime.DaysFromDate(dt),
+            (TypeId.Date, string s) => IcebergTime.DaysFromIsoDate(s),
+            (TypeId.Time, long us) => us,
+            (TypeId.Time, TimeSpan time) => time.Ticks / 10,
             (TypeId.Timestamp or TypeId.TimestampTz, long us) => us,
             (TypeId.Timestamp or TypeId.TimestampTz, DateTime dt) => IcebergTime.MicrosFromTimestamp(dt),
             (TypeId.Timestamp or TypeId.TimestampTz, DateTimeOffset dto) => IcebergTime.MicrosFromTimestamp(dto),
