@@ -22,6 +22,8 @@ public sealed class TestEnvironment
     public string? S3Endpoint { get; }
     public string? GlueEndpoint { get; }
     public Uri? RestUri { get; }
+    /// <summary>AWS mode: Glue Iceberg REST endpoint warehouse (account ID) for the "rest" catalog kind.</summary>
+    public string? GlueRestWarehouse { get; }
     public string Warehouse { get; }
     public string? AthenaWorkGroup { get; }
     public string? AthenaOutput { get; }
@@ -73,7 +75,9 @@ public sealed class TestEnvironment
             AthenaOutput = Env("ICEBERG_ATHENA_OUTPUT");
             SkipReason = Warehouse.StartsWith("s3://", StringComparison.Ordinal) ? null : "ICEBERG_WAREHOUSE=s3://bucket/prefix is required for AWS runs";
             // The Glue/S3 Tables REST endpoints need SigV4 request signing, which RestCatalogOptions.Handler can supply but the suite does not yet.
-            RestSkipReason = SkipReason ?? (RestUri is null ? "Set ICEBERG_REST_URI to run REST tests against AWS (SigV4 signing not wired yet)" : null);
+            // REST against AWS: the Glue Iceberg REST endpoint (SigV4) for an account, or any REST URI.
+            GlueRestWarehouse = Env("ICEBERG_GLUE_REST_WAREHOUSE");
+            RestSkipReason = SkipReason ?? (RestUri is null && GlueRestWarehouse is null ? "Set ICEBERG_GLUE_REST_WAREHOUSE (account id) or ICEBERG_REST_URI for REST tests against AWS" : null);
             PolarisSkipReason = "Polaris runs in emulation only";
             AthenaSkipReason = SkipReason ?? (AthenaWorkGroup is null ? "Set ICEBERG_ATHENA_WORKGROUP (and optionally ICEBERG_ATHENA_OUTPUT)" : null);
         }
@@ -117,6 +121,7 @@ public sealed class TestEnvironment
     public async Task<ICatalog> CatalogAsync(string kind) => kind switch
     {
         "glue" => GlueCatalog.Create(new S3FileIO(S3Options), new GlueCatalogOptions { Endpoint = GlueEndpoint, Region = Region, Warehouse = Warehouse.TrimEnd('/') + "/glue" }),
+        "rest" when GlueRestWarehouse is not null && RestUri is null => await RestCatalog.ConnectAsync(RestCatalogOptions.ForGlue(Region, GlueRestWarehouse)),
         "rest" => await RestCatalog.ConnectAsync(new RestCatalogOptions { Uri = RestUri!, Properties = S3Properties },
             props => new S3FileIO(S3FileIOOptions.FromProperties(props))),
         // Bootstrapped by emulation/polaris_setup.py. No credential vending (no STS): clients bring S3 credentials.

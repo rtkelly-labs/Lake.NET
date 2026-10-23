@@ -26,7 +26,7 @@ and where this port stands. Release facts are sourced in [research/ecosystem-202
 | 1.8.0 | Deletion vectors; row-lineage metadata fields | v3 write path needs Puffin + Roaring | 🟡 lineage ✅, DVs ⬜ |
 | 1.9.0 | Row lineage on for all v3 tables; `current-snapshot-id` written as `null` for v3 | Readers must accept null **and** -1 | ✅ |
 | 1.10.0 | Stop retrying REST commits on 502/504; 503 on commit = **unknown** | Retrying an unknown commit can apply it twice or delete live files | ✅ 500/502/503/504 → `CommitStateUnknownException`, never retried |
-| 1.10.0 | `cleanExpiredMetadata` in ExpireSnapshots; dangling-DV cleanup on rewrite | Expiry must also prune unused specs/schemas and orphaned deletes | ⬜ (expiry is metadata-only today) |
+| 1.10.0 | `cleanExpiredMetadata` in ExpireSnapshots; dangling-DV cleanup on rewrite | Expiry must also prune unused specs/schemas and orphaned deletes | 🟡 expiry deletes unreachable files; unused specs/schemas are kept |
 | 1.11.0 | `Idempotency-Key` on mutating REST calls | Makes retry-after-timeout safe on servers that support it | 🟡 header sent; no retry yet |
 | 1.11.0 | Sequence-number conflicts retryable under concurrent commits (#15126) | A stale sequence number is a conflict, not a fatal error | ✅ (builder rejects; producer retries on refresh) |
 | 1.11.0 | Duplicate DVs for one data file merged before commit (#15006) | v3 MoR writers must merge, not add | ⬜ (no DVs yet) |
@@ -61,10 +61,10 @@ outcome, look for it in the table's snapshots before retrying. That pattern need
 
 | Operation | Java/Spark reference | Here |
 |---|---|---|
-| Expire snapshots (`older_than`, `retain_last`, keep refs) | `expire_snapshots`, defaults 5 days / 1 | ✅ metadata-only; file deletion needs reachability diff (⬜) |
-| Remove orphan files | `remove_orphan_files` (needs listing + age threshold) | ⬜ |
-| Rewrite data files (bin-pack/sort) | `rewrite_data_files`, `use-starting-sequence-number=true` | ⬜ |
-| Rewrite manifests | `rewrite_manifests` | ⬜ (fast-append creates one manifest per commit, so this matters early) |
+| Expire snapshots (`older_than`, `retain_last`, keep refs) | `expire_snapshots`, defaults 5 days / 1 | ✅ `Maintenance.ExpireAsync`: deletes files only expired snapshots referenced, after the commit succeeds |
+| Remove orphan files | `remove_orphan_files` (needs listing + age threshold) | ✅ `Maintenance.DeleteOrphanFilesAsync` (default 3 days, dry run) |
+| Rewrite data files (bin-pack/sort) | `rewrite_data_files`, `use-starting-sequence-number=true` | ✅ bin-pack `Compaction.RewriteDataFilesAsync`; instead of starting sequence numbers it re-plans on any concurrent commit; sort ⬜ |
+| Rewrite manifests | `rewrite_manifests` | 🟡 merge-append on commit (Java defaults) keeps counts bounded; standalone rewrite ⬜ |
 | Rollback / cherry-pick / fast-forward | procedures of the same names | 🟡 possible via raw `set-snapshot-ref` updates |
 
 Note:Athena's `OPTIMIZE` and `VACUUM` already cover compaction and expiry for Glue tables, so

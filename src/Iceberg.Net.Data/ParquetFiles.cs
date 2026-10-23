@@ -36,11 +36,32 @@ public static class ParquetFiles
             TypeId.String => new PrimitiveNode(f.Name, rep, LogicalType.String(), PhysicalType.ByteArray, fieldId: f.Id),
             TypeId.Binary => new PrimitiveNode(f.Name, rep, LogicalType.None(), PhysicalType.ByteArray, fieldId: f.Id),
             TypeId.Uuid => new PrimitiveNode(f.Name, rep, LogicalType.Uuid(), PhysicalType.FixedLenByteArray, 16, f.Id),
-            // Iceberg: decimals with precision ≤ 9 as INT32, ≤ 18 as INT64 (fixed for larger precisions; not written yet).
+            // Iceberg (Appendix A): decimals with precision ≤ 9 as INT32, ≤ 18 as INT64, larger as the smallest fixed.
             TypeId.Decimal when f.Type is DecimalType { Precision: <= 9 } d => new PrimitiveNode(f.Name, rep, LogicalType.Decimal(d.Precision, d.Scale), PhysicalType.Int32, fieldId: f.Id),
             TypeId.Decimal when f.Type is DecimalType { Precision: <= 18 } d => new PrimitiveNode(f.Name, rep, LogicalType.Decimal(d.Precision, d.Scale), PhysicalType.Int64, fieldId: f.Id),
+            TypeId.Decimal when f.Type is DecimalType d => new PrimitiveNode(f.Name, rep, LogicalType.Decimal(d.Precision, d.Scale), PhysicalType.FixedLenByteArray, DecimalBytes(d.Precision), f.Id),
+            TypeId.Fixed when f.Type is FixedType x => new PrimitiveNode(f.Name, rep, LogicalType.None(), PhysicalType.FixedLenByteArray, x.Length, f.Id),
             _ => throw new NotSupportedException($"Column {f.Name}: {f.Type} is not supported by the phase-0 Parquet writer"),
         };
+    }
+
+    /// <summary>Smallest byte width whose two's-complement range holds every unscaled value of the precision.</summary>
+    public static int DecimalBytes(int precision)
+    {
+        var max = System.Numerics.BigInteger.Pow(10, precision) - 1;
+        var bytes = 1;
+        while (System.Numerics.BigInteger.Pow(2, 8 * bytes - 1) <= max) bytes++;
+        return bytes;
+    }
+
+    private static byte[] FixedDecimal(System.Numerics.BigInteger unscaled, int width)
+    {
+        var raw = unscaled.ToByteArray(isUnsigned: false, isBigEndian: true);
+        if (raw.Length > width) throw new ArgumentException($"Decimal {unscaled} does not fit in {width} bytes");
+        var result = new byte[width];
+        if (unscaled.Sign < 0) Array.Fill(result, (byte)0xFF); // sign extension
+        raw.CopyTo(result, width - raw.Length);
+        return result;
     }
 
     /// <summary>Write rows to a Parquet file at <paramref name="location"/> and return the Iceberg <see cref="DataFile"/> with metrics.</summary>
@@ -129,11 +150,69 @@ public static class ParquetFiles
                 var unscaled = values.Select(v => v is IcebergDecimal d
                     ? d.Scale == scale ? (object)d.Unscaled : throw new ArgumentException($"Column {f.Name}: value scale {d.Scale} != {scale}")
                     : null).ToArray();
-                if (((DecimalType)f.Type).Precision <= 9) Write<int>(col, f, unscaled.Select(u => u is null ? null : (object)(int)(System.Numerics.BigInteger)u).ToArray());
-                else Write<long>(col, f, unscaled.Select(u => u is null ? null : (object)(long)(System.Numerics.BigInteger)u).ToArray());
+                var precision = ((DecimalType)f.Type).Precision;
+                if (precision <= 9) Write<int>(col, f, unscaled.Select(u => u is null ? null : (object)(int)(System.Numerics.BigInteger)u).ToArray());
+                else if (precision <= 18) Write<long>(col, f, unscaled.Select(u => u is null ? null : (object)(long)(System.Numerics.BigInteger)u).ToArray());
+                else WriteBytes(col, f, unscaled.Select(u => u is null ? null : FixedDecimal((System.Numerics.BigInteger)u, DecimalBytes(precision))).ToArray());
+                break;
+            case TypeId.Fixed:
+                var length = ((FixedType)f.Type).Length;
+                WriteBytes(col, f, values.Select(v => v is null ? null : v is byte[] b && b.Length == length ? b : throw new ArgumentException($"Column {f.Name}: fixed[{length}] needs {length}-byte values")).ToArray());
                 break;
             default: throw new NotSupportedException(f.Type.ToString());
         }
+    }
+
+    /// <summary>
+    /// FIXED_LEN_BYTE_ARRAY through the physical writer (ParquetSharp's logical writers do not take raw bytes for it):
+    /// values are packed into one pinned buffer and passed as pointers.
+    /// </summary>
+    private static void WriteBytes(ColumnWriter col, NestedField f, byte[]?[] values)
+    {
+        if (f.Required && values.Any(v => v is null)) throw new ArgumentException($"Required column {f.Name} contains nulls");
+        var writer = (ColumnWriter<FixedLenByteArray>)col;
+        var present = values.Where(v => v is not null).ToList();
+        var width = present.Count == 0 ? 0 : present[0]!.Length;
+        var buffer = new byte[Math.Max(1, present.Count * width)];
+        for (var i = 0; i < present.Count; i++) present[i]!.CopyTo(buffer, i * width);
+        var handle = System.Runtime.InteropServices.GCHandle.Alloc(buffer, System.Runtime.InteropServices.GCHandleType.Pinned);
+        try
+        {
+            var start = handle.AddrOfPinnedObject();
+            var pointers = Enumerable.Range(0, present.Count).Select(i => new FixedLenByteArray(start + i * width)).ToArray();
+            if (f.Required) writer.WriteBatch(pointers);
+            else writer.WriteBatch(values.Length, values.Select(v => (short)(v is null ? 0 : 1)).ToArray(), ReadOnlySpan<short>.Empty, pointers);
+        }
+        finally
+        {
+            handle.Free();
+        }
+    }
+
+    /// <summary>Raw FIXED_LEN_BYTE_ARRAY values (null where undefined), copied out of the reader's buffers.</summary>
+    private static byte[]?[] ReadFixed(ColumnReader col, int n)
+    {
+        var reader = (ColumnReader<FixedLenByteArray>)col;
+        var width = col.ColumnDescriptor.TypeLength;
+        var optional = col.ColumnDescriptor.MaxDefinitionLevel > 0;
+        var result = new byte[]?[n];
+        var defs = new short[Math.Max(1, n)];
+        var values = new FixedLenByteArray[Math.Max(1, n)];
+        var row = 0;
+        while (row < n)
+        {
+            var levels = reader.ReadBatch(n - row, defs, Span<short>.Empty, values, out var valuesRead);
+            if (levels == 0) break;
+            var v = 0;
+            for (var i = 0; i < levels; i++, row++)
+            {
+                if (optional && defs[i] == 0) continue;
+                var bytes = new byte[width];
+                System.Runtime.InteropServices.Marshal.Copy(values[v++].Pointer, bytes, 0, width);
+                result[row] = bytes;
+            }
+        }
+        return result;
     }
 
     private static void Write<T>(ColumnWriter col, NestedField f, object?[] values) where T : struct
@@ -228,7 +307,12 @@ public static class ParquetFiles
             col.LogicalReaderOverride<int?>().ReadAll(n).Select(v => v is null ? null : (object?)new IcebergDecimal(v.Value, ((DecimalType)type).Scale)).ToArray(),
         TypeId.Decimal when col.ColumnDescriptor.PhysicalType == PhysicalType.Int64 =>
             col.LogicalReaderOverride<long?>().ReadAll(n).Select(v => v is null ? null : (object?)new IcebergDecimal(v.Value, ((DecimalType)type).Scale)).ToArray(),
-        TypeId.Decimal => ReadStruct<decimal>(col, n).Select(v => v is decimal d ? (object?)IcebergDecimal.FromDecimal(d, ((DecimalType)type).Scale) : null).ToArray(),
+        // FIXED (or BINARY) decimals, any precision: big-endian two's-complement unscaled value.
+        TypeId.Decimal when col.ColumnDescriptor.PhysicalType == PhysicalType.FixedLenByteArray => ReadFixed(col, n)
+            .Select(v => v is null ? null : (object?)new IcebergDecimal(new System.Numerics.BigInteger(v, isUnsigned: false, isBigEndian: true), ((DecimalType)type).Scale)).ToArray(),
+        TypeId.Decimal => col.LogicalReaderOverride<byte[]?>().ReadAll(n) // BINARY-backed decimals
+            .Select(v => v is null ? null : (object?)new IcebergDecimal(new System.Numerics.BigInteger(v, isUnsigned: false, isBigEndian: true), ((DecimalType)type).Scale)).ToArray(),
+        TypeId.Fixed => ReadFixed(col, n).Select(v => (object?)v).ToArray(),
         _ => throw new NotSupportedException($"Reading {type} is not supported yet"),
     };
 
@@ -268,7 +352,7 @@ internal sealed record Metrics(
             }
             // Bounds are optional. Omit them where CLR ordering is not Iceberg's (uuid is compared as unsigned
             // big-endian bytes; Guid.CompareTo is not) and for binary, rather than risk wrong pruning.
-            if (present.Count == 0 || f.Type.TypeId is TypeId.Binary or TypeId.Uuid) continue;
+            if (present.Count == 0 || f.Type.TypeId is TypeId.Binary or TypeId.Uuid or TypeId.Fixed) continue;
             if (f.Type.TypeId == TypeId.String && present.Any(v => ((string)v).EnumerateRunes().Count() > StringBoundLimit)) continue;
             var comparer = Comparer<object>.Create((a, b) => a is string sa ? string.CompareOrdinal(sa, (string)b) : ((IComparable)a).CompareTo(b));
             m.Lower[f.Id] = Conversions.ToBytes(f.Type, present.Min(comparer)!);

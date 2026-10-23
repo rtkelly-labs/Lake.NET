@@ -31,7 +31,8 @@ public sealed class SparkFixtureTests : IDisposable
         if (Directory.Exists(_copy)) Directory.Delete(_copy, true);
     }
 
-    public static TheoryData<string> Tables() => new() { "mor_v2", "mor_v3" };
+    public static TheoryData<string> Tables() => new() { "mor_v2", "mor_v3", "cow_v1", "evolved_v2" };
+    public static TheoryData<string> Writable() => new() { "mor_v2", "mor_v3" };
 
     private async Task<Table> Load(string name)
     {
@@ -53,12 +54,54 @@ public sealed class SparkFixtureTests : IDisposable
         var expected = Expected[name]!;
         Assert.Equal(expected["format_version"]!.GetValue<int>(), table.Metadata.FormatVersion);
 
-        var rows = await TableScan.ReadAllAsync(table);
-        var want = expected["rows"]!.AsArray().ToDictionary(r => r!["id"]!.GetValue<long>(), r => r!["name"]?.GetValue<string>());
-        Assert.Equal(want.OrderBy(kv => kv.Key), ByKey(rows).OrderBy(kv => kv.Key));
+        // Every column, by name, in the current schema (renamed, widened, dropped and re-added columns included).
+        static string Canon(JsonNode? v) => v is null ? "null" : v.GetValueKind() == System.Text.Json.JsonValueKind.Number ? v.GetValue<double>().ToString("R", System.Globalization.CultureInfo.InvariantCulture) : v.ToString();
+        static string Ours(object? v) => v switch
+        {
+            null => "null",
+            long or int or double or float => Convert.ToDouble(v, System.Globalization.CultureInfo.InvariantCulture).ToString("R", System.Globalization.CultureInfo.InvariantCulture),
+            _ => v.ToString()!,
+        };
+        var names = table.Schema.Columns.Select(c => c.Name).ToList();
+        var ours = (await TableScan.ReadAllAsync(table))
+            .Select(r => string.Join("|", names.Select((n, i) => Ours(r[i])))).Order().ToList();
+        var spark = expected["rows"]!.AsArray()
+            .Select(r => string.Join("|", names.Select(n => Canon(r![n])))).Order().ToList();
+        Assert.Equal(spark, ours);
     }
 
-    [Spec("Manifests")]
+    [Theory]
+    [InlineData(DeleteStrategy.CopyOnWrite)]
+    [InlineData(DeleteStrategy.PositionDeletes)]
+    [InlineData(DeleteStrategy.EqualityDeletes)]
+    public async Task Our_writes_on_an_evolved_spark_table_cover_rows_of_every_schema_and_spec(DeleteStrategy strategy)
+    {
+        var table = await Load("evolved_v2");
+        Assert.Equal(["id", "qty", "region", "score", "label"], table.Schema.Columns.Select(c => c.Name));
+        // id 3: first schema, first spec; id 12: renamed/widened schema; id 17: last schema, bucketed spec.
+        await TableMutations.UpsertAsync(table, [[3L, 30L, "us", 0.5, "ours"], [12L, 5_000_000_000L, "eu", null, "ours"], [17L, 1L, "us", 9.0, "ours"]], ["id", "region"], strategy);
+        var rows = (await TableScan.ReadAllAsync(await _catalog.LoadTableAsync(table.Identifier))).ToDictionary(r => (long)r[0]!);
+        Assert.Equal(20, rows.Count);
+        Assert.All(new[] { 3L, 12L, 17L }, id => Assert.Equal("ours", rows[id][4]));
+        Assert.Equal(5_000_000_000L, rows[12][1]);
+        Assert.Null(rows[4][4]);
+        var report = await TableValidator.ValidateAsync(await _catalog.LoadTableAsync(table.Identifier), new ValidationOptions { AllSnapshots = true, Deep = true });
+        Assert.True(report.IsValid, report.ToString());
+    }
+
+    [Fact]
+    public async Task Evolved_table_prunes_across_both_partition_specs()
+    {
+        var table = await Load("evolved_v2");
+        Assert.Equal(2, table.Metadata.PartitionSpecs.Count);
+        var plan = await TableScan.PlanAsync(table, Expressions.Expr.Equal("id", 17L));
+        Assert.Single(await TableScan.ReadAsync(table, Expressions.Expr.Equal("id", 17L)));
+        Assert.True(plan.ManifestsSkipped + plan.FilesSkippedByPartition + plan.FilesSkippedByMetrics > 0);
+        // Old 'label' values (the dropped column) must not surface under the re-added one.
+        Assert.All((await TableScan.ReadAllAsync(table)).Where(r => (long)r[0]! < 15), r => Assert.Null(r[names(table).IndexOf("label")]));
+        static List<string> names(Table t) => t.Schema.Columns.Select(c => c.Name).ToList();
+    }
+
     [Theory]
     [MemberData(nameof(Tables))]
     public async Task Spark_tables_pass_deep_validation(string name)

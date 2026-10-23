@@ -26,6 +26,28 @@ public sealed record RestCatalogOptions
     public IReadOnlyDictionary<string, string> Properties { get; init; } = new Dictionary<string, string>();
     /// <summary>Hook for request signing (e.g. a SigV4 handler for the Glue/S3 Tables REST endpoints).</summary>
     public HttpMessageHandler? Handler { get; init; }
+
+    /// <summary>
+    /// The AWS Glue Iceberg REST endpoint for <paramref name="warehouse"/> (an account ID, or
+    /// <c>{account}:s3tablescatalog/{bucket}</c> for S3 Tables through Glue), signed with SigV4 (<c>glue</c>) using
+    /// <paramref name="credentials"/> or the SDK's default credential chain.
+    /// </summary>
+    public static RestCatalogOptions ForGlue(string region, string warehouse, Amazon.Runtime.AWSCredentials? credentials = null) => new()
+    {
+        Uri = new Uri($"https://glue.{region}.amazonaws.com/iceberg"),
+        Warehouse = warehouse,
+        Handler = new SigV4Handler(credentials ?? Amazon.Runtime.Credentials.DefaultAWSCredentialsIdentityResolver.GetCredentials(), region, "glue"),
+        Properties = new Dictionary<string, string> { ["client.region"] = region },
+    };
+
+    /// <summary>The S3 Tables Iceberg REST endpoint for a table bucket ARN, signed with SigV4 (<c>s3tables</c>).</summary>
+    public static RestCatalogOptions ForS3Tables(string region, string tableBucketArn, Amazon.Runtime.AWSCredentials? credentials = null) => new()
+    {
+        Uri = new Uri($"https://s3tables.{region}.amazonaws.com/iceberg"),
+        Warehouse = tableBucketArn,
+        Handler = new SigV4Handler(credentials ?? Amazon.Runtime.Credentials.DefaultAWSCredentialsIdentityResolver.GetCredentials(), region, "s3tables"),
+        Properties = new Dictionary<string, string> { ["client.region"] = region },
+    };
 }
 
 /// <summary>

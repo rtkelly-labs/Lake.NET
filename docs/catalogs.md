@@ -36,9 +36,10 @@ Both are REST catalogs (`https://glue.<region>.amazonaws.com/iceberg`, `https://
 authenticated by **SigV4**, not OAuth2. AWS recommends the S3 Tables endpoint for single table buckets and the
 Glue endpoint for Lake Formation governance. Challenges:
 
-- **SigV4 request signing** for an `HttpClient`: AWSSDK.Core's signer is internal-ish API; the robust option is
-  a small `DelegatingHandler` implementing SigV4 (canonical request, payload hash) — plug into
-  `RestCatalogOptions.Handler`. Signing name `glue` vs `s3tables`.
+- **SigV4 request signing**: ✅ `SigV4Handler` (a `DelegatingHandler`; canonical request with double-encoded path
+  segments, payload hash, session token; an OAuth `Authorization` moves to `Original-Authorization` as in Java).
+  `RestCatalogOptions.ForGlue(region, accountId)` / `ForS3Tables(region, tableBucketArn)` wire it up. Verified against
+  AWS's published vectors and botocore; not yet against the live endpoints (AWS mode: `ICEBERG_GLUE_REST_WAREHOUSE`).
 - **Warehouse/prefix mapping**: `warehouse` is an account/catalog ARN-ish identifier; the server returns `prefix`
   in `/v1/config`, which must be honoured on every path (`RestCatalog` does).
 - **S3 Tables managed maintenance** (compaction, snapshot expiry) runs server-side — writers must expect
@@ -81,9 +82,10 @@ Glue endpoint for Lake Formation governance. Challenges:
 ### JDBC / SQL catalog
 
 - A single table `iceberg_tables(catalog_name, table_namespace, table_name, metadata_location, previous_metadata_location)`;
-  CAS is `UPDATE … WHERE metadata_location = :expected` and checking the row count. Trivial to implement on
-  `MetastoreCatalog` with any ADO.NET provider (Postgres, SQL Server, SQLite) — useful as a **local, durable**
-  catalog that PyIceberg's `SqlCatalog` can share. Good M1 candidate.
+  CAS is `UPDATE … WHERE metadata_location = :expected` and checking the row count. ✅ `JdbcCatalog` over any
+  ADO.NET provider, in the "V0" layout Java and PyIceberg default to (no `iceberg_type` column), plus
+  `iceberg_namespace_properties` with the `exists` marker row. Runs the full conformance suite and soak over SQLite,
+  and PyIceberg's `SqlCatalog` reads and writes the same database (`CrossEngineTests`).
 
 ### DynamoDB, Hadoop/file-system
 

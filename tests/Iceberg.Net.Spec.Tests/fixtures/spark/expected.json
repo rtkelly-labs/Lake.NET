@@ -1,4 +1,280 @@
 {
+  "cow_v1": {
+    "delete_files": [],
+    "engine": "spark 4.0.1",
+    "format_version": 1,
+    "ids": [
+      1,
+      2,
+      4,
+      5,
+      7,
+      8,
+      10,
+      11,
+      13,
+      14,
+      16,
+      17,
+      19,
+      100,
+      101
+    ],
+    "metadata_location": "file:///tmp/sentric-spark-fixture-root/warehouse/ref/cow_v1/metadata/v5.metadata.json",
+    "operation": "overwrite",
+    "row_count": 15,
+    "rows": [
+      {
+        "id": 1,
+        "name": "n1",
+        "region": "us"
+      },
+      {
+        "id": 2,
+        "name": "n2",
+        "region": "eu"
+      },
+      {
+        "id": 4,
+        "name": "n4",
+        "region": "eu"
+      },
+      {
+        "id": 5,
+        "name": "n5",
+        "region": "us"
+      },
+      {
+        "id": 7,
+        "name": "n7",
+        "region": "us"
+      },
+      {
+        "id": 8,
+        "name": "n8",
+        "region": "eu"
+      },
+      {
+        "id": 10,
+        "name": "n10",
+        "region": "eu"
+      },
+      {
+        "id": 11,
+        "name": "n11",
+        "region": "us"
+      },
+      {
+        "id": 13,
+        "name": "n13",
+        "region": "us"
+      },
+      {
+        "id": 14,
+        "name": "n14",
+        "region": "eu"
+      },
+      {
+        "id": 16,
+        "name": "n16",
+        "region": "eu"
+      },
+      {
+        "id": 17,
+        "name": "n17",
+        "region": "us"
+      },
+      {
+        "id": 19,
+        "name": "n19",
+        "region": "us"
+      },
+      {
+        "id": 100,
+        "name": "replaced",
+        "region": "apac"
+      },
+      {
+        "id": 101,
+        "name": "replaced",
+        "region": "apac"
+      }
+    ],
+    "snapshot_count": 4
+  },
+  "evolved_v2": {
+    "delete_files": [],
+    "engine": "spark 4.0.1",
+    "format_version": 2,
+    "ids": [
+      0,
+      1,
+      2,
+      3,
+      4,
+      5,
+      6,
+      7,
+      8,
+      9,
+      10,
+      11,
+      12,
+      13,
+      14,
+      15,
+      16,
+      17,
+      18,
+      19
+    ],
+    "metadata_location": "file:///tmp/sentric-spark-fixture-root/warehouse/ref/evolved_v2/metadata/v10.metadata.json",
+    "operation": "append",
+    "row_count": 20,
+    "rows": [
+      {
+        "id": 0,
+        "label": null,
+        "qty": 0,
+        "region": "eu",
+        "score": null
+      },
+      {
+        "id": 1,
+        "label": null,
+        "qty": 1,
+        "region": "us",
+        "score": null
+      },
+      {
+        "id": 2,
+        "label": null,
+        "qty": 2,
+        "region": "eu",
+        "score": null
+      },
+      {
+        "id": 3,
+        "label": null,
+        "qty": 3,
+        "region": "us",
+        "score": null
+      },
+      {
+        "id": 4,
+        "label": null,
+        "qty": 4,
+        "region": "eu",
+        "score": null
+      },
+      {
+        "id": 5,
+        "label": null,
+        "qty": 5,
+        "region": "us",
+        "score": null
+      },
+      {
+        "id": 6,
+        "label": null,
+        "qty": 6,
+        "region": "eu",
+        "score": null
+      },
+      {
+        "id": 7,
+        "label": null,
+        "qty": 7,
+        "region": "us",
+        "score": null
+      },
+      {
+        "id": 8,
+        "label": null,
+        "qty": 8,
+        "region": "eu",
+        "score": null
+      },
+      {
+        "id": 9,
+        "label": null,
+        "qty": 9,
+        "region": "us",
+        "score": null
+      },
+      {
+        "id": 10,
+        "label": null,
+        "qty": 10000000000,
+        "region": "eu",
+        "score": 5.0
+      },
+      {
+        "id": 11,
+        "label": null,
+        "qty": 11000000000,
+        "region": "eu",
+        "score": 5.5
+      },
+      {
+        "id": 12,
+        "label": null,
+        "qty": 12000000000,
+        "region": "eu",
+        "score": 6.0
+      },
+      {
+        "id": 13,
+        "label": null,
+        "qty": 13000000000,
+        "region": "eu",
+        "score": 6.5
+      },
+      {
+        "id": 14,
+        "label": null,
+        "qty": 14000000000,
+        "region": "eu",
+        "score": 7.0
+      },
+      {
+        "id": 15,
+        "label": "new15",
+        "qty": 15,
+        "region": "us",
+        "score": 1.5
+      },
+      {
+        "id": 16,
+        "label": "new16",
+        "qty": 16,
+        "region": "us",
+        "score": 1.5
+      },
+      {
+        "id": 17,
+        "label": "new17",
+        "qty": 17,
+        "region": "us",
+        "score": 1.5
+      },
+      {
+        "id": 18,
+        "label": "new18",
+        "qty": 18,
+        "region": "us",
+        "score": 1.5
+      },
+      {
+        "id": 19,
+        "label": "new19",
+        "qty": 19,
+        "region": "us",
+        "score": 1.5
+      }
+    ],
+    "snapshot_count": 3
+  },
   "mor_v2": {
     "delete_files": [
       "1:PARQUET",

@@ -269,28 +269,34 @@ public static class TableMutations
     {
         var key = matcher.Key ?? throw new InvalidOperationException("Equality deletes need a key");
         var schema = table.Schema;
-        var spec = table.Spec;
-        // An equality delete only applies within its partition (unless unpartitioned), so the partition of every
-        // existing row with a given key must be derivable from the key itself.
+        var m = table.Metadata;
+        // An equality delete applies only to data files of its own spec and partition (unless unpartitioned), so for
+        // every spec that still has data, the partition of each existing row with a given key must follow from the
+        // key itself; one delete file is written per (spec, partition).
+        var live = m.CurrentSnapshot is { } current
+            ? (await TableScan.ManifestsAsync(table, current, ct)).Where(mf => mf.Content == ManifestContent.Data).Select(mf => mf.PartitionSpecId).ToHashSet()
+            : [];
+        live.Add(m.DefaultSpecId);
+        var specs = live.Select(m.SpecById).ToList();
         var keyIds = key.Fields.Select(f => f.Id).ToHashSet();
-        if (spec.Fields.Any(f => !(f.Transform is Transforms.VoidTransform) && !keyIds.Contains(f.SourceId)))
-            throw new ValidationException("Equality deletes require every partition source column to be part of the key; use PositionDeletes or CopyOnWrite");
-        if (table.Metadata.Specs().Any(s => s.SpecId != spec.SpecId && !s.IsUnpartitioned))
-            throw new ValidationException("Equality deletes on a table with several partition specs are not supported yet (rows may live under older specs)");
+        foreach (var spec in specs)
+            if (spec.Fields.Any(f => f.Transform is not Transforms.VoidTransform && !keyIds.Contains(f.SourceId)))
+                throw new ValidationException($"Equality deletes require every partition source column to be part of the key (spec {spec.SpecId}); use PositionDeletes or CopyOnWrite");
 
         var positions = key.Fields.Select((f, i) => (f.Id, i)).ToDictionary(x => x.Id, x => x.i);
-        var dataDir = table.Metadata.Property("write.data.path", $"{table.Location}/data").TrimEnd('/');
-        var byPartition = matcher.Keys!.Tuples.GroupBy(t => spec.Partition(schema, id => t[positions[id]]), PartitionComparer.Instance);
+        var dataDir = m.Property("write.data.path", $"{table.Location}/data").TrimEnd('/');
         var files = new List<DataFile>();
-        foreach (var group in byPartition)
+        foreach (var spec in specs.Count > 1 && specs.Any(sp => sp.IsUnpartitioned) ? [specs.First(sp => sp.IsUnpartitioned)] : specs)
         {
-            var location = $"{dataDir}/{Guid.NewGuid():N}-eq-deletes.parquet";
-            files.Add(await EqualityDeleteFiles.WriteAsync(table.IO, location, spec.SpecId, group.Key, key.Fields, group, ct));
+            // An unpartitioned delete file applies to every partition of every spec, so one is enough.
+            foreach (var group in matcher.Keys!.Tuples.GroupBy(t => spec.Partition(schema, id => t[positions[id]]), PartitionComparer.Instance))
+            {
+                var location = $"{dataDir}/{Guid.NewGuid():N}-eq-deletes.parquet";
+                files.Add(await EqualityDeleteFiles.WriteAsync(table.IO, location, spec.SpecId, group.Key, key.Fields, group, ct));
+            }
         }
         producer.AddDeleteFiles(files);
     }
-
-    private static IEnumerable<Partitioning.PartitionSpec> Specs(this TableMetadata m) => m.PartitionSpecs;
 
     private sealed class ValueEquality : IEqualityComparer<object?>
     {

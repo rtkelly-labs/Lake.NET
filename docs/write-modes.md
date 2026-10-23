@@ -57,9 +57,12 @@ Inserted data files are written once and reused across attempts, because they do
 
 ## Known limits
 
-- Matching scans every live data file (no partition/metrics pruning yet, which needs expressions, roadmap M2). Group
-  replacement on identity-partition columns would be the first beneficiary.
-- v3 copy-on-write rewrites assign **new row IDs**: `_row_id` is not yet carried through rewrites, as Java ≥1.10 does.
+- Matching reads only files the keys can touch: upserts, deletes by key and group replacement derive a pruning
+  filter from the key set (membership, or the min–max range above 1,000 keys); `DeleteWhereAsync(Expression)` prunes
+  by the filter. The `Func<object?[], bool>` overload still scans every file.
+- Filters follow Java's null semantics: `x != v`, `not in`, `not starts with` are true for nulls. PyIceberg drops
+  nulls there (Arrow's three-valued logic), so results can differ on nullable columns.
+- v3 copy-on-write rewrites and compaction keep `_row_id` and `_last_updated_sequence_number`, as Java does.
 - Equality-delete scans load every applicable delete file's keys into memory.
 
 ## Executable specification

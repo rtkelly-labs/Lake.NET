@@ -145,6 +145,16 @@ def cmd_read_tables(locations: list[str]) -> dict[str, Any]:
     return result
 
 
+def describe_fixture(spark: SparkSession, name: str) -> dict[str, Any]:
+    info = describe_catalog_table(spark, f"fx.ref.{name}")
+    meta_dir = Path(FIXTURE_ROOT) / "warehouse" / "ref" / name / "metadata"
+    latest = max(
+        meta_dir.glob("v*.metadata.json"), key=lambda p: int(p.name[1:].split(".")[0])
+    )
+    info["metadata_location"] = f"file://{latest}"
+    return info
+
+
 def cmd_fixtures(out_dir: Path) -> dict[str, Any]:
     # FIXTURE_ROOT is a bind mount: empty it rather than removing it.
     root = Path(FIXTURE_ROOT)
@@ -171,16 +181,50 @@ def cmd_fixtures(out_dir: Path) -> dict[str, Any]:
         spark.sql(
             f"DELETE FROM {table} WHERE id IN (2, 3)"
         )  # second delete on the same files: DVs must merge
-        info = describe_catalog_table(spark, table)
-        meta_dir = (
-            Path(FIXTURE_ROOT) / "warehouse" / "ref" / f"mor_v{version}" / "metadata"
-        )
-        latest = max(
-            meta_dir.glob("v*.metadata.json"),
-            key=lambda p: int(p.name[1:].split(".")[0]),
-        )
-        info["metadata_location"] = f"file://{latest}"
-        result[f"mor_v{version}"] = info
+        result[f"mor_v{version}"] = describe_fixture(spark, f"mor_v{version}")
+
+    # Format v1: appends, a dynamic partition overwrite and a copy-on-write delete (v1 has no delete files).
+    spark.sql(
+        "CREATE TABLE fx.ref.cow_v1 (id bigint NOT NULL, name string, region string) USING iceberg "
+        "PARTITIONED BY (region) TBLPROPERTIES ('format-version'='1')"
+    )
+    spark.sql(
+        "INSERT INTO fx.ref.cow_v1 SELECT id, concat('n', id), IF(id % 2 = 0, 'eu', 'us') FROM range(0, 20)"
+    )
+    spark.sql(
+        "INSERT INTO fx.ref.cow_v1 SELECT id, concat('n', id), 'apac' FROM range(20, 25)"
+    )
+    spark.conf.set("spark.sql.sources.partitionOverwriteMode", "dynamic")
+    spark.sql(
+        "INSERT OVERWRITE fx.ref.cow_v1 SELECT id, 'replaced', 'apac' FROM range(100, 103)"
+    )
+    spark.sql("DELETE FROM fx.ref.cow_v1 WHERE id % 3 = 0")
+    result["cow_v1"] = describe_fixture(spark, "cow_v1")
+
+    # Schema and partition evolution: rows written under every schema and both specs.
+    t = "fx.ref.evolved_v2"
+    spark.sql(
+        f"CREATE TABLE {t} (id bigint NOT NULL, qty int, note string, region string) USING iceberg "
+        "PARTITIONED BY (region) TBLPROPERTIES ('format-version'='2')"
+    )
+    spark.sql(
+        f"INSERT INTO {t} SELECT id, CAST(id AS int), concat('old', id), IF(id % 2 = 0, 'eu', 'us') FROM range(0, 10)"
+    )
+    spark.sql(f"ALTER TABLE {t} ADD COLUMN score double")
+    spark.sql(f"ALTER TABLE {t} RENAME COLUMN note TO label")
+    spark.sql(f"ALTER TABLE {t} ALTER COLUMN qty TYPE bigint")
+    spark.sql(
+        f"INSERT INTO {t} SELECT id, id * 1000000000, concat('mid', id), 'eu', id / 2.0 FROM range(10, 15)"
+    )
+    spark.sql(f"ALTER TABLE {t} DROP COLUMN label")
+    spark.sql(
+        f"ALTER TABLE {t} ADD COLUMN label string"
+    )  # a new column: new field ID, old values must not show
+    spark.sql(f"ALTER TABLE {t} ADD PARTITION FIELD bucket(4, id)")
+    spark.sql(
+        f"INSERT INTO {t} SELECT id, id, 'us', 1.5, concat('new', id) FROM range(15, 20)"
+    )
+    result["evolved_v2"] = describe_fixture(spark, "evolved_v2")
 
     shutil.rmtree(out_dir, ignore_errors=True)
     shutil.copytree(f"{FIXTURE_ROOT}/warehouse", out_dir)

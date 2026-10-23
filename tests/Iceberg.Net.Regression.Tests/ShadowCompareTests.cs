@@ -43,6 +43,8 @@ public sealed class ShadowCompareTests : IDisposable
         NestedField.Optional(12, "s", PrimitiveType.String),
         NestedField.Optional(13, "u", PrimitiveType.Uuid),
         NestedField.Optional(14, "b", PrimitiveType.Binary),
+        NestedField.Optional(15, "wide_dec", new DecimalType(38, 10)),
+        NestedField.Optional(16, "fx", new FixedType(4)),
     ], identifierFieldIds: [1]);
 
     private static List<object?[]> Rows(int start, int count) => Enumerable.Range(start, count).Select(i => new object?[]
@@ -61,6 +63,8 @@ public sealed class ShadowCompareTests : IDisposable
         i % 8 == 0 ? null : $"row-{i}-ünïcødé-{new string('x', i % 20)}",
         i % 6 == 0 ? null : new Guid($"{i:x8}-0000-4000-8000-{i * 7919:x12}"),
         i % 4 == 1 ? null : Enumerable.Range(0, i % 9).Select(b => (byte)(b * 31 + i)).ToArray(),
+        i % 5 == 2 ? null : new IcebergDecimal(System.Numerics.BigInteger.Parse("123456789012345678901234567") * (i % 2 == 0 ? 1 : -1) + i, 10),
+        i % 6 == 3 ? null : new byte[] { (byte)i, (byte)(i * 7), 0xff, 0 },
     }).ToList();
 
     private static async Task<TableFingerprint> PyIceberg(Table t) =>

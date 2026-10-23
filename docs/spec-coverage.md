@@ -27,9 +27,9 @@ Legend: ✅ implemented and tested · 🟡 partial · ⬜ not started · — not
 | `geometry`, `geography` (CRS, algorithm) | | | ✓ | 🟡 model + JSON only (WKB I/O and bounds not done) | `MetadataSpecTests` |
 | `unknown` | | | ✓ | 🟡 model + JSON + promotion rule | `MetadataSpecTests` |
 | struct / list / map with field IDs | ✓ | ✓ | ✓ | ✅ model + JSON; ⬜ Parquet I/O for nested | `MetadataSpecTests` |
-| `initial-default` / `write-default` | | | ✓ | 🟡 JSON round-trip; reader applies primitive initial defaults | `MetadataSpecTests` |
+| `initial-default` / `write-default` | | | ✓ | ✅ JSON single-value form (Appendix D) round-trips; reader applies initial defaults; `AddRequiredColumn(…, initialDefault)` | `MetadataSpecTests`, `SingleValueJsonTests`, `SchemaUpdateTests` |
 | Identifier field IDs (required, non-float) | ✓ | ✓ | ✓ | ✅ | `MetadataSpecTests` |
-| Schema evolution & type promotion (int→long, float→double, decimal widening, v3 date→timestamp, unknown→any) | ✓ | ✓ | ✓ | ✅ rules; 🟡 no `UpdateSchema` builder API yet (callers build the new schema) | `MetadataSpecTests`, `LocalTableTests` |
+| Schema evolution & type promotion (int→long, float→double, decimal widening, v3 date→timestamp, unknown→any) | ✓ | ✓ | ✓ | ✅ rules and `Table.UpdateSchemaAsync(s => s.AddColumn(…).RenameColumn(…).UpdateColumn(…).DeleteColumn(…).Move…)`, re-applied on conflict; top-level columns | `MetadataSpecTests`, `LocalTableTests`, `SchemaUpdateTests` |
 | Column projection by field ID | ✓ | ✓ | ✓ | ✅ (name fallback only when a file has no IDs) | `PyIcebergFixtureTests` |
 | Name mapping (`schema.name-mapping.default`) | ✓ | ✓ | ✓ | ✅ top-level columns, aliases for renames | `NameMappingAndImportTests` |
 | Reserved field IDs / metadata columns (`_file`, `_pos`, `_row_id`, …) | ✓ | ✓ | ✓ | 🟡 `_row_id` / `_last_updated_sequence_number` read and written (below); reserved IDs excluded from column metrics; `_file` / `_pos` not exposed | `SparkFixtureTests` |
@@ -64,7 +64,8 @@ Legend: ✅ implemented and tested · 🟡 partial · ⬜ not started · — not
 | Snapshot summary (operation + totals) | ✅ append/overwrite/delete totals | `LocalTableTests` |
 | Single-value binary serialisation (Appendix D) for bounds | ✅ incl. promoted-width reads | `AvroSpecTests` |
 | v1 snapshots with embedded `manifests` list | ⬜ (refused explicitly) | |
-| Manifest compaction / merge-append | ⬜ (fast-append only: one manifest per commit) | |
+| Manifest compaction / merge-append | ✅ Java defaults (`commit.manifest-merge.enabled`, min count 100, 8 MB); sequence numbers and `first_row_id` preserved | `MergeAppendTests`, `ModelBasedTests`, `SparkCrossEngineTests` |
+| Scan planning: filter expressions, manifest pruning by partition summaries, file pruning by partition projection and column metrics | ✅ identity/bucket/truncate/temporal projection; Java null semantics | `ExpressionTests`, `ScanPruningTests` (random filters ≡ full scan), `FilterCrossEngineTests` (PyIceberg) |
 | Column metrics modes (`write.metadata.metrics.*`, truncate(16)) | 🟡 full metrics; long strings omit bounds instead of truncating | `LocalTableTests` |
 
 ### Row-level deletes and v3 capabilities
@@ -78,6 +79,16 @@ Legend: ✅ implemented and tested · 🟡 partial · ⬜ not started · — not
 | Row lineage: `next-row-id`, snapshot `first-row-id`/`added-rows`, manifest and file `first_row_id` | ✅ assignment and inheritance | `StateManagementTests`, `LocalTableTests`, `CatalogConformanceTests` |
 | Row lineage metadata columns `_row_id`, `_last_updated_sequence_number` | ✅ read (`TableScan.ReadWithLineageAsync`: stored value, else inherited); copy-on-write rewrites store them explicitly so rows keep their identity, as Java does | `SparkFixtureTests` (matches Spark's values), `SparkCrossEngineTests` (Spark derives ours identically), `ModelBasedTests` (invariants) |
 | Table encryption keys, snapshot `key-id` | 🟡 metadata only | |
+
+### Maintenance
+
+| Operation | Status | Tests |
+|---|---|---|
+| Snapshot expiry (retention policy) with file cleanup by reachability | ✅ files only expired snapshots referenced, after the commit | `MaintenanceTests`, `ModelBasedTests`, `SparkCrossEngineTests` |
+| Drop with purge | ✅ every referenced file (metadata, manifests, data, deletes, statistics) | `MaintenanceTests` |
+| Orphan-file cleanup | ✅ listing (`ISupportsListing`) + age cutoff, URI forms normalised | `MaintenanceTests` |
+| Rewrite data files (bin-pack) | ✅ deletes applied, v3 lineage kept, re-plan on any concurrent commit | `CompactionTests`, `SparkCrossEngineTests` |
+| Rewrite manifests | ⬜ (merge-append keeps counts bounded) | |
 
 ### Table metadata
 
@@ -98,7 +109,7 @@ Legend: ✅ implemented and tested · 🟡 partial · ⬜ not started · — not
 |---|---|---|
 | `GET /v1/config` (defaults/overrides/endpoints/prefix) | ✅ | endpoints list stored, not yet used to gate calls |
 | OAuth2 client credentials, bearer token | ✅ | `/v1/oauth/tokens` is deprecated upstream; configurable token URI |
-| SigV4 (Glue / S3 Tables IRC endpoints) | ⬜ | hook exists: `RestCatalogOptions.Handler` |
+| SigV4 (Glue / S3 Tables IRC endpoints) | ✅ `SigV4Handler`, `RestCatalogOptions.ForGlue` / `ForS3Tables` | AWS test vectors (`SigV4Tests`), botocore agreement (`SigV4CrossCheckTests`); live endpoint needs AWS |
 | Namespaces: list (paged), create, exists, load, drop | ✅ | multi-level encoded with `0x1F` |
 | Namespace `updateProperties` | ⬜ | |
 | Tables: list (paged), create, load, exists, drop (purge), rename, register | ✅ | `CatalogConformanceTests` against the Java reference server |

@@ -247,17 +247,57 @@ public sealed class SnapshotProducer
     private Dictionary<string, RoaringPositionBitmap>? _rowDeletes;
     private bool _convertPositionDeletes;
 
-    private SnapshotProducer(Table table) => _table = table;
+    private SnapshotProducer(Table table)
+    {
+        _table = table;
+        _startingSnapshotId = table.Metadata.CurrentSnapshotId;
+    }
+
+    private readonly long? _startingSnapshotId;
+    private Func<DataFile, bool>? _conflictFilter;
 
     public static SnapshotProducer Append(Table table) => new(table);
 
     /// <summary>Copy-on-write overwrite: whole files matching <paramref name="deleteWhere"/> are removed, then new files added.</summary>
+    /// <remarks>
+    /// Serializable by default (Java's <c>validateNoConflictingData</c>, as Spark uses): if, by the time this commits,
+    /// another writer has added a data file <paramref name="deleteWhere"/> selects, the commit fails with
+    /// <see cref="ValidationException"/> rather than silently removing that writer's data on retry. Opt out with
+    /// <see cref="WithSnapshotIsolation"/>.
+    /// </remarks>
     public static SnapshotProducer Overwrite(Table table, Func<DataFile, bool> deleteWhere) =>
-        new(table) { _deleteWhere = deleteWhere, _operation = Operations.Overwrite };
+        new(table) { _deleteWhere = deleteWhere, _operation = Operations.Overwrite, _conflictFilter = deleteWhere };
 
-    /// <summary>Remove whole data files without adding any (a metadata-only delete).</summary>
+    /// <summary>Remove whole data files without adding any (a metadata-only delete); serializable like <see cref="Overwrite"/>.</summary>
     public static SnapshotProducer DeleteFiles(Table table, Func<DataFile, bool> deleteWhere) =>
-        new(table) { _deleteWhere = deleteWhere, _operation = Operations.Delete };
+        new(table) { _deleteWhere = deleteWhere, _operation = Operations.Delete, _conflictFilter = deleteWhere };
+
+    /// <summary>Skip conflict validation: on retry the predicate is simply re-applied to the newer table state.</summary>
+    public SnapshotProducer WithSnapshotIsolation()
+    {
+        _conflictFilter = null;
+        return this;
+    }
+
+    /// <summary>
+    /// Data files added since this producer's starting snapshot that <see cref="_conflictFilter"/> selects. Read from each
+    /// new snapshot's own manifest list, so files later merged into other manifests are still found.
+    /// </summary>
+    private async Task ValidateNoConflictingDataAsync(CancellationToken ct)
+    {
+        if (_conflictFilter is null) return;
+        var m = _table.Metadata;
+        foreach (var snapshot in m.Ancestors(m.CurrentSnapshotId).TakeWhile(sn => sn.SnapshotId != _startingSnapshotId))
+        {
+            if (snapshot.ManifestList is null) continue;
+            foreach (var manifest in (await TableScan.ManifestsAsync(_table, snapshot, ct)).Where(mf => mf.Content == ManifestContent.Data && mf.AddedSnapshotId == snapshot.SnapshotId))
+            {
+                var entries = ManifestCodec.ReadManifest(await _table.IO.ReadAllAsync(manifest.ManifestPath, ct), m.SpecById(manifest.PartitionSpecId), m.CurrentSchema, manifest).Entries;
+                if (entries.FirstOrDefault(e => e.Status == ManifestEntryStatus.Added && _conflictFilter(e.DataFile)) is { } conflict)
+                    throw new ValidationException($"Concurrent snapshot {snapshot.SnapshotId} ({snapshot.Operation}) added {conflict.DataFile.FilePath}, which this {_operation} would remove; re-plan against the new table state");
+            }
+        }
+    }
 
     /// <summary>
     /// Merge-on-read row delete: mark <paramref name="positions"/> (0-based row positions) of the given data
@@ -346,6 +386,7 @@ public sealed class SnapshotProducer
         {
             try
             {
+                if (attempt > 0) await ValidateNoConflictingDataAsync(ct);
                 var snapshot = await ApplyAsync(ct);
                 var requirements = new List<UpdateRequirement>
                 {
