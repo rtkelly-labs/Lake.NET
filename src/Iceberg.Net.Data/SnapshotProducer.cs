@@ -229,6 +229,15 @@ public sealed class SnapshotProducer
         return this;
     }
 
+    private Func<TableMetadata, CancellationToken, Task>? _validateEachAttempt;
+
+    /// <summary>A check run against the table state every attempt commits on (cherry-pick's ancestry and partition checks).</summary>
+    internal SnapshotProducer ValidateEachAttempt(Func<TableMetadata, CancellationToken, Task> check)
+    {
+        _validateEachAttempt = check;
+        return this;
+    }
+
     public async Task<Snapshot> CommitAsync(CancellationToken ct = default)
     {
         var policy = CommitRetryPolicy.From(_table.Metadata);
@@ -237,6 +246,7 @@ public sealed class SnapshotProducer
         {
             try
             {
+                if (_validateEachAttempt is { } check) await check(_table.Metadata, ct);
                 if (attempt > 0) await ValidateNoConflictingDataAsync(ct);
                 var snapshot = await ApplyOrConflictAsync(ct);
                 var requirements = new List<UpdateRequirement>
@@ -246,11 +256,15 @@ public sealed class SnapshotProducer
                 };
                 try
                 {
-                    await _table.CommitAsync(requirements,
-                    [
-                        new MetadataUpdate.AddSnapshot(snapshot),
-                        new MetadataUpdate.SetSnapshotRef(SnapshotRef.Main, SnapshotRef.Branch(snapshot.SnapshotId)),
-                    ], ct);
+                    await _table.CommitAsync(requirements, [new MetadataUpdate.AddSnapshot(snapshot), SetBranch(snapshot.SnapshotId)], ct);
+                }
+                catch (ArgumentException stale) when (_table.Metadata.FormatVersion > 1)
+                {
+                    if (snapshot.SequenceNumber > await LastSequenceNumberAsync(ct)) throw;
+                    // The branch head is what we planned against, but another writer added a snapshot meanwhile (on another
+                    // branch, or before a rollback returned the head to our parent): our sequence number is stale. A conflict
+                    // to retry with the next sequence number, not an invalid commit (Java #15126).
+                    throw new CommitFailedException($"Sequence number {snapshot.SequenceNumber} of snapshot {snapshot.SnapshotId} is stale: {stale.Message}", stale);
                 }
                 catch (CommitStateUnknownException unknown) when (unknown.ServerResponded)
                 {
@@ -304,7 +318,17 @@ public sealed class SnapshotProducer
         _attemptArtifacts.Clear();
         return new TableCommit(_table.Identifier,
             [new UpdateRequirement.AssertTableUuid(_table.Metadata.TableUuid), new UpdateRequirement.AssertRefSnapshotId(SnapshotRef.Main, _table.Metadata.CurrentSnapshotId)],
-            [new MetadataUpdate.AddSnapshot(snapshot), new MetadataUpdate.SetSnapshotRef(SnapshotRef.Main, SnapshotRef.Branch(snapshot.SnapshotId))]);
+            [new MetadataUpdate.AddSnapshot(snapshot), SetBranch(snapshot.SnapshotId)]);
+    }
+
+    /// <summary>Move the target branch to the new snapshot, keeping its retention settings (Java's <c>SnapshotRef.builderFrom</c>).</summary>
+    private MetadataUpdate.SetSnapshotRef SetBranch(long snapshotId) =>
+        new(SnapshotRef.Main, _table.Metadata.Refs.TryGetValue(SnapshotRef.Main, out var existing) ? existing with { SnapshotId = snapshotId } : SnapshotRef.Branch(snapshotId));
+
+    private async Task<long> LastSequenceNumberAsync(CancellationToken ct)
+    {
+        await _table.RefreshAsync(ct);
+        return _table.Metadata.LastSequenceNumber;
     }
 
     private async Task<bool> AppliedAsync(long snapshotId, CommitStateUnknownException unknown, CancellationToken ct)
