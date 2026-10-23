@@ -329,8 +329,76 @@ public abstract partial class MetastoreCatalog(string name, IFileIO io) : ICatal
 }
 
 /// <summary>Process-local catalog with a CAS pointer per table. The reference for catalog conformance tests.</summary>
-public class InMemoryCatalog(string warehouse, IFileIO? io = null, string name = "memory") : MetastoreCatalog(name, io ?? new LocalFileIO())
+public class InMemoryCatalog(string warehouse, IFileIO? io = null, string name = "memory") : MetastoreCatalog(name, io ?? new LocalFileIO()), IViewCatalog
 {
+    private readonly Dictionary<TableIdentifier, string> _views = [];
+
+    public Task<IReadOnlyList<TableIdentifier>> ListViewsAsync(Namespace ns, CancellationToken ct = default)
+    {
+        lock (_lock) return Task.FromResult<IReadOnlyList<TableIdentifier>>(_views.Keys.Where(v => v.Namespace.Equals(ns)).ToList());
+    }
+
+    public async Task<View> CreateViewAsync(TableIdentifier id, ViewDefinition definition, IReadOnlyDictionary<string, string>? properties = null, CancellationToken ct = default)
+    {
+        lock (_lock)
+        {
+            if (!_namespaces.ContainsKey(id.Namespace)) throw new NoSuchNamespaceException($"Namespace {id.Namespace} does not exist");
+            if (_views.ContainsKey(id) || _tables.ContainsKey(id)) throw new AlreadyExistsException($"{id} already exists");
+        }
+        var metadata = ViewMetadata.Create(await DefaultTableLocationAsync(id, ct), definition.Schema, definition.ToVersion(), properties, Clock());
+        return await WriteViewAsync(id, null, metadata, ct);
+    }
+
+    public async Task<View> LoadViewAsync(TableIdentifier id, CancellationToken ct = default)
+    {
+        string? location;
+        lock (_lock) location = _views.GetValueOrDefault(id);
+        if (location is null) throw new NoSuchTableException($"View {id} does not exist");
+        return new View(id, ViewJson.Read(System.Text.Encoding.UTF8.GetString(await FileIO.ReadAllAsync(location, ct)), location));
+    }
+
+    public Task<bool> ViewExistsAsync(TableIdentifier id, CancellationToken ct = default)
+    {
+        lock (_lock) return Task.FromResult(_views.ContainsKey(id));
+    }
+
+    public async Task<View> ReplaceViewAsync(TableIdentifier id, ViewDefinition definition, CancellationToken ct = default)
+    {
+        var current = await LoadViewAsync(id, ct);
+        return await WriteViewAsync(id, current.Metadata.MetadataFileLocation, current.Metadata.Replace(definition.Schema, definition.ToVersion(), Clock()), ct);
+    }
+
+    public Task DropViewAsync(TableIdentifier id, CancellationToken ct = default)
+    {
+        lock (_lock)
+            if (!_views.Remove(id)) throw new NoSuchTableException($"View {id} does not exist");
+        return Task.CompletedTask;
+    }
+
+    public Task RenameViewAsync(TableIdentifier from, TableIdentifier to, CancellationToken ct = default)
+    {
+        lock (_lock)
+        {
+            if (_views.ContainsKey(to) || _tables.ContainsKey(to)) throw new AlreadyExistsException($"{to} already exists");
+            if (!_views.Remove(from, out var loc)) throw new NoSuchTableException($"View {from} does not exist");
+            _views[to] = loc;
+        }
+        return Task.CompletedTask;
+    }
+
+    private async Task<View> WriteViewAsync(TableIdentifier id, string? expected, ViewMetadata metadata, CancellationToken ct)
+    {
+        var version = expected is null ? 0 : int.Parse(Path.GetFileName(expected).Split('-')[0], System.Globalization.CultureInfo.InvariantCulture) + 1;
+        var location = $"{metadata.Location}/metadata/{version:D5}-{Guid.NewGuid()}.metadata.json";
+        await FileIO.WriteAsync(location, System.Text.Encoding.UTF8.GetBytes(ViewJson.Write(metadata)), overwrite: false, ct);
+        lock (_lock)
+        {
+            if (_views.GetValueOrDefault(id) != expected) throw new CommitFailedException($"View {id} changed concurrently");
+            _views[id] = location;
+        }
+        return new View(id, metadata with { MetadataFileLocation = location });
+    }
+
     private readonly Dictionary<Namespace, Dictionary<string, string>> _namespaces = [];
     private readonly Dictionary<TableIdentifier, string> _tables = [];
     private readonly object _lock = new();

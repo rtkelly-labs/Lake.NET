@@ -119,7 +119,7 @@ Legend: ✅ implemented and tested · 🟡 partial · ⬜ not started · — not
 | `loadCredentials` refresh, remote signing | ⬜ | |
 | Multi-table `transactions/commit` | ✅ `ICatalog.CommitTransactionAsync` + `SnapshotProducer.StageAsync` | `CatalogConformanceTests` (Java REST server, Polaris; JDBC via one SQL transaction; Glue refuses) |
 | Scan planning (`plan`, `tasks`) | ⬜ | |
-| Views | ⬜ | |
+| Views (create, load, replace, list, exists, rename, drop) | ✅ `IViewCatalog` on `RestCatalog` and `InMemoryCatalog`; view spec v1 metadata (`ViewMetadata`, history trimming) | `ViewTests`, `ViewConformanceTests` (Java REST server, Polaris; Trino queries our view and we read Trino's) |
 | Metrics reporting | ⬜ | |
 | ETag / freshness-aware loading | ⬜ | |
 

@@ -54,8 +54,94 @@ public sealed record RestCatalogOptions
 /// Iceberg REST catalog client (open-api/rest-catalog-open-api.yaml). The server owns commit
 /// semantics: the client sends requirements + updates and the server applies them atomically.
 /// </summary>
-public sealed class RestCatalog : ICatalog
+public sealed class RestCatalog : ICatalog, IViewCatalog
 {
+    private string ViewPath(TableIdentifier id) => $"{NsPath(id.Namespace)}/views/{Uri.EscapeDataString(id.Name)}";
+
+    private static View ToView(TableIdentifier id, JsonNode result) =>
+        new(id, ViewJson.FromJson(result["metadata"]!) with { MetadataFileLocation = result["metadata-location"]?.GetValue<string>() });
+
+    public async Task<IReadOnlyList<TableIdentifier>> ListViewsAsync(Namespace ns, CancellationToken ct = default)
+    {
+        var result = new List<TableIdentifier>();
+        string? pageToken = null;
+        do
+        {
+            var resp = await SendAsync(HttpMethod.Get, $"{NsPath(ns)}/views{(pageToken is null ? "" : $"?pageToken={Uri.EscapeDataString(pageToken)}")}", null, ct);
+            result.AddRange(resp!["identifiers"]!.AsArray().Select(i => new TableIdentifier(ns, i!["name"]!.GetValue<string>())));
+            pageToken = resp["next-page-token"]?.GetValue<string>();
+        }
+        while (pageToken is not null);
+        return result;
+    }
+
+    public async Task<View> CreateViewAsync(TableIdentifier id, ViewDefinition definition, IReadOnlyDictionary<string, string>? properties = null, CancellationToken ct = default)
+    {
+        var version = ViewJson.VersionToJson(definition.ToVersion() with { VersionId = 1, TimestampMs = DateTimeOffset.UtcNow.ToUnixTimeMilliseconds(), SchemaId = definition.Schema.SchemaId });
+        var body = new JsonObject
+        {
+            ["name"] = id.Name,
+            ["schema"] = TypeJson.SchemaToJson(definition.Schema),
+            ["view-version"] = version,
+            ["properties"] = new JsonObject((properties ?? new Dictionary<string, string>()).Select(kv => KeyValuePair.Create(kv.Key, (JsonNode?)kv.Value))),
+        };
+        return ToView(id, (await SendAsync(HttpMethod.Post, $"{NsPath(id.Namespace)}/views", body, ct, conflict: m => new AlreadyExistsException(m)))!);
+    }
+
+    public async Task<View> LoadViewAsync(TableIdentifier id, CancellationToken ct = default) =>
+        ToView(id, (await SendAsync(HttpMethod.Get, ViewPath(id), null, ct))!);
+
+    public async Task<bool> ViewExistsAsync(TableIdentifier id, CancellationToken ct = default)
+    {
+        try
+        {
+            await SendAsync(HttpMethod.Head, ViewPath(id), null, ct);
+            return true;
+        }
+        catch (NoSuchTableException)
+        {
+            return false;
+        }
+    }
+
+    public async Task<View> ReplaceViewAsync(TableIdentifier id, ViewDefinition definition, CancellationToken ct = default)
+    {
+        var current = await LoadViewAsync(id, ct);
+        // An identical existing schema is referenced by its ID (Java's builder does not count a re-added identical
+        // schema as "last added"); a new one is added and referenced as -1, "the schema added in this commit".
+        var existing = current.Metadata.Schemas.FirstOrDefault(sc => sc.SameSchema(definition.Schema));
+        var version = ViewJson.VersionToJson(definition.ToVersion() with
+        {
+            VersionId = current.Metadata.Versions.Max(v => v.VersionId) + 1,
+            TimestampMs = DateTimeOffset.UtcNow.ToUnixTimeMilliseconds(),
+            SchemaId = existing?.SchemaId ?? -1,
+        });
+        var updates = new JsonArray();
+        if (existing is null)
+            updates.Add(new JsonObject { ["action"] = "add-schema", ["schema"] = TypeJson.SchemaToJson(definition.Schema.WithId(current.Metadata.Schemas.Max(sc => sc.SchemaId) + 1)) });
+        updates.Add(new JsonObject { ["action"] = "add-view-version", ["view-version"] = version });
+        updates.Add(new JsonObject { ["action"] = "set-current-view-version", ["view-version-id"] = -1 });
+        var body = new JsonObject
+        {
+            ["requirements"] = new JsonArray(new JsonObject { ["type"] = "assert-view-uuid", ["uuid"] = current.Metadata.ViewUuid.ToString() }),
+            ["updates"] = updates,
+        };
+        return ToView(id, (await SendAsync(HttpMethod.Post, ViewPath(id), body, ct, conflict: m => new CommitFailedException(m)))!);
+    }
+
+    public Task DropViewAsync(TableIdentifier id, CancellationToken ct = default) => SendAsync(HttpMethod.Delete, ViewPath(id), null, ct);
+
+    public Task RenameViewAsync(TableIdentifier from, TableIdentifier to, CancellationToken ct = default)
+    {
+        static JsonObject Id(TableIdentifier t) => new()
+        {
+            ["namespace"] = new JsonArray(t.Namespace.Levels.Select(l => (JsonNode)l).ToArray()),
+            ["name"] = t.Name,
+        };
+        return SendAsync(HttpMethod.Post, $"v1/{_prefix}views/rename", new JsonObject { ["source"] = Id(from), ["destination"] = Id(to) }, ct,
+            conflict: m => new AlreadyExistsException(m));
+    }
+
     private readonly HttpClient _http;
     private readonly RestCatalogOptions _options;
     private string _prefix = "";
@@ -329,7 +415,9 @@ public sealed class RestCatalog : ICatalog
             var type = ErrorType(text);
             throw resp.StatusCode switch
             {
-                HttpStatusCode.NotFound when type == "NoSuchTableException" || (type is null && path.Contains("/tables/", StringComparison.Ordinal)) =>
+                // HEAD responses have no body: infer table/view not found from the path. Views share NoSuchTableException.
+                HttpStatusCode.NotFound when type is "NoSuchTableException" or "NoSuchViewException"
+                    || (type is null && (path.Contains("/tables/", StringComparison.Ordinal) || path.Contains("/views/", StringComparison.Ordinal))) =>
                     new NoSuchTableException(message),
                 HttpStatusCode.NotFound => new NoSuchNamespaceException(message),
                 HttpStatusCode.Conflict when conflict is not null => conflict(message),
