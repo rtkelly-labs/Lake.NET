@@ -79,6 +79,7 @@ catches.
 |---|---|---|---|---|---|---|
 | Iceberg.Net.Puffin | 526 | 346 + 2 timeouts | 128 | 50 | 66.2% | 2026-10-23 (baseline) |
 | Iceberg.Net.Puffin | 526 | 375 + 10 timeouts | 97 | 44 | 73.2% | 2026-10-23, after `PuffinEdgeTests` |
+| Iceberg.Net.Core (transforms, expressions) | 414 | 286 + 1 timeout | 58 | 69 | 69.3% | 2026-10-23 (baseline; most survivors and uncovered mutants in `Expression.cs` and `Evaluators.cs`) |
 
 Runs weekly in `.github/workflows/iceberg-dotnet-mutation.yml` (Puffin, and Core's transforms and expressions via
 `stryker-core.json`), uploading the reports.
