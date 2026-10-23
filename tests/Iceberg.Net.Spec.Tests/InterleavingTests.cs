@@ -272,4 +272,191 @@ public sealed class InterleavingTests : IDisposable
             }, state[2]);
         }
     }
+
+    // Ref changes (ManageSnapshots): an operation that moves a ref to a fixed place fails cleanly when that ref moved,
+    // one that composes (cherry-pick replay, fast-forward, ref creation) is re-validated and re-applied.
+
+    [Spec("Snapshot References")]
+    [Theory]
+    [InlineData(2)]
+    [InlineData(3)]
+    public async Task Rollback_and_set_current_fail_cleanly_when_main_moved(int formatVersion)
+    {
+        foreach (var setCurrent in new[] { false, true })
+        {
+            var (subject, other) = await SetupAsync(formatVersion);
+            var target = subject.Metadata.CurrentSnapshot!.ParentSnapshotId!.Value;
+            _catalog.BeforeNextSwap = Interferer("append", other);
+            var manager = subject.ManageSnapshots();
+            if (setCurrent) manager.SetCurrentSnapshot(target);
+            else manager.RollbackTo(target);
+            await Assert.ThrowsAsync<CommitFailedException>(() => manager.CommitAsync());
+
+            var state = await StateAsync(subject);
+            Assert.Equal("other", state[10]); // the concurrent append survives: main was not moved over it
+            Assert.Equal(7, state.Count);
+        }
+    }
+
+    [Spec("Snapshot References")]
+    [Theory]
+    [InlineData(2)]
+    [InlineData(3)]
+    public async Task Fast_forward_is_revalidated_after_a_concurrent_commit(int formatVersion)
+    {
+        // The source branch advanced meanwhile: still a fast-forward, so main moves to the new head.
+        var (subject, other) = await SetupAsync(formatVersion);
+        var parent = subject.Metadata.CurrentSnapshotId!.Value;
+        await TableMutations.InsertAsync(subject, [[30L, "staged"]]);
+        var first = subject.Metadata.CurrentSnapshotId!.Value;
+        await TableMutations.InsertAsync(subject, [[31L, "staged"]]);
+        var second = subject.Metadata.CurrentSnapshotId!.Value;
+        await subject.ManageSnapshots().CreateBranch("staging", first).RollbackTo(parent).CommitAsync();
+        await other.RefreshAsync();
+        _catalog.BeforeNextSwap = () => other.ManageSnapshots().ReplaceBranch("staging", second).CommitAsync();
+        await subject.ManageSnapshots().FastForwardBranch(SnapshotRef.Main, "staging").CommitAsync();
+        Assert.Equal(second, subject.Metadata.CurrentSnapshotId);
+        var state = await StateAsync(subject);
+        Assert.Equal("staged", state[31]);
+        Assert.Equal("staged", state[30]);
+
+        // Main moved meanwhile: no longer a fast-forward, so it fails rather than dropping main's new snapshot.
+        (subject, other) = await SetupAsync(formatVersion);
+        var head = subject.Metadata.CurrentSnapshotId!.Value;
+        parent = subject.Metadata.CurrentSnapshot!.ParentSnapshotId!.Value;
+        await subject.ManageSnapshots().CreateBranch("staging", head).RollbackTo(parent).CommitAsync();
+        _catalog.BeforeNextSwap = Interferer("append", other);
+        await Assert.ThrowsAsync<ArgumentException>(() => subject.ManageSnapshots().FastForwardBranch(SnapshotRef.Main, "staging").CommitAsync());
+        state = await StateAsync(subject);
+        Assert.Equal("other", state[10]);
+        Assert.False(state.ContainsKey(5));
+    }
+
+    [Spec("Snapshot References")]
+    [Theory]
+    [InlineData(2)]
+    [InlineData(3)]
+    public async Task Cherry_pick_composes_with_a_concurrent_append_and_conflicts_with_a_concurrent_pick(int formatVersion)
+    {
+        var (subject, other) = await SetupAsync(formatVersion);
+        var parent = subject.Metadata.CurrentSnapshotId!.Value;
+        await TableMutations.InsertAsync(subject, [[40L, "picked"]]);
+        var staged = subject.Metadata.CurrentSnapshotId!.Value;
+        await subject.ManageSnapshots().RollbackTo(parent).CommitAsync();
+        _catalog.BeforeNextSwap = Interferer("append", other);
+        await subject.ManageSnapshots().CherryPick(staged).CommitAsync(); // was a fast-forward; replayed after the race
+        var state = await StateAsync(subject);
+        Assert.Equal("picked", state[40]);
+        Assert.Equal("other", state[10]);
+
+        // Two writers publish the same staged snapshot: exactly one wins.
+        (subject, other) = await SetupAsync(formatVersion);
+        parent = subject.Metadata.CurrentSnapshotId!.Value;
+        await TableMutations.InsertAsync(subject, [[40L, "picked"]]);
+        staged = subject.Metadata.CurrentSnapshotId!.Value;
+        await subject.ManageSnapshots().RollbackTo(parent).CommitAsync();
+        await TableMutations.InsertAsync(subject, [[41L, "main"]]); // so the picks are replays, not fast-forwards
+        await other.RefreshAsync();
+        _catalog.BeforeNextSwap = () => other.ManageSnapshots().CherryPick(staged).CommitAsync();
+        await Assert.ThrowsAsync<ValidationException>(() => subject.ManageSnapshots().CherryPick(staged).CommitAsync());
+        state = await StateAsync(subject);
+        Assert.Equal("picked", state[40]);
+        Assert.Equal(8, state.Count);
+    }
+
+    [Spec("Snapshot References")]
+    [Fact]
+    public async Task Concurrent_tag_changes_conflict_on_the_tag()
+    {
+        var (subject, other) = await SetupAsync(2);
+        var head = subject.Metadata.CurrentSnapshotId!.Value;
+        var parent = subject.Metadata.CurrentSnapshot!.ParentSnapshotId!.Value;
+        _catalog.BeforeNextSwap = () => other.ManageSnapshots().CreateTag("release", parent).CommitAsync();
+        await Assert.ThrowsAsync<ArgumentException>(() => subject.ManageSnapshots().CreateTag("release", head).CommitAsync());
+        Assert.Equal(parent, (await _catalog.LoadTableAsync(subject.Identifier)).Metadata.Refs["release"].SnapshotId);
+
+        await subject.RefreshAsync();
+        await other.RefreshAsync();
+        _catalog.BeforeNextSwap = () => other.ManageSnapshots().ReplaceTag("release", head).CommitAsync();
+        await Assert.ThrowsAsync<CommitFailedException>(() => subject.ManageSnapshots().RemoveTag("release").CommitAsync());
+        Assert.Equal(head, (await _catalog.LoadTableAsync(subject.Identifier)).Metadata.Refs["release"].SnapshotId);
+        await StateAsync(subject);
+    }
+
+    private static async Task<Dictionary<long, string?>> BranchRowsAsync(Table t, string branch)
+    {
+        var rows = new Dictionary<long, string?>();
+        await foreach (var r in TableScan.ReadRowsAsync(t, new ScanRequest { Snapshot = SnapshotSelector.Ref(branch) })) rows.Add((long)r[0]!, (string?)r[1]);
+        return rows;
+    }
+
+    [Spec("Snapshot References")]
+    [Theory]
+    [MemberData(nameof(Interferers))]
+    public async Task Branch_overwrites_are_isolated_from_every_writer_on_main(string kind)
+    {
+        foreach (var v in new[] { 2, 3 })
+        {
+            var (subject, other) = await SetupAsync(v);
+            await subject.ManageSnapshots().CreateBranch("audit").CommitAsync();
+            await other.RefreshAsync();
+            var targets = (await TableScan.PlanFilesAsync(subject, Id2, subject.Metadata.Refs["audit"].SnapshotId)).Select(t => t.File.FilePath).ToHashSet();
+            var overwrite = SnapshotProducer.Overwrite(subject, f => targets.Contains(f.FilePath))
+                .AddFiles(await TableWriter.WriteAsync(subject, [[1L, "base"], [2L, "mine"]])).ToBranch("audit");
+            _catalog.BeforeNextSwap = Interferer(kind, other);
+            await overwrite.CommitAsync();
+
+            var main = await StateAsync(subject); // validates every ref's history
+            AssertInterfererKept(kind, main);
+            Assert.NotEqual("mine", main.GetValueOrDefault(2));
+            var audit = await BranchRowsAsync(await _catalog.LoadTableAsync(subject.Identifier), "audit");
+            Assert.Equal(Enumerable.Range(1, 6).Select(i => (long)i), audit.Keys.Order());
+            Assert.Equal("mine", audit[2]);
+        }
+    }
+
+    [Spec("Snapshot References")]
+    [Theory]
+    [InlineData(2)]
+    [InlineData(3)]
+    public async Task Branch_commits_conflict_with_writers_on_the_same_branch(int formatVersion)
+    {
+        foreach (var concurrent in new[] { "append", "delete-2" })
+        {
+            var (subject, other) = await SetupAsync(formatVersion);
+            await subject.ManageSnapshots().CreateBranch("audit").CommitAsync();
+            await other.RefreshAsync();
+            var head = subject.Metadata.Refs["audit"].SnapshotId;
+            var targets = (await TableScan.PlanFilesAsync(subject, Id2, head)).Select(t => t.File.FilePath).ToHashSet();
+            var overwrite = SnapshotProducer.Overwrite(subject, f => targets.Contains(f.FilePath))
+                .AddFiles(await TableWriter.WriteAsync(subject, [[1L, "base"], [2L, "mine"]])).ToBranch("audit");
+            _catalog.BeforeNextSwap = async () =>
+            {
+                if (concurrent == "append")
+                {
+                    await SnapshotProducer.Append(other).AddFiles(await TableWriter.WriteAsync(other, [[10L, "other"]])).ToBranch("audit").CommitAsync();
+                    return;
+                }
+                var file = targets.Single();
+                var pos = (await DataFiles.ReadAsync(other.IO, file, "PARQUET", Schema)).FindIndex(r => (long)r[0]! == 2);
+                await SnapshotProducer.DeleteRows(other, new Dictionary<string, IEnumerable<long>> { [file] = [pos] }).ToBranch("audit").CommitAsync();
+            };
+
+            if (concurrent == "append")
+            {
+                await overwrite.CommitAsync(); // rebased onto the other branch commit
+                var audit = await BranchRowsAsync(await _catalog.LoadTableAsync(subject.Identifier), "audit");
+                Assert.Equal("mine", audit[2]);
+                Assert.Equal("other", audit[10]);
+            }
+            else
+            {
+                await Assert.ThrowsAsync<ValidationException>(() => overwrite.CommitAsync()); // would resurrect id 2 on the branch
+                Assert.False((await BranchRowsAsync(await _catalog.LoadTableAsync(subject.Identifier), "audit")).ContainsKey(2));
+            }
+            var main = await StateAsync(subject);
+            Assert.Equal("base", main[2]); // main never saw either branch commit
+            Assert.Equal(6, main.Count);
+        }
+    }
 }

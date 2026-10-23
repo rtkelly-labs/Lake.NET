@@ -125,12 +125,43 @@ public sealed class SparkTablesFixture : IAsyncLifetime
             Tables[$"avro_nested_v{v}"] = new Built(t, (await TableScan.ReadAllAsync(t)).ToDictionary(r => (long)r[0]!), v >= 3 ? await TableScan.ReadWithLineageAsync(t) : null);
         }
 
+        // Branches, tags, a branch write and row delta, rollback, cherry-pick replay, fast-forward and ref expiry: Spark must
+        // read every ref as we do and see the same metadata tables.
+        foreach (var v in new[] { 2, 3 })
+            await Build($"refs_v{v}", v, async t =>
+            {
+                var s1 = t.Metadata.CurrentSnapshotId!.Value;
+                await t.ManageSnapshots().CreateTag("v1", s1, new RefRetention(MaxRefAgeMs: 30L * 86_400_000))
+                    .CreateBranch("audit", retention: new RefRetention(2, 3_600_000, 7L * 86_400_000)).CommitAsync();
+                await SnapshotProducer.Append(t).AddFiles(await TableWriter.WriteAsync(t, CatalogConformanceTests.Rows(100, 3))).ToBranch("audit").CommitAsync();
+                var staged = (await TableScan.PlanFilesAsync(t, t.Metadata.Refs["audit"].SnapshotId)).First(f => f.File.RecordCount == 3).File.FilePath;
+                await SnapshotProducer.DeleteRows(t, new Dictionary<string, IEnumerable<long>> { [staged] = [0] }).ToBranch("audit").CommitAsync();
+                await TableMutations.InsertAsync(t, CatalogConformanceTests.Rows(200, 2));
+                var s2 = t.Metadata.CurrentSnapshotId!.Value;
+                await TableMutations.InsertAsync(t, CatalogConformanceTests.Rows(300, 2));
+                var s3 = t.Metadata.CurrentSnapshotId!.Value;
+                await t.ManageSnapshots().RollbackTo(s2).CommitAsync();
+                await TableMutations.InsertAsync(t, CatalogConformanceTests.Rows(400, 1));
+                await t.ManageSnapshots().CherryPick(s3).CommitAsync();
+                await t.ManageSnapshots().CreateBranch("ff", s1).CreateTag("short-lived", s1, new RefRetention(MaxRefAgeMs: 1)).CommitAsync();
+                await t.ManageSnapshots().FastForwardBranch("ff", SnapshotRef.Main).CommitAsync();
+                await Task.Delay(5);
+                var expired = await Maintenance.ExpireAsync(t, new ExpireOptions { OlderThanMs = 0 }); // only the aged-out tag goes
+                Assert.Equal(["short-lived"], expired.RemovedRefs);
+            });
+
+
         await BuildUpdateMergeAsync();
         await BuildQueriesAsync();
 
-        // One Spark run: every table, the MERGEs Spark replays, and the read queries.
-        Spark = await SparkOracle.ReadTablesAsync(Tables.Values.Select(b => b.Table.MetadataLocation!)
-            .Concat(SparkMerges.Values).Concat(Queries.Select(q => q.Key)));
+        // One Spark run: every table (some also with metadata tables and changelog), the MERGEs Spark replays, the read
+        // queries, and a table with refs that Spark builds itself.
+        var withMetadataTables = new HashSet<string>(MetadataTableNames());
+        SparkMadeWarehouse = Path.Combine(_warehouse, "spark-made");
+        Spark = await SparkOracle.ReadTablesAsync(Tables
+            .Select(kv => (withMetadataTables.Contains(kv.Key) ? "meta:" : "") + kv.Value.Table.MetadataLocation!)
+            .Concat(SparkMerges.Values).Concat(Queries.Select(q => q.Key))
+            .Append($"create-refs:{SparkMadeWarehouse}"));
     }
 
     /// <summary>
@@ -251,6 +282,15 @@ public sealed class SparkTablesFixture : IAsyncLifetime
                 new ScanRequest { Filter = Expr.Or(Expr.IsNull("name"), Expr.LessThan("id", 7L), Expr.In("id", 26L, 101L, 201L)), Columns = ["id", "name", "qty"] });
         }
     }
+
+    /// <summary>Tables Spark also dumps the metadata tables and the changelog of.</summary>
+    public static IEnumerable<string> MetadataTableNames() =>
+        ["refs_v2", "refs_v3", "PositionDeletes_v2", "PositionDeletes_v3", "EqualityDeletes_v2", "CopyOnWrite_v3", "partitioned_v3", "spec_evolved_v2"];
+
+    /// <summary>Where Spark built its own table with branches, tags, a rollback and a cherry-pick.</summary>
+    public string? SparkMadeWarehouse { get; private set; }
+
+    public InMemoryCatalog Catalog => _catalog!;
 
     private async Task Build(string name, int formatVersion, Func<Table, Task> mutate, Partitioning.PartitionSpec? spec = null)
     {
@@ -476,5 +516,255 @@ public sealed class SparkCrossEngineTests(SparkTablesFixture fx) : IClassFixture
                 $"{q.Key}\nours:   {string.Join(", ", ours.Select(r => r[0]).Order())}\nspark:  {string.Join(", ", theirs.Keys.Order())}");
             Assert.Equal(ours.Count, await TableScan.CountAsync(q.Table, q.Ours));
         }
+    }
+
+    // ---- Snapshot management, metadata tables and the change feed against Spark (one oracle run, see the fixture) ----
+
+    private static string NormPath(string? p) => p is null ? "" : System.Text.RegularExpressions.Regex.Replace(p, "^file:/+", "/");
+
+    private static string Text(JsonNode? n) => n switch
+    {
+        null => "null",
+        JsonValue v when v.TryGetValue<string>(out var s) => s,
+        _ => n.ToJsonString(),
+    };
+
+    /// <summary>Our partition value as Spark shows it: day-transform values (and dates) as ISO dates, the rest as is.</summary>
+    private static string PartitionText(object? ours, JsonNode? theirs)
+    {
+        if (ours is null) return "null";
+        if (ours is int days && Text(theirs) is var t && t.Length == 10 && t[4] == '-')
+            return DateOnly.FromDayNumber(new DateOnly(1970, 1, 1).DayNumber + days).ToString("yyyy-MM-dd", System.Globalization.CultureInfo.InvariantCulture);
+        return ours switch
+        {
+            byte[] b => Convert.ToHexString(b).ToLowerInvariant(),
+            bool x => x ? "true" : "false",
+            IFormattable f => f.ToString(null, System.Globalization.CultureInfo.InvariantCulture),
+            _ => ours.ToString()!,
+        };
+    }
+
+    private static string MapText<T>(IReadOnlyDictionary<int, T>? ours, Func<T, string> value) =>
+        ours is null ? "" : string.Join(",", ours.OrderBy(kv => kv.Key).Select(kv => $"{kv.Key}={value(kv.Value)}"));
+
+    private static string MapText(JsonNode? theirs) =>
+        theirs is not JsonObject o ? "" : string.Join(",", o.OrderBy(kv => int.Parse(kv.Key, System.Globalization.CultureInfo.InvariantCulture)).Select(kv => $"{kv.Key}={Text(kv.Value).ToLowerInvariant()}"));
+
+    private static string ListText<T>(IEnumerable<T>? ours) => ours is null ? "null" : "[" + string.Join(",", ours) + "]";
+
+    private static string ListText(JsonNode? theirs) => theirs is not JsonArray a ? "null" : "[" + string.Join(",", a.Select(Text)) + "]";
+
+    private static string FileText(FilesRow f, JsonNode s) => string.Join("|",
+        $"{f.Content}", f.FileFormat, $"{f.SpecId}", $"{f.RecordCount}", $"{f.FileSizeInBytes}",
+        MapText(f.ColumnSizes, v => $"{v}"), MapText(f.ValueCounts, v => $"{v}"), MapText(f.NullValueCounts, v => $"{v}"), MapText(f.NanValueCounts, v => $"{v}"),
+        MapText(f.LowerBounds, v => Convert.ToHexString(v).ToLowerInvariant()), MapText(f.UpperBounds, v => Convert.ToHexString(v).ToLowerInvariant()),
+        ListText(f.SplitOffsets), ListText(f.EqualityIds), $"{f.SortOrderId?.ToString() ?? "null"}", $"{f.FirstRowId?.ToString() ?? "null"}",
+        NormPath(f.ReferencedDataFile), $"{f.ContentOffset?.ToString() ?? "null"}", $"{f.ContentSizeInBytes?.ToString() ?? "null"}",
+        string.Join(",", f.Partition.Select(kv => $"{kv.Key}={PartitionText(kv.Value, s["partition"]?[kv.Key])}")));
+
+    private static string SparkFileText(JsonNode s) => string.Join("|",
+        Text(s["content"]), Text(s["file_format"]), Text(s["spec_id"]), Text(s["record_count"]), Text(s["file_size_in_bytes"]),
+        MapText(s["column_sizes"]), MapText(s["value_counts"]), MapText(s["null_value_counts"]), MapText(s["nan_value_counts"]),
+        MapText(s["lower_bounds"]), MapText(s["upper_bounds"]),
+        ListText(s["split_offsets"]), ListText(s["equality_ids"]), Text(s["sort_order_id"]), Text(s["first_row_id"]),
+        NormPath(s["referenced_data_file"]?.GetValue<string>()), Text(s["content_offset"]), Text(s["content_size_in_bytes"]),
+        s["partition"] is JsonObject p ? string.Join(",", p.Select(kv => $"{kv.Key}={Text(kv.Value)}")) : "");
+
+    private static JsonArray Rows(JsonNode tables, string name)
+    {
+        var table = tables[name]!;
+        Assert.True(table["error"] is null, $"Spark could not read the {name} metadata table: {table["error"]}");
+        return table["rows"]!.AsArray();
+    }
+
+    /// <summary>Our metadata tables against Spark's, column by column (paths normalised, timestamps to the millisecond).</summary>
+    private static async Task AssertSameMetadataTables(Table t, JsonNode tables, string label)
+    {
+        var snapshots = MetadataTables.Snapshots(t).ToDictionary(s => s.SnapshotId);
+        var sparkSnapshots = Rows(tables, "snapshots");
+        Assert.Equal(snapshots.Count, sparkSnapshots.Count);
+        foreach (var r in sparkSnapshots)
+        {
+            var o = snapshots[r!["snapshot_id"]!.GetValue<long>()];
+            Assert.Equal(o.ParentId, r["parent_id"]?.GetValue<long>());
+            Assert.Equal(o.Operation, r["operation"]?.GetValue<string>());
+            Assert.Equal(NormPath(o.ManifestList), NormPath(r["manifest_list"]?.GetValue<string>()));
+            Assert.Equal(o.CommittedAt.ToUnixTimeMilliseconds(), (long)Math.Round(r["committed_at"]!.GetValue<long>() / 1000.0));
+            Assert.Equal(o.Summary.Where(kv => kv.Key != "operation").OrderBy(kv => kv.Key), r["summary"]!.AsObject().Select(kv => KeyValuePair.Create(kv.Key, kv.Value!.GetValue<string>())).OrderBy(kv => kv.Key));
+        }
+
+        Assert.Equal(
+            MetadataTables.History(t).Select(h => $"{h.MadeCurrentAt.ToUnixTimeMilliseconds()}|{h.SnapshotId}|{h.ParentId}|{h.IsCurrentAncestor}"),
+            Rows(tables, "history").Select(r => $"{(long)Math.Round(r!["made_current_at"]!.GetValue<long>() / 1000.0)}|{r["snapshot_id"]}|{r["parent_id"]?.GetValue<long>()}|{r["is_current_ancestor"]!.GetValue<bool>()}"));
+
+        Assert.Equal(
+            MetadataTables.Refs(t).Select(r => $"{r.Name}|{r.Type}|{r.SnapshotId}|{r.MaxReferenceAgeInMs}|{r.MinSnapshotsToKeep}|{r.MaxSnapshotAgeInMs}").Order(),
+            Rows(tables, "refs").Select(r => $"{r!["name"]}|{r["type"]}|{r["snapshot_id"]}|{r["max_reference_age_in_ms"]?.GetValue<long>()}|{r["min_snapshots_to_keep"]?.GetValue<int>()}|{r["max_snapshot_age_in_ms"]?.GetValue<long>()}").Order());
+
+        var manifests = (await MetadataTables.ManifestsAsync(t)).ToDictionary(m => NormPath(m.Path));
+        var sparkManifests = Rows(tables, "manifests");
+        Assert.Equal(manifests.Count, sparkManifests.Count);
+        foreach (var r in sparkManifests)
+        {
+            var o = manifests[NormPath(r!["path"]!.GetValue<string>())];
+            Assert.Equal(
+                $"{o.Content}|{o.Length}|{o.PartitionSpecId}|{o.AddedSnapshotId}|{o.AddedDataFilesCount}|{o.ExistingDataFilesCount}|{o.DeletedDataFilesCount}|{o.AddedDeleteFilesCount}|{o.ExistingDeleteFilesCount}|{o.DeletedDeleteFilesCount}|" +
+                string.Join(";", o.PartitionSummaries.Select(p => $"{p.ContainsNull}|{p.ContainsNan?.ToString() ?? "null"}|{p.LowerBound ?? "null"}|{p.UpperBound ?? "null"}")),
+                $"{r["content"]}|{r["length"]}|{r["partition_spec_id"]}|{r["added_snapshot_id"]}|{r["added_data_files_count"]}|{r["existing_data_files_count"]}|{r["deleted_data_files_count"]}|{r["added_delete_files_count"]}|{r["existing_delete_files_count"]}|{r["deleted_delete_files_count"]}|" +
+                string.Join(";", r["partition_summaries"]!.AsArray().Select(p => $"{(p!["contains_null"]!.GetValue<bool>() ? "True" : "False")}|{(p["contains_nan"] is { } n ? (n.GetValue<bool>() ? "True" : "False") : "null")}|{Text(p["lower_bound"])}|{Text(p["upper_bound"])}")));
+        }
+
+        var files = (await MetadataTables.FilesAsync(t)).ToDictionary(f => $"{NormPath(f.FilePath)}@{f.ContentOffset}");
+        var sparkFiles = Rows(tables, "files");
+        Assert.Equal(files.Count, sparkFiles.Count);
+        foreach (var r in sparkFiles)
+        {
+            var o = files[$"{NormPath(r!["file_path"]!.GetValue<string>())}@{r["content_offset"]?.GetValue<long>()}"];
+            Assert.Equal(SparkFileText(r), FileText(o, r));
+        }
+
+        Assert.Equal(
+            (await MetadataTables.EntriesAsync(t)).Select(e => $"{e.Status}|{e.SnapshotId}|{e.SequenceNumber}|{e.FileSequenceNumber}|{NormPath(e.DataFile.FilePath)}@{e.DataFile.ContentOffset}").Order(),
+            Rows(tables, "entries").Select(r => $"{r!["status"]}|{r["snapshot_id"]}|{r["sequence_number"]?.GetValue<long>()}|{r["file_sequence_number"]?.GetValue<long>()}|{NormPath(r["data_file"]!["file_path"]!.GetValue<string>())}@{r["data_file"]!["content_offset"]?.GetValue<long>()}").Order());
+
+        var partitions = await MetadataTables.PartitionsAsync(t);
+        var sparkPartitions = Rows(tables, "partitions");
+        Assert.Equal(partitions.Count, sparkPartitions.Count);
+        string Counts(long records, int files, long bytes, long posRecords, int posFiles, long eqRecords, int eqFiles, long? last) =>
+            $"{records}|{files}|{bytes}|{posRecords}|{posFiles}|{eqRecords}|{eqFiles}|{last}";
+        var ours = partitions.Select(p => (Key: p.Partition, Row: p)).ToList();
+        foreach (var r in sparkPartitions)
+        {
+            var key = r!["partition"] as JsonObject;
+            var match = ours.Single(o => key is null
+                ? o.Key.Count == 0
+                : o.Key.Count == key.Count && o.Key.All(kv => PartitionText(kv.Value, key[kv.Key]) == Text(key[kv.Key])));
+            var p = match.Row;
+            Assert.Equal(
+                Counts(p.RecordCount, p.FileCount, p.TotalDataFileSizeInBytes, p.PositionDeleteRecordCount, p.PositionDeleteFileCount, p.EqualityDeleteRecordCount, p.EqualityDeleteFileCount, p.LastUpdatedSnapshotId),
+                Counts(r["record_count"]!.GetValue<long>(), r["file_count"]!.GetValue<int>(), r["total_data_file_size_in_bytes"]!.GetValue<long>(),
+                    r["position_delete_record_count"]!.GetValue<long>(), r["position_delete_file_count"]!.GetValue<int>(),
+                    r["equality_delete_record_count"]!.GetValue<long>(), r["equality_delete_file_count"]!.GetValue<int>(), r["last_updated_snapshot_id"]?.GetValue<long>()));
+            if (key is not null) Assert.Equal(p.SpecId, r["spec_id"]!.GetValue<int>());
+        }
+        _ = label;
+    }
+
+    private static async Task<List<long>> RefIds(Table t, string name)
+    {
+        var ids = new List<long>();
+        await foreach (var r in TableScan.ReadRowsAsync(t, new ScanRequest { Snapshot = SnapshotSelector.Ref(name) })) ids.Add((long)r[0]!);
+        return ids.Order().ToList();
+    }
+
+    [Spec("Snapshot References")]
+    [SkippableTheory]
+    [InlineData("refs_v2")]
+    [InlineData("refs_v3")]
+    public async Task Spark_reads_our_branches_and_tags(string name)
+    {
+        Require.Spark();
+        var t = fx.Tables[name].Table;
+        var refs = SparkView(name)["refs"]!.AsObject();
+        Assert.Equal(t.Metadata.Refs.Keys.Order(StringComparer.Ordinal), refs.Select(kv => kv.Key).Order(StringComparer.Ordinal));
+        Assert.DoesNotContain("short-lived", t.Metadata.Refs.Keys); // expired by its max-ref-age
+        foreach (var (refName, r) in refs)
+        {
+            Assert.Equal(t.Metadata.Refs[refName].SnapshotId, r!["snapshot_id"]!.GetValue<long>());
+            Assert.Equal(t.Metadata.Refs[refName].Type == SnapshotRefType.Branch ? "BRANCH" : "TAG", r["type"]!.GetValue<string>());
+            Assert.Equal(await RefIds(t, refName), r["ids"]!.AsArray().Select(x => x!.GetValue<long>()));
+        }
+        Assert.Contains(101L, await RefIds(t, "audit"));    // staged on the branch...
+        Assert.DoesNotContain(100L, await RefIds(t, "audit")); // ...with a row delta on the branch
+        Assert.DoesNotContain(101L, await RefIds(t, SnapshotRef.Main));
+        Assert.Equal(await RefIds(t, SnapshotRef.Main), await RefIds(t, "ff")); // fast-forwarded
+    }
+
+    [Spec("Snapshots")]
+    [Spec("Manifests")]
+    [Spec("Snapshot References")]
+    [SkippableTheory]
+    [MemberData(nameof(MetadataTableCases))]
+    public async Task Spark_sees_the_same_metadata_tables(string name)
+    {
+        Require.Spark();
+        await AssertSameMetadataTables(fx.Tables[name].Table, SparkView(name)["metadata_tables"]!, name);
+    }
+
+    public static TheoryData<string> MetadataTableCases()
+    {
+        var data = new TheoryData<string>();
+        foreach (var n in SparkTablesFixture.MetadataTableNames()) data.Add(n);
+        return data;
+    }
+
+    private static List<string> SparkChanges(JsonNode changes) =>
+        changes["rows"]!.AsArray().Select(r => $"{r!["_change_ordinal"]}|{r["_commit_snapshot_id"]}|{r["_change_type"]}|{r[r.AsObject().First().Key]}|{Text(r.AsObject().ElementAt(1).Value)}").Order().ToList();
+
+    private static async Task<List<string>> OurChanges(Table t)
+    {
+        var list = new List<string>();
+        await foreach (var c in ChangeFeed.ChangesAsync(t, null))
+            list.Add($"{c.ChangeOrdinal}|{c.CommitSnapshotId}|{c.ChangeType.ToString().ToUpperInvariant()}|{c.Row[0]}|{c.Row[1] ?? "null"}");
+        return list.Order().ToList();
+    }
+
+    /// <summary>Our change feed against Spark's <c>changes</c> table, for every table Spark can produce a changelog of.</summary>
+    [Spec("Row-level Deletes")]
+    [SkippableFact]
+    public async Task Spark_reports_the_same_changes()
+    {
+        Require.Spark();
+        var compared = new List<string>();
+        foreach (var name in SparkTablesFixture.MetadataTableNames())
+        {
+            var changes = SparkView(name)["changes"]!;
+            if (changes["error"] is { } error)
+            {
+                // Iceberg Java 1.12's changelog scan refuses tables with delete files; only the feed's own L0 tests cover those.
+                Assert.Contains("Delete files are currently not supported in changelog scans", error.GetValue<string>());
+                continue;
+            }
+            Assert.Equal(SparkChanges(changes), await OurChanges(fx.Tables[name].Table));
+            compared.Add(name);
+        }
+        Assert.Contains("refs_v2", compared);
+        Assert.Contains("refs_v3", compared);
+        Assert.Contains("CopyOnWrite_v3", compared); // copy-on-write: whole rewritten files as DELETE + INSERT, carry-overs included
+    }
+
+    /// <summary>A table Spark gave branches, tags, a branch write, a rollback and a cherry-pick reads the same here.</summary>
+    [Spec("Snapshot References")]
+    [Spec("Snapshot Retention Policy")]
+    [SkippableFact]
+    public async Task We_read_Spark_branches_tags_rollback_and_cherry_pick()
+    {
+        Require.Spark();
+        var made = fx.Spark!["create-refs"]!;
+        Assert.True(made["error"] is null, $"Spark failed to build its table: {made["error"]}");
+        var t = await fx.Catalog.RegisterTableAsync(TableIdentifier.Of("db", "spark_refs"), made["metadata_location"]!.GetValue<string>());
+        await TableValidator.AssertValidAsync(t, new ValidationOptions { AllSnapshots = true, Deep = true });
+
+        foreach (var (name, r) in made["refs"]!.AsObject())
+        {
+            Assert.Equal(r!["snapshot_id"]!.GetValue<long>(), t.Metadata.Refs[name].SnapshotId);
+            Assert.Equal(r["ids"]!.AsArray().Select(x => x!.GetValue<long>()), await RefIds(t, name));
+        }
+        Assert.Equal(new SnapshotRef(t.Metadata.Refs["audit"].SnapshotId, SnapshotRefType.Branch, 2, null, 7L * 86_400_000), t.Metadata.Refs["audit"]);
+        Assert.Equal(30L * 86_400_000, t.Metadata.Refs["t1"].MaxRefAgeMs);
+        Assert.Equal(made["cherry_picked"]!.GetValue<long>().ToString(System.Globalization.CultureInfo.InvariantCulture), t.Metadata.CurrentSnapshot!.Summary["source-snapshot-id"]);
+        var rolledBackTo = made["rolled_back_to"]!.GetValue<long>();
+        Assert.Contains(MetadataTables.History(t), h => h.SnapshotId == rolledBackTo);
+        Assert.Contains(MetadataTables.History(t), h => !h.IsCurrentAncestor);
+
+        await AssertSameMetadataTables(t, made["metadata_tables"]!, "spark_refs");
+        Assert.True(made["changes"]!["error"] is null, $"{made["changes"]!["error"]}");
+        Assert.Equal(SparkChanges(made["changes"]!), await OurChanges(t));
+
+        // Our expiry honours Spark's retention settings: audit keeps 2 snapshots, nothing tagged or on main expires.
+        var expired = await Maintenance.ExpireAsync(t, new ExpireOptions { OlderThanMs = long.MaxValue, CleanExpiredFiles = false });
+        Assert.All(t.Metadata.Refs.Values, r => Assert.NotNull(t.Metadata.SnapshotById(r.SnapshotId)));
+        Assert.Equal(2, t.Metadata.Ancestors(t.Metadata.Refs["audit"].SnapshotId).Count());
+        Assert.NotEmpty(expired.Expired);
     }
 }

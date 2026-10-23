@@ -6,6 +6,9 @@ Runs inside the apache/spark image via spark-submit (see TestSupport/SparkOracle
     read-tables <metadata.json>...  the same for many tables in one JVM: {location: description | {"error": ...}}
                                     an argument "merge:<spec.json>" instead replays a MERGE in Spark (see merge_in_spark)
                                     an argument "query:<json>" is instead a read query (see run_query), keyed by itself
+                                    "meta:<metadata.json>" also dumps the metadata tables and the changelog;
+                                    "create-refs:<dir>" first has Spark build a table with branches, tags, a
+                                    rollback and a cherry-pick under <dir> (result key "create-refs")
     fixtures <out_dir>              write reference tables (DVs, position deletes, row lineage) with Spark
 
 Output is the JSON document after the last @@ORACLE@@ marker on stdout; Spark's own logging goes to stderr.
@@ -195,10 +198,134 @@ def run_query(spark: SparkSession, spec: dict[str, Any]) -> dict[str, Any]:
     }
 
 
+METADATA_TABLES = (
+    "snapshots",
+    "history",
+    "refs",
+    "manifests",
+    "files",
+    "entries",
+    "partitions",
+)
+
+
+def error_text(e: Exception) -> str:
+    java = getattr(e, "java_exception", None)
+    return str(java) if java is not None else f"{type(e).__name__}: {e}"
+
+
+def describe_refs(spark: SparkSession, location: str) -> dict[str, Any]:
+    """Every branch and tag as Spark reads it (VERSION AS OF 'name' for a path-loaded table)."""
+    refs = spark.read.format("iceberg").load(f"{location}#refs").collect()
+    result: dict[str, Any] = {}
+    for r in refs:
+        kind = "branch" if r["type"] == "BRANCH" else "tag"
+        df = spark.read.format("iceberg").option(kind, r["name"]).load(location)
+        key = df.columns[0]
+        result[r["name"]] = {
+            "type": r["type"],
+            "snapshot_id": r["snapshot_id"],
+            "ids": sorted(x[key] for x in df.select(key).collect()),
+        }
+    return result
+
+
+def describe_metadata_tables(spark: SparkSession, location: str) -> dict[str, Any]:
+    result: dict[str, Any] = {}
+    for name in METADATA_TABLES:
+        try:
+            df = spark.read.format("iceberg").load(f"{location}#{name}")
+            df = df.drop("readable_metrics") if "readable_metrics" in df.columns else df
+            data_file = "data_file" in df.columns
+            rows = [r.asDict(recursive=True) for r in df.collect()]
+            if data_file:
+                for r in rows:
+                    r["data_file"].pop("readable_metrics", None)
+            result[name] = {
+                "columns": df.columns,
+                "rows": [to_jsonable(r) for r in rows],
+            }
+        except Exception as e:  # noqa: BLE001 - one unsupported table must not hide the others
+            result[name] = {"error": error_text(e)}
+    return result
+
+
+def describe_changes(spark: SparkSession, location: str) -> dict[str, Any]:
+    """The changelog (Spark's changes table) between the first and the current snapshot of main."""
+    try:
+        df = spark.read.format("iceberg").load(f"{location}#changes")
+        key = df.columns[0]
+        rows = df.orderBy("_change_ordinal", key, "_change_type").collect()
+        return {"columns": df.columns, "rows": [to_jsonable(r.asDict()) for r in rows]}
+    except Exception as e:  # noqa: BLE001
+        return {"error": error_text(e)}
+
+
+def create_refs_table(spark: SparkSession, warehouse: str) -> dict[str, Any]:
+    """A table Spark gives branches, tags, a branch write, a rollback and a cherry-pick, for us to read."""
+    spark.conf.set("spark.sql.catalog.sx", "org.apache.iceberg.spark.SparkCatalog")
+    spark.conf.set("spark.sql.catalog.sx.type", "hadoop")
+    spark.conf.set("spark.sql.catalog.sx.warehouse", f"file://{warehouse}")
+    t = "sx.db.spark_refs"
+    spark.sql(
+        f"CREATE TABLE {t} (id bigint NOT NULL, v string) USING iceberg TBLPROPERTIES ('format-version'='2')"
+    )
+
+    def current() -> int:
+        return spark.sql(
+            f"SELECT snapshot_id FROM {t}.snapshots ORDER BY committed_at DESC LIMIT 1"
+        ).collect()[0][0]
+
+    def head() -> int:
+        return spark.sql(
+            f"SELECT snapshot_id FROM {t}.refs WHERE name = 'main'"
+        ).collect()[0][0]
+
+    spark.sql(f"INSERT INTO {t} VALUES (1, 'a'), (2, 'b')")
+    spark.sql(f"ALTER TABLE {t} CREATE TAG t1 RETAIN 30 DAYS")
+    spark.sql(f"INSERT INTO {t} VALUES (3, 'c')")
+    s2 = head()
+    spark.sql(
+        f"ALTER TABLE {t} CREATE BRANCH audit RETAIN 7 DAYS WITH SNAPSHOT RETENTION 2 SNAPSHOTS"
+    )
+    spark.sql(f"INSERT INTO {t}.branch_audit VALUES (4, 'd')")
+    spark.sql(f"DELETE FROM {t}.branch_audit WHERE id = 1")
+    spark.sql(f"INSERT INTO {t} VALUES (5, 'e')")
+    s5 = current()
+    spark.sql(f"CALL sx.system.rollback_to_snapshot('db.spark_refs', {s2})")
+    spark.sql(f"INSERT INTO {t} VALUES (6, 'f')")
+    spark.sql(f"CALL sx.system.cherrypick_snapshot('db.spark_refs', {s5})")
+    spark.sql(f"ALTER TABLE {t} CREATE TAG t2")
+    meta_dir = Path(warehouse) / "db" / "spark_refs" / "metadata"
+    latest = max(
+        meta_dir.glob("v*.metadata.json"), key=lambda p: int(p.name[1:].split(".")[0])
+    )
+    location = f"file://{latest}"
+    return {
+        "metadata_location": location,
+        "rolled_back_to": s2,
+        "cherry_picked": s5,
+        "description": describe_metadata_file(spark, location),
+        "refs": describe_refs(spark, location),
+        "metadata_tables": describe_metadata_tables(spark, location),
+        "changes": describe_changes(spark, location),
+    }
+
+
 def cmd_read_tables(locations: list[str]) -> dict[str, Any]:
     spark = session()
     result: dict[str, Any] = {}
-    for location in locations:
+    for arg in locations:
+        if arg.startswith("create-refs:"):
+            try:
+                result["create-refs"] = create_refs_table(
+                    spark, arg.removeprefix("create-refs:")
+                )
+            except Exception as e:  # noqa: BLE001
+                result["create-refs"] = {"error": error_text(e)}
+            continue
+        meta = arg.startswith("meta:")
+        location = arg.removeprefix("meta:")
         try:
             if location.startswith(MERGE_PREFIX):
                 result[location] = merge_in_spark(
@@ -210,12 +337,14 @@ def cmd_read_tables(locations: list[str]) -> dict[str, Any]:
                     spark, json.loads(location[len("query:") :])
                 )
                 continue
-            result[location] = describe_metadata_file(spark, location)
+            described = describe_metadata_file(spark, location)
+            if meta:
+                described["refs"] = describe_refs(spark, location)
+                described["metadata_tables"] = describe_metadata_tables(spark, location)
+                described["changes"] = describe_changes(spark, location)
+            result[location] = described
         except Exception as e:  # noqa: BLE001 - report per table; one bad table must not hide the others
-            java = getattr(e, "java_exception", None)
-            result[location] = {
-                "error": str(java) if java is not None else f"{type(e).__name__}: {e}"
-            }
+            result[location] = {"error": error_text(e)}
     return result
 
 

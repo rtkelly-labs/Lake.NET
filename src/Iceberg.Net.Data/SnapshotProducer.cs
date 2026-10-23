@@ -51,7 +51,30 @@ public sealed class SnapshotProducer
         _startingSnapshotId = table.Metadata.CurrentSnapshotId;
     }
 
-    private readonly long? _startingSnapshotId;
+    private long? _startingSnapshotId;
+    private string _branch = SnapshotRef.Main;
+
+    /// <summary>
+    /// Commit to <paramref name="branch"/> instead of <c>main</c> (Java's <c>toBranch</c>): the new snapshot's parent is the
+    /// branch head, validation looks at the branch's history, and only that ref moves, so <c>main</c> is untouched (the
+    /// write half of write-audit-publish). A branch that does not exist yet is created from <c>main</c>'s current snapshot.
+    /// </summary>
+    public SnapshotProducer ToBranch(string branch)
+    {
+        ArgumentException.ThrowIfNullOrEmpty(branch);
+        if (_table.Metadata.Refs.TryGetValue(branch, out var r) && r.Type != SnapshotRefType.Branch)
+            throw new ArgumentException($"{branch} is a tag, not a branch");
+        _branch = branch;
+        _startingSnapshotId = Head(_table.Metadata);
+        return this;
+    }
+
+    /// <summary>The branch head this producer commits on (main's current snapshot for a branch not created yet).</summary>
+    private long? Head(TableMetadata m) =>
+        _branch != SnapshotRef.Main && m.Refs.TryGetValue(_branch, out var r) ? r.SnapshotId : m.CurrentSnapshotId;
+
+    private UpdateRequirement.AssertRefSnapshotId BranchRequirement(TableMetadata m) =>
+        new(_branch, m.Refs.TryGetValue(_branch, out var r) ? r.SnapshotId : null);
     private Func<DataFile, bool>? _conflictFilter;
     /// <summary>The data files the first attempt removed: a serializable retry must still find every one of them live.</summary>
     private List<DataFile>? _removedAtStart;
@@ -89,7 +112,8 @@ public sealed class SnapshotProducer
         var m = _table.Metadata;
         var since = new List<Snapshot>();
         var reachedStart = _startingSnapshotId is null;
-        foreach (var snapshot in m.Ancestors(m.CurrentSnapshotId))
+        var head = Head(m);
+        foreach (var snapshot in m.Ancestors(head))
         {
             if (snapshot.SnapshotId == _startingSnapshotId)
             {
@@ -102,8 +126,8 @@ public sealed class SnapshotProducer
         // past it. Snapshots in between may have expired with it, so a conflicting file can no longer be ruled out (Java:
         // "Cannot determine history between starting snapshot ... and the last known ancestor").
         if (!reachedStart)
-            throw new ValidationException($"Cannot determine history between starting snapshot {_startingSnapshotId} and current snapshot {m.CurrentSnapshotId}: " +
-                $"it has expired or is no longer an ancestor of main; re-plan this {_operation} against the current table state");
+            throw new ValidationException($"Cannot determine history between starting snapshot {_startingSnapshotId} and current snapshot {head} of {_branch}: " +
+                $"it has expired or is no longer an ancestor of {_branch}; re-plan this {_operation} against the current table state");
         var removed = _removedAtStart ?? [];
         var removedPaths = removed.Select(f => f.FilePath).ToHashSet();
         foreach (var snapshot in since)
@@ -134,7 +158,7 @@ public sealed class SnapshotProducer
         // the filter would remove nothing and add the replacement rows a second time.
         if (removed.Count > 0)
         {
-            var live = (await TableScan.PlanFilesAsync(_table, Expression.True, null, ct)).Select(t => t.File.FilePath).ToHashSet();
+            var live = head is null ? [] : (await TableScan.PlanFilesAsync(_table, Expression.True, head, ct)).Select(t => t.File.FilePath).ToHashSet();
             if (removed.FirstOrDefault(f => !live.Contains(f.FilePath)) is { } gone)
                 throw new ValidationException($"{gone.FilePath}, which this {_operation} replaces, was removed by a concurrent commit (compaction or another writer); re-plan against the new table state");
         }
@@ -203,6 +227,18 @@ public sealed class SnapshotProducer
         return this;
     }
 
+    private readonly List<DataFile> _removeDeleteFiles = [];
+
+    /// <summary>
+    /// Remove these delete files (a delete-file rewrite). Each must still be live when the commit is applied, else
+    /// <see cref="ValidationException"/>: another writer rewrote or dropped it meanwhile.
+    /// </summary>
+    public SnapshotProducer RemoveDeleteFiles(IEnumerable<DataFile> files)
+    {
+        _removeDeleteFiles.AddRange(files);
+        return this;
+    }
+
     /// <summary>Add pre-written delete files (e.g. equality deletes).</summary>
     public SnapshotProducer AddDeleteFiles(IEnumerable<DataFile> files)
     {
@@ -229,6 +265,15 @@ public sealed class SnapshotProducer
         return this;
     }
 
+    private Func<TableMetadata, CancellationToken, Task>? _validateEachAttempt;
+
+    /// <summary>A check run against the table state every attempt commits on (cherry-pick's ancestry and partition checks).</summary>
+    internal SnapshotProducer ValidateEachAttempt(Func<TableMetadata, CancellationToken, Task> check)
+    {
+        _validateEachAttempt = check;
+        return this;
+    }
+
     public async Task<Snapshot> CommitAsync(CancellationToken ct = default)
     {
         var policy = CommitRetryPolicy.From(_table.Metadata);
@@ -237,20 +282,25 @@ public sealed class SnapshotProducer
         {
             try
             {
+                if (_validateEachAttempt is { } check) await check(_table.Metadata, ct);
                 if (attempt > 0) await ValidateNoConflictingDataAsync(ct);
                 var snapshot = await ApplyOrConflictAsync(ct);
                 var requirements = new List<UpdateRequirement>
                 {
                     new UpdateRequirement.AssertTableUuid(_table.Metadata.TableUuid),
-                    new UpdateRequirement.AssertRefSnapshotId(SnapshotRef.Main, _table.Metadata.CurrentSnapshotId),
+                    BranchRequirement(_table.Metadata),
                 };
                 try
                 {
-                    await _table.CommitAsync(requirements,
-                    [
-                        new MetadataUpdate.AddSnapshot(snapshot),
-                        new MetadataUpdate.SetSnapshotRef(SnapshotRef.Main, SnapshotRef.Branch(snapshot.SnapshotId)),
-                    ], ct);
+                    await _table.CommitAsync(requirements, [new MetadataUpdate.AddSnapshot(snapshot), SetBranch(snapshot.SnapshotId)], ct);
+                }
+                catch (ArgumentException stale) when (_table.Metadata.FormatVersion > 1)
+                {
+                    if (snapshot.SequenceNumber > await LastSequenceNumberAsync(ct)) throw;
+                    // The branch head is what we planned against, but another writer added a snapshot meanwhile (on another
+                    // branch, or before a rollback returned the head to our parent): our sequence number is stale. A conflict
+                    // to retry with the next sequence number, not an invalid commit (Java #15126).
+                    throw new CommitFailedException($"Sequence number {snapshot.SequenceNumber} of snapshot {snapshot.SnapshotId} is stale: {stale.Message}", stale);
                 }
                 catch (CommitStateUnknownException unknown) when (unknown.ServerResponded)
                 {
@@ -286,10 +336,10 @@ public sealed class SnapshotProducer
         }
         catch (Exception e) when (e is FileNotFoundException or DirectoryNotFoundException)
         {
-            var before = _table.Metadata.CurrentSnapshotId;
+            var before = Head(_table.Metadata);
             await _table.RefreshAsync(ct);
-            if (_table.Metadata.CurrentSnapshotId == before) throw;
-            throw new CommitFailedException($"Files of snapshot {before} were removed while this {_operation} was being prepared; the table has moved to {_table.Metadata.CurrentSnapshotId}", e);
+            if (Head(_table.Metadata) == before) throw;
+            throw new CommitFailedException($"Files of snapshot {before} were removed while this {_operation} was being prepared; {_branch} has moved to {Head(_table.Metadata)}", e);
         }
     }
 
@@ -303,8 +353,22 @@ public sealed class SnapshotProducer
         var snapshot = await ApplyAsync(ct);
         _attemptArtifacts.Clear();
         return new TableCommit(_table.Identifier,
-            [new UpdateRequirement.AssertTableUuid(_table.Metadata.TableUuid), new UpdateRequirement.AssertRefSnapshotId(SnapshotRef.Main, _table.Metadata.CurrentSnapshotId)],
-            [new MetadataUpdate.AddSnapshot(snapshot), new MetadataUpdate.SetSnapshotRef(SnapshotRef.Main, SnapshotRef.Branch(snapshot.SnapshotId))]);
+            [new UpdateRequirement.AssertTableUuid(_table.Metadata.TableUuid), BranchRequirement(_table.Metadata)],
+            [new MetadataUpdate.AddSnapshot(snapshot), SetBranch(snapshot.SnapshotId)]);
+    }
+
+    /// <summary>Move the target branch to the new snapshot, keeping its retention settings (Java's <c>SnapshotRef.builderFrom</c>).</summary>
+    private MetadataUpdate.SetSnapshotRef SetBranch(long snapshotId)
+    {
+        if (!_table.Metadata.Refs.TryGetValue(_branch, out var existing)) return new(_branch, SnapshotRef.Branch(snapshotId));
+        if (existing.Type != SnapshotRefType.Branch) throw new ArgumentException($"{_branch} is a tag, not a branch");
+        return new(_branch, existing with { SnapshotId = snapshotId });
+    }
+
+    private async Task<long> LastSequenceNumberAsync(CancellationToken ct)
+    {
+        await _table.RefreshAsync(ct);
+        return _table.Metadata.LastSequenceNumber;
     }
 
     private async Task<bool> AppliedAsync(long snapshotId, CommitStateUnknownException unknown, CancellationToken ct)
@@ -331,7 +395,7 @@ public sealed class SnapshotProducer
     {
         var m = _table.Metadata;
         if (m.FormatVersion < 2) throw new NotSupportedException("Writing to v1 tables is not supported; upgrade the table to v2");
-        var parent = m.CurrentSnapshot;
+        var parent = Head(m) is { } headId ? m.SnapshotById(headId) : null;
         var snapshotId = NewSnapshotId();
         var sequenceNumber = m.NextSequenceNumber;
         var metaDir = m.Property("write.metadata.path", $"{m.Location}/metadata").TrimEnd('/');
@@ -342,7 +406,7 @@ public sealed class SnapshotProducer
         var parentManifests = parent is null ? [] : await TableScan.ManifestsAsync(_table, parent, ct);
 
         // 0. Row-level deletes / conversion: decide which delete files to add and which to remove.
-        var deleteChange = _rowDeletes is not null || _convertPositionDeletes || _addedDeleteFiles.Count > 0 || _deleteWhere is not null
+        var deleteChange = _rowDeletes is not null || _convertPositionDeletes || _addedDeleteFiles.Count > 0 || _deleteWhere is not null || _removeDeleteFiles.Count > 0
             ? await PlanDeleteChangeAsync(parent, parentManifests, commitUuid, ct)
             : DeleteChange.None;
 
@@ -521,6 +585,13 @@ public sealed class SnapshotProducer
         void Remove(DataFile f)
         {
             if (removed.Add((f.FilePath, f.ContentOffset))) removedFiles.Add(f);
+        }
+
+        foreach (var f in _removeDeleteFiles)
+        {
+            var entry = index.All.Concat(index.EqualityDeletes).FirstOrDefault(e => e.File.FilePath == f.FilePath && e.File.ContentOffset == f.ContentOffset)
+                ?? throw new ValidationException($"Delete file {f.FilePath} is no longer live in snapshot {parent.SnapshotId}: a concurrent commit rewrote or removed it");
+            Remove(entry.File);
         }
 
         // Data files removed in this commit take their deletion vectors with them (no dangling DVs).
@@ -773,7 +844,7 @@ public sealed class SnapshotProducer
     /// <summary>After a successful commit, delete manifests/lists from failed attempts that the winning snapshot does not reference.</summary>
     private async Task CleanupAsync(CancellationToken ct)
     {
-        var current = _table.Metadata.CurrentSnapshot!;
+        var current = _table.Metadata.SnapshotById(Head(_table.Metadata)!.Value)!;
         var live = (await TableScan.ManifestsAsync(_table, current, ct)).Select(mf => mf.ManifestPath).Append(current.ManifestList!).ToHashSet();
         foreach (var path in _staleArtifacts.Where(p => !live.Contains(p)))
         {
