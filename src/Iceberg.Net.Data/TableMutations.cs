@@ -32,7 +32,7 @@ public sealed record MutationResult(Snapshot Snapshot, long RowsInserted, long? 
 /// are seen by the retry), using <c>commit.retry.*</c> properties for the retry budget.
 /// Rows are <c>object?[]</c> aligned to the current schema's top-level columns (see <see cref="ParquetFiles"/>).
 /// </summary>
-public static class TableMutations
+public static partial class TableMutations
 {
     public const string DeleteModeProperty = "write.delete.mode";
     public const string MergeModeProperty = "write.merge.mode";
