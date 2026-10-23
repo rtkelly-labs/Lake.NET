@@ -65,14 +65,20 @@ public static partial class TableScan
         var m = table.Metadata;
         var snapshot = Resolve(m, snapshotId);
         if (snapshot is null) return new ScanPlan([], 0, 0, 0, 0);
-
         var schema = m.CurrentSchema;
-        var bound = Binder.Bind(schema, filter);
+        return await PlanCoreAsync(table, snapshot, await ManifestsAsync(table, snapshot, ct), schema, Binder.Bind(schema, filter), fileFilter, ct);
+    }
+
+    /// <param name="schema">The schema <paramref name="bound"/> was bound to; partition specs and manifests are read with it.</param>
+    private static async Task<ScanPlan> PlanCoreAsync(Table table, Snapshot snapshot, IReadOnlyList<ManifestFile> manifests, Schema schema, Expression bound,
+        Func<DataFile, bool>? fileFilter, CancellationToken ct)
+    {
+        var m = table.Metadata;
         var metrics = bound is AlwaysTrue ? null : new MetricsEvaluator(bound);
         var bySpec = new Dictionary<int, (ManifestEvaluator Manifest, Func<IReadOnlyList<object?>, bool> Partition)>();
         int read = 0, skipped = 0, byPartition = 0, byMetrics = 0;
         var tasks = new List<ScanTask>();
-        foreach (var manifest in (await ManifestsAsync(table, snapshot, ct)).Where(mf => mf.Content == ManifestContent.Data))
+        foreach (var manifest in manifests.Where(mf => mf.Content == ManifestContent.Data))
         {
             var spec = m.SpecById(manifest.PartitionSpecId);
             if (!bySpec.TryGetValue(spec.SpecId, out var eval))
@@ -131,25 +137,22 @@ public static partial class TableScan
     /// Read all rows of a snapshot, projected onto the current schema (by field ID), with position deletes,
     /// deletion vectors and equality deletes applied (merge-on-read).
     /// </summary>
+    /// <remarks>
+    /// Deliberately the <em>current</em> schema even for an old snapshot (rows stay aligned with <see cref="Table.Schema"/>
+    /// for callers that index positionally); <see cref="ReadRowsAsync"/> with a <see cref="SnapshotSelector"/> reads a
+    /// snapshot in the schema it was written with, as Spark's time travel does.
+    /// </remarks>
     public static Task<List<object?[]>> ReadAllAsync(Table table, long? snapshotId = null, CancellationToken ct = default) =>
         ReadAsync(table, Expression.True, snapshotId, ct);
 
-    /// <summary>Rows of a snapshot matching <paramref name="filter"/>: pruned planning, deletes applied, then the filter on every row.</summary>
+    /// <summary>
+    /// Rows of a snapshot matching <paramref name="filter"/> (bound to the current schema), in the current schema: pruned
+    /// planning and row groups, deletes applied, then the filter on every row. Streams internally; only the result list is held.
+    /// </summary>
     public static async Task<List<object?[]>> ReadAsync(Table table, Expression filter, long? snapshotId = null, CancellationToken ct = default)
     {
-        var bound = Binder.Bind(table.Schema, filter);
-        var matches = bound is AlwaysTrue ? null : RowEvaluator.Compile(bound);
-        var deletes = await DeletesAsync(table, snapshotId, ct);
-        var mapping = NameMapping.ForTable(table.Metadata.Properties);
         var rows = new List<object?[]>();
-        foreach (var task in await PlanFilesAsync(table, filter, snapshotId, ct))
-        {
-            var fileRows = await DataFiles.ReadAsync(table.IO, task.File, table.Schema, mapping, ct);
-            var isDeleted = deletes.IsEmpty ? null : await deletes.RowFilterAsync(task.File, task.DataSequenceNumber, table.Schema, ct);
-            for (var pos = 0; pos < fileRows.Count; pos++)
-                if (isDeleted?.Invoke(pos, fileRows[pos]) != true && matches?.Invoke(fileRows[pos]) != false)
-                    rows.Add(fileRows[pos]);
-        }
+        await foreach (var batch in ReadBatchesAsync(table, filter, snapshotId, null, ct)) rows.AddRange(batch);
         return rows;
     }
 }

@@ -126,8 +126,11 @@ public sealed class SparkTablesFixture : IAsyncLifetime
         }
 
         await BuildUpdateMergeAsync();
+        await BuildQueriesAsync();
 
-        Spark = await SparkOracle.ReadTablesAsync(Tables.Values.Select(b => b.Table.MetadataLocation!).Concat(SparkMerges.Values));
+        // One Spark run: every table, the MERGEs Spark replays, and the read queries.
+        Spark = await SparkOracle.ReadTablesAsync(Tables.Values.Select(b => b.Table.MetadataLocation!)
+            .Concat(SparkMerges.Values).Concat(Queries.Select(q => q.Key)));
     }
 
     /// <summary>
@@ -187,6 +190,65 @@ public sealed class SparkTablesFixture : IAsyncLifetime
                 ["sql"] = MergeSql,
             }.ToJsonString());
             SparkMerges[name] = $"merge:{spec}";
+        }
+    }
+
+    /// <summary>A read Spark runs in the same JVM (key: <c>query:{json}</c>, see spark_oracle.py run_query) and its <see cref="ScanRequest"/> twin.</summary>
+    public sealed record Query(string Key, Table Table, ScanRequest Ours);
+
+    public List<Query> Queries { get; } = new();
+
+    /// <summary>
+    /// Time travel across a rename, a drop, a widening and an added column (Spark's versionAsOf/timestampAsOf, i.e.
+    /// VERSION AS OF / TIMESTAMP AS OF), and filtered, projected reads of the delete-heavy tables built above.
+    /// </summary>
+    private async Task BuildQueriesAsync()
+    {
+        var schema = new Schema(0, [NestedField.Require(1, "id", PrimitiveType.Long), NestedField.Optional(2, "name", PrimitiveType.String),
+            NestedField.Optional(3, "extra", PrimitiveType.Int), NestedField.Optional(4, "qty", PrimitiveType.Int)]);
+        static object?[] Row(int i) => [(long)i, i % 4 == 0 ? null : $"n{i}", i * 2, i % 5];
+        var t = await _catalog!.CreateTableAsync(new CreateTableRequest(TableIdentifier.Of("db", "time_travel_v2"), schema, FormatVersion: 2));
+        var s1 = (await TableMutations.InsertAsync(t, Enumerable.Range(0, 10).Select(Row).ToList())).Snapshot.SnapshotId;
+        t = await _catalog.LoadTableAsync(t.Identifier);
+        // Small row groups, so row-group pruning runs on what Spark also reads.
+        var file = await ParquetFiles.WriteAsync(t.IO, $"{t.Location}/data/{Guid.NewGuid():N}.parquet", t.Schema, 0, [], Enumerable.Range(10, 20).Select(Row).ToList(),
+            new ParquetWriteOptions { RowGroupRows = 4 });
+        var s2 = (await SnapshotProducer.Append(t).AddFiles([file]).CommitAsync()).SnapshotId;
+        await Task.Delay(20); // distinct snapshot-log instants
+        t = await _catalog.LoadTableAsync(t.Identifier);
+        await t.UpdateSchemaAsync(u => u.RenameColumn("name", "title").DeleteColumn("extra").UpdateColumn("qty", PrimitiveType.Long).AddColumn("note", PrimitiveType.String));
+        t = await _catalog.LoadTableAsync(t.Identifier);
+        await TableMutations.InsertAsync(t, Enumerable.Range(30, 10).Select(i => new object?[] { (long)i, $"n{i}", (long)(i % 5), i % 2 == 0 ? "x" : null }).ToList());
+        await TableMutations.DeleteWhereAsync(await _catalog.LoadTableAsync(t.Identifier), Expr.In("id", 13L, 22L), DeleteStrategy.PositionDeletes);
+        t = await _catalog.LoadTableAsync(t.Identifier);
+        string At(long snapshotId) => DateTimeOffset.FromUnixTimeMilliseconds(t.Metadata.SnapshotLog.Single(e => e.SnapshotId == snapshotId).TimestampMs)
+            .UtcDateTime.ToString("yyyy-MM-dd HH:mm:ss.fff", System.Globalization.CultureInfo.InvariantCulture);
+        DateTimeOffset Instant(long snapshotId) => DateTimeOffset.FromUnixTimeMilliseconds(t.Metadata.SnapshotLog.Single(e => e.SnapshotId == snapshotId).TimestampMs);
+
+        void Add(Table table, JsonObject spark, ScanRequest ours)
+        {
+            spark["location"] = table.MetadataLocation;
+            Queries.Add(new Query("query:" + spark.ToJsonString(), table, ours));
+        }
+        Add(t, new JsonObject { ["version_as_of"] = s1 }, new ScanRequest { Snapshot = SnapshotSelector.Id(s1) });
+        Add(t, new JsonObject { ["version_as_of"] = s2, ["where"] = "name = 'n13' OR extra > 50 OR name IS NULL" },
+            new ScanRequest { Snapshot = SnapshotSelector.Id(s2), Filter = Expr.Or(Expr.Equal("name", "n13"), Expr.GreaterThan("extra", 50), Expr.IsNull("name")) });
+        Add(t, new JsonObject { ["version_as_of"] = s2, ["where"] = "extra BETWEEN 30 AND 41", ["columns"] = new JsonArray("id", "extra", "name") },
+            new ScanRequest { Snapshot = SnapshotSelector.Id(s2), Filter = Expr.And(Expr.GreaterThanOrEqual("extra", 30), Expr.LessThanOrEqual("extra", 41)), Columns = ["id", "extra", "name"] });
+        Add(t, new JsonObject { ["timestamp_as_of"] = At(s2), ["where"] = "id >= 12" },
+            new ScanRequest { Snapshot = SnapshotSelector.AsOf(Instant(s2)), Filter = Expr.GreaterThan("id", 11L) });
+        Add(t, new JsonObject { ["timestamp_as_of"] = At(s1) }, new ScanRequest { Snapshot = SnapshotSelector.AsOf(Instant(s1)) });
+        Add(t, new JsonObject { ["where"] = "title LIKE 'n2%' OR note IS NOT NULL" },
+            new ScanRequest { Filter = Expr.Or(Expr.StartsWith("title", "n2"), Expr.NotNull("note")) });
+        Add(t, new JsonObject { ["where"] = "qty < 2 AND id <> 31", ["columns"] = new JsonArray("id", "qty", "title") },
+            new ScanRequest { Filter = Expr.And(Expr.LessThan("qty", 2L), Expr.NotEqual("id", 31L)), Columns = ["id", "qty", "title"] });
+        foreach (var name in new[] { "PositionDeletes_v3", "EqualityDeletes_v2", "partitioned_v3", "evolved_v2", "upgraded_v2_to_v3" })
+        {
+            var table = Tables[name].Table;
+            Add(table, new JsonObject { ["where"] = "amount > 10.0 AND region = 'eu'" },
+                new ScanRequest { Filter = Expr.And(Expr.GreaterThan("amount", 10.0), Expr.Equal("region", "eu")) });
+            Add(table, new JsonObject { ["where"] = "name IS NULL OR id < 7 OR id IN (26, 101, 201)", ["columns"] = new JsonArray("id", "name", "qty") },
+                new ScanRequest { Filter = Expr.Or(Expr.IsNull("name"), Expr.LessThan("id", 7L), Expr.In("id", 26L, 101L, 201L)), Columns = ["id", "name", "qty"] });
         }
     }
 
@@ -387,5 +449,32 @@ public sealed class SparkCrossEngineTests(SparkTablesFixture fx) : IClassFixture
         Assert.Contains(33L, ours.Keys);
         Assert.DoesNotContain(31L, ours.Keys);
         Assert.DoesNotContain(1L, ours.Keys);
+    }
+
+    /// <summary>
+    /// Spark reads old snapshots (VERSION AS OF / TIMESTAMP AS OF) in the schema they were written with, and filtered,
+    /// projected reads, exactly as <see cref="TableScan.ReadRowsAsync"/> does: same columns, same rows.
+    /// </summary>
+    [Spec("Point in Time Reads (Time Travel)")]
+    [Spec("Column Projection")]
+    [Spec("Scan Planning")]
+    [SkippableFact]
+    public async Task Spark_agrees_on_time_travel_and_filtered_reads()
+    {
+        Require.Spark();
+        Assert.NotEmpty(fx.Queries);
+        foreach (var q in fx.Queries)
+        {
+            var view = fx.Spark![q.Key]!;
+            Assert.True(view["error"] is null, $"Spark failed {q.Key}: {view["error"]}");
+            var schema = TableScan.SchemaOf(q.Table, q.Ours);
+            Assert.Equal(schema.Columns.Select(c => c.Name), view["columns"]!.AsArray().Select(c => c!.GetValue<string>()));
+            var ours = new List<object?[]>();
+            await foreach (var row in TableScan.ReadRowsAsync(q.Table, q.Ours)) ours.Add(row);
+            var theirs = SparkJson.Rows(schema, view["rows"]!.AsArray());
+            Assert.True(SparkJson.Rows(schema, ours).OrderBy(kv => kv.Key).SequenceEqual(theirs.OrderBy(kv => kv.Key)),
+                $"{q.Key}\nours:   {string.Join(", ", ours.Select(r => r[0]).Order())}\nspark:  {string.Join(", ", theirs.Keys.Order())}");
+            Assert.Equal(ours.Count, await TableScan.CountAsync(q.Table, q.Ours));
+        }
     }
 }

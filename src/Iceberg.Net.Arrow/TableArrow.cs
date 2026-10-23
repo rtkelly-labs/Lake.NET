@@ -11,24 +11,25 @@ namespace Iceberg.Net.Arrow;
 public static class TableArrow
 {
     /// <summary>
-    /// Matching rows as record batches (one per data file, after deletes and the filter; empty batches skipped), in the
-    /// current schema with field IDs.
+    /// Matching rows as record batches (one per data-file row group, after deletes and the filter; empty batches skipped),
+    /// in the current schema with field IDs. Memory is bounded by a row group.
     /// </summary>
     public static async IAsyncEnumerable<RecordBatch> ReadBatchesAsync(Table table, Expression? filter = null, long? snapshotId = null,
         [EnumeratorCancellation] CancellationToken ct = default)
     {
-        filter ??= Expression.True;
-        var bound = Binder.Bind(table.Schema, filter);
-        var matches = bound is AlwaysTrue ? null : RowEvaluator.Compile(bound);
-        var deletes = await TableScan.DeletesAsync(table, snapshotId, ct);
-        var mapping = Types.NameMapping.ForTable(table.Metadata.Properties);
-        foreach (var task in await TableScan.PlanFilesAsync(table, filter, snapshotId, ct))
-        {
-            var rows = await DataFiles.ReadAsync(table.IO, task.File, table.Schema, mapping, ct);
-            var isDeleted = deletes.IsEmpty ? null : await deletes.RowFilterAsync(task.File, task.DataSequenceNumber, table.Schema, ct);
-            var kept = rows.Where((r, pos) => isDeleted?.Invoke(pos, r) != true && matches?.Invoke(r) != false).ToList();
-            if (kept.Count > 0) yield return ArrowInterop.ToRecordBatch(table.Schema, kept);
-        }
+        await foreach (var rows in TableScan.ReadBatchesAsync(table, filter ?? Expression.True, snapshotId, null, ct))
+            yield return ArrowInterop.ToRecordBatch(table.Schema, rows);
+    }
+
+    /// <summary>
+    /// <paramref name="request"/>'s rows as record batches (one per data-file row group), in
+    /// <see cref="TableScan.SchemaOf"/> — the snapshot's schema narrowed to the requested columns — with field IDs.
+    /// </summary>
+    public static async IAsyncEnumerable<RecordBatch> ReadBatchesAsync(Table table, ScanRequest request, [EnumeratorCancellation] CancellationToken ct = default)
+    {
+        var schema = TableScan.SchemaOf(table, request);
+        await foreach (var rows in TableScan.ReadBatchesAsync(table, request, ct))
+            yield return ArrowInterop.ToRecordBatch(schema, rows);
     }
 
     public static Task<MutationResult> InsertAsync(Table table, RecordBatch batch, CancellationToken ct = default) =>
