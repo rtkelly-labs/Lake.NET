@@ -5,3 +5,4 @@ obj/
 TestResults/
 .venv/
 __pycache__/
+emulation/.cache/

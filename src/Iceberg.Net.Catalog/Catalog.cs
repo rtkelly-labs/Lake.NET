@@ -202,10 +202,18 @@ public abstract partial class MetastoreCatalog(string name, IFileIO io) : ICatal
             await TryDeleteAsync(newLocation, ct);
             throw;
         }
+        catch (CommitStateUnknownException)
+        {
+            throw;
+        }
         catch (Exception e) when (e is not OperationCanceledException)
         {
             // We may have won. Never delete the file: a reader may already be following the pointer.
-            throw new CommitStateUnknownException($"Commit to {id} failed with an unknown outcome; check {newLocation}", e);
+            throw new CommitStateUnknownException($"Commit to {id} failed with an unknown outcome; check {newLocation}", e)
+            {
+                // A service error response (as opposed to a timeout) means the call has finished.
+                ServerResponded = e is Amazon.Runtime.AmazonServiceException,
+            };
         }
         return updated;
     }

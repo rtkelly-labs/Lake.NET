@@ -246,11 +246,21 @@ public sealed class SnapshotProducer
                     new UpdateRequirement.AssertTableUuid(_table.Metadata.TableUuid),
                     new UpdateRequirement.AssertRefSnapshotId(SnapshotRef.Main, _table.Metadata.CurrentSnapshotId),
                 };
-                await _table.CommitAsync(requirements,
-                [
-                    new MetadataUpdate.AddSnapshot(snapshot),
-                    new MetadataUpdate.SetSnapshotRef(SnapshotRef.Main, SnapshotRef.Branch(snapshot.SnapshotId)),
-                ], ct);
+                try
+                {
+                    await _table.CommitAsync(requirements,
+                    [
+                        new MetadataUpdate.AddSnapshot(snapshot),
+                        new MetadataUpdate.SetSnapshotRef(SnapshotRef.Main, SnapshotRef.Branch(snapshot.SnapshotId)),
+                    ], ct);
+                }
+                catch (CommitStateUnknownException unknown) when (unknown.ServerResponded)
+                {
+                    // The catalog finished the request with an error, so its outcome is now fixed: look for our
+                    // snapshot (IDs are random 63-bit values). Absent means not applied, which is a plain conflict.
+                    if (!await AppliedAsync(snapshot.SnapshotId, unknown, ct))
+                        throw new CommitFailedException($"Commit of snapshot {snapshot.SnapshotId} was not applied ({unknown.Message})", unknown);
+                }
                 _attemptArtifacts.Clear();
                 await CleanupAsync(ct);
                 return snapshot;
@@ -264,6 +274,19 @@ public sealed class SnapshotProducer
                 await _table.RefreshAsync(ct);
             }
         }
+    }
+
+    private async Task<bool> AppliedAsync(long snapshotId, CommitStateUnknownException unknown, CancellationToken ct)
+    {
+        try
+        {
+            await _table.RefreshAsync(ct);
+        }
+        catch (Exception e) when (e is not OperationCanceledException)
+        {
+            throw new CommitStateUnknownException($"{unknown.Message}; resolving it failed: {e.Message}", unknown);
+        }
+        return _table.Metadata.SnapshotById(snapshotId) is not null;
     }
 
     /// <summary>Java's snapshot ID scheme: a random positive long derived from a UUID.</summary>

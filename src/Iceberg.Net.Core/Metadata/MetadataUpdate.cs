@@ -117,4 +117,12 @@ public abstract record UpdateRequirement(string Type)
 public class CommitFailedException(string message, Exception? inner = null) : Exception(message, inner);
 
 /// <summary>The commit outcome is unknown (e.g. a timeout after the catalog may have applied it). Never retry blindly and never delete written files.</summary>
-public class CommitStateUnknownException(string message, Exception? inner = null) : Exception(message, inner);
+public class CommitStateUnknownException(string message, Exception? inner = null) : Exception(message, inner)
+{
+    /// <summary>
+    /// True when the catalog answered with an error (e.g. HTTP 500/502/503/504 or a service exception): the request
+    /// has finished, so reloading the table tells whether it was applied. False for timeouts and dropped connections,
+    /// where the request may still be applied later and the outcome cannot be resolved by looking.
+    /// </summary>
+    public bool ServerResponded { get; init; }
+}

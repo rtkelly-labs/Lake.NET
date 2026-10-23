@@ -296,7 +296,7 @@ public sealed class RestCatalog : ICatalog
                 HttpStatusCode.Unauthorized or HttpStatusCode.Forbidden => new UnauthorizedAccessException(message),
                 // On commit, 500/502/503/504 mean the commit may or may not have been applied (Java 1.10: #13352, #13619).
                 HttpStatusCode.InternalServerError or HttpStatusCode.BadGateway or HttpStatusCode.ServiceUnavailable or HttpStatusCode.GatewayTimeout when commit =>
-                    new CommitStateUnknownException(message),
+                    new CommitStateUnknownException(message) { ServerResponded = true },
                 _ => new HttpRequestException($"{method} {path} failed: {message}", null, resp.StatusCode),
             };
         }

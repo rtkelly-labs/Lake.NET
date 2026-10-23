@@ -19,7 +19,8 @@ services:
     image: motoserver/moto:5.2.4
     depends_on:
       moto: { condition: service_healthy }
-    entrypoint: ["python", "-c", "import boto3; boto3.client('s3', endpoint_url='http://moto:5000', region_name='eu-west-1', aws_access_key_id='test', aws_secret_access_key='test').create_bucket(Bucket='iceberg-regression', CreateBucketConfiguration={'LocationConstraint': 'eu-west-1'})"]
+    # Idempotent: moto may already hold the bucket when the stack is restarted.
+    entrypoint: ["python", "-c", "import boto3; s3 = boto3.client('s3', endpoint_url='http://moto:5000', region_name='eu-west-1', aws_access_key_id='test', aws_secret_access_key='test'); s3.head_bucket(Bucket='iceberg-regression') if 'iceberg-regression' in [b['Name'] for b in s3.list_buckets()['Buckets']] else s3.create_bucket(Bucket='iceberg-regression', CreateBucketConfiguration={'LocationConstraint': 'eu-west-1'})"]
 
   rest:
     image: apache/iceberg-rest-fixture:1.10.0
@@ -34,3 +35,6 @@ services:
       CATALOG_IO__IMPL: org.apache.iceberg.aws.s3.S3FileIO
       CATALOG_S3_ENDPOINT: http://moto:5000
       CATALOG_S3_PATH__STYLE__ACCESS: "true"
+      # The fixture's default in-memory SQLite fails concurrent commits with SQLITE_BUSY (HTTP 500), which the
+      # soak tests surfaced. A file database with WAL and a busy timeout serialises writers instead.
+      CATALOG_URI: "jdbc:sqlite:/tmp/rest-catalog.db?journal_mode=WAL&busy_timeout=30000"
