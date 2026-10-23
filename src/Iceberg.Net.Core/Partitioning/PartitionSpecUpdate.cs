@@ -59,7 +59,8 @@ public sealed class PartitionSpecUpdate
         return this;
     }
 
-    public PartitionSpec Apply() => new(0, _fields);
+    /// <summary>The evolved spec, numbered with the next free spec ID (an identical existing spec is reused on commit).</summary>
+    public PartitionSpec Apply() => new(_base.PartitionSpecs.Max(s => s.SpecId) + 1, _fields);
 
     /// <summary>Requirements (the default spec and last partition ID have not moved) and updates (add + make default).</summary>
     public (IReadOnlyList<UpdateRequirement> Requirements, IReadOnlyList<MetadataUpdate> Updates) ToCommit() =>

@@ -174,7 +174,8 @@ public sealed class SchemaUpdate
     /// <summary>The evolved schema (validated: identifier rules, format-version type requirements).</summary>
     public Schema Apply()
     {
-        var schema = new Schema(_base.CurrentSchemaId, _columns, _identifiers);
+        // The next free schema ID, as Java's client sends it (servers such as Nessie do not renumber an add-schema).
+        var schema = new Schema(_base.Schemas.Max(s => s.SchemaId) + 1, _columns, _identifiers);
         if (schema.MinFormatVersion > _base.FormatVersion)
             throw new InvalidOperationException($"The schema needs format v{schema.MinFormatVersion}; the table is v{_base.FormatVersion}");
         return schema;

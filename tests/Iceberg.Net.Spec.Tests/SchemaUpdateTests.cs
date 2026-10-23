@@ -121,4 +121,17 @@ public sealed class SchemaUpdateTests : IDisposable
         Assert.Equal(["id", "qty", "note", "region", "from_a", "from_b"], final.Schema.Columns.Select(c => c.Name));
         Assert.Equal(6, final.Schema.FindField("from_b")!.Id);
     }
+
+    [Fact]
+    public async Task Evolutions_are_sent_with_the_next_free_id()
+    {
+        // Catalogs such as Nessie reject an add-schema/add-spec/add-sort-order whose ID is already taken.
+        var t = await Seeded();
+        Assert.Equal(1, new SchemaUpdate(t.Metadata).AddColumn("x", PrimitiveType.Long).Apply().SchemaId);
+        Assert.Equal(1, new PartitionSpecUpdate(t.Metadata).RemoveField("region").Apply().SpecId);
+
+        await t.UpdateSchemaAsync(new Schema(0, [.. Base.Columns, NestedField.Optional(5, "y", PrimitiveType.Long)], [1]));
+        Assert.Equal([0, 1], t.Metadata.Schemas.Select(x => x.SchemaId));
+        Assert.Equal(1, t.Metadata.CurrentSchemaId);
+    }
 }

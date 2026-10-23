@@ -137,6 +137,15 @@ def env_catalog(kind: str) -> Catalog:
             **{"header.X-Iceberg-Access-Delegation": ""},
             **s3,
         )
+    if kind == "nessie":
+        return load_catalog(
+            "nessie",
+            type="rest",
+            uri=os.environ.get("ICEBERG_NESSIE_URI", "http://localhost:19120/iceberg"),
+            # Nessie's load-table config pins py-io-impl to FsspecFileIO, which needs the s3fs extra
+            **{"header.X-Iceberg-Access-Delegation": ""},
+            **s3,
+        )
     if kind == "gravitino":
         # Gravitino's Iceberg REST service (emulation/up.sh --gravitino); no credential vending. PyIceberg 0.12 sends
         # "Authorization: Bearer None" when it has no token, which Gravitino rejects: the noop auth manager sends none.

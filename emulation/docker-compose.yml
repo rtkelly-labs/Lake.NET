@@ -9,6 +9,9 @@
 #           catalog server (in-memory persistence, S3 storage on moto, no credential vending)
 #   gravitino - (profile "gravitino": ./up.sh --gravitino) Apache Gravitino's Iceberg REST server, a third REST server
 #           (Gravitino's own service over Iceberg 1.11's catalog code; SQLite JDBC backend, S3FileIO on moto)
+#   nessie - (profile "nessie": ./up.sh --nessie) Project Nessie's Iceberg REST API, a fourth REST server. Its images
+#           are on ghcr.io/quay.io, so the release jar from Maven Central (fetched by up.sh into .cache/) runs on the
+#           JDK of the Polaris image; in-memory version store, S3 on moto, no request signing (clients bring credentials)
 #   trino - (profile "trino": ./up.sh --trino) Trino's Iceberg connector over the same REST catalog + S3,
 #           a third independent reader (Java, but not the Iceberg core library's scan planner)
 name: iceberg-dotnet-emulation
@@ -106,6 +109,34 @@ services:
       AWS_SECRET_ACCESS_KEY: test
     healthcheck:
       test: ["CMD", "bash", "-c", "exec 3<>/dev/tcp/localhost/9001 && printf 'GET /iceberg/v1/config HTTP/1.0\\r\\n\\r\\n' >&3 && grep -q '200' <&3"]
+      interval: 3s
+      retries: 60
+
+  nessie:
+    image: apache/polaris:${POLARIS_TAG:-1.8.0}
+    profiles: ["nessie"]
+    depends_on:
+      bucket: { condition: service_completed_successfully }
+    ports: ["19120:19120"]
+    volumes: ["./.cache:/jars:ro"]
+    entrypoint:
+      - java
+      - -Dnessie.version.store.type=IN_MEMORY
+      - -Dnessie.catalog.default-warehouse=warehouse
+      - -Dnessie.catalog.warehouses.warehouse.location=s3://iceberg-regression/nessie
+      - -Dnessie.catalog.service.s3.default-options.endpoint=http://moto:5000
+      - -Dnessie.catalog.service.s3.default-options.external-endpoint=http://localhost:5000
+      - -Dnessie.catalog.service.s3.default-options.path-style-access=true
+      - -Dnessie.catalog.service.s3.default-options.region=eu-west-1
+      - -Dnessie.catalog.service.s3.default-options.request-signing-enabled=false
+      - -Dnessie.catalog.service.s3.default-options.access-key=urn:nessie-secret:quarkus:s3key
+      - -Ds3key.name=test
+      - -Ds3key.secret=test
+      - -Dquarkus.otel.sdk.disabled=true
+      - -jar
+      - /jars/nessie-quarkus-${NESSIE_VERSION:-0.109.0}-runner.jar
+    healthcheck:
+      test: ["CMD", "curl", "-sf", "http://localhost:19120/iceberg/v1/config"]
       interval: 3s
       retries: 60
 

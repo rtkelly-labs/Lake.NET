@@ -66,6 +66,14 @@ Glue endpoint for Lake Formation governance. Challenges:
 - REST with git-like semantics: refs are *catalog* branches, distinct from Iceberg table refs. A commit can
   conflict on the catalog branch even when the table did not change — surfaces as 409, handled as a retry.
 - Still actively released (0.109).
+- Emulated (`emulation/up.sh --nessie`; the Maven runner jar on a JDK image) and in the conformance matrix. Findings from
+  running it, all handled:
+  - It rejects an `add-schema` whose ID is taken ("A schema with ID 0 already exists") rather than renumbering it, so
+    the client sends schema, spec and sort-order evolutions with the next free ID, as Java does.
+  - The metadata it serves carries only the current snapshot and an empty `metadata-log` (history lives in Nessie
+    commits), so time travel by snapshot ID through Nessie only reaches the current snapshot.
+  - 0.109 has no format v3: a create asking for v3 silently returns v2, and `upgrade-format-version` to 3 fails with 500.
+  - `create-table` must carry `stage-create`; its load-table config pins PyIceberg to `FsspecFileIO` (needs `s3fs`).
 
 ### Lakekeeper, Gravitino
 

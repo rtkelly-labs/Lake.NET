@@ -298,6 +298,7 @@ public sealed class RestCatalog : ICatalog, IViewCatalog
             ["name"] = r.Identifier.Name,
             ["schema"] = TypeJson.SchemaToJson(r.Schema),
             ["properties"] = MetadataJson.StringMap(props),
+            ["stage-create"] = false, // optional in the spec, but Nessie requires it (Java's client always sends it)
         };
         if (r.Location is not null) body["location"] = r.Location;
         if (r.Spec is not null) body["partition-spec"] = TypeJson.SpecToJson(r.Spec);

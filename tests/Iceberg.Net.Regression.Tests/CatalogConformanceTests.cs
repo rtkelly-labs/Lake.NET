@@ -17,7 +17,7 @@ public sealed class CatalogConformanceTests
     /// "rest" is the Iceberg project's Java test server; "polaris" is Apache Polaris, implemented independently;
     /// "jdbc" is our JdbcCatalog over SQLite, in the tables PyIceberg's SqlCatalog and Java's JdbcCatalog share.
     /// </summary>
-    public static TheoryData<string> Catalogs => new() { "glue", "rest", "polaris", "gravitino", "jdbc" };
+    public static TheoryData<string> Catalogs => new() { "glue", "rest", "polaris", "gravitino", "nessie", "jdbc" };
 
     public static readonly Schema Schema = new(
         NestedField.Require(1, "id", PrimitiveType.Long),
@@ -122,9 +122,10 @@ public sealed class CatalogConformanceTests
         await Task.WhenAll(tables.Select((t, i) => SnapshotProducer.Append(t).AddFiles(files[i]).CommitAsync()));
 
         var final = await s.Catalog.LoadTableAsync(created.Identifier);
-        Assert.Equal(writers, final.Metadata.Snapshots.Count);
         Assert.Equal(writers, final.Metadata.LastSequenceNumber);
         Assert.Equal(Enumerable.Range(0, writers * 10).Select(i => (long)i), (await TableScan.ReadAllAsync(final)).Select(r => (long)r[0]!).Order());
+        if (!TestEnvironment.KeepsSnapshotHistory(kind)) return;
+        Assert.Equal(writers, final.Metadata.Snapshots.Count);
         // Snapshot chain is linear: each parent is the previous snapshot.
         Assert.Equal(writers, final.Metadata.Ancestors(final.Metadata.CurrentSnapshotId).Count());
     }
@@ -166,6 +167,7 @@ public sealed class CatalogConformanceTests
         var rows = await TableScan.ReadAllAsync(loaded);
         Assert.Equal(14, rows.Count);
         Assert.Equal(4, rows.Count(r => (string?)r[6] == "late"));
+        if (!TestEnvironment.KeepsSnapshotHistory(kind)) return;
         Assert.Equal(20, (await TableScan.ReadAllAsync(loaded, first.SnapshotId)).Count);
         // create, append, overwrite, add-schema, append: five metadata files, four in the log.
         Assert.True(loaded.Metadata.MetadataLog.Count >= 4, $"metadata-log has {loaded.Metadata.MetadataLog.Count} entries");
@@ -209,6 +211,8 @@ public sealed class CatalogConformanceTests
     public async Task Format_v3_tables(string kind)
     {
         Require.Catalog(kind);
+        // Nessie 0.109 has no v3: create returns a v2 table and upgrade-format-version to 3 fails with a 500.
+        Skip.If(kind == "nessie", "Nessie 0.109 does not support format v3 tables");
         await using var s = await ScopeAsync(kind, "v3");
         var t = await s.Catalog.CreateTableAsync(new CreateTableRequest(s.Id("t"), Schema, Spec, FormatVersion: 3));
         Assert.Equal(3, t.Metadata.FormatVersion);

@@ -108,15 +108,24 @@ public sealed class Table(ICatalog catalog, TableIdentifier identifier, TableMet
     public Task<TableMetadata> ReplaceSortOrderAsync(SortOrder order, CancellationToken ct = default) =>
         CommitAsync(
             [new UpdateRequirement.AssertDefaultSortOrderId(Metadata.DefaultSortOrderId)],
-            [new MetadataUpdate.AddSortOrder(order), new MetadataUpdate.SetDefaultSortOrder(MetadataUpdate.LastAdded)],
+            // Numbered with the next free order ID, as Java's client sends it (an identical existing order is reused).
+            [new MetadataUpdate.AddSortOrder(order.IsUnsorted ? order : new SortOrder(Metadata.SortOrders.Max(o => o.OrderId) + 1, order.Fields)),
+             new MetadataUpdate.SetDefaultSortOrder(MetadataUpdate.LastAdded)],
             ct);
 
     /// <summary>Add (or switch to an existing equivalent) schema; asserts the current schema has not moved.</summary>
     public Task<TableMetadata> UpdateSchemaAsync(Schema newSchema, CancellationToken ct = default) =>
         CommitAsync(
             [new UpdateRequirement.AssertCurrentSchemaId(Metadata.CurrentSchemaId), new UpdateRequirement.AssertLastAssignedFieldId(Metadata.LastColumnId)],
-            [new MetadataUpdate.AddSchema(newSchema), new MetadataUpdate.SetCurrentSchema(MetadataUpdate.LastAdded)],
+            [new MetadataUpdate.AddSchema(FreshSchemaId(newSchema)), new MetadataUpdate.SetCurrentSchema(MetadataUpdate.LastAdded)],
             ct);
+
+    // A schema whose ID is already taken is sent with the next free ID, as Java's client does: some catalogs (Nessie)
+    // reject an add-schema that reuses an ID rather than renumbering it.
+    private Schema FreshSchemaId(Schema schema) =>
+        Metadata.Schemas.Any(s => s.SchemaId == schema.SchemaId)
+            ? new Schema(Metadata.Schemas.Max(s => s.SchemaId) + 1, schema.Columns, schema.IdentifierFieldIds)
+            : schema;
 
     /// <summary>
     /// Evolve the partition spec, e.g. <c>table.UpdateSpecAsync(p => p.AddField("event_ts", Transform.Day).RemoveField("region"))</c>.

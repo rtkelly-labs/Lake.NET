@@ -30,7 +30,7 @@ Alternatives considered:
 | MinIO | Good S3 fidelity but no Glue. Pulling `minio/minio` from Docker Hub and quay.io both failed while building M0 (MinIO has reportedly stopped publishing community images; unverified) — avoid as a hard dependency |
 | LocalStack | S3 + many services, but Glue is not in the free tier (unverified for current releases); heavier |
 | Adobe S3Mock, RustFS, SeaweedFS | S3 only |
-| Lakekeeper / Nessie containers | More REST implementations for the conformance matrix. Polaris and Gravitino (Docker Hub) are in; the other two publish to quay.io/ghcr.io, which the development sandbox could not reach, and Docker Hub rate-limited Nessie |
+| Lakekeeper container | A further REST implementation for the conformance matrix. Polaris, Gravitino (Docker Hub) and Nessie (`--nessie`: the Maven Central runner jar, checksum-verified, on the Polaris JDK image) are in; Lakekeeper publishes only to quay.io/ghcr.io, which the development sandbox could not reach |
 
 ## Fidelity shims
 

@@ -38,7 +38,7 @@ public sealed class CrossEngineTests
             var py = await env.OracleAsync("read", kind, $"{ns}.events");
             var expectedIds = Enumerable.Range(0, 25).Where(i => i % 2 == 0).Select(i => (long)i).Append(1000).ToList();
             Assert.Equal(expectedIds, py["ids"]!.AsArray().Select(i => i!.GetValue<long>()));
-            Assert.Equal(2, py["snapshot_count"]!.GetValue<int>());
+            Assert.Equal(TestEnvironment.KeepsSnapshotHistory(kind) ? 2 : 1, py["snapshot_count"]!.GetValue<int>());
             Assert.Equal("overwrite", py["summary"]!["operation"]!.GetValue<string>());
             Assert.Equal(["event_ts_day:day", "id_bucket:bucket[4]", "region:identity"], py["spec"]!.AsArray().Select(s => s!.GetValue<string>()));
 
@@ -84,7 +84,7 @@ public sealed class CrossEngineTests
             await SnapshotProducer.Append(table).AddFiles(await TableWriter.WriteAsync(table, CatalogConformanceTests.Rows(30, 5))).CommitAsync();
             var after = await env.OracleAsync("read", kind, $"{ns}.events");
             Assert.Equal(35, after["row_count"]!.GetValue<int>());
-            Assert.Equal(2, after["snapshot_count"]!.GetValue<int>());
+            Assert.Equal(TestEnvironment.KeepsSnapshotHistory(kind) ? 2 : 1, after["snapshot_count"]!.GetValue<int>());
         }
         finally
         {

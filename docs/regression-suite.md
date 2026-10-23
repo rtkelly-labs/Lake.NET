@@ -51,7 +51,7 @@ Current results (emulation, everything up): **L0 210/210**, **L1+L2 117/119** (2
 
 ```bash
 ./run-tests.sh spec                                   # L0
-./emulation/up.sh --spark --trino --polaris --gravitino   # everything CI runs; plain ./emulation/up.sh for moto + REST
+./emulation/up.sh --spark --trino --polaris --gravitino --nessie   # everything CI runs; plain ./emulation/up.sh for moto + REST
 ./run-tests.sh emulation                              # L0 + BDD + L1 + L2
 dotnet test tests/Iceberg.Net.Spec.Tests --filter Spec=deletion-vectors   # every test of one spec section
 ICEBERG_PBT_RUNS=2000 ICEBERG_FUZZ_RUNS=20000 ./run-tests.sh spec               # longer randomized runs
