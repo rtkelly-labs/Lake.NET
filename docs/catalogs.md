@@ -86,6 +86,11 @@ Glue endpoint for Lake Formation governance. Challenges:
   ADO.NET provider, in the "V0" layout Java and PyIceberg default to (no `iceberg_type` column), plus
   `iceberg_namespace_properties` with the `exists` marker row. Runs the full conformance suite and soak over SQLite,
   and PyIceberg's `SqlCatalog` reads and writes the same database (`CrossEngineTests`).
+- Views: `new JdbcCatalog(..., views: true)` switches to Java's "V1" layout (`jdbc.schema-version=V1`): an
+  `iceberg_type` column marks rows `TABLE` or `VIEW`, NULL counting as a table, and `InitializeAsync` adds the column
+  to an existing V0 database with Java's `ALTER TABLE`. Tables and views share the primary key, so one name is
+  either. PyIceberg's `SqlCatalog` ignores the column and keeps working (the regression suite runs it against a V1
+  database), but its `list_tables` would also list views. Tested in `JdbcCatalogTests` and `ViewConformanceTests`.
 
 ### DynamoDB, Hadoop/file-system
 

@@ -37,3 +37,18 @@ public interface IViewCatalog
     Task DropViewAsync(TableIdentifier id, CancellationToken ct = default);
     Task RenameViewAsync(TableIdentifier from, TableIdentifier to, CancellationToken ct = default);
 }
+
+internal static class ViewFiles
+{
+    /// <summary>Write the next <c>NNNNN-uuid.metadata.json</c> for a view whose current file is <paramref name="expected"/>.</summary>
+    public static async Task<string> WriteNextAsync(IO.IFileIO io, ViewMetadata metadata, string? expected, CancellationToken ct)
+    {
+        var version = expected is null ? 0 : int.Parse(Path.GetFileName(expected).Split('-')[0], System.Globalization.CultureInfo.InvariantCulture) + 1;
+        var location = $"{metadata.Location}/metadata/{version:D5}-{Guid.NewGuid()}.metadata.json";
+        await io.WriteAsync(location, System.Text.Encoding.UTF8.GetBytes(ViewJson.Write(metadata)), overwrite: false, ct);
+        return location;
+    }
+
+    public static async Task<ViewMetadata> ReadAsync(IO.IFileIO io, string location, CancellationToken ct) =>
+        ViewJson.Read(System.Text.Encoding.UTF8.GetString(await io.ReadAllAsync(location, ct)), location);
+}

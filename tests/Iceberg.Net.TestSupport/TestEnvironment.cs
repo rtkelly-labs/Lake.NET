@@ -139,7 +139,7 @@ public sealed class TestEnvironment
     private async Task<ICatalog> JdbcAsync()
     {
         var catalog = new JdbcCatalog(() => new Microsoft.Data.Sqlite.SqliteConnection($"Data Source={JdbcDatabase};Default Timeout=30"),
-            Warehouse.TrimEnd('/') + "/jdbc", new S3FileIO(S3Options), "regression");
+            Warehouse.TrimEnd('/') + "/jdbc", new S3FileIO(S3Options), "regression", views: true);
         await catalog.InitializeAsync();
         return catalog;
     }

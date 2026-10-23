@@ -361,7 +361,7 @@ public class InMemoryCatalog(string warehouse, IFileIO? io = null, string name =
         string? location;
         lock (_lock) location = _views.GetValueOrDefault(id);
         if (location is null) throw new NoSuchTableException($"View {id} does not exist");
-        return new View(id, ViewJson.Read(System.Text.Encoding.UTF8.GetString(await FileIO.ReadAllAsync(location, ct)), location));
+        return new View(id, await ViewFiles.ReadAsync(FileIO, location, ct));
     }
 
     public Task<bool> ViewExistsAsync(TableIdentifier id, CancellationToken ct = default)
@@ -395,9 +395,7 @@ public class InMemoryCatalog(string warehouse, IFileIO? io = null, string name =
 
     private async Task<View> WriteViewAsync(TableIdentifier id, string? expected, ViewMetadata metadata, CancellationToken ct)
     {
-        var version = expected is null ? 0 : int.Parse(Path.GetFileName(expected).Split('-')[0], System.Globalization.CultureInfo.InvariantCulture) + 1;
-        var location = $"{metadata.Location}/metadata/{version:D5}-{Guid.NewGuid()}.metadata.json";
-        await FileIO.WriteAsync(location, System.Text.Encoding.UTF8.GetBytes(ViewJson.Write(metadata)), overwrite: false, ct);
+        var location = await ViewFiles.WriteNextAsync(FileIO, metadata, expected, ct);
         lock (_lock)
         {
             if (_views.GetValueOrDefault(id) != expected) throw new CommitFailedException($"View {id} changed concurrently");
