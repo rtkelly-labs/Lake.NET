@@ -214,4 +214,62 @@ public sealed class InterleavingTests : IDisposable
             if (kind == "delete-2") Assert.False(state.ContainsKey(2));
         }
     }
+
+    [Theory]
+    [MemberData(nameof(Interferers))]
+    public async Task Update_re_plans_against_the_winners_rows(string kind)
+    {
+        foreach (var v in new[] { 2, 3 })
+        foreach (var strategy in new[] { DeleteStrategy.PositionDeletes, DeleteStrategy.CopyOnWrite })
+        {
+            var (subject, other) = await SetupAsync(v);
+            _catalog.BeforeNextSwap = Interferer(kind, other);
+            var result = await TableMutations.UpdateAsync(subject, Id2, u => u.Set("v", row => $"{row[1]}+mine"), strategy);
+
+            Assert.Equal(kind == "orphan-cleanup" ? 1 : 2, result.Attempts); // the race really happened (orphan cleanup commits nothing)
+            var state = await StateAsync(subject);
+            AssertInterfererKept(kind, state);
+            foreach (var id in new long[] { 1, 3, 4, 5, 6 }) Assert.Equal("base", state[id]);
+            switch (kind)
+            {
+                case "delete-2": // the row is gone in the winner's state: nothing to update, nothing committed
+                    Assert.False(state.ContainsKey(2));
+                    Assert.Null(result.Snapshot);
+                    break;
+                case "upsert-2": Assert.Equal("other+mine", state[2]); break; // computed from the winner's value
+                default: Assert.Equal("base+mine", state[2]); break;
+            }
+        }
+    }
+
+    [Theory]
+    [MemberData(nameof(Interferers))]
+    public async Task Merge_re_plans_against_the_winners_rows(string kind)
+    {
+        foreach (var v in new[] { 2, 3 })
+        foreach (var strategy in new[] { DeleteStrategy.PositionDeletes, DeleteStrategy.CopyOnWrite, DeleteStrategy.EqualityDeletes })
+        {
+            var (subject, other) = await SetupAsync(v);
+            _catalog.BeforeNextSwap = Interferer(kind, other);
+            var bySource = strategy != DeleteStrategy.EqualityDeletes; // equality deletes cannot express "not matched by source"
+            var result = await TableMutations.MergeAsync(subject, [[2L, "mine"], [20L, "new"]], ["id"], m =>
+            {
+                m.WhenMatchedUpdate(u => u.Set("v", row => $"{row[1]}+mine")).WhenNotMatchedInsert();
+                if (bySource) m.WhenNotMatchedBySourceDelete(Expr.GreaterThanOrEqual("id", 10L));
+            }, strategy);
+
+            Assert.Equal(kind == "orphan-cleanup" ? 1 : 2, result.Attempts);
+            var state = await StateAsync(subject);
+            Assert.Equal("new", state[20]);
+            foreach (var id in new long[] { 1, 3, 4, 5, 6 }) Assert.Equal("base", state[id]);
+            if (bySource) Assert.False(state.ContainsKey(10)); // the appended row is seen by the re-plan and deleted
+            else AssertInterfererKept(kind, state);
+            Assert.Equal(kind switch
+            {
+                "delete-2" => "mine", // not matched any more: the source row is inserted
+                "upsert-2" => "other+mine",
+                _ => "base+mine",
+            }, state[2]);
+        }
+    }
 }

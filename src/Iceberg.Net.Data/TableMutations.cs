@@ -180,37 +180,51 @@ public static partial class TableMutations
     {
         // Inserted rows don't depend on the table state, so their files are written once and reused by every attempt.
         IReadOnlyList<DataFile>? insertFiles = null;
+        var (snapshot, (deleted, rewritten), attempts) = await RetryAsync(table, async () =>
+        {
+            insertFiles ??= inserts.Count > 0 ? await TableWriter.WriteAsync(table, inserts, ct) : [];
+            var producer = SnapshotProducer.RowDelta(table).AddFiles(insertFiles).WithRetries(0);
+            (long? Deleted, int Rewritten) outcome = (0, 0);
+            if (matcher is not null && table.Metadata.CurrentSnapshot is not null)
+                outcome = await PlanDeletesAsync(table, producer, matcher, strategy, ct);
+            return (producer, outcome);
+        }, ct);
+        return new MutationResult(snapshot!, inserts.Count, deleted, rewritten, strategy, attempts);
+    }
+
+    /// <summary>
+    /// The serializable re-plan loop shared by every mutation: <paramref name="plan"/> builds this attempt's change
+    /// against the table's current state (a null producer means there is nothing to commit); on a lost race the table
+    /// is refreshed and the change planned again from scratch, never replayed. A base file removed meanwhile by
+    /// compaction and expiry counts as a lost race when the table has moved.
+    /// </summary>
+    private static async Task<(Snapshot? Snapshot, T Outcome, int Attempts)> RetryAsync<T>(Table table, Func<Task<(SnapshotProducer? Producer, T Outcome)>> plan, CancellationToken ct)
+    {
         var policy = CommitRetryPolicy.From(table.Metadata);
         for (var attempt = 1; ; attempt++)
         {
             if (attempt > 1) await table.RefreshAsync(ct);
-            insertFiles ??= inserts.Count > 0 ? await TableWriter.WriteAsync(table, inserts, ct) : [];
-            var producer = SnapshotProducer.RowDelta(table).AddFiles(insertFiles).WithRetries(0);
-            long? deleted = 0;
-            var rewritten = 0;
-
-            if (matcher is not null && table.Metadata.CurrentSnapshot is not null)
+            SnapshotProducer? producer;
+            T outcome;
+            try
             {
-                try
-                {
-                    (deleted, rewritten) = await PlanDeletesAsync(table, producer, matcher, strategy, ct);
-                }
-                catch (Exception e) when (e is FileNotFoundException or DirectoryNotFoundException && attempt <= policy.NumRetries)
-                {
-                    // Compaction and expiry removed a file of the state this attempt planned against: re-plan if the table
-                    // has moved since, as for a lost commit race; otherwise the file is genuinely missing.
-                    var before = table.Metadata.CurrentSnapshotId;
-                    await table.RefreshAsync(ct);
-                    if (table.Metadata.CurrentSnapshotId == before) throw;
-                    await BackOffAsync(policy, attempt, ct);
-                    continue;
-                }
+                (producer, outcome) = await plan();
             }
+            catch (Exception e) when (e is FileNotFoundException or DirectoryNotFoundException && attempt <= policy.NumRetries)
+            {
+                // Compaction and expiry removed a file of the state this attempt planned against: re-plan if the table
+                // has moved since, as for a lost commit race; otherwise the file is genuinely missing.
+                var before = table.Metadata.CurrentSnapshotId;
+                await table.RefreshAsync(ct);
+                if (table.Metadata.CurrentSnapshotId == before) throw;
+                await BackOffAsync(policy, attempt, ct);
+                continue;
+            }
+            if (producer is null) return (null, outcome, attempt);
 
             try
             {
-                var snapshot = await producer.CommitAsync(ct);
-                return new MutationResult(snapshot, inserts.Count, deleted, rewritten, strategy, attempt);
+                return (await producer.CommitAsync(ct), outcome, attempt);
             }
             catch (CommitFailedException) when (attempt <= policy.NumRetries)
             {
@@ -231,19 +245,17 @@ public static partial class TableMutations
                 deleted = null; // unknown without a scan; that is the point of equality deletes
                 break;
             case DeleteStrategy.PositionDeletes:
-                foreach (var (file, positions, _, _) in await FindMatchesAsync(table, matcher, ct))
+                foreach (var m in await FindMatchesAsync(table, matcher.Prune, row => matcher.Matches(row) ? RowChange.Delete : null, ct))
                 {
-                    producer.DeletePositions(file.FilePath, positions);
-                    deleted += positions.Count;
+                    producer.DeletePositions(m.File.FilePath, m.Positions);
+                    deleted += m.Positions.Count;
                 }
                 break;
             case DeleteStrategy.CopyOnWrite:
-                foreach (var (file, positions, survivors, lineage) in await FindMatchesAsync(table, matcher, ct))
+                foreach (var m in await FindMatchesAsync(table, matcher.Prune, row => matcher.Matches(row) ? RowChange.Delete : null, ct))
                 {
-                    producer.RemoveDataFiles([file.FilePath]);
-                    // Survivors keep their row identity (v3 row lineage) across the rewrite.
-                    if (survivors.Count > 0) producer.AddFiles(await TableWriter.WriteAsync(table, survivors, lineage.Count > 0 ? lineage : null, ct));
-                    deleted += positions.Count;
+                    await RewriteWithoutAsync(table, producer, m, ct);
+                    deleted += m.Positions.Count;
                     rewritten++;
                 }
                 break;
@@ -253,41 +265,71 @@ public static partial class TableMutations
         return (deleted, rewritten);
     }
 
+    /// <summary>Copy-on-write: remove the file and add its surviving rows, which keep their row identity (v3 row lineage).</summary>
+    private static async Task RewriteWithoutAsync(Table table, SnapshotProducer producer, FileMatch m, CancellationToken ct)
+    {
+        producer.RemoveDataFiles([m.File.FilePath]);
+        if (m.Survivors.Count > 0) producer.AddFiles(await TableWriter.WriteAsync(table, m.Survivors, m.SurvivorLineage.Count > 0 ? m.SurvivorLineage : null, ct));
+    }
+
     private static Task BackOffAsync(CommitRetryPolicy policy, int attempt, CancellationToken ct)
     {
         var wait = Math.Min(policy.MaxWaitMs, policy.MinWaitMs * (1 << Math.Min(attempt - 1, 20)));
         return Task.Delay(wait + Random.Shared.Next(wait / 10 + 1), ct);
     }
 
+    /// <summary>What a mutation does to one live row: delete it (<see cref="Replacement"/> null) or replace it.</summary>
+    private sealed record RowChange(object?[]? Replacement)
+    {
+        public static readonly RowChange Delete = new((object?[]?)null);
+    }
+
     /// <summary>
-    /// Live rows of the current snapshot that the matcher selects, per data file (existing deletes applied), with the
-    /// surviving rows and, on v3, their lineage so a copy-on-write rewrite can preserve <c>_row_id</c>.
+    /// The live rows of one data file that a mutation changes (by position), the replacement rows with the lineage of
+    /// the rows they replace, and the rows that survive with their own lineage (v3; empty before v3).
     /// </summary>
-    private static async Task<List<(DataFile File, List<long> Positions, List<object?[]> Survivors, List<(long? RowId, long? Seq)> Lineage)>> FindMatchesAsync(Table table, Matcher matcher, CancellationToken ct)
+    private sealed record FileMatch(DataFile File, List<long> Positions, List<object?[]> Replacements, List<(long? RowId, long? Seq)> ReplacedLineage,
+        List<object?[]> Survivors, List<(long? RowId, long? Seq)> SurvivorLineage);
+
+    /// <summary>
+    /// Live rows of the current snapshot (existing deletes applied) in the files <paramref name="prune"/> can reach,
+    /// classified by <paramref name="change"/> (null keeps the row), per data file that has at least one change. On v3
+    /// each row carries its lineage so a rewrite or an update can preserve <c>_row_id</c>.
+    /// </summary>
+    private static async Task<List<FileMatch>> FindMatchesAsync(Table table, Expression prune, Func<object?[], RowChange?> change, CancellationToken ct)
     {
         var deletes = await TableScan.DeletesAsync(table, null, ct);
         var mapping = NameMapping.ForTable(table.Metadata.Properties);
         var v3 = table.Metadata.FormatVersion >= 3;
         var projection = v3 ? RowLineage.WithLineage(table.Schema) : table.Schema;
         var n = table.Schema.Columns.Count;
-        var result = new List<(DataFile, List<long>, List<object?[]>, List<(long?, long?)>)>();
-        foreach (var task in await TableScan.PlanFilesAsync(table, matcher.Prune, null, ct))
+        var result = new List<FileMatch>();
+        foreach (var task in await TableScan.PlanFilesAsync(table, prune, null, ct))
         {
             var rows = await DataFiles.ReadAsync(table.IO, task.File, projection, mapping, ct);
             var isDeleted = deletes.IsEmpty ? null : await deletes.RowFilterAsync(task.File, task.DataSequenceNumber, table.Schema, ct);
-            var positions = new List<long>();
-            var survivors = new List<object?[]>();
-            var lineage = new List<(long?, long?)>();
+            var m = new FileMatch(task.File, [], [], [], [], []);
             for (var pos = 0; pos < rows.Count; pos++)
             {
                 var row = rows[pos][..n];
                 if (isDeleted?.Invoke(pos, row) == true) continue;
-                if (matcher.Matches(row)) { positions.Add(pos); continue; }
-                survivors.Add(row);
-                if (v3)
-                    lineage.Add(((long?)rows[pos][n] ?? (task.File.FirstRowId is { } f ? f + pos : null), (long?)rows[pos][n + 1] ?? task.DataSequenceNumber));
+                (long?, long?) lineage = v3
+                    ? ((long?)rows[pos][n] ?? (task.File.FirstRowId is { } f ? f + pos : null), (long?)rows[pos][n + 1] ?? task.DataSequenceNumber)
+                    : (null, null);
+                if (change(row) is { } c)
+                {
+                    m.Positions.Add(pos);
+                    if (c.Replacement is { } replacement)
+                    {
+                        m.Replacements.Add(replacement);
+                        m.ReplacedLineage.Add(lineage);
+                    }
+                    continue;
+                }
+                m.Survivors.Add(row);
+                if (v3) m.SurvivorLineage.Add(lineage);
             }
-            if (positions.Count > 0) result.Add((task.File, positions, survivors, lineage));
+            if (m.Positions.Count > 0) result.Add(m);
         }
         return result;
     }
