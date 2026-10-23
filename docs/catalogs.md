@@ -79,6 +79,11 @@ Glue endpoint for Lake Formation governance. Challenges:
 
 - Lakekeeper (Rust, on iceberg-rust): OpenFGA authorisation, remote signing for S3; good second REST server for
   CI because it is a *different* implementation from the Java fixture.
+- Emulated (`emulation/up.sh --lakekeeper`; 0.14.1, Postgres, warehouse `regression` on moto without STS). It
+  passed every conformance, view, soak and PyIceberg cross-engine test the first time, v3 tables included. The
+  setup needs two things: one S3 endpoint serves both Lakekeeper and its clients, so it runs on the host network
+  against `localhost:5000`; and the warehouse uses a `hard` delete profile, because the default soft-delete
+  defers the purge.
 - Gravitino: federated REST across underlying catalogs; multi-level namespaces; some optional endpoints were
   historically unimplemented — rely on the `/v1/config` `endpoints` list, not assumptions.
 

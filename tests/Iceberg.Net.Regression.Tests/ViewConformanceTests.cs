@@ -18,7 +18,7 @@ namespace Iceberg.Net.Regression.Tests;
 [Spec("rest: viewExists")]
 public sealed class ViewConformanceTests
 {
-    public static TheoryData<string> Catalogs => new() { "rest", "polaris", "gravitino", "nessie", "jdbc" };
+    public static TheoryData<string> Catalogs => new() { "rest", "polaris", "gravitino", "nessie", "lakekeeper", "jdbc" };
 
     private static readonly Schema Out = new(0, [NestedField.Optional(1, "region", PrimitiveType.String), NestedField.Optional(2, "n", PrimitiveType.Long)]);
 

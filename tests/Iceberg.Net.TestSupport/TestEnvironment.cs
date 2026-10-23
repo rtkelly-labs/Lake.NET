@@ -42,6 +42,10 @@ public sealed class TestEnvironment
     /// <summary>Project Nessie's Iceberg REST API (emulation/up.sh --nessie): a fourth REST server.</summary>
     public Uri NessieUri { get; } = new(Env("ICEBERG_NESSIE_URI") ?? "http://localhost:19120/iceberg");
     public string? NessieSkipReason { get; } = "Nessie only runs in emulation";
+
+    /// <summary>Lakekeeper (emulation/up.sh --lakekeeper): a fifth REST server, and the one not built on Iceberg Java.</summary>
+    public Uri LakekeeperUri { get; } = new(Env("ICEBERG_LAKEKEEPER_URI") ?? "http://localhost:8283/catalog");
+    public string? LakekeeperSkipReason { get; } = "Lakekeeper only runs in emulation";
     public string? OracleSkipReason { get; }
     /// <summary>Oracle availability for tests that only use the local filesystem (no emulator or AWS).</summary>
     public string? LocalOracleSkipReason { get; }
@@ -73,6 +77,7 @@ public sealed class TestEnvironment
             PolarisSkipReason = SkipReason ?? (Reachable(PolarisUri) ? null : $"Polaris not reachable at {PolarisUri} (run emulation/up.sh --polaris)");
             GravitinoSkipReason = SkipReason ?? (Reachable(GravitinoUri) ? null : $"Gravitino not reachable at {GravitinoUri} (run emulation/up.sh --gravitino)");
             NessieSkipReason = SkipReason ?? (Reachable(NessieUri) ? null : $"Nessie not reachable at {NessieUri} (run emulation/up.sh --nessie)");
+            LakekeeperSkipReason = SkipReason ?? (Reachable(LakekeeperUri) ? null : $"Lakekeeper not reachable at {LakekeeperUri} (run emulation/up.sh --lakekeeper)");
             AthenaSkipReason = "Athena only runs with ICEBERG_TEST_TARGET=aws";
         }
         else
@@ -142,6 +147,9 @@ public sealed class TestEnvironment
         // Nessie's Iceberg REST API (prefix "main" from its config); no request signing, clients bring S3 credentials.
         "nessie" => await RestCatalog.ConnectAsync(new RestCatalogOptions { Uri = NessieUri, AccessDelegation = null, Properties = S3Properties },
             props => new S3FileIO(S3FileIOOptions.FromProperties(props)), "nessie"),
+        // Lakekeeper's warehouse "regression" (emulation/lakekeeper_setup.py); no STS, so clients bring S3 credentials.
+        "lakekeeper" => await RestCatalog.ConnectAsync(new RestCatalogOptions { Uri = LakekeeperUri, Warehouse = "regression", AccessDelegation = null, Properties = S3Properties },
+            props => new S3FileIO(S3FileIOOptions.FromProperties(props)), "lakekeeper"),
         // Gravitino's Iceberg REST service (in-memory backend, S3FileIO on moto); clients bring S3 credentials.
         "gravitino" => await RestCatalog.ConnectAsync(new RestCatalogOptions { Uri = GravitinoUri, AccessDelegation = null, Properties = S3Properties },
             props => new S3FileIO(S3FileIOOptions.FromProperties(props)), "gravitino"),
@@ -164,7 +172,7 @@ public sealed class TestEnvironment
     /// </summary>
     public static bool KeepsSnapshotHistory(string kind) => kind != "nessie";
 
-    public string? CatalogSkipReason(string kind) => kind switch { "rest" => RestSkipReason, "polaris" => PolarisSkipReason, "gravitino" => GravitinoSkipReason, "nessie" => NessieSkipReason, _ => SkipReason };
+    public string? CatalogSkipReason(string kind) => kind switch { "rest" => RestSkipReason, "polaris" => PolarisSkipReason, "gravitino" => GravitinoSkipReason, "nessie" => NessieSkipReason, "lakekeeper" => LakekeeperSkipReason, _ => SkipReason };
 
     // ---------- PyIceberg oracle ----------
 

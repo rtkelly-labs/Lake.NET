@@ -4,6 +4,8 @@
 #   --trino   also start Trino (Iceberg connector over the REST fixture + moto S3) on :8080
 #   --polaris also start Apache Polaris (second REST catalog implementation) on :8182, catalog "regression"
 #   --nessie  also start Project Nessie's Iceberg REST API (fourth REST implementation) on :19120 (jar from Maven Central)
+#   --lakekeeper also start Lakekeeper (Rust REST implementation) on :8283, warehouse "regression"; set LAKEKEEPER_IMAGE
+#             to a local build (./lakekeeper_image.sh) where quay.io is unreachable
 #   --gravitino also start Apache Gravitino's Iceberg REST server (third REST implementation) on :9001
 set -euo pipefail
 cd "$(dirname "$0")"
@@ -15,6 +17,7 @@ for arg in "$@"; do
     --polaris) PROFILES+=(--profile polaris) ;;
     --gravitino) PROFILES+=(--profile gravitino) ;;
     --nessie) PROFILES+=(--profile nessie); NESSIE=1 ;;
+    --lakekeeper) PROFILES+=(--profile lakekeeper) ;;
     *) echo "unknown option: $arg" >&2; exit 2 ;;
   esac
 done
@@ -35,6 +38,7 @@ echo "Iceberg REST fixture:  http://localhost:8181"
 [[ " ${PROFILES[*]} " == *" polaris "* ]] && echo "Polaris (REST):        http://localhost:8182/api/catalog (warehouse regression)"
 [[ " ${PROFILES[*]} " == *" nessie "* ]] && echo "Nessie (REST):         http://localhost:19120/iceberg (prefix main)"
 [[ " ${PROFILES[*]} " == *" gravitino "* ]] && echo "Gravitino (REST):      http://localhost:9001/iceberg"
+[[ " ${PROFILES[*]} " == *" lakekeeper "* ]] && echo "Lakekeeper (REST):     http://localhost:8283/catalog (warehouse regression)"
 
 if [[ "$SPARK" == 1 ]]; then
   SPARK_IMAGE="${ICEBERG_SPARK_IMAGE:-apache/spark:4.0.1}"

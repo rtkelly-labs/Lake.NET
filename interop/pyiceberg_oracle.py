@@ -146,6 +146,16 @@ def env_catalog(kind: str) -> Catalog:
             **{"header.X-Iceberg-Access-Delegation": ""},
             **s3,
         )
+    if kind == "lakekeeper":
+        # emulation/lakekeeper_setup.py: warehouse "regression", no STS, so no access-delegation header
+        return load_catalog(
+            "lakekeeper",
+            type="rest",
+            uri=os.environ.get("ICEBERG_LAKEKEEPER_URI", "http://localhost:8283/catalog"),
+            warehouse="regression",
+            **{"header.X-Iceberg-Access-Delegation": ""},
+            **s3,
+        )
     if kind == "gravitino":
         # Gravitino's Iceberg REST service (emulation/up.sh --gravitino); no credential vending. PyIceberg 0.12 sends
         # "Authorization: Bearer None" when it has no token, which Gravitino rejects: the noop auth manager sends none.

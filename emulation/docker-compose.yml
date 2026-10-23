@@ -12,6 +12,9 @@
 #   nessie - (profile "nessie": ./up.sh --nessie) Project Nessie's Iceberg REST API, a fourth REST server. Its images
 #           are on ghcr.io/quay.io, so the release jar from Maven Central (fetched by up.sh into .cache/) runs on the
 #           JDK of the Polaris image; in-memory version store, S3 on moto, no request signing (clients bring credentials)
+#   lakekeeper - (profile "lakekeeper": ./up.sh --lakekeeper) Lakekeeper, a fifth REST server and the only one not on
+#           the Java catalog code (Rust, on iceberg-rust); Postgres-backed, S3 on moto without STS. Its images are on
+#           quay.io; LAKEKEEPER_IMAGE points at a locally built one (./lakekeeper_image.sh) where quay.io is unreachable
 #   trino - (profile "trino": ./up.sh --trino) Trino's Iceberg connector over the same REST catalog + S3,
 #           a third independent reader (Java, but not the Iceberg core library's scan planner)
 name: iceberg-dotnet-emulation
@@ -139,6 +142,57 @@ services:
       test: ["CMD", "curl", "-sf", "http://localhost:19120/iceberg/v1/config"]
       interval: 3s
       retries: 60
+
+  # Lakekeeper shares the host network: its warehouse has one S3 endpoint for itself and for clients, and only
+  # localhost:5000 reaches moto from both. Ports are moved off the fixture's 8181 and Gravitino's metrics range.
+  lakekeeper-db:
+    image: postgres:${LAKEKEEPER_PG_TAG:-17}
+    profiles: ["lakekeeper"]
+    environment: { POSTGRES_PASSWORD: postgres }
+    ports: ["5433:5432"]
+    healthcheck:
+      test: ["CMD", "pg_isready", "-U", "postgres"]
+      interval: 2s
+      retries: 30
+
+  lakekeeper-migrate:
+    image: ${LAKEKEEPER_IMAGE:-quay.io/lakekeeper/catalog:v0.14.1}
+    profiles: ["lakekeeper"]
+    network_mode: host
+    depends_on:
+      lakekeeper-db: { condition: service_healthy }
+    environment: &lakekeeper-env
+      LAKEKEEPER__PG_DATABASE_URL_WRITE: postgresql://postgres:postgres@localhost:5433/postgres
+      LAKEKEEPER__PG_ENCRYPTION_KEY: regression-only-not-a-secret
+      LAKEKEEPER__LISTEN_PORT: "8283"
+      LAKEKEEPER__METRICS__PORT: "9093"
+      RUST_LOG: info
+    command: ["migrate"]
+    restart: "no"
+
+  lakekeeper:
+    image: ${LAKEKEEPER_IMAGE:-quay.io/lakekeeper/catalog:v0.14.1}
+    profiles: ["lakekeeper"]
+    network_mode: host
+    depends_on:
+      lakekeeper-migrate: { condition: service_completed_successfully }
+      bucket: { condition: service_completed_successfully }
+    environment: *lakekeeper-env
+    command: ["serve"]
+    healthcheck:
+      test: ["CMD", "/home/nonroot/lakekeeper", "healthcheck"]
+      interval: 2s
+      retries: 30
+
+  lakekeeper-setup:
+    image: motoserver/moto:${MOTO_TAG:-5.2.4}
+    profiles: ["lakekeeper"]
+    network_mode: host
+    depends_on:
+      lakekeeper: { condition: service_healthy }
+    volumes: ["./lakekeeper_setup.py:/setup/lakekeeper_setup.py:ro"]
+    entrypoint: ["python", "-I", "/setup/lakekeeper_setup.py"]
+    restart: "no"
 
   polaris-setup:
     image: motoserver/moto:${MOTO_TAG:-5.2.4}
