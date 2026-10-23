@@ -107,4 +107,27 @@ public sealed class SortOrder(int orderId, IEnumerable<SortField> fields)
     public bool IsUnsorted => Fields.Count == 0;
 
     public bool SameOrder(SortOrder other) => Fields.SequenceEqual(other.Fields);
+
+    /// <summary>Build a sort order over columns of <paramref name="schema"/>: <c>SortOrder.BuilderFor(s).Asc("day").Desc("id").Build()</c>.</summary>
+    public static Builder BuilderFor(Schema schema) => new(schema);
+
+    public sealed class Builder(Schema schema)
+    {
+        private readonly List<SortField> _fields = [];
+
+        public Builder Asc(string column, NullOrder nulls = NullOrder.NullsFirst, Transform? transform = null) => Add(column, SortDirection.Asc, nulls, transform);
+        public Builder Desc(string column, NullOrder nulls = NullOrder.NullsLast, Transform? transform = null) => Add(column, SortDirection.Desc, nulls, transform);
+
+        private Builder Add(string column, SortDirection direction, NullOrder nulls, Transform? transform)
+        {
+            var field = schema.FindField(column) ?? throw new ArgumentException($"Unknown column {column}");
+            var t = transform ?? Transform.Identity;
+            if (!t.CanTransform(field.Type)) throw new ArgumentException($"Cannot sort {column} by {t}");
+            _fields.Add(new SortField(t, field.Id, direction, nulls));
+            return this;
+        }
+
+        /// <summary>Order ID 0 is reserved for "unsorted"; the catalog assigns the real ID when the order is added.</summary>
+        public SortOrder Build() => new(1, _fields);
+    }
 }

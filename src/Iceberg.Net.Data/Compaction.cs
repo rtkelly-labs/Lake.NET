@@ -9,12 +9,17 @@ namespace Iceberg.Net.Data;
 /// <param name="TargetFileSizeBytes">Files smaller than 75% of this are compaction candidates (Java's default ratio).</param>
 /// <param name="MinInputFiles">A partition is rewritten only when it has at least this many candidates.</param>
 /// <param name="Filter">Only consider files that may hold rows matching this filter.</param>
-public sealed record RewriteOptions(long TargetFileSizeBytes = 128L * 1024 * 1024, int MinInputFiles = 5, Expression? Filter = null);
+/// <param name="RewriteAll">Rewrite every matching file whatever its size (Java's <c>rewrite-all</c>).</param>
+/// <remarks>
+/// When the table has a default sort order, output is sorted by it (Java's sort strategy), and files not written in that
+/// order are candidates on their own — so a newly set sort order is applied to existing data by one compaction.
+/// </remarks>
+public sealed record RewriteOptions(long TargetFileSizeBytes = 128L * 1024 * 1024, int MinInputFiles = 5, Expression? Filter = null, bool RewriteAll = false);
 
 public sealed record RewriteResult(Snapshot? Snapshot, int FilesRewritten, int FilesAdded, long RowsRewritten, int Attempts);
 
 /// <summary>
-/// Rewrite data files (Java's <c>RewriteDataFiles</c>, bin-pack): per partition, small files — with their deletes
+/// Rewrite data files (Java's <c>RewriteDataFiles</c>, bin-pack or sort): per partition, small files — with their deletes
 /// applied — are merged into new files in one <c>replace</c> snapshot. v3 rows keep their <c>_row_id</c> and
 /// last-updated sequence number. Any concurrent commit makes the rewrite re-plan from the new state, so a delete
 /// committed meanwhile is never undone (the new files' higher sequence number would otherwise hide it).
@@ -30,10 +35,12 @@ public static class Compaction
             if (table.Metadata.CurrentSnapshot is null) return new RewriteResult(null, 0, 0, 0, attempt);
 
             var plan = await TableScan.PlanAsync(table, options.Filter ?? Expression.True, ct: ct);
+            var order = table.Metadata.DefaultSortOrder;
+            bool Unsorted(DataFile f) => !order.IsUnsorted && f.SortOrderId != order.OrderId;
             var groups = plan.Tasks
-                .Where(t => t.File.FileSizeInBytes < options.TargetFileSizeBytes * 3 / 4)
+                .Where(t => options.RewriteAll || Unsorted(t.File) || t.File.FileSizeInBytes < options.TargetFileSizeBytes * 3 / 4)
                 .GroupBy(t => (t.File.SpecId, Key: string.Join('\u001f', t.File.Partition.Select(v => v is byte[] b ? Convert.ToHexString(b) : v?.ToString() ?? "\0"))))
-                .Where(g => g.Count() >= Math.Max(2, options.MinInputFiles))
+                .Where(g => options.RewriteAll || g.Any(t => Unsorted(t.File)) || g.Count() >= Math.Max(2, options.MinInputFiles))
                 .ToList();
             if (groups.Count == 0) return new RewriteResult(null, 0, 0, 0, attempt);
 

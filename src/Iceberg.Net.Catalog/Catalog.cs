@@ -104,6 +104,13 @@ public sealed class Table(ICatalog catalog, TableIdentifier identifier, TableMet
     public Task<TableMetadata> SetPropertiesAsync(IReadOnlyDictionary<string, string> props, CancellationToken ct = default) =>
         CommitAsync([new UpdateRequirement.AssertTableUuid(Metadata.TableUuid)], [new MetadataUpdate.SetProperties(props)], ct);
 
+    /// <summary>Make <paramref name="order"/> the default sort order (reusing an identical existing one); writers then sort by it.</summary>
+    public Task<TableMetadata> ReplaceSortOrderAsync(SortOrder order, CancellationToken ct = default) =>
+        CommitAsync(
+            [new UpdateRequirement.AssertDefaultSortOrderId(Metadata.DefaultSortOrderId)],
+            [new MetadataUpdate.AddSortOrder(order), new MetadataUpdate.SetDefaultSortOrder(MetadataUpdate.LastAdded)],
+            ct);
+
     /// <summary>Add (or switch to an existing equivalent) schema; asserts the current schema has not moved.</summary>
     public Task<TableMetadata> UpdateSchemaAsync(Schema newSchema, CancellationToken ct = default) =>
         CommitAsync(

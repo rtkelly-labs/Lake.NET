@@ -48,7 +48,7 @@ Legend: ✅ implemented and tested · 🟡 partial · ⬜ not started · — not
 | v3 multi-argument transforms (`source-ids`) | 🟡 JSON round-trip only | |
 | Partition evolution (new spec IDs, reuse of compatible specs) | ✅ | `StateManagementTests` |
 | Hive-style partition paths (`name=human-value`) | ✅ | `TransformSpecTests` |
-| Sort orders (JSON, reuse, default) | ✅ metadata; ⬜ writers don't sort | `MetadataSpecTests` |
+| Sort orders (JSON, reuse, default) | ✅ metadata; writers sort each file by the default order (transforms, direction, null order, NaN greatest) and set `sort_order_id`; compaction rewrites files not in the current order | `MetadataSpecTests`, `SortOrderTests` |
 | Cross-implementation agreement on partition values | ✅ vs PyIceberg (Rust `pyiceberg-core`) | `PyIcebergFixtureTests`, `CrossEngineTests` |
 
 ### Manifests and snapshots

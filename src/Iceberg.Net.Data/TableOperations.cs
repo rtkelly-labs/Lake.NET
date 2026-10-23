@@ -192,13 +192,18 @@ public static class TableWriter
             var partitionPath = spec.IsUnpartitioned ? "" : spec.PartitionPath(schema, g.Key) + "/";
             var location = $"{dataDir}/{partitionPath}{Guid.NewGuid():N}.parquet";
             var groupRows = g.ToList();
+            // Files are written in the table's default sort order (spec "Sorting"), and say so in sort_order_id.
+            var order = table.Metadata.DefaultSortOrder;
+            if (!order.IsUnsorted) groupRows = groupRows.OrderBy(r => r, new RowSorter(schema, order)).ToList(); // stable: ties keep input order
+            DataFile written;
             if (lineage is null)
+                written = await ParquetFiles.WriteAsync(table.IO, location, schema, spec.SpecId, g.Key, groupRows, ct);
+            else
             {
-                files.Add(await ParquetFiles.WriteAsync(table.IO, location, schema, spec.SpecId, g.Key, groupRows, ct));
-                continue;
+                var withLineage = groupRows.Select(r => (object?[])[.. r, lineage[index[r]].RowId, lineage[index[r]].Seq]).ToList();
+                written = await ParquetFiles.WriteAsync(table.IO, location, RowLineage.WithLineage(schema), spec.SpecId, g.Key, withLineage, ct);
             }
-            var withLineage = groupRows.Select(r => (object?[])[.. r, lineage[index[r]].RowId, lineage[index[r]].Seq]).ToList();
-            files.Add(await ParquetFiles.WriteAsync(table.IO, location, RowLineage.WithLineage(schema), spec.SpecId, g.Key, withLineage, ct));
+            files.Add(order.IsUnsorted ? written : written with { SortOrderId = order.OrderId });
         }
         return files;
     }
