@@ -17,6 +17,7 @@ a failure instead. Every test is linked to the spec section it verifies ([spec-t
 | L1 soak | `SoakTests` | per target | 4 concurrent writers × random modes for `ICEBERG_SOAK_SECONDS` against memory v2/v3, Glue, REST fixture and Polaris: no lost or duplicated rows, deletes stay deleted, fsck clean |
 | **L2 cross-engine** | `CrossEngineTests`, `WriteModeCrossEngineTests`, `PuffinCrossEngineTests`, `SourceGeneratorInteropTests`, `ShadowCompareTests` | PyIceberg oracle | Both directions with PyIceberg (rows, values, partitions, summaries, position deletes, DVs, NDV sketches, generator files); PyIceberg refuses equality deletes rather than misreading them; shadow fingerprints agree for every type |
 | L2 · Spark | `SparkCrossEngineTests` | `emulation/up.sh --spark` | Spark + Iceberg Java reads every write path (CoW, position deletes, DVs, equality deletes, v2→v3 upgrade, multi-transform partitioning) with the same rows, snapshots, delete kinds and row lineage |
+| L2 · Java scan planning | `ServerScanPlanningTests` (L0, committed plans), `SparkCrossEngineTests.Java_plans_our_tables_and_we_read_its_plans` | `emulation/up.sh --spark` for the live half | Iceberg Java plans scans (interop/java/ScanPlanOracle.java, the Spark image's JDK + Iceberg 1.12) and serializes the REST `PlanTableScanResponse`; we read those plans, of Spark's tables and of every table we write, exactly as our own planner does. No emulated REST server implements planning, so this is the server side |
 | L2 · Trino | `TrinoCrossEngineTests` | `emulation/up.sh --trino` | Trino reads our writes; we read Trino's MoR DELETE/UPDATE/MERGE; mixed histories agree in both |
 | **BDD** | `Iceberg.Net.Behaviour.Tests` (Reqnroll) | PyIceberg oracle for the cross-engine steps | Gherkin specification of write modes × delete mechanisms × format versions, concurrency and conversion; deep fsck after every scenario |
 | **L3 AWS-only** | `AthenaTests` | AWS + Athena workgroup | Athena reads our tables (counts, sums, partition pruning on our transforms); we read Athena-written tables including its position deletes |
@@ -123,6 +124,7 @@ All are path-filtered or scheduled, so they do not affect the platform's CI time
   `interop/spark_oracle.py`; Spark tables go in the shared fixture so one JVM reads them all).
 - An AWS guarantee the emulator lacks → shim + `EmulatorFidelityTests` ([emulation.md](emulation.md)).
 - A new decoder → add its sample to `CorruptionTests`; a new operation → add it to `ModelBasedTests`.
-- Regenerate committed fixtures with the oracles' `fixtures` commands when their scenarios change; L0 stays network-free.
+- Regenerate committed fixtures with the oracles' `fixtures` commands when their scenarios change (Java plans:
+  `interop/java/make-fixtures.sh`); L0 stays network-free.
 
 Planned tiers and their status are tracked in [roadmap.md](roadmap.md#verification-roadmap).

@@ -1,6 +1,8 @@
 using System.Text.Json.Nodes;
 using Iceberg.Net.Catalog;
 using Iceberg.Net.Data;
+using Iceberg.Net.Expressions;
+using Iceberg.Net.Json;
 using Iceberg.Net.Metadata;
 using Iceberg.Net.TestSupport;
 using Iceberg.Net.Types;
@@ -167,6 +169,27 @@ public sealed class SparkCrossEngineTests(SparkTablesFixture fx) : IClassFixture
         var schema = built.Table.Schema;
         Assert.Equal(SparkJson.Rows(schema, built.Rows.Values), SparkJson.Rows(schema, SparkView("nested_v3")["rows"]!.AsArray()));
         Assert.Contains(built.Rows.Values, r => r[4] is null); // the null list<struct> case really is covered
+    }
+
+    /// <summary>Iceberg Java plans scans of every table we wrote (as a REST server would) and we read its plans exactly.</summary>
+    [Spec("rest: planTableScan")]
+    [Spec("Scan Planning")]
+    [SkippableFact]
+    public async Task Java_plans_our_tables_and_we_read_its_plans()
+    {
+        Require.Spark();
+        var filters = new Expression?[] { null, Expr.LessThan("id", 20L), Expr.In("id", 3L, 5L, 7L, 26L, 101L, 201L) };
+        var cases = (from name in fx.Tables.Keys from f in filters select (name, f)).ToList();
+        var plans = await SparkOracle.PlanScansAsync(cases.Select(c => (fx.Tables[c.name].Table.MetadataLocation!, c.f is null ? null : ExpressionJson.ToJson(c.f))));
+        for (var i = 0; i < cases.Count; i++)
+        {
+            var (name, filter) = cases[i];
+            var t = fx.Tables[name].Table;
+            var plan = ServerScanPlan.FromCompletedResponse(plans[i]!, t.Metadata);
+            var theirs = await ServerSideScan.ReadAsync(t, plan, filter);
+            var ours = filter is null ? await TableScan.ReadAllAsync(t) : await TableScan.ReadAsync(t, filter);
+            Assert.True(SparkJson.Rows(t.Schema, theirs).OrderBy(kv => kv.Key).SequenceEqual(SparkJson.Rows(t.Schema, ours).OrderBy(kv => kv.Key)), $"{name} filter {filter}");
+        }
     }
 
     [Spec("Snapshots")]

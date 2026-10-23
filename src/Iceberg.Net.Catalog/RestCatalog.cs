@@ -306,6 +306,18 @@ public sealed class RestCatalog : ICatalog, IViewCatalog
         return ToTable(r.Identifier, resp!);
     }
 
+    /// <summary>Whether the server advertises server-side scan planning (<c>planTableScan</c> in <c>/v1/config</c> endpoints).</summary>
+    public bool SupportsScanPlanning => Endpoints.Contains(ScanPlanningProtocol.PlanEndpoint);
+
+    /// <summary>
+    /// Ask the server to plan a scan of <paramref name="table"/> (spec 1.10+): the files to read, the delete files that
+    /// apply to each and a residual filter, following asynchronous planning and plan tasks to the end. Read the result
+    /// with <c>ServerSideScan</c> in Iceberg.Net.Data. <paramref name="timeout"/> bounds polling (default 5 minutes).
+    /// </summary>
+    public Task<ServerScanPlan> PlanTableScanAsync(Table table, ScanPlanRequest request, TimeSpan? timeout = null, CancellationToken ct = default) =>
+        ScanPlanningProtocol.PlanAsync((m, path, body, c) => SendAsync(m, path, body, c), TablePath(table.Identifier), table.Metadata, request,
+            timeout ?? TimeSpan.FromMinutes(5), ct);
+
     public async Task<Table> LoadTableAsync(TableIdentifier id, CancellationToken ct = default) =>
         ToTable(id, (await SendAsync(HttpMethod.Get, TablePath(id), null, ct))!);
 

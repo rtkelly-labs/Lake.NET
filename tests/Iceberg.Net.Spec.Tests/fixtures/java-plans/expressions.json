@@ -1,0 +1,123 @@
+[
+ true,
+ false,
+ {
+  "type": "eq",
+  "term": "id",
+  "value": 5
+ },
+ {
+  "type": "not-eq",
+  "term": "name",
+  "value": "bob"
+ },
+ {
+  "type": "lt",
+  "term": "price",
+  "value": 19.99
+ },
+ {
+  "type": "lt-eq",
+  "term": "id",
+  "value": -3000000000
+ },
+ {
+  "type": "gt",
+  "term": "ts",
+  "value": "2024-01-02T03:04:05.000006"
+ },
+ {
+  "type": "gt-eq",
+  "term": "day",
+  "value": "2024-01-02"
+ },
+ {
+  "type": "in",
+  "term": "id",
+  "values": [
+   1,
+   2,
+   3
+  ]
+ },
+ {
+  "type": "not-in",
+  "term": "region",
+  "values": [
+   "eu",
+   "us"
+  ]
+ },
+ {
+  "type": "is-null",
+  "term": "name"
+ },
+ {
+  "type": "not-null",
+  "term": "name"
+ },
+ {
+  "type": "is-nan",
+  "term": "score"
+ },
+ {
+  "type": "not-nan",
+  "term": "score"
+ },
+ {
+  "type": "starts-with",
+  "term": "name",
+  "value": "ab"
+ },
+ {
+  "type": "not-starts-with",
+  "term": "name",
+  "value": "x"
+ },
+ {
+  "type": "eq",
+  "term": "flag",
+  "value": true
+ },
+ {
+  "type": "eq",
+  "term": "amount",
+  "value": "12.340"
+ },
+ {
+  "type": "eq",
+  "term": "u",
+  "value": "f79c3e09-677c-4bbd-a479-3f349cb785e7"
+ },
+ {
+  "type": "and",
+  "left": {
+   "type": "gt",
+   "term": "id",
+   "value": 1
+  },
+  "right": {
+   "type": "or",
+   "left": {
+    "type": "is-null",
+    "term": "a"
+   },
+   "right": {
+    "type": "not",
+    "child": {
+     "type": "eq",
+     "term": "b",
+     "value": "x"
+    }
+   }
+  }
+ },
+ {
+  "type": "eq",
+  "term": {
+   "type": "reference",
+   "term": "id"
+  },
+  "value": 7
+ }
+]

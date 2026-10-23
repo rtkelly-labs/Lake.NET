@@ -149,6 +149,51 @@ public sealed class DeleteIndex
         return index;
     }
 
+    /// <summary>
+    /// An index for deletes someone else already matched to data files (server-side scan planning): it holds no files
+    /// itself; <see cref="RowFilterAsync(DataFile, IReadOnlyList{DataFile}, Schema, CancellationToken)"/> applies exactly
+    /// the deletes given for each file, caching what it reads across files.
+    /// </summary>
+    public static DeleteIndex ForResolvedDeletes(Table table) => new(table.IO) { _metadata = table.Metadata };
+
+    /// <summary>
+    /// Like <see cref="RowFilterAsync(DataFile, long, Schema, CancellationToken)"/>, but with the applicable delete files
+    /// given (sequence numbers and partition scoping were already applied by whoever chose them). Position deletes and
+    /// deletion vectors still only remove rows recorded against <paramref name="dataFile"/>'s path.
+    /// </summary>
+    public async Task<Func<long, object?[], bool>?> RowFilterAsync(DataFile dataFile, IReadOnlyList<DataFile> applicable, Schema projection, CancellationToken ct = default)
+    {
+        RoaringPositionBitmap? positions = null;
+        foreach (var d in applicable.Where(d => d.Content == FileContent.PositionDeletes))
+        {
+            if (d.ReferencedDataFile is { } r && r != dataFile.FilePath) continue;
+            RoaringPositionBitmap? bm;
+            if (d.FileFormat == "PUFFIN") bm = await ReadDeletionVectorAsync(d, ct);
+            else (await PositionDeletesAsync(d.FilePath)).TryGetValue(dataFile.FilePath, out bm);
+            if (bm is not null) (positions ??= new RoaringPositionBitmap()).Or(bm);
+        }
+        var equality = await EqualityFiltersAsync(applicable.Where(d => d.Content == FileContent.EqualityDeletes), projection);
+        if (positions is null && equality.Count == 0) return null;
+        return (pos, row) => (positions?.Contains(pos) ?? false)
+            || equality.Any(eq => eq.Keys.Contains(EqualityKey.Encode(eq.Fields, i => row[eq.Columns[i]])));
+    }
+
+    private async Task<List<(int[] Columns, IReadOnlyList<NestedField> Fields, HashSet<string> Keys)>> EqualityFiltersAsync(IEnumerable<DataFile> files, Schema projection)
+    {
+        var equality = new List<(int[] Columns, IReadOnlyList<NestedField> Fields, HashSet<string> Keys)>();
+        foreach (var group in files.GroupBy(f => string.Join(',', (f.EqualityIds ?? throw new FormatException($"Equality delete file {f.FilePath} has no equality_ids")).Order())))
+        {
+            var ids = group.First().EqualityIds!.Order().ToList();
+            var columns = ids.Select(id => projection.Columns.ToList().FindIndex(c => c.Id == id)).ToArray();
+            if (columns.Any(c => c < 0)) throw new NotSupportedException($"Equality deletes on columns [{string.Join(',', ids)}] must be top-level columns of the projection");
+            var fields = columns.Select(c => projection.Columns[c]).ToList();
+            var keys = new HashSet<string>(StringComparer.Ordinal);
+            foreach (var f in group) keys.UnionWith(await EqualityKeysAsync(f, fields));
+            equality.Add((columns, fields, keys));
+        }
+        return equality;
+    }
+
     public DeleteEntry? DeletionVectorFor(string dataFile) => _dvs.GetValueOrDefault(dataFile);
 
     /// <summary>Positions deleted from <paramref name="dataFile"/>, or null when nothing applies.</summary>
@@ -177,17 +222,7 @@ public sealed class DeleteIndex
     public async Task<Func<long, object?[], bool>?> RowFilterAsync(DataFile dataFile, long dataSequenceNumber, Schema projection, CancellationToken ct = default)
     {
         var positions = await DeletedPositionsAsync(dataFile, dataSequenceNumber, ct);
-        var equality = new List<(int[] Columns, IReadOnlyList<NestedField> Fields, HashSet<string> Keys)>();
-        foreach (var group in _equalityFiles.Where(e => AppliesTo(e, dataFile, dataSequenceNumber)).GroupBy(e => string.Join(',', e.File.EqualityIds!.Order())))
-        {
-            var ids = group.First().File.EqualityIds!.Order().ToList();
-            var columns = ids.Select(id => projection.Columns.ToList().FindIndex(c => c.Id == id)).ToArray();
-            if (columns.Any(c => c < 0)) throw new NotSupportedException($"Equality deletes on columns [{string.Join(',', ids)}] must be top-level columns of the projection");
-            var fields = columns.Select(c => projection.Columns[c]).ToList();
-            var keys = new HashSet<string>(StringComparer.Ordinal);
-            foreach (var e in group) keys.UnionWith(await EqualityKeysAsync(e.File, fields));
-            equality.Add((columns, fields, keys));
-        }
+        var equality = await EqualityFiltersAsync(_equalityFiles.Where(e => AppliesTo(e, dataFile, dataSequenceNumber)).Select(e => e.File), projection);
         if (positions is null && equality.Count == 0) return null;
         return (pos, row) => (positions?.Contains(pos) ?? false)
             || equality.Any(eq => eq.Keys.Contains(EqualityKey.Encode(eq.Fields, i => row[eq.Columns[i]])));

@@ -1,0 +1,85 @@
+[
+  {
+    "name": "mor_v2_all",
+    "table": "mor_v2",
+    "metadata": "file:///tmp/sentric-spark-fixture-root/warehouse/ref/mor_v2/metadata/v5.metadata.json",
+    "filter": null
+  },
+  {
+    "name": "mor_v2_id_lt_10",
+    "table": "mor_v2",
+    "metadata": "file:///tmp/sentric-spark-fixture-root/warehouse/ref/mor_v2/metadata/v5.metadata.json",
+    "filter": {
+      "type": "lt",
+      "term": "id",
+      "value": 10
+    }
+  },
+  {
+    "name": "mor_v2_region_eu",
+    "table": "mor_v2",
+    "metadata": "file:///tmp/sentric-spark-fixture-root/warehouse/ref/mor_v2/metadata/v5.metadata.json",
+    "filter": {
+      "type": "eq",
+      "term": "region",
+      "value": "eu"
+    }
+  },
+  {
+    "name": "mor_v3_eu_from_3",
+    "table": "mor_v3",
+    "metadata": "file:///tmp/sentric-spark-fixture-root/warehouse/ref/mor_v3/metadata/v5.metadata.json",
+    "filter": {
+      "type": "and",
+      "left": {
+        "type": "gt-eq",
+        "term": "id",
+        "value": 3
+      },
+      "right": {
+        "type": "eq",
+        "term": "region",
+        "value": "eu"
+      }
+    }
+  },
+  {
+    "name": "mor_v3_id_in",
+    "table": "mor_v3",
+    "metadata": "file:///tmp/sentric-spark-fixture-root/warehouse/ref/mor_v3/metadata/v5.metadata.json",
+    "filter": {
+      "type": "in",
+      "term": "id",
+      "values": [
+        1,
+        2,
+        5,
+        8,
+        13,
+        21
+      ]
+    }
+  },
+  {
+    "name": "evolved_v2_all",
+    "table": "evolved_v2",
+    "metadata": "file:///tmp/sentric-spark-fixture-root/warehouse/ref/evolved_v2/metadata/v10.metadata.json",
+    "filter": null
+  },
+  {
+    "name": "evolved_v2_id_gt_12",
+    "table": "evolved_v2",
+    "metadata": "file:///tmp/sentric-spark-fixture-root/warehouse/ref/evolved_v2/metadata/v10.metadata.json",
+    "filter": {
+      "type": "gt",
+      "term": "id",
+      "value": 12
+    }
+  },
+  {
+    "name": "nested_v2_all",
+    "table": "nested_v2",
+    "metadata": "file:///tmp/sentric-spark-fixture-root/warehouse/ref/nested_v2/metadata/v5.metadata.json",
+    "filter": null
+  }
+]

@@ -118,7 +118,7 @@ Legend: ✅ implemented and tested · 🟡 partial · ⬜ not started · — not
 | Storage credentials / per-table `config` | ✅ longest-prefix credential selection | |
 | `loadCredentials` refresh, remote signing | ⬜ | |
 | Multi-table `transactions/commit` | ✅ `ICatalog.CommitTransactionAsync` + `SnapshotProducer.StageAsync` | `CatalogConformanceTests` (Java REST server, Polaris; JDBC via one SQL transaction; Glue refuses) |
-| Scan planning (`plan`, `tasks`) | ⬜ | |
+| Scan planning (`plan`, `plan/{id}`, `tasks`, cancel) | ✅ `RestCatalog.PlanTableScanAsync` (inline, submitted → polled, plan tasks followed recursively, cancel on abandon), `ServerSideScan` reads with the server-matched deletes; content files and expressions in both Java 1.10 and spec (1.12) forms | `ServerScanPlanningTests` (Java-made plans replayed), `ExpressionJsonTests`, `SparkCrossEngineTests.Java_plans_our_tables_and_we_read_its_plans` |
 | Views (create, load, replace, list, exists, rename, drop) | ✅ `IViewCatalog` on `RestCatalog` and `InMemoryCatalog`; view spec v1 metadata (`ViewMetadata`, history trimming) | `ViewTests`, `ViewConformanceTests` (Java REST server, Polaris; Trino queries our view and we read Trino's) |
 | Metrics reporting | ⬜ | |
 | ETag / freshness-aware loading | ⬜ | |

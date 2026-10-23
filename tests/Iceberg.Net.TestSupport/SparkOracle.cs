@@ -59,6 +59,44 @@ public static class SparkOracle
         return JsonNode.Parse(stdout[(marker + "@@ORACLE@@".Length)..])!.AsObject();
     }
 
+    /// <summary>
+    /// Iceberg Java's REST scan planning as an oracle (interop/java/ScanPlanOracle.java, same image and jar): for each
+    /// (metadata location, filter JSON) Java plans the scan itself and returns the PlanTableScanResponse a server sends.
+    /// </summary>
+    public static Task<JsonArray> PlanScansAsync(IEnumerable<(string MetadataLocation, JsonNode? Filter)> cases) =>
+        JavaAsync("plans", new JsonArray(cases.Select(c => (JsonNode)new JsonObject { ["metadata"] = c.MetadataLocation, ["filter"] = c.Filter?.DeepClone() }).ToArray()));
+
+    /// <summary>Each expression parsed and re-serialized by Java's ExpressionParser: <c>[{"string","json"}]</c>.</summary>
+    public static Task<JsonArray> ParseExpressionsAsync(IEnumerable<JsonNode> expressions) =>
+        JavaAsync("exprs", new JsonArray(expressions.Select(e => e.DeepClone()).ToArray()));
+
+    private static async Task<JsonArray> JavaAsync(string command, JsonArray input)
+    {
+        if (SkipReason is not null) throw new InvalidOperationException(SkipReason);
+        Directory.CreateDirectory(SharedRoot);
+        var file = Path.Combine(SharedRoot, $"java-{Guid.NewGuid():N}.json");
+        await File.WriteAllTextAsync(file, input.ToJsonString());
+        try
+        {
+            var java = Path.Combine(TestEnvironment.RepoDir(), "interop", "java");
+            string[] args =
+            [
+                "run", "--rm", "--user", "root", "--network", "none", "--hostname", "localhost", "--entrypoint", "/opt/java/openjdk/bin/java",
+                "-v", $"{Path.GetDirectoryName(Jar)}:/jars:ro", "-v", $"{java}:/w:ro", "-v", $"{SharedRoot}:{SharedRoot}",
+                Image, "-cp", $"/jars/{Path.GetFileName(Jar)}:/opt/spark/jars/*", "/w/ScanPlanOracle.java", command, file,
+            ];
+            var (code, stdout, stderr) = await Run("docker", args, TimeSpan.FromMinutes(5));
+            var last = stdout.TrimEnd().Split('\n').LastOrDefault();
+            if (code != 0 || last is null || !last.StartsWith('['))
+                throw new InvalidOperationException($"Java oracle failed ({code}): {string.Join('\n', stderr.Split('\n').TakeLast(30))}");
+            return JsonNode.Parse(last)!.AsArray();
+        }
+        finally
+        {
+            File.Delete(file);
+        }
+    }
+
     private static async Task<(int Code, string Stdout, string Stderr)> Run(string file, IEnumerable<string> args, TimeSpan timeout)
     {
         var psi = new ProcessStartInfo(file) { RedirectStandardOutput = true, RedirectStandardError = true };
