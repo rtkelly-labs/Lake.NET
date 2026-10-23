@@ -104,7 +104,8 @@ Runs weekly in `.github/workflows/iceberg-dotnet-mutation.yml` (Puffin, and Core
    reads.
 4. **Registry access for Nessie/Lakekeeper** (#11), or add them from a machine that can pull from quay.io/ghcr.io.
 5. **Upstream issues**: Parquet.Net group field IDs ([drafted](upstream/parquet-net-group-field-ids.md), patch
-   verified), PyIceberg reading a null `list<struct>` as empty ([drafted](upstream/pyiceberg-null-list-of-struct.md))
+   verified), PyIceberg reading a null `list<struct>` as empty ([drafted](upstream/pyiceberg-null-list-of-struct.md)), Gravitino
+   misattributing deletion vectors in scan plans ([drafted](upstream/gravitino-dv-references.md))
    and the Parquet.SourceGenerator Iceberg profile ([gaps](parquet-sourcegenerator.md)).
 
 ## Breaking out
