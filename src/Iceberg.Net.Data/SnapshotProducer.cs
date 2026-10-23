@@ -227,6 +227,18 @@ public sealed class SnapshotProducer
         return this;
     }
 
+    private readonly List<DataFile> _removeDeleteFiles = [];
+
+    /// <summary>
+    /// Remove these delete files (a delete-file rewrite). Each must still be live when the commit is applied, else
+    /// <see cref="ValidationException"/>: another writer rewrote or dropped it meanwhile.
+    /// </summary>
+    public SnapshotProducer RemoveDeleteFiles(IEnumerable<DataFile> files)
+    {
+        _removeDeleteFiles.AddRange(files);
+        return this;
+    }
+
     /// <summary>Add pre-written delete files (e.g. equality deletes).</summary>
     public SnapshotProducer AddDeleteFiles(IEnumerable<DataFile> files)
     {
@@ -394,7 +406,7 @@ public sealed class SnapshotProducer
         var parentManifests = parent is null ? [] : await TableScan.ManifestsAsync(_table, parent, ct);
 
         // 0. Row-level deletes / conversion: decide which delete files to add and which to remove.
-        var deleteChange = _rowDeletes is not null || _convertPositionDeletes || _addedDeleteFiles.Count > 0 || _deleteWhere is not null
+        var deleteChange = _rowDeletes is not null || _convertPositionDeletes || _addedDeleteFiles.Count > 0 || _deleteWhere is not null || _removeDeleteFiles.Count > 0
             ? await PlanDeleteChangeAsync(parent, parentManifests, commitUuid, ct)
             : DeleteChange.None;
 
@@ -573,6 +585,13 @@ public sealed class SnapshotProducer
         void Remove(DataFile f)
         {
             if (removed.Add((f.FilePath, f.ContentOffset))) removedFiles.Add(f);
+        }
+
+        foreach (var f in _removeDeleteFiles)
+        {
+            var entry = index.All.Concat(index.EqualityDeletes).FirstOrDefault(e => e.File.FilePath == f.FilePath && e.File.ContentOffset == f.ContentOffset)
+                ?? throw new ValidationException($"Delete file {f.FilePath} is no longer live in snapshot {parent.SnapshotId}: a concurrent commit rewrote or removed it");
+            Remove(entry.File);
         }
 
         // Data files removed in this commit take their deletion vectors with them (no dangling DVs).
