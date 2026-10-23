@@ -1,0 +1,16 @@
+<Project Sdk="Microsoft.NET.Sdk">
+  <PropertyGroup>
+    <OutputType>Exe</OutputType>
+    <IsPackable>false</IsPackable>
+    <RootNamespace>Iceberg.Net.Fuzz</RootNamespace>
+    <Description>Coverage-guided fuzzing (SharpFuzz + libFuzzer) of the decoders for untrusted bytes; run with tools/fuzz.sh.</Description>
+  </PropertyGroup>
+  <ItemGroup>
+    <PackageReference Include="SharpFuzz" />
+  </ItemGroup>
+  <ItemGroup>
+    <ProjectReference Include="../../src/Iceberg.Net.Core/Iceberg.Net.Core.csproj" />
+    <ProjectReference Include="../../src/Iceberg.Net.Avro/Iceberg.Net.Avro.csproj" />
+    <ProjectReference Include="../../src/Iceberg.Net.Puffin/Iceberg.Net.Puffin.csproj" />
+  </ItemGroup>
+</Project>

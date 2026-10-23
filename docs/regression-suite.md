@@ -85,6 +85,24 @@ dotnet run --project tools/ShadowCompare -- --catalog glue --table analytics.pla
 dotnet run --project tools/ShadowCompare -- --metadata s3://bucket/path/metadata/00042-….metadata.json
 ```
 
+### Fuzzing
+
+`CorruptionTests` (L0) mutates fixtures at random; `tools/fuzz.sh` adds coverage-guided fuzzing with SharpFuzz and
+libFuzzer for long unattended runs, one decoder at a time:
+
+```bash
+sudo apt-get install clang libclang-rt-18-dev     # libFuzzer runtime
+tools/fuzz.sh manifest 600                         # metadata view-metadata manifest-list manifest puffin
+                                                   # deletion-vector roaring theta
+FUZZ_STRICT=1 tools/fuzz.sh roaring 600            # also flag low-level exceptions a Corruption.Guard converted
+```
+
+The harness (`tests/Iceberg.Net.Fuzz`) holds each decoder to the `Corruption` contract: a format error or
+success, nothing else. Crashes, hangs (10 s) and out-of-memory (4 GB) inputs are saved under
+`fuzz/<target>/findings/`; turn each into a `CorruptionTests` case when fixing it. The corpus is seeded from the
+committed fixtures and kept between runs in `fuzz/<target>/corpus` (git-ignored). CI runs every target for 15
+minutes weekly (`.github/workflows/iceberg-dotnet-fuzz.yml`).
+
 ## CI
 
 | Workflow | When | What |

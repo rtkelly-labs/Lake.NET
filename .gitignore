@@ -6,3 +6,4 @@ TestResults/
 .venv/
 __pycache__/
 emulation/.cache/
+fuzz/
