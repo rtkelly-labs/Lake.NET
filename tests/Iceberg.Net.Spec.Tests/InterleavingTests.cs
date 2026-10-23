@@ -324,4 +324,81 @@ public sealed class InterleavingTests : IDisposable
         Assert.Equal(head, (await _catalog.LoadTableAsync(subject.Identifier)).Metadata.Refs["release"].SnapshotId);
         await StateAsync(subject);
     }
+
+    private static async Task<Dictionary<long, string?>> BranchRowsAsync(Table t, string branch)
+    {
+        var rows = new Dictionary<long, string?>();
+        await foreach (var r in TableScan.ReadRowsAsync(t, new ScanRequest { Snapshot = SnapshotSelector.Ref(branch) })) rows.Add((long)r[0]!, (string?)r[1]);
+        return rows;
+    }
+
+    [Spec("Snapshot References")]
+    [Theory]
+    [MemberData(nameof(Interferers))]
+    public async Task Branch_overwrites_are_isolated_from_every_writer_on_main(string kind)
+    {
+        foreach (var v in new[] { 2, 3 })
+        {
+            var (subject, other) = await SetupAsync(v);
+            await subject.ManageSnapshots().CreateBranch("audit").CommitAsync();
+            await other.RefreshAsync();
+            var targets = (await TableScan.PlanFilesAsync(subject, Id2, subject.Metadata.Refs["audit"].SnapshotId)).Select(t => t.File.FilePath).ToHashSet();
+            var overwrite = SnapshotProducer.Overwrite(subject, f => targets.Contains(f.FilePath))
+                .AddFiles(await TableWriter.WriteAsync(subject, [[1L, "base"], [2L, "mine"]])).ToBranch("audit");
+            _catalog.BeforeNextSwap = Interferer(kind, other);
+            await overwrite.CommitAsync();
+
+            var main = await StateAsync(subject); // validates every ref's history
+            AssertInterfererKept(kind, main);
+            Assert.NotEqual("mine", main.GetValueOrDefault(2));
+            var audit = await BranchRowsAsync(await _catalog.LoadTableAsync(subject.Identifier), "audit");
+            Assert.Equal(Enumerable.Range(1, 6).Select(i => (long)i), audit.Keys.Order());
+            Assert.Equal("mine", audit[2]);
+        }
+    }
+
+    [Spec("Snapshot References")]
+    [Theory]
+    [InlineData(2)]
+    [InlineData(3)]
+    public async Task Branch_commits_conflict_with_writers_on_the_same_branch(int formatVersion)
+    {
+        foreach (var concurrent in new[] { "append", "delete-2" })
+        {
+            var (subject, other) = await SetupAsync(formatVersion);
+            await subject.ManageSnapshots().CreateBranch("audit").CommitAsync();
+            await other.RefreshAsync();
+            var head = subject.Metadata.Refs["audit"].SnapshotId;
+            var targets = (await TableScan.PlanFilesAsync(subject, Id2, head)).Select(t => t.File.FilePath).ToHashSet();
+            var overwrite = SnapshotProducer.Overwrite(subject, f => targets.Contains(f.FilePath))
+                .AddFiles(await TableWriter.WriteAsync(subject, [[1L, "base"], [2L, "mine"]])).ToBranch("audit");
+            _catalog.BeforeNextSwap = async () =>
+            {
+                if (concurrent == "append")
+                {
+                    await SnapshotProducer.Append(other).AddFiles(await TableWriter.WriteAsync(other, [[10L, "other"]])).ToBranch("audit").CommitAsync();
+                    return;
+                }
+                var file = targets.Single();
+                var pos = (await DataFiles.ReadAsync(other.IO, file, "PARQUET", Schema)).FindIndex(r => (long)r[0]! == 2);
+                await SnapshotProducer.DeleteRows(other, new Dictionary<string, IEnumerable<long>> { [file] = [pos] }).ToBranch("audit").CommitAsync();
+            };
+
+            if (concurrent == "append")
+            {
+                await overwrite.CommitAsync(); // rebased onto the other branch commit
+                var audit = await BranchRowsAsync(await _catalog.LoadTableAsync(subject.Identifier), "audit");
+                Assert.Equal("mine", audit[2]);
+                Assert.Equal("other", audit[10]);
+            }
+            else
+            {
+                await Assert.ThrowsAsync<ValidationException>(() => overwrite.CommitAsync()); // would resurrect id 2 on the branch
+                Assert.False((await BranchRowsAsync(await _catalog.LoadTableAsync(subject.Identifier), "audit")).ContainsKey(2));
+            }
+            var main = await StateAsync(subject);
+            Assert.Equal("base", main[2]); // main never saw either branch commit
+            Assert.Equal(6, main.Count);
+        }
+    }
 }
