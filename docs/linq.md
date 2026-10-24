@@ -3,7 +3,7 @@
 `Iceberg.Net.Linq` maps C# classes and records to Iceberg rows by field ID. It adds a LINQ provider that turns
 a query into one `ScanRequest` (filter, columns, snapshot) and adds bulk writes shaped like EF Core's
 (`ExecuteDelete`, `ExecuteUpdate`). It builds on the shared read contract in `Iceberg.Net.Data/Scan.cs` and on
-`TableMutations`, and adds nothing to them.
+`TableMutations`, and adds nothing to them. The EF Core provider ([efcore.md](efcore.md)) is built on this layer.
 
 ```csharp
 var snake = new IcebergMapperOptions { NameConverter = IcebergNaming.SnakeCase };
@@ -42,6 +42,8 @@ setters or `init` accessors for the rest.
 **Binding a member to a field**, in this order:
 
 1. `[IcebergField(id)]` binds by field ID. This is the only binding that survives renames.
+   `IcebergMapperOptions.FieldIds` supplies IDs for top-level members configured elsewhere. The EF Core provider uses
+   it for `HasIcebergFieldId`.
 2. The name, which is `[IcebergField(Name = "...")]` or the property name passed through
    `IcebergMapperOptions.NameConverter` (for example `IcebergNaming.SnakeCase`):
    1. an exact match on a column name;
