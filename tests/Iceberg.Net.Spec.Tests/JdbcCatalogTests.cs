@@ -98,4 +98,27 @@ public sealed class JdbcCatalogTests : IDisposable
         var current = await catalog.LoadViewAsync(id);
         Assert.Equal(1 + results.Count(ok => ok), current.Metadata.Versions.Count); // every acknowledged replace is in history
     }
+
+    [Fact]
+    [Spec("rest: commitTransaction")]
+    public async Task Staged_merges_commit_across_tables_in_one_database_transaction()
+    {
+        var catalog = await Open(views: false);
+        Assert.True(catalog.SupportsMultiTableTransactions);
+        await catalog.CreateNamespaceAsync(Namespace.Of("ns"));
+        var a = await catalog.CreateTableAsync(new CreateTableRequest(TableIdentifier.Of("ns", "a"), Schema, PartitionSpec.Unpartitioned));
+        var b = await catalog.CreateTableAsync(new CreateTableRequest(TableIdentifier.Of("ns", "b"), Schema, PartitionSpec.Unpartitioned));
+        await TableMutations.InsertAsync(a, [[1L], [2L]]);
+        await TableMutations.InsertAsync(b, [[1L]]);
+        var stagedA = await TableMutations.StageMergeAsync(await catalog.LoadTableAsync(a.Identifier), [[1L], [3L]], ["id"], m => m.WhenMatchedDelete().WhenNotMatchedInsert());
+        var stagedB = await TableMutations.StageMergeAsync(await catalog.LoadTableAsync(b.Identifier), [[5L]], ["id"], m => m.WhenNotMatchedInsert());
+        // a moves after staging: the transaction's row for a is stale, so neither row moves until both are re-planned.
+        await TableMutations.InsertAsync(a, [[4L]]);
+
+        await StagedCommit.CommitAllAsync([stagedA, stagedB]);
+
+        Assert.Equal((2, 2), (stagedA.Attempts, stagedB.Attempts));
+        Assert.Equal([2L, 3L, 4L], (await TableScan.ReadAllAsync(await catalog.LoadTableAsync(a.Identifier))).Select(r => (long)r[0]!).Order());
+        Assert.Equal([1L, 5L], (await TableScan.ReadAllAsync(await catalog.LoadTableAsync(b.Identifier))).Select(r => (long)r[0]!).Order());
+    }
 }

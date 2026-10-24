@@ -236,6 +236,7 @@ public sealed class CatalogConformanceTests
         async Task<TableCommit> Stage(Table t, int from) =>
             await SnapshotProducer.Append(t).AddFiles(await TableWriter.WriteAsync(t, Rows(from, 3))).StageAsync();
 
+        Assert.Equal(kind is not ("glue" or "gravitino"), s.Catalog.SupportsMultiTableTransactions);
         if (kind is "glue" or "gravitino")
         {
             // Glue has no multi-table atomic update; Gravitino 1.3's REST service does not advertise one (checked from /v1/config).
@@ -253,5 +254,14 @@ public sealed class CatalogConformanceTests
         await Assert.ThrowsAsync<CommitFailedException>(() => s.Catalog.CommitTransactionAsync([staleA, stagedB]));
         Assert.Equal(4, (await TableScan.ReadAllAsync(await s.Catalog.LoadTableAsync(a.Identifier))).Count);
         Assert.Equal(3, (await TableScan.ReadAllAsync(await s.Catalog.LoadTableAsync(b.Identifier))).Count);
+
+        // Staged row-level changes (what EF Core's SaveChanges commits): a moves after staging, so both are re-planned.
+        var deleteA = await TableMutations.StageMergeAsync(await s.Catalog.LoadTableAsync(a.Identifier), Rows(0, 1), ["id"], m => m.WhenMatchedDelete());
+        var deleteB = await TableMutations.StageMergeAsync(await s.Catalog.LoadTableAsync(b.Identifier), Rows(100, 1), ["id"], m => m.WhenMatchedDelete());
+        await TableMutations.InsertAsync(await s.Catalog.LoadTableAsync(a.Identifier), Rows(30, 1));
+        await StagedCommit.CommitAllAsync([deleteA, deleteB]);
+        Assert.Equal(2, deleteA.Attempts);
+        Assert.Equal(4, (await TableScan.ReadAllAsync(await s.Catalog.LoadTableAsync(a.Identifier))).Count);
+        Assert.Equal(2, (await TableScan.ReadAllAsync(await s.Catalog.LoadTableAsync(b.Identifier))).Count);
     }
 }

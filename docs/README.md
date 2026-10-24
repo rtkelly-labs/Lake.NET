@@ -12,7 +12,7 @@
 | [read-path.md](read-path.md) | Scans: pruning levels (manifests, files, row groups), projection by field ID, streaming, time travel semantics |
 | [snapshot-management.md](snapshot-management.md) | Branches, tags, rollback, cherry-pick, write-audit-publish, per-ref retention, metadata tables, change feed |
 | [linq.md](linq.md) | The typed layer: mapping rules, what LINQ pushes down vs evaluates in memory, strict mode, typed writes |
-| [efcore.md](efcore.md) | The EF Core provider: model mapping, query delegation to the LINQ layer, `SaveChanges` as one MERGE per table, concurrency, atomicity |
+| [efcore.md](efcore.md) | The EF Core provider: model mapping, query delegation to the LINQ layer, `SaveChanges` as one MERGE per table, concurrency, atomicity across tables |
 | [write-modes.md](write-modes.md) | Insert, upsert by key, group key replacement, deletes — and the copy-on-write / position / equality delete mechanisms |
 | [upstream/parquet-net-group-field-ids.md](upstream/parquet-net-group-field-ids.md) | Draft Parquet.Net issue + verified minimal patch for field IDs on struct/list/map |
 | [puffin.md](puffin.md) | Puffin files, deletion vectors, Theta sketches, the v2→v3 position-delete converter, NDV statistics |

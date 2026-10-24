@@ -109,6 +109,30 @@ public static partial class TableMutations
     public static async Task<MergeResult> UpdateAsync(Table table, Expression filter, Action<RowUpdate> set,
         DeleteStrategy strategy = DeleteStrategy.Default, CancellationToken ct = default)
     {
+        var (resolved, plan) = PlanUpdate(table, filter, set, strategy);
+        var (snapshot, updated, attempts) = await RetryAsync(table, () => plan(ct), ct);
+        return new MergeResult(snapshot, updated, 0, 0, resolved, attempts);
+    }
+
+    /// <summary>
+    /// <see cref="UpdateAsync"/> planned and written but not committed: commit it, with changes to other tables, through
+    /// <see cref="StagedCommit.CommitAllAsync"/>, which plans it again after a lost race. <see cref="StagedCommit{TResult}.Result"/>
+    /// holds the counts of the current plan.
+    /// </summary>
+    public static async Task<StagedCommit<MergeResult>> StageUpdateAsync(Table table, Expression filter, Action<RowUpdate> set,
+        DeleteStrategy strategy = DeleteStrategy.Default, CancellationToken ct = default)
+    {
+        var (resolved, plan) = PlanUpdate(table, filter, set, strategy);
+        var staged = new StagedCommit<MergeResult>(table, async c => { var (p, o) = await plan(c); return (p, o); },
+            (snapshot, o, attempts) => new MergeResult(snapshot, (long?)o ?? 0, 0, 0, resolved, attempts));
+        await staged.PlanAsync(ct);
+        return staged;
+    }
+
+    /// <summary>Validates an UPDATE and returns its strategy and the plan of one attempt against the table's current state.</summary>
+    private static (DeleteStrategy Strategy, Func<CancellationToken, Task<(SnapshotProducer? Producer, long Updated)>> Plan) PlanUpdate(
+        Table table, Expression filter, Action<RowUpdate> set, DeleteStrategy strategy)
+    {
         ArgumentNullException.ThrowIfNull(filter);
         ArgumentNullException.ThrowIfNull(set);
         var resolved = Resolve(table, strategy, UpdateModeProperty);
@@ -117,7 +141,7 @@ public static partial class TableMutations
         var matches = RowEvaluator.Compile(Binder.Bind(table.Schema, filter));
         var assign = Assignments.Of(table.Schema, set);
 
-        var (snapshot, updated, attempts) = await RetryAsync(table, async () =>
+        return (resolved, async ct =>
         {
             if (table.Metadata.CurrentSnapshot is null) return ((SnapshotProducer?)null, 0L);
             var found = await FindMatchesAsync(table, filter, row => matches(row) ? new RowChange(assign.Apply(row, null)) : null, ct);
@@ -125,8 +149,7 @@ public static partial class TableMutations
             var producer = SnapshotProducer.RowDelta(table).WithRetries(0);
             await StageChangesAsync(table, producer, found, resolved, null, [], ct);
             return (producer, found.Sum(m => (long)m.Replacements.Count));
-        }, ct);
-        return new MergeResult(snapshot, updated, 0, 0, resolved, attempts);
+        });
     }
 
     /// <summary>
@@ -142,6 +165,33 @@ public static partial class TableMutations
     /// </summary>
     public static async Task<MergeResult> MergeAsync(Table table, IReadOnlyList<object?[]> source, IReadOnlyList<string> on, Action<MergeBuilder> clauses,
         DeleteStrategy strategy = DeleteStrategy.Default, CancellationToken ct = default)
+    {
+        var (resolved, plan) = PlanMerge(table, source, on, clauses, strategy);
+        var (snapshot, counts, attempts) = await RetryAsync(table, () => plan(ct), ct);
+        return new MergeResult(snapshot, counts.Updated, counts.Deleted, counts.Inserted, resolved, attempts);
+    }
+
+    /// <summary>
+    /// <see cref="MergeAsync"/> planned and written but not committed, for an atomic commit across tables with
+    /// <see cref="StagedCommit.CommitAllAsync"/>. The clauses (and the checks they make) run again on every re-plan,
+    /// against the state the transaction then commits on. <see cref="StagedCommit{TResult}.Result"/> holds the counts of
+    /// the current plan; its snapshot is null when the merge changes nothing.
+    /// </summary>
+    public static async Task<StagedCommit<MergeResult>> StageMergeAsync(Table table, IReadOnlyList<object?[]> source, IReadOnlyList<string> on,
+        Action<MergeBuilder> clauses, DeleteStrategy strategy = DeleteStrategy.Default, CancellationToken ct = default)
+    {
+        var (resolved, plan) = PlanMerge(table, source, on, clauses, strategy);
+        var staged = new StagedCommit<MergeResult>(table, async c => { var (p, o) = await plan(c); return (p, o); },
+            (snapshot, o, attempts) => o is (long u, long d, long i)
+                ? new MergeResult(snapshot, u, d, i, resolved, attempts)
+                : new MergeResult(snapshot, 0, 0, 0, resolved, attempts));
+        await staged.PlanAsync(ct);
+        return staged;
+    }
+
+    /// <summary>Validates a MERGE (cardinality included) and returns its strategy and the plan of one attempt.</summary>
+    private static (DeleteStrategy Strategy, Func<CancellationToken, Task<(SnapshotProducer? Producer, (long Updated, long Deleted, long Inserted) Counts)>> Plan) PlanMerge(
+        Table table, IReadOnlyList<object?[]> source, IReadOnlyList<string> on, Action<MergeBuilder> clauses, DeleteStrategy strategy)
     {
         ArgumentNullException.ThrowIfNull(source);
         ArgumentNullException.ThrowIfNull(clauses);
@@ -177,7 +227,7 @@ public static partial class TableMutations
         var prune = key.FilterFor(tuples);
         foreach (var f in builder.NotMatchedBySourceDeletes) prune = Expr.Or(prune, f ?? Expression.True);
 
-        var (snapshot, counts, attempts) = await RetryAsync(table, async () =>
+        return (resolved, async ct =>
         {
             // Per attempt: what this attempt found in the table state it planned against.
             var hit = new HashSet<string>(StringComparer.Ordinal);
@@ -222,8 +272,7 @@ public static partial class TableMutations
                 ? new Matcher(key, new KeySet(hit, hitTuples), null, Expression.True) : null;
             await StageChangesAsync(table, producer, found, resolved, equality, inserts, ct);
             return (producer, (updated, deleted, (long)inserts.Count));
-        }, ct);
-        return new MergeResult(snapshot, counts.Item1, counts.Item2, counts.Item3, resolved, attempts);
+        });
     }
 
     /// <summary>

@@ -312,6 +312,9 @@ public sealed class RestCatalog : ICatalog, IViewCatalog
     private const string TransactionsEndpoint = "POST /v1/{prefix}/transactions/commit";
 
     /// <summary>Whether the server advertises server-side scan planning (<c>planTableScan</c> in <c>/v1/config</c> endpoints).</summary>
+    /// <summary>The server advertises <c>POST /v1/{prefix}/transactions/commit</c> (or lists no endpoints, so the default set is assumed).</summary>
+    public bool SupportsMultiTableTransactions => Endpoints.Count == 0 || Endpoints.Contains(TransactionsEndpoint);
+
     public bool SupportsScanPlanning => Endpoints.Contains(ScanPlanningProtocol.PlanEndpoint);
 
     /// <summary>
@@ -383,7 +386,7 @@ public sealed class RestCatalog : ICatalog, IViewCatalog
     {
         using var telemetry = IcebergTelemetry.StartCatalogCall(Name, nameof(RestCatalog), "commit_transaction");
         // A server that lists its endpoints and not this one does not do atomic multi-table commits (e.g. Gravitino).
-        if (Endpoints.Count > 0 && !Endpoints.Contains(TransactionsEndpoint))
+        if (!SupportsMultiTableTransactions)
             throw new NotSupportedException("This REST server does not advertise multi-table transactions (POST /v1/{prefix}/transactions/commit)");
         var body = new JsonObject
         {

@@ -29,6 +29,7 @@ the same `CatalogConformanceTests`. New catalogs are added to that theory, never
 | Rename | Not supported by Glue; implemented as create + delete — **not atomic** | Same as Java; documented |
 | Lake Formation | Permissions may hide tables/columns, and LF-managed locations need credential vending | Out of scope for M0; the Glue IRC endpoint is AWS's recommended route for LF governance |
 | Cross-account | `CatalogId` (Java `glue.id`) | Supported |
+| Multi-table transactions | Glue has no atomic update of several tables | `SupportsMultiTableTransactions` is false and `CommitTransactionAsync` throws `NotSupportedException`; EF Core's `SaveChanges` falls back to table by table |
 
 ### AWS Glue Iceberg REST endpoint and S3 Tables — next
 
@@ -134,6 +135,7 @@ Glue endpoint for Lake Formation governance. Challenges:
 | Namespace encoding | REST multi-level namespaces joined with `0x1F` then URL-encoded; Glue single-level; Unity three-level |
 | Default locations | Glue/Hive convention `{warehouse}/{db}.db/{table}`; REST servers assign their own — never assume |
 | Capability negotiation | Use `/v1/config` `endpoints`; absent list ⇒ assume the default set |
+| Multi-table transactions | `ICatalog.SupportsMultiTableTransactions`: in-memory (one lock), JDBC (one database transaction), REST when the server advertises `/transactions/commit` (absent list ⇒ assumed); Glue no. `StagedCommit.CommitAllAsync` and EF Core's `SaveChanges` use it |
 | Idempotency | `Idempotency-Key` (spec 1.11+) — safe retries after timeouts on servers that support it |
 | Credentials lifetime | Vended credentials expire mid-job; long writers must refresh |
 | Governance | Lake Formation / Unity / Polaris RBAC may make a table visible but not writable — map 403 to a clear error |

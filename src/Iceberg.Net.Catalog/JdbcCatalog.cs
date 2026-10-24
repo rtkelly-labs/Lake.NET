@@ -243,6 +243,8 @@ public sealed class JdbcCatalog : MetastoreCatalog, IViewCatalog
         if (changed != 1) throw new CommitFailedException($"{kind} {id} metadata is no longer {expectedLocation ?? "(none)"}");
     }
 
+    public override bool SupportsMultiTableTransactions => true;
+
     /// <summary>All pointer moves in one database transaction: any stale row rolls every move back.</summary>
     protected override async Task SwapMetadataLocationsAsync(IReadOnlyList<MetadataSwap> swaps, CancellationToken ct)
     {

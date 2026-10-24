@@ -61,7 +61,10 @@ public abstract class EfTest : IDisposable
 {
     private readonly string _warehouse = Path.Combine(Path.GetTempPath(), "iceberg-dotnet-efcore", Guid.NewGuid().ToString("N"));
 
-    protected EfTest() => Catalog = new InMemoryCatalog(_warehouse);
+    protected EfTest() : this(w => new InMemoryCatalog(w)) { }
+
+    /// <param name="create">Builds the catalog over the test's warehouse (a subclass with hooks, say).</param>
+    protected EfTest(Func<string, InMemoryCatalog> create) => Catalog = create(_warehouse);
 
     protected InMemoryCatalog Catalog { get; }
     protected static readonly Namespace Ns = Namespace.Of("shop");

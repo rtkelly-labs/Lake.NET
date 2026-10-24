@@ -81,6 +81,13 @@ public interface ICatalog : IDisposable
     /// multi-table atomicity (Glue) throw <see cref="NotSupportedException"/>.
     /// </summary>
     Task CommitTransactionAsync(IReadOnlyList<TableCommit> commits, CancellationToken ct = default);
+
+    /// <summary>
+    /// Whether <see cref="CommitTransactionAsync"/> commits several tables atomically here. False (the default, also
+    /// for catalogs that wrap another) means it throws <see cref="NotSupportedException"/> or may do so; callers such
+    /// as the EF Core provider then commit table by table.
+    /// </summary>
+    bool SupportsMultiTableTransactions => false;
 }
 
 /// <summary>A loaded table: identity, current metadata, and the catalog/FileIO to change it.</summary>
@@ -301,6 +308,9 @@ public abstract partial class MetastoreCatalog(string name, IFileIO io) : ICatal
             throw;
         }
     }
+
+    /// <summary>True when the catalog overrides <see cref="SwapMetadataLocationsAsync"/> with a native multi-row transaction.</summary>
+    public virtual bool SupportsMultiTableTransactions => false;
 
     /// <summary>One pointer move of a multi-table commit.</summary>
     protected sealed record MetadataSwap(TableIdentifier Id, string ExpectedLocation, string NewLocation, TableMetadata Metadata);
@@ -531,6 +541,9 @@ public class InMemoryCatalog(string warehouse, IFileIO? io = null, string name =
         lock (_lock) _tables.Remove(id);
         return Task.CompletedTask;
     }
+
+    /// <summary>Every pointer moves under one lock.</summary>
+    public override bool SupportsMultiTableTransactions => true;
 
     protected override Task SwapMetadataLocationsAsync(IReadOnlyList<MetadataSwap> swaps, CancellationToken ct)
     {
