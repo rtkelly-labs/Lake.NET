@@ -32,8 +32,15 @@ Rows are `object?[]` aligned to the current schema's top-level columns, as for i
   A target is a top-level column or a field nested in structs, by its dotted path (`u.Set("address.city", "York")`);
   each may be assigned once, and a struct and a field inside it cannot both be assigned. A field inside a list or map
   cannot be targeted (assign the whole column). A nested assignment copies the structs it passes through and keeps
-  their other fields; when an enclosing struct is null it becomes a struct whose other fields are null (Spark's
-  nested assignment does the same), so leaving one of its required fields unassigned is an `ArgumentException`.
+  their other fields; when an enclosing struct is null it becomes a struct whose other fields are null, and a struct
+  nested in it that is not on the path stays null (`SET address.city = 'x'` on a null `address` gives
+  `{city: 'x', zip: null, geo: null}`; `SET address.geo.lat = 1` gives `{city: null, zip: null, geo: {lat: 1, lon:
+  null}}`). This is what Spark 4.0 + Iceberg 1.12 do, checked by `SparkCrossEngineTests.Spark_runs_the_same_nested_updates`.
+  If the null struct has a **required** field that is not assigned, Spark fails the statement at run time
+  (`NOT_NULL_ASSERT_VIOLATION`, nothing committed); we refuse it with an `ArgumentException` before anything is
+  written (`…Spark_and_we_refuse_to_leave_a_required_field_of_a_null_struct_null`). Spark only refuses when the table
+  really declares the field `NOT NULL`: a Spark copy made with `writeTo(...).create()` (CTAS) is all-nullable and
+  would silently write the null.
   The same targets work in MERGE's `WhenMatchedUpdate(u => …)`. Values are converted the way
   filter literals are (`int` → `long`, `DateOnly` → days, `DateTime` → micros, decimals rescaled without loss);
   `null` into a required column, an unknown column or a value of the wrong type is an `ArgumentException`, raised
@@ -102,7 +109,10 @@ cleanup, which keeps young files.
   `merge-on-read`; both are readable by Athena (v2), Spark, Trino and PyIceberg.
 - `SparkCrossEngineTests` checks that Spark + Iceberg Java read our UPDATE/MERGE output identically, including row
   lineage, and that Spark running the same MERGE in SQL on a copy of the pre-merge table ends with the same rows
-  (`Spark_merge_on_a_copy_matches_ours`). `UpdateMergeCrossEngineTests` checks PyIceberg column for column.
+  (`Spark_merge_on_a_copy_matches_ours`). The same holds for nested assignments: one and two levels deep, through null
+  structs, and a MERGE assigning two fields of one struct, on v2 copy-on-write and v3 deletion vectors
+  (`Spark_runs_the_same_nested_updates`, which also checks row lineage on v3). `UpdateMergeCrossEngineTests` checks
+  PyIceberg column for column.
 - Equality-delete merges are unreadable by PyIceberg 0.12, as for upserts.
 
 ## Executable specification

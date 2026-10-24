@@ -43,13 +43,22 @@ reflect the rollback. Every ref that the change set reads or changes is guarded 
 - Otherwise an `append` is replayed: a new snapshot adds the same data files with new sequence numbers and new row IDs,
   and records `source-snapshot-id`.
 - A dynamic partition overwrite (`replace-partitions=true`, as Spark's `INSERT OVERWRITE` writes it) is replayed when
-  its parent is an ancestor of main and no file was added to its partitions since.
+  its parent is an ancestor of main and no file was added to its partitions since. Like Java, the replayed snapshot
+  records `source-snapshot-id` but not `replace-partitions`.
 - Any other operation fails if it is not a fast-forward.
 - Files keep the partition spec they were written with. A snapshot staged before a spec change replays its files
   under their old spec, and the producer writes one added-files manifest per spec. A dynamic overwrite's
   replaced-partition check compares partitions together with their spec, so main's appends under the new spec do not
   block it.
 - Picking an ancestor of main, or a snapshot that was already picked, fails.
+- **Spark agrees.** `SparkCrossEngineTests.Spark_cherry_picks_snapshots_of_an_older_spec_as_we_do` stages an append and
+  a dynamic overwrite under spec 0 (identity `region`), moves the spec to `bucket(4, id)` and appends under it, then
+  picks both. Spark runs `CALL system.cherrypick_snapshot` on a copy of the table before our picks (our
+  `metadata.json` as `v1` of a Hadoop table: same snapshots and files), and Iceberg Java describes both results: the
+  operation, the summary (apart from engine names and Java's manifest counts), every added and removed file with its
+  spec, partition, record count and `first_row_id`, the rows and, on v3, the row lineage. They are identical; Spark
+  also reads our result, its metadata tables and its changelog as we do. The comparison found one difference, now
+  fixed: we used to write `replace-partitions=true` on a replayed overwrite, which Java does not.
 - A replay composes with concurrent appends.
 
 ## Branch writes and write-audit-publish
