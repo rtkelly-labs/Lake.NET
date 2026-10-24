@@ -230,7 +230,8 @@ public sealed class RestCatalog : ICatalog, IViewCatalog
         foreach (var (k, v) in _options.Properties) merged[k] = v;
         foreach (var (k, v) in MetadataJson.StringMapFrom(config?["overrides"])) merged[k] = v;
         Properties = merged;
-        if (_defaultIo) RequireTrustedStorageEndpoint(merged);
+        // With delegated access requested, credentials or signing arrive per table: check each table as it loads instead.
+        if (_defaultIo && _options.AccessDelegation is null) RequireTrustedStorageEndpoint(merged);
         Endpoints = config?["endpoints"]?.AsArray().Select(e => e!.GetValue<string>()).ToList() ?? [];
         IdempotencyKeyLifetime = config?["idempotency-key-lifetime"]?.GetValue<string>() is { } lifetime ? System.Xml.XmlConvert.ToTimeSpan(lifetime) : null;
         _prefix = merged.TryGetValue("prefix", out var p) && p.Length > 0 ? p.Trim('/') + "/" : "";
@@ -470,6 +471,8 @@ public sealed class RestCatalog : ICatalog, IViewCatalog
             .OrderByDescending(c => c!["prefix"]!.GetValue<string>().Length)
             .FirstOrDefault();
         var io = FileIO;
+        // The catalog-wide FileIO signs with the client's own credentials: same check as at connect, for this table.
+        if (tableConfig.Count == 0 && creds is null && _defaultIo) RequireTrustedStorageEndpoint(Properties);
         if (tableConfig.Count > 0 || creds is not null)
         {
             var props = new Dictionary<string, string>(Properties);

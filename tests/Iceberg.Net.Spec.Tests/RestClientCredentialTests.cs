@@ -56,6 +56,18 @@ public sealed class RestClientCredentialTests
     }
 
     [Fact]
+    public async Task With_vended_credentials_requested_the_endpoint_check_waits_for_the_table()
+    {
+        // Config names a non-AWS endpoint; the client asked for vended credentials, so connecting is fine.
+        using var catalog = await RestCatalog.ConnectAsync(new RestCatalogOptions
+        {
+            Uri = new Uri("https://catalog.example/"), Token = "t", Handler = new ConfigServer("\"s3.endpoint\":\"http://minio.example:9000\""),
+            AccessDelegation = "vended-credentials",
+        });
+        Assert.Equal("http://minio.example:9000", catalog.Properties["s3.endpoint"]);
+    }
+
+    [Fact]
     public async Task The_signer_must_be_the_catalogs_own_origin()
     {
         using var catalog = await Connect("https://catalog.example/");
