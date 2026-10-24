@@ -1,5 +1,7 @@
 <Project Sdk="Microsoft.NET.Sdk">
   <PropertyGroup>
+    <!-- Not in the first preview; published in a later one (docs/roadmap.md, Release plan). -->
+    <IsPackable>false</IsPackable>
     <RootNamespace>Iceberg.Net.Athena</RootNamespace>
     <Description>Amazon Athena SQL for Iceberg tables (CREATE TABLE from an Iceberg schema, OPTIMIZE, VACUUM, table properties, time travel) and a StartQueryExecution runner with polling and paging.</Description>
     <PackageTags>$(PackageTags);athena</PackageTags>

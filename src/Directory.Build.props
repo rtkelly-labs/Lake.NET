@@ -1,15 +1,24 @@
 <Project>
   <Import Project="$([MSBuild]::GetPathOfFileAbove('Directory.Build.props', '$(MSBuildThisFileDirectory)../'))" />
-  <!-- NuGet packaging for the libraries (tests and tools are IsPackable=false). Publishing is a CI decision; see docs/roadmap.md. -->
+  <!-- NuGet packaging for the libraries (tests, tools and projects not yet released are IsPackable=false). Releases: .github/workflows/release.yml. -->
   <PropertyGroup>
     <IsPackable>true</IsPackable>
     <PackageId>$(MSBuildProjectName)</PackageId>
+    <!-- A release passes -p:Version from CHANGELOG.md (scripts/ParseChangelog.cs); local packs get this. -->
     <VersionPrefix>0.1.0</VersionPrefix>
-    <VersionSuffix Condition="'$(VersionSuffix)' == ''">preview</VersionSuffix>
+    <VersionSuffix Condition="'$(VersionSuffix)' == ''">preview.1</VersionSuffix>
     <Authors>Ryan Kelly</Authors>
+    <Copyright>Copyright (c) 2026 rtkelly-labs</Copyright>
+    <PackageLicenseExpression>MIT</PackageLicenseExpression>
+    <PackageProjectUrl>https://github.com/rtkelly-labs/Iceberg.NET</PackageProjectUrl>
+    <RepositoryUrl>https://github.com/rtkelly-labs/Iceberg.NET.git</RepositoryUrl>
     <PackageTags>iceberg;apache-iceberg;lakehouse;parquet;glue;s3</PackageTags>
-    <PackageReadmeFile>README.md</PackageReadmeFile>
+    <PackageReadmeFile>PACKAGE_README.md</PackageReadmeFile>
     <RepositoryType>git</RepositoryType>
+    <!-- SourceLink (in the .NET SDK): sources and the commit are recorded in the symbols; CI builds are deterministic. -->
+    <PublishRepositoryUrl>true</PublishRepositoryUrl>
+    <EmbedUntrackedSources>true</EmbedUntrackedSources>
+    <ContinuousIntegrationBuild Condition="'$(GITHUB_ACTIONS)' == 'true'">true</ContinuousIntegrationBuild>
     <!-- XML docs ship with the packages; not every public member has a comment yet. -->
     <GenerateDocumentationFile>true</GenerateDocumentationFile>
     <NoWarn>$(NoWarn);CS1591;CS1573</NoWarn>
@@ -17,6 +26,6 @@
     <SymbolPackageFormat>snupkg</SymbolPackageFormat>
   </PropertyGroup>
   <ItemGroup>
-    <None Include="$(MSBuildThisFileDirectory)../README.md" Pack="true" PackagePath="/" Visible="false" />
+    <None Include="$(MSBuildThisFileDirectory)../PACKAGE_README.md" Pack="true" PackagePath="/" Visible="false" />
   </ItemGroup>
 </Project>

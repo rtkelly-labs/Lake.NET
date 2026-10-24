@@ -7,7 +7,7 @@ Read this first, then [AGENTS.md](../AGENTS.md) for conventions and [roadmap.md]
 
 - **Branch:** `ccr-cb295622-bcczx3`, about 110 commits ahead of `main`. Phases A–G are merged into it.
 - **Not yet reviewed or merged to `main`.** No pull request is open.
-- **CI has never run on this work.** `.github/workflows/iceberg-dotnet.yml` runs on pull requests and on pushes to
+- **CI has never run on this work.** `.github/workflows/ci.yml` runs on pull requests and on pushes to
   `main`, so opening the pull request is the first step: it runs every suite below against fresh emulators.
 - **Pre-existing local change:** `.github/copilot-instructions.md` shows as a typechange (symlink → regular file). It
   was like that before this work began, and the owner chose to leave it. Don't commit it by accident.
@@ -135,7 +135,7 @@ they're done.
 - **How:**
   1. Create an OIDC role trusted by this repository. It needs S3 on a regression prefix, Glue on `regr_*` databases,
      and one Athena engine v3 workgroup.
-  2. Set the repository variables listed at the top of `.github/workflows/iceberg-dotnet-aws.yml`:
+  2. Set the repository variables listed at the top of `.github/workflows/aws.yml`:
      - `ICEBERG_AWS_ROLE_ARN`, `ICEBERG_AWS_WAREHOUSE`, `ICEBERG_ATHENA_WORKGROUP`;
      - optionally `ICEBERG_ATHENA_OUTPUT` and `ICEBERG_GLUE_REST_WAREHOUSE`.
   3. Add an S3 lifecycle rule on the prefix that expires objects after 3 days.
