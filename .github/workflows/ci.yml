@@ -30,6 +30,9 @@ jobs:
           enable-cache: true
 
       # The SDK comes from global.json (setup-dotnet above).
+      - name: CHANGELOG.md is well formed (the release reads its version from it)
+        run: dotnet run scripts/ParseChangelog.cs
+
       - name: L0 spec tests
         run: dotnet test tests/Iceberg.Net.Spec.Tests --nologo
 

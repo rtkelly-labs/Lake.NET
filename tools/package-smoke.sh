@@ -42,54 +42,37 @@ XML
 # The local feed first; public dependencies (ParquetSharp, AWSSDK) from the machine's default sources.
 dotnet run --project "$work/app" --nologo --source "$out" --source https://api.nuget.org/v3/index.json
 
-# The higher-level packages: EF Core (over LINQ over Data), plus the Spark and Athena SQL helpers.
-mkdir -p "$work/higher"
-cat > "$work/higher/higher.csproj" <<'XML'
+# Exactly the packages released: a project that is not ready must not reach the feed by accident.
+expected="Iceberg.Net.Avro Iceberg.Net.Catalog Iceberg.Net.Core Iceberg.Net.Data Iceberg.Net.IO Iceberg.Net.Linq Iceberg.Net.Puffin"
+actual="$(ls "$out"/*.nupkg | xargs -n1 basename | sed -E 's/\.[0-9]+\.[0-9]+\.[0-9]+.*//' | sort -u | tr '\n' ' ' | sed 's/ $//')"
+[[ "$actual" == "$expected" ]] || { echo "packed: $actual" >&2; echo "expected: $expected" >&2; exit 1; }
+
+# The typed layer: a model, its schema, typed writes and a LINQ query pushed into the scan.
+mkdir -p "$work/typed"
+cat > "$work/typed/typed.csproj" <<'XML'
 <Project Sdk="Microsoft.NET.Sdk">
   <PropertyGroup><OutputType>Exe</OutputType><TargetFramework>net10.0</TargetFramework><Nullable>enable</Nullable><ImplicitUsings>enable</ImplicitUsings></PropertyGroup>
-  <ItemGroup>
-    <PackageReference Include="Iceberg.Net.EntityFrameworkCore" Version="0.1.0-*" />
-    <PackageReference Include="Iceberg.Net.Spark" Version="0.1.0-*" />
-    <PackageReference Include="Iceberg.Net.Athena" Version="0.1.0-*" />
-  </ItemGroup>
+  <ItemGroup><PackageReference Include="Iceberg.Net.Linq" Version="0.1.0-*" /></ItemGroup>
 </Project>
 XML
-cat > "$work/higher/Program.cs" <<'CS'
-using Microsoft.EntityFrameworkCore;
-using Iceberg.Net.Athena;
+cat > "$work/typed/Program.cs" <<'CS'
 using Iceberg.Net.Catalog;
-using Iceberg.Net.Spark;
+using Iceberg.Net.Linq;
 
 var dir = Path.Combine(Path.GetTempPath(), "iceberg-package-smoke", Guid.NewGuid().ToString("N"));
 using var catalog = new InMemoryCatalog(dir);
-using (var db = new SmokeContext(catalog))
-{
-    db.Database.EnsureCreated();
-    db.Orders.Add(new Order { Id = 1, Customer = "a", Total = 10 });
-    db.Orders.Add(new Order { Id = 2, Customer = "b", Total = 20 });
-    db.SaveChanges();
-}
-using (var db = new SmokeContext(catalog))
-{
-    var big = db.Orders.Where(o => o.Total > 15).Select(o => o.Customer).ToList();
-    if (big.Count != 1 || big[0] != "b") throw new Exception($"unexpected EF result: {string.Join(",", big)}");
-}
-var spark = new IcebergProcedures("lake").RewriteDataFiles(new SparkTable("lake", ["smoke"], "orders")).ToSql();
-var athena = AthenaSql.Vacuum(new AthenaTable("smoke", "orders"));
-if (!spark.Contains("rewrite_data_files") || !athena.StartsWith("VACUUM")) throw new Exception("unexpected SQL");
-Console.WriteLine("higher-level packages OK");
+await catalog.CreateNamespaceAsync(Namespace.Of("smoke"));
+var table = await catalog.CreateTableAsync<Order>(TableIdentifier.Of("smoke", "orders"));
+await table.InsertAsync([new Order(1, "a", 10), new Order(2, "b", 20)], new ReflectionRowMapper<Order>());
+var big = await table.AsQueryable<Order>().Where(o => o.Total > 15).Select(o => o.Customer).ToListAsync();
+if (big.Count != 1 || big[0] != "b") throw new Exception($"unexpected LINQ result: {string.Join(",", big)}");
+Console.WriteLine("typed package OK");
 Directory.Delete(dir, true);
 
-public sealed class Order { public long Id { get; set; } public string Customer { get; set; } = ""; public int Total { get; set; } }
-
-public sealed class SmokeContext(ICatalog catalog) : DbContext
-{
-    public DbSet<Order> Orders => Set<Order>();
-    protected override void OnConfiguring(DbContextOptionsBuilder options) => options.UseIceberg(catalog, "smoke");
-}
+public sealed record Order(long Id, string Customer, int Total);
 CS
-cp "$work/app/nuget.config" "$work/higher/"
-dotnet run --project "$work/higher" --nologo --source "$out" --source https://api.nuget.org/v3/index.json
+cp "$work/app/nuget.config" "$work/typed/"
+dotnet run --project "$work/typed" --nologo --source "$out" --source https://api.nuget.org/v3/index.json
 
 # Core and Avro also ship netstandard2.0 (for .NET Framework 4.6.2+): a netstandard2.0 library must build against them.
 for pkg in Iceberg.Net.Core Iceberg.Net.Avro; do

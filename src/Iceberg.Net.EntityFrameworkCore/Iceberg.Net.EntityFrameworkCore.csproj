@@ -1,5 +1,7 @@
 <Project Sdk="Microsoft.NET.Sdk">
   <PropertyGroup>
+    <!-- Not in the first preview; published in a later one (docs/roadmap.md, Release plan). -->
+    <IsPackable>false</IsPackable>
     <RootNamespace>Iceberg.Net.EntityFrameworkCore</RootNamespace>
     <Description>An EF Core database provider for Apache Iceberg tables, built on Iceberg.Net.Linq: DbSet queries with predicate pushdown, time travel, ExecuteUpdate/ExecuteDelete and SaveChanges as one snapshot per table.</Description>
     <!-- EF1001: the provider replaces EF Core's IQueryCompiler (an internal service) to hand queries to the Iceberg LINQ provider. -->
