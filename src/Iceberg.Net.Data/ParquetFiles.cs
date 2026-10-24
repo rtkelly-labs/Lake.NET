@@ -320,17 +320,23 @@ public static class ParquetFiles
     public static async IAsyncEnumerable<DataFileBatch> ReadBatchesAsync(IFileIO io, string location, Schema projection, NameMapping? mapping,
         DataFileReadOptions? options, [EnumeratorCancellation] CancellationToken ct = default)
     {
-        // Ranged reads: the footer first, then only the column chunks of the projected columns in row groups that
-        // are read. A small file, or one whose every column is read, is fetched in one request.
-        var length = options?.FileSize ?? await io.LengthAsync(location, ct);
-        var source = new RangeReadStream(io, location, length, ct);
-        await source.PrefetchAsync(length <= WholeFileBelow ? 0 : length - FooterPrefetch, length, ct);
+        // With the size known (from the manifest), ranged reads: the footer first, then only the column chunks of the
+        // projected columns in row groups that are read. A small file, or one whose every column is read, is fetched
+        // in one request. Without it, one whole-object read beats a length lookup plus ranges.
+        Stream source;
+        RangeReadStream? ranged = null;
+        if (options?.FileSize is { } length)
+        {
+            source = ranged = new RangeReadStream(io, location, length, ct);
+            await ranged.PrefetchAsync(length <= WholeFileBelow ? 0 : length - FooterPrefetch, length, ct);
+        }
+        else source = new MemoryStream(await io.ReadAllAsync(location, ct));
         using var input = new ManagedRandomAccessFile(source);
         using var reader = new ParquetFileReader(input);
         using var meta = reader.FileMetaData;
         var layout = FileLayout.Of(meta, projection, mapping);
         var evaluator = options?.Filter is { } filter && filter is not AlwaysTrue ? new MetricsEvaluator(filter) : null;
-        if (evaluator is null && layout.LeafCount == meta.NumColumns) await source.PrefetchAsync(0, length, ct);
+        if (ranged is not null && evaluator is null && layout.LeafCount == meta.NumColumns) await ranged.PrefetchAsync(0, ranged.Length, ct);
         var metrics = options?.Metrics;
         var groups = meta.NumRowGroups;
         long position = 0;

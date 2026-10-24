@@ -86,8 +86,9 @@ A Parquet data file is read through `RangeReadStream` (in `Iceberg.Net.IO`), a s
 2. for each row group that survives row-group pruning, the column chunks of the projected leaf columns. parquet-cpp
    reads a chunk with one call, so each chunk is one request.
 
-The file size comes from the manifest's `file_size_in_bytes` (`DataFileReadOptions.FileSize`), so no `HEAD` is needed;
-a read by location alone asks `IFileIO.LengthAsync`. Two cases fetch the file in one request instead: a file of at
+The file size comes from the manifest's `file_size_in_bytes` (`DataFileReadOptions.FileSize`, set by every read of a
+manifest's `DataFile`), so no `HEAD` is needed. A read by location alone (no size) fetches the file whole, which costs
+one request instead of a `HEAD` plus ranges. Two cases fetch the file in one request instead: a file of at
 most 1 MiB, and a read that decodes every leaf column with no row-group filter (the rest after the footer, two
 requests in all). ParquetSharp 25 does not expose `data_page_offset` or `dictionary_page_offset`, so chunk ranges
 cannot be planned ahead: a chunk not yet fetched is fetched when the reader asks for it, synchronously on the thread

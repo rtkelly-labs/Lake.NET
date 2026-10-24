@@ -543,7 +543,7 @@ public sealed class ReadPathTests : IDisposable
     }
 
     [Fact]
-    public async Task A_read_of_every_column_or_of_a_small_file_is_one_request_after_the_footer()
+    public async Task A_read_of_every_column_a_small_file_or_a_file_of_unknown_size_takes_one_or_two_requests()
     {
         var local = new LocalFileIO();
         var file = await WideFile(local);
@@ -556,6 +556,11 @@ public sealed class ReadPathTests : IDisposable
         var once = new CountingFileIO(local);
         Assert.Single(await ReadFile(once, small, new Schema(0, [WideSchema.Columns[0]])));
         Assert.Equal((1L, small.FileSizeInBytes), (once.RangeRequests, once.BytesRead));
+
+        // By location alone the size is unknown: one whole-object read, not a length lookup plus ranges.
+        var byLocation = new CountingFileIO(local);
+        Assert.Equal(100_000, (await ParquetFiles.ReadAsync(byLocation, file.FilePath, new Schema(0, [WideSchema.Columns[0]]))).Count);
+        Assert.Equal((1L, 0L), (byLocation.WholeReads, byLocation.RangeRequests));
     }
 
     [Fact]
