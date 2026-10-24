@@ -7,6 +7,9 @@
         print the ids, row count, snapshot count and schema column names
     evolve <uri> <credential> <namespace> <table> <column>
         add an optional string column
+    signed-append-read <uri> <credential> <namespace> <table> <start> <count>
+        with X-Iceberg-Access-Delegation: remote-signing, append rows start..start+count-1 to an existing table and
+        read it back (every S3 request signed by the server), printing the ids and the FileIO used
     plan-read <uri> <credential> <namespace> <table> [<max id>]
         read with server-side scan planning (scan-planning-mode=server), optionally with "id < <max id>", and print
         the ids and the planned data and delete files
@@ -113,6 +116,30 @@ def cmd_evolve(
     return describe(cat, (ns, name))
 
 
+def cmd_signed_append_read(
+    uri: str, credential: str, ns: str, name: str, start: int, count: int
+) -> dict[str, Any]:
+    cat = catalog(
+        uri, credential, **{"header.X-Iceberg-Access-Delegation": "remote-signing"}
+    )
+    table = cat.load_table((ns, name))
+    rows = pa.Table.from_pylist(
+        [
+            {"id": i, "name": f"py-{i}", "region": "eu" if i % 2 == 0 else "us"}
+            for i in range(start, start + count)
+        ],
+        schema=table.schema().as_arrow(),
+    )
+    table.append(rows)
+    table = cat.load_table((ns, name))
+    arrow = table.scan().to_arrow()
+    return {
+        "ids": sorted(arrow.column("id").to_pylist()),
+        "io": type(table.io).__name__,
+        "signer": table.io.properties.get("s3.signer"),
+    }
+
+
 def cmd_plan_read(
     uri: str, credential: str, ns: str, name: str, max_id: str | None
 ) -> dict[str, Any]:
@@ -143,6 +170,8 @@ def main(argv: list[str]) -> None:
         )
     elif cmd == "read":
         result = cmd_read(*args[:4])
+    elif cmd == "signed-append-read":
+        result = cmd_signed_append_read(*args[:4], int(args[4]), int(args[5]))
     elif cmd == "plan-read":
         result = cmd_plan_read(*args[:4], args[4] if len(args) > 4 else None)
     elif cmd == "evolve":

@@ -165,11 +165,13 @@ public sealed class RestCatalog : ICatalog, IViewCatalog
     public TimeSpan? IdempotencyKeyLifetime { get; private set; }
 
     private readonly Func<IReadOnlyDictionary<string, string>, IFileIO> _ioFactory;
+    private readonly bool _defaultIo;
 
-    private RestCatalog(RestCatalogOptions options, Func<IReadOnlyDictionary<string, string>, IFileIO> ioFactory, string name)
+    private RestCatalog(RestCatalogOptions options, Func<IReadOnlyDictionary<string, string>, IFileIO>? ioFactory, string name)
     {
         _options = options;
-        _ioFactory = ioFactory;
+        _defaultIo = ioFactory is null;
+        _ioFactory = ioFactory ?? (props => new ResolvingFileIO(() => new S3FileIO(S3FileIOOptions.FromProperties(props))));
         Name = name;
         _http = options.Handler is null ? new HttpClient() : new HttpClient(options.Handler);
         _http.BaseAddress = new Uri(options.Uri.ToString().TrimEnd('/') + "/");
@@ -184,7 +186,6 @@ public sealed class RestCatalog : ICatalog, IViewCatalog
         string name = "rest",
         CancellationToken ct = default)
     {
-        ioFactory ??= props => new ResolvingFileIO(() => new S3FileIO(S3FileIOOptions.FromProperties(props)));
         var catalog = new RestCatalog(options, ioFactory, name);
         await catalog.InitialiseAsync(ct);
         return catalog;
@@ -420,9 +421,61 @@ public sealed class RestCatalog : ICatalog, IViewCatalog
             var props = new Dictionary<string, string>(Properties);
             foreach (var (k, v) in tableConfig) props[k] = v;
             if (creds is not null) foreach (var (k, v) in MetadataJson.StringMapFrom(creds["config"])) props[k] = v;
-            io = _ioFactory(props);
+            // Remote signing: S3 requests are signed by the catalog. A custom FileIO factory gets the properties only,
+            // and can call RemoteSigner itself.
+            io = creds is null && _defaultIo && props.GetValueOrDefault("s3.remote-signing-enabled") == "true"
+                ? new ResolvingFileIO(() => new S3FileIO(S3FileIOOptions.FromProperties(props) with { RequestSigner = RemoteSigner(id, props) }))
+                : _ioFactory(props);
         }
         return new Table(this, id, metadata, io);
+    }
+
+    /// <summary>
+    /// An S3 request signer for <see cref="S3FileIOOptions.RequestSigner"/> that has the catalog sign each request
+    /// (<c>RemoteSignRequest</c> to the table's <c>…/sign</c> route, as Iceberg Java 1.12 does; the deprecated
+    /// <c>signer.uri</c> / <c>signer.endpoint</c> properties win when the server sets them) and applies the signed
+    /// headers. Used automatically with the default FileIO when a table's config has <c>s3.remote-signing-enabled</c>.
+    /// </summary>
+    public Func<HttpRequestMessage, CancellationToken, Task> RemoteSigner(TableIdentifier id, IReadOnlyDictionary<string, string> tableProperties)
+    {
+        var endpoint = tableProperties.GetValueOrDefault("signer.endpoint") is { Length: > 0 } e
+            ? new Uri(new Uri((tableProperties.GetValueOrDefault("signer.uri") ?? _http.BaseAddress!.ToString()).TrimEnd('/') + "/"), e.TrimStart('/')).ToString()
+            : $"{TablePath(id)}/sign";
+        var region = tableProperties.GetValueOrDefault("client.region") ?? tableProperties.GetValueOrDefault("s3.region") ?? "eu-west-1";
+        return async (request, ct) =>
+        {
+            var headers = new JsonObject();
+            foreach (var (k, v) in request.Headers.Concat(request.Content?.Headers ?? Enumerable.Empty<KeyValuePair<string, IEnumerable<string>>>()))
+                headers[k] = new JsonArray(v.Select(x => (JsonNode)x).ToArray());
+            var body = new JsonObject
+            {
+                ["region"] = region,
+                ["uri"] = request.RequestUri!.AbsoluteUri,
+                ["method"] = request.Method.Method,
+                ["headers"] = headers,
+                ["provider"] = "s3",
+            };
+            // DeleteObjects is signed with its body (the keys it deletes), as the spec asks.
+            if (request.Method == HttpMethod.Post && request.Content is not null && request.RequestUri.Query.Contains("delete", StringComparison.Ordinal))
+                body["body"] = await request.Content.ReadAsStringAsync(ct);
+            var signed = await SendAsync(HttpMethod.Post, endpoint, body, ct) ?? throw new InvalidDataException("Empty remote signing response");
+            request.RequestUri = new Uri(signed["uri"]!.GetValue<string>());
+            foreach (var (k, v) in signed["headers"]!.AsObject())
+            {
+                var values = v!.AsArray().Select(x => x!.GetValue<string>()).ToList();
+                if (k.Equals("Host", StringComparison.OrdinalIgnoreCase)) continue;
+                if (request.Content is not null && k.StartsWith("Content-", StringComparison.OrdinalIgnoreCase))
+                {
+                    request.Content.Headers.Remove(k);
+                    request.Content.Headers.TryAddWithoutValidation(k, values);
+                }
+                else
+                {
+                    request.Headers.Remove(k);
+                    request.Headers.TryAddWithoutValidation(k, values);
+                }
+            }
+        };
     }
 
     private async Task<JsonNode?> SendAsync(

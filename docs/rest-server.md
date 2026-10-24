@@ -56,7 +56,8 @@ Clients point at the base URI:
 | `Authorization:Grants:{principal}:{n}` | none (all allowed) | See [Authorization](#authorization) |
 | `ScanPlanning:*` | on | See [Server-side scan planning](#server-side-scan-planning) |
 | `CredentialVending:*` | off | See [Credential vending](#credential-vending) |
-| `Idempotency:Enabled`, `Idempotency:Lifetime` | on, `00:30:00` | See [Idempotency keys](#idempotency-keys) |
+| `RemoteSigning:*` | off | See [Remote signing](#remote-signing) |
+| `Idempotency:Enabled`, `Idempotency:Lifetime`, `Idempotency:PendingTimeout` | on, `00:30:00`, `00:05:00` | See [Idempotency keys](#idempotency-keys) |
 
 ## Storage
 
@@ -79,6 +80,13 @@ is either a table or a view, never both.
     (`Two_servers_over_one_database_serialise_commits`). SQLite on a network file system is not safe; use a server
     database there.
 - **`InMemoryCatalogStore`**: a lock and dictionaries. For tests and throwaway servers.
+
+Both stores also keep the server's own state between requests (`IServerStateStore`): `Idempotency-Key` claims and
+responses, and scan plans by plan ID, each with an expiry. `SqlCatalogStore` keeps them in two more tables,
+`iceberg_rest_idempotency` and `iceberg_rest_plans` (keyed by `catalog_name` too), which Java's `JdbcCatalog` and
+PyIceberg ignore; `InMemoryCatalogStore` keeps them in memory. So every server instance over one database replays the
+others' idempotency keys and answers their plan IDs (`SharedStateTests`, over one SQLite file and over one shared
+in-memory store). A store of your own that does not implement `IServerStateStore` gets process-local state.
 
 Metadata and data files go through `IFileIO`. The default is `ResolvingFileIO`, which sends `s3://` locations to
 `S3FileIO` and everything else to the local file system.
@@ -128,8 +136,8 @@ Iceberg__Authorization__Grants__*__0=read:public        # every principal
 | Level | Allows |
 |---|---|
 | (browse) | Implied by any grant at, above or below a namespace: load it, check it exists, list into it. Lists only show the namespaces a principal can browse and the tables and views it can read |
-| `read` | load, check, plan scans (`plan`, `plan/{id}`, `tasks`), report metrics, read-only vended credentials |
-| `write` | create and register tables and views, commit (every table of a multi-table transaction), replace views, rename *to*; read-write vended credentials |
+| `read` | load, check, plan scans (`plan`, `plan/{id}`, `tasks`), report metrics, read-only vended credentials, signed reads (`GET`/`HEAD`) |
+| `write` | create and register tables and views, commit (every table of a multi-table transaction), replace views, rename *to*; read-write vended credentials, signed writes |
 | `admin` | create, drop and change namespaces; drop, purge, unregister and rename *from*; register with `overwrite` |
 
 `/v1/config` and the token endpoint need no grant. Grants that do not parse fail at start-up. To use your own model
@@ -148,7 +156,20 @@ the filter in the spec's expression JSON (`ExpressionJson`).
 - **Request fields:** `snapshot-id`, `filter`, `select` (validated), `case-sensitive` (names resolved ignoring case
   when false), `use-snapshot-schema` (bind to the snapshot's schema instead of the current one) and `stats-fields`
   (data files carry only those columns' metrics; without it, none; delete files always carry theirs).
-  `min-rows-requested` is ignored. Incremental scans (`start-snapshot-id` / `end-snapshot-id`) are a 406.
+  `min-rows-requested` is ignored.
+- **Incremental scans:** `start-snapshot-id` (exclusive) and `end-snapshot-id` (inclusive) plan Java's
+  `IncrementalAppendScan`: the data files that the `append` snapshots among the end snapshot's ancestors after the start
+  added (read from the manifests those snapshots wrote, entries `ADDED` by one of them), pruned by the filter like any
+  scan. Overwrites, deletes and replaces in the range contribute nothing, and no delete files are attached, so rows
+  deleted later still come back: it is "what was appended", as in Java. `end-snapshot-id` alone covers every append up
+  to it; a start without an end, a start that is not an ancestor of the end, or `snapshot-id` as well is a 400. Large
+  incremental plans are split into plan tasks too. The library exposes the same planning as
+  `TableScan.PlanAppendsAsync`, and our client sends it with `ScanPlanRequest { StartSnapshotId, EndSnapshotId }`.
+  Checked against the change feed's inserts of the append snapshots (`IncrementalScanPlanningTests`) and against Spark
+  4 / Iceberg 1.12's incremental reads (`CrossEngineTests.Spark_incremental_reads_match_server_incremental_plans`).
+  Java 1.12 itself sends incremental plans to the server only from `table.newScan().appendsBetween(…)`; Spark's
+  `start-snapshot-id` reads use `newIncrementalAppendScan()`, which `RESTTable` does not route to the server, so they
+  plan on the client.
 - **Residuals:** each task's `residual-filter` is the request's filter, or `true` without one. Clients must still
   filter rows; nothing is lost, but no per-partition simplification is done.
 - **Plan tasks:** the data manifests that survive pruning are grouped by the file counts in the manifest list.
@@ -158,8 +179,10 @@ the filter in the spec's expression JSON (`ExpressionJson`).
   state is kept. It is checked on use: a token for another table, a snapshot that has expired or a manifest that is not
   in the snapshot is `404 NoSuchPlanTaskException`.
 - **Plan IDs:** every plan gets a `plan-id`. `GET …/plan/{id}` returns its result and `DELETE` cancels and forgets
-  it. Results stay in memory for `ScanPlanning:PlanLifetime` (10 minutes) after they finish; an unknown or expired ID
-  is `404 NoSuchPlanIdException`.
+  it. Plans are kept in the store (see [Storage](#storage)) for `ScanPlanning:PlanLifetime` (10 minutes) after they
+  finish, so any instance over the same database answers any plan ID; an unknown or expired ID is
+  `404 NoSuchPlanIdException`. A cancel on another instance forgets the plan, and the instance planning it discards its
+  result when it finishes. A plan still `submitted` after `PlanLifetime` (its server went away) is reported `failed`.
 - **Asynchronous mode:** with `ScanPlanning:Async=true` the server plans in the background and answers `submitted`;
   clients poll. It mainly exists to test clients' polling. Synchronous is the default.
 - **Telling clients:** the four routes are listed in `/v1/config` `endpoints` (`ScanPlanning:Enabled=false` removes
@@ -174,13 +197,16 @@ When the client sends `X-Iceberg-Access-Delegation: vended-credentials` and a ve
 `LoadTableResult` of loadTable, createTable and registerTable carries `storage-credentials` scoped to the table's
 location, and the same keys in `config` for clients that predate `storage-credentials`. `GET …/tables/{t}/credentials`
 (loadCredentials) returns them on their own and is advertised only when vending is on. Commit responses carry no
-`config`, so no credentials.
+`config`, so no credentials. Clients must refresh before the credentials expire
+(`s3.session-token-expires-at-ms`, `adls.sas-token-expires-at-ms.*`). This library's client does not refresh yet
+([catalogs.md](catalogs.md)), so long writers should reload the table.
 
-The built-in vendor calls STS `AssumeRole` (the Query API over HTTP, signed with the library's `SigV4Handler`):
+The S3 vendor (`StsCredentialVendor`) calls STS `AssumeRole` (the Query API over HTTP, signed with the library's
+`SigV4Handler`):
 
 | Key | Meaning |
 |---|---|
-| `CredentialVending:RoleArn` | The role to assume. Setting it turns vending on |
+| `CredentialVending:RoleArn` | The role to assume. Setting it turns S3 vending on |
 | `CredentialVending:Region`, `:StsEndpoint` | Default `us-east-1` and `https://sts.{region}.amazonaws.com` |
 | `CredentialVending:DurationSeconds`, `:ExternalId` | 3600; optional external ID |
 | `CredentialVending:AccessKeyId`, `:SecretAccessKey`, `:SessionToken` | The server's own credentials for STS. Default: the `FileIO` keys, else the AWS SDK default chain |
@@ -191,11 +217,80 @@ The built-in vendor calls STS `AssumeRole` (the Query API over HTTP, signed with
 - **Returned config:** `s3.access-key-id`, `s3.secret-access-key`, `s3.session-token`,
   `s3.session-token-expires-at-ms` and `client.region`. Put `s3.endpoint` and the like in `TableConfig`.
 - **Caching and scope:** credentials are cached per (location, access) until a quarter of their lifetime remains.
-  Locations other than `s3://` get none.
-- **Your own vendor:** register an `IStorageCredentialVendor` (Azure SAS, GCS, a broker) to replace this one.
+  Locations other than `s3://` get none from it.
 
-Clients must refresh before `s3.session-token-expires-at-ms`. This library's client does not refresh yet
-([catalogs.md](catalogs.md)), so long writers should reload the table.
+### Azure (ADLS Gen2 / Blob)
+
+`AdlsSasCredentialVendor` vends SAS tokens for tables at `abfs[s]://{container}@{account}.{host}/{path}` (and
+`wasb[s]://`), signed with the storage account's shared key. Configuring any account turns it on; with S3 vending on as
+well, `CompositeCredentialVendor` combines both, and each answers only for its own schemes.
+
+| Key | Meaning |
+|---|---|
+| `CredentialVending:Adls:Accounts:{account}` | The account's shared key (base64) |
+| `CredentialVending:Adls:Scope` | `directory` (default): a directory SAS (`sr=d`) on the table's path, for hierarchical-namespace (ADLS Gen2) accounts. `container`: a container SAS, for flat accounts; it reaches every table in the container, so use one container per trust boundary |
+| `CredentialVending:Adls:DurationSeconds`, `:Version`, `:Protocol` | 3600; the SAS version (`2023-11-03`); `https` to refuse plain HTTP (unset allows both) |
+
+- **Permissions:** `rl` (read, list) for principals with `read`; `racwdl` (plus add, create, write, delete) for
+  principals with `write` on the table.
+- **Returned config:** `adls.sas-token.{account host}` and `adls.sas-token-expires-at-ms.{account host}` (for example
+  `adls.sas-token.mylake.dfs.core.windows.net`), the keys Iceberg Java's `ADLSFileIO` and PyIceberg 0.12 read. Tokens
+  are cached like the STS ones.
+- **How it is checked:** tokens equal the Azure SDK's for the same inputs (`AzureCredentialVendingTests`, vectors from
+  azure-storage-blob 12.31 with the version pinned). Azurite (`mcr.microsoft.com/azure-storage/azurite:3.35.0`, run as
+  a one-off container) enforces container-scoped tokens: a writer's uploads and reads, a reader's reads but cannot
+  write or delete, and tampered or expired tokens are refused. Azurite has no hierarchical namespace and refuses every
+  directory SAS, so the default directory scope is checked only against the SDK vector, not by an emulator. This library
+  has no ADLS FileIO, so the test drives Azurite's Blob REST API directly.
+
+### Other storage
+
+GCS has no built-in vendor. Vending there means minting a downscoped OAuth token (a Credential Access Boundary through
+Google's STS); `fsouza/fake-gcs-server` can be pulled here but ignores authentication, so it could not verify such a
+token, and none was built. Register an `IStorageCredentialVendor` for GCS or a credential broker; it replaces the
+built-in ones.
+
+## Remote signing
+
+With `RemoteSigning:Enabled=true` the server signs clients' S3 requests itself, so clients hold no storage credentials
+at all: `POST …/tables/{table}/sign` (the spec's `signRequest`) takes a `RemoteSignRequest` (`region`, `uri`, `method`,
+`headers`, optional `body` and `provider`) and returns the URI and headers to send, with `Cache-Control: private` for
+reads and `no-cache` for writes.
+
+| Key | Meaning |
+|---|---|
+| `RemoteSigning:Enabled` | Serve and advertise the route; offer signing to clients that ask for it |
+| `RemoteSigning:Region` | The region requests are signed for, and returned as `client.region`. Default: the `FileIO`'s `client.region`; a request for another region is a 400 |
+| `RemoteSigning:AccessKeyId`, `:SecretAccessKey`, `:SessionToken` | The credentials requests are signed with. Default: the `FileIO`'s `s3.*` keys, else the AWS SDK's default chain |
+
+- **Telling clients:** a client that sends `X-Iceberg-Access-Delegation: remote-signing` (and gets no vended
+  credentials instead: vending wins when both are asked for and available) loads S3 tables with
+  `s3.remote-signing-enabled=true`, which Iceberg Java 1.12 follows by signing through the table's own `…/sign` route
+  (`rest.remote-signing.endpoint`); `s3.signer=S3V4RestSigner` and `s3.signer.endpoint` for PyIceberg, plus
+  `py-io-impl` set to its fsspec FileIO, the one that can sign remotely; and `client.region`. Put `s3.endpoint` and the
+  like in `TableConfig`. This library's `RestCatalog` signs remotely by itself when it builds the default FileIO
+  (`S3FileIOOptions.RequestSigner`: the AWS SDK sends unsigned, `UNSIGNED-PAYLOAD` requests that the catalog has
+  signed); a custom FileIO factory can call `RestCatalog.RemoteSigner`.
+- **What is signed:** SigV4 for `s3`, with S3's single path encoding, over the client's headers except those that
+  change between attempts (`amz-sdk-*`, `range`, `expect`, `user-agent` …). The payload is `UNSIGNED-PAYLOAD`, the
+  SHA-256 of `body` when one is sent (the spec asks for it on `DeleteObjects`), or `STREAMING-UNSIGNED-PAYLOAD-TRAILER`
+  when the client uploads that way. A `host` header is never taken from the client: it comes from the URI.
+- **What may be signed:** the URI must address the configured `FileIO:s3.endpoint` (path-style or virtual-hosted), or
+  AWS S3 over HTTPS when none is set. Object requests must name a key under the table's location, `write.data.path` or
+  `write.metadata.path` (no `.` or `..` segments), and so must a copy's `x-amz-copy-source`. Bucket requests are limited
+  to listing with such a `prefix`, `DeleteObjects` whose body names only such keys, `GetBucketLocation` and
+  `HeadBucket`. Anything else is a 403, as is a write from a principal without `write` on the table.
+- **How it is checked:** the S3 signer matches AWS's documented "GET Object" SigV4 example, and the authorization rules
+  have their own tests (`RemoteSigningTests`). End to end, against a moto that checks signatures (a one-off
+  `motoserver/moto` container with authentication on, bootstrapped with an IAM user: `AuthenticatingMoto`; the shared
+  emulator accepts any signature): our client with no keys creates, appends, deletes, reads (locally and through
+  server-side planning) and purges a table, and a reader's client cannot write; Spark 4 / Iceberg 1.12 (with
+  `iceberg-aws-bundle`, no AWS credentials in the container) creates, inserts, deletes merge-on-read and reads, and reads
+  our append; PyIceberg 0.12 appends to and reads our table (`CrossEngineTests`).
+- **Limits:** signing is per table, for tables that exist. Spark's `DROP TABLE … PURGE` drops the table first and then
+  deletes its files through the table's FileIO, so those deletes cannot be signed and the statement fails after the
+  drop; drop with purge through the server instead (`purgeRequested=true`, which this library's client sends). The
+  same goes for writes to a staged (not yet committed) create. Only S3 is signed (`provider` other than `s3` is a 400).
 
 ## Idempotency keys
 
@@ -207,13 +302,18 @@ Mutating requests (`POST`, `DELETE`) that carry an `Idempotency-Key` header are 
 - **Not kept:** a 5xx, so a retry runs again. A duplicate that arrives while the first is still running waits for it.
 - **Refused:** the same key with a different method, path or body is a 422. A key longer than 128 characters is a
   400.
-- **Not covered:** planning routes are excluded (they change nothing), and so is the token endpoint.
+- **Not covered:** planning and signing routes are excluded (they change nothing), and so is the token endpoint.
 
 `/v1/config` advertises `idempotency-key-lifetime` (`Idempotency:Lifetime`, default `PT30M`); responses are kept that
 long plus a minute. Clients only retry mutations when it is advertised. This library's `RestCatalog` then resends a
 commit whose response was lost with the same key, and gets the original answer instead of
-`CommitStateUnknownException` (`IdempotencyTests`). Keys live in the process's memory, so servers sharing one
-database do not share them; behind a load balancer, use sticky routing per client, or turn it off.
+`CommitStateUnknownException` (`IdempotencyTests`).
+
+Keys are claimed in the store (see [Storage](#storage)), so server instances over one database share them: a retry
+that a load balancer sends to another instance is replayed there, and a duplicate waits for the first request even when
+another instance runs it (`SharedStateTests`, including a commit whose response is lost on one server and retried on
+the other). A claim whose request never finished, because its server went away mid-request, is treated like a 5xx
+after `Idempotency:PendingTimeout` (5 minutes): the next request with the key runs.
 
 ## Endpoints
 
@@ -235,6 +335,7 @@ database do not share them; behind a load balancer, use sticky routing per clien
 | reportMetrics | `POST …/tables/{t}/metrics` | Accepted and discarded (204) |
 | planTableScan / fetchPlanningResult / cancelPlanning / fetchScanTasks | `POST …/tables/{t}/plan`, `GET`/`DELETE …/plan/{id}`, `POST …/tables/{t}/tasks` | See [Server-side scan planning](#server-side-scan-planning) |
 | loadCredentials | `GET …/tables/{t}/credentials` | Only with a credential vendor; see [Credential vending](#credential-vending) |
+| signRequest | `POST …/tables/{t}/sign` | Only with remote signing on; see [Remote signing](#remote-signing) |
 | renameTable | `POST …/tables/rename` | Atomic in either store, across namespaces too |
 | commitTransaction | `POST …/transactions/commit` | Every requirement is checked and every file written first; then all pointers move in one `SwapAsync`, or none do. Staged creates may take part |
 | listViews / createView / loadView / viewExists / replaceView / dropView / renameView | `…/views…`, `POST …/views/rename` | View updates follow Java's `ViewMetadata.Builder`: identical schemas and versions are reused, `-1` means "added in this commit", and history is trimmed to `version.history.num-entries` |
@@ -247,19 +348,18 @@ Errors always have the `{"error": {"message", "type", "code"}}` shape:
 | 401 | `NotAuthorizedException` |
 | 403 | `ForbiddenException`: the principal lacks the grant |
 | 404 | `NoSuchNamespaceException`, `NoSuchTableException`, `NoSuchViewException`, `NoSuchPlanIdException`, `NoSuchPlanTaskException` |
-| 406 | `UnsupportedOperationException` (e.g. incremental scan planning) |
+| 406 | `UnsupportedOperationException` |
 | 409 | `AlreadyExistsException`, `CommitFailedException`, `NamespaceNotEmptyException` |
 | 422 | `UnprocessableEntityException` |
 | 500 | anything else, logged |
 
 ## Not implemented
 
-- Remote signing (`/sign`). Vended credentials cover the same need for S3.
-- Incremental scan planning (`start-snapshot-id` / `end-snapshot-id`), per-partition residual simplification, and
-  `storage-credentials` in planning responses (clients use the table's).
-- Credentials for non-S3 storage. Register an `IStorageCredentialVendor` for them.
-- Idempotency keys shared between server instances. They are per process.
-- Durable plan IDs. Plan tasks are stateless, but `plan/{id}` results live in the process that made them.
+- Remote signing for anything but S3, the spec's newer `remote-signing-config` field (Iceberg 1.12 works without it),
+  and signing for staged creates or just-dropped tables (see [Remote signing](#remote-signing)).
+- Per-partition residual simplification, and `storage-credentials` in planning responses (clients use the table's).
+- GCS credentials, and an emulator-checked ADLS directory SAS (Azurite cannot). Register an `IStorageCredentialVendor`
+  for other storage.
 - Functions, `register-view`, and a custom `namespace-separator`.
 - Audit logging and storing metrics reports.
 - Several warehouses behind one server. Run one server per warehouse, or share a database with a different
@@ -269,8 +369,8 @@ Errors always have the `{"error": {"message", "type", "code"}}` shape:
 
 | Where | What |
 |---|---|
-| `tests/Iceberg.Net.RestServer.Tests` | `CatalogContractTests` run the catalog contract (namespaces, round trip, concurrent writers, stale requirements, time travel, rename/register/purge, v3, multi-table transactions, views) through `RestCatalog` against the server under `WebApplicationFactory`, over both stores. `ProtocolTests` cover status codes, the ErrorModel, paging, ETag, staged creates and registration. `ConcurrencyTests` cover two racing commits (exactly one 409), a lost compare-and-swap (409, its file removed) and two servers over one database. `AuthTests` and `SqlStoreTests` cover the rest. `ScanPlanningTests` read server plans with our client and compare them with local scans (v2/v3, position deletes, DVs, equality deletes, filters, time travel, plan tasks, async), plus the protocol (plan IDs, plan-task tokens, `stats-fields`, case-insensitivity, 400/404/406). `AuthorizationTests`, `CredentialVendingTests` (fake vendor, scripted STS, and moto's STS when the emulators run: the vended keys are then used for S3) and `IdempotencyTests` (replays, 422, concurrent duplicates, a lost commit response) cover the rest |
-| `CrossEngineTests` (same project) | The server on a Kestrel port. **PyIceberg 0.12** (OAuth2 client credentials) creates, appends, evolves and reads tables interleaved with our client, including a staged create transaction, and reads through server-side scan planning (`scan-planning-mode=server`, split into plan tasks, with position deletes). **Spark 4.0.1 / Iceberg 1.12** (apache/spark image on the host network) creates, inserts, deletes with merge-on-read position deletes, reads our appends, alters and inserts into a table we created, and (told `scan-planning-mode=server` by the table config) reads tables with v2 position deletes and v3 DVs through server-side planning and plan tasks. They need `ICEBERG_PYTHON` and the Spark oracle (`emulation/up.sh --spark`, or `ICEBERG_SPARK_JAR`), and skip without them |
+| `tests/Iceberg.Net.RestServer.Tests` | `CatalogContractTests` run the catalog contract (namespaces, round trip, concurrent writers, stale requirements, time travel, rename/register/purge, v3, multi-table transactions, views) through `RestCatalog` against the server under `WebApplicationFactory`, over both stores. `ProtocolTests` cover status codes, the ErrorModel, paging, ETag, staged creates and registration. `ConcurrencyTests` cover two racing commits (exactly one 409), a lost compare-and-swap (409, its file removed) and two servers over one database. `AuthTests` and `SqlStoreTests` cover the rest. `ScanPlanningTests` read server plans with our client and compare them with local scans (v2/v3, position deletes, DVs, equality deletes, filters, time travel, plan tasks, async), plus the protocol (plan IDs, plan-task tokens, `stats-fields`, case-insensitivity, 400/404). `IncrementalScanPlanningTests` check incremental plans against the change feed. `AuthorizationTests`, `CredentialVendingTests` (fake vendor, scripted STS, and moto's STS when the emulators run: the vended keys are then used for S3), `AzureCredentialVendingTests` (Azure SDK vectors; Azurite when its image is present), `RemoteSigningTests` (AWS's example, the authorization rules, and our client against `AuthenticatingMoto`), `IdempotencyTests` (replays, 422, concurrent duplicates, a lost commit response) and `SharedStateTests` (two servers sharing keys and plan IDs; the state store contract) cover the rest |
+| `CrossEngineTests` (same project) | The server on a Kestrel port. **PyIceberg 0.12** (OAuth2 client credentials) creates, appends, evolves and reads tables interleaved with our client, including a staged create transaction, reads through server-side scan planning (`scan-planning-mode=server`, split into plan tasks, with position deletes), and appends and reads through remote signing. **Spark 4.0.1 / Iceberg 1.12** (apache/spark image on the host network) creates, inserts, deletes with merge-on-read position deletes, reads our appends, alters and inserts into a table we created, and (told `scan-planning-mode=server` by the table config) reads tables with v2 position deletes and v3 DVs through server-side planning and plan tasks, matches our incremental plans with its incremental reads, and reads and writes S3 through remote signing (with `iceberg-aws-bundle-1.12.0.jar` next to the runtime jar). They need `ICEBERG_PYTHON` and the Spark oracle (`emulation/up.sh --spark`, or `ICEBERG_SPARK_JAR`), and skip without them; the signing tests also need Docker and the `motoserver/moto:5.2.4` image. `ICEBERG_SPARK_LOG=<file>` keeps the full Spark output of a failed run |
 | `tests/Iceberg.Net.Regression.Tests` | The `dotnet-rest` catalog kind (`DotnetRestServer.cs`): the server on a free port with its warehouse on moto. It runs `CatalogConformanceTests`, `ViewConformanceTests`, the PyIceberg `CrossEngineTests` and the soak test |
 
 ```bash

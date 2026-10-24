@@ -79,9 +79,73 @@ public static partial class TableScan
         CancellationToken ct = default) =>
         PlanCoreAsync(table, snapshot, manifests, schema, Binder.Bind(schema, filter), null, ct);
 
+    /// <summary>
+    /// The snapshots an incremental append scan covers (Java's <c>IncrementalAppendScan</c>): the <c>append</c> snapshots
+    /// among the ancestors of <paramref name="toInclusive"/> after <paramref name="fromExclusive"/> (all of its ancestors
+    /// when null), oldest first. Overwrites, deletes and replaces in the range contribute nothing.
+    /// </summary>
+    /// <exception cref="ArgumentException">An unknown snapshot, or <paramref name="fromExclusive"/> is not an ancestor of <paramref name="toInclusive"/>.</exception>
+    public static IReadOnlyList<Snapshot> AppendSnapshots(TableMetadata metadata, long? fromExclusive, long toInclusive)
+    {
+        if (metadata.SnapshotById(toInclusive) is null) throw new ArgumentException($"Unknown end snapshot {toInclusive}");
+        if (fromExclusive is { } from && metadata.SnapshotById(from) is null) throw new ArgumentException($"Unknown start snapshot {from}");
+        var range = new List<Snapshot>();
+        var reached = fromExclusive is null;
+        foreach (var s in metadata.Ancestors(toInclusive))
+        {
+            if (s.SnapshotId == fromExclusive) { reached = true; break; }
+            range.Add(s);
+        }
+        if (!reached) throw new ArgumentException($"Starting snapshot (exclusive) {fromExclusive} is not an ancestor of end snapshot {toInclusive}");
+        range.Reverse();
+        return range.Where(s => s.Operation == Operations.Append).ToList();
+    }
+
+    /// <summary>
+    /// The data manifests that <paramref name="appends"/> added (each snapshot's own manifest list, keeping the manifests
+    /// whose <c>added_snapshot_id</c> is one of them), without duplicates: the manifests an incremental append scan reads.
+    /// </summary>
+    public static async Task<IReadOnlyList<ManifestFile>> AppendManifestsAsync(Table table, IReadOnlyList<Snapshot> appends, CancellationToken ct = default)
+    {
+        var ids = appends.Select(s => s.SnapshotId).ToHashSet();
+        var seen = new HashSet<string>(StringComparer.Ordinal);
+        var result = new List<ManifestFile>();
+        foreach (var s in appends)
+            foreach (var mf in await ManifestsAsync(table, s, ct))
+                if (mf.Content == ManifestContent.Data && ids.Contains(mf.AddedSnapshotId) && seen.Add(mf.ManifestPath))
+                    result.Add(mf);
+        return result;
+    }
+
+    /// <summary>
+    /// Plan an incremental append scan over some of the manifests from <see cref="AppendManifestsAsync"/>: the data files
+    /// those snapshots added (entries <c>ADDED</c> by one of <paramref name="appends"/>), pruned by
+    /// <paramref name="filter"/> exactly as a snapshot scan is. Delete files are not applied, as in Java: appends add none.
+    /// </summary>
+    public static Task<ScanPlan> PlanAppendManifestsAsync(Table table, IReadOnlyList<Snapshot> appends, IReadOnlyList<ManifestFile> manifests, Schema schema,
+        Expression filter, CancellationToken ct = default)
+    {
+        var ids = appends.Select(s => s.SnapshotId).ToHashSet();
+        var end = appends.Count > 0 ? appends[^1] : table.Metadata.CurrentSnapshot!;
+        return PlanCoreAsync(table, end, manifests, schema, Binder.Bind(schema, filter), null, ct,
+            e => e.Status == ManifestEntryStatus.Added && e.SnapshotId is { } id && ids.Contains(id));
+    }
+
+    /// <summary>
+    /// The data files appended after <paramref name="fromExclusive"/> up to <paramref name="toInclusive"/> that may hold
+    /// rows matching <paramref name="filter"/> (Java's <c>table.newIncrementalAppendScan().fromSnapshotExclusive(from)
+    /// .toSnapshot(to)</c>).
+    /// </summary>
+    public static async Task<ScanPlan> PlanAppendsAsync(Table table, long? fromExclusive, long toInclusive, Expression? filter = null, CancellationToken ct = default)
+    {
+        var appends = AppendSnapshots(table.Metadata, fromExclusive, toInclusive);
+        if (appends.Count == 0) return new ScanPlan([], 0, 0, 0, 0);
+        return await PlanAppendManifestsAsync(table, appends, await AppendManifestsAsync(table, appends, ct), table.Schema, filter ?? Expression.True, ct);
+    }
+
     /// <param name="schema">The schema <paramref name="bound"/> was bound to; partition specs and manifests are read with it.</param>
     private static async Task<ScanPlan> PlanCoreAsync(Table table, Snapshot snapshot, IReadOnlyList<ManifestFile> manifests, Schema schema, Expression bound,
-        Func<DataFile, bool>? fileFilter, CancellationToken ct)
+        Func<DataFile, bool>? fileFilter, CancellationToken ct, Func<ManifestEntry, bool>? entryFilter = null)
     {
         using var telemetry = IcebergTelemetry.StartScanPlanning(table.Identifier.ToString(), snapshot.SnapshotId);
         var m = table.Metadata;
@@ -103,6 +167,7 @@ public static partial class TableScan
             foreach (var e in contents.Entries)
             {
                 if (e.Status == ManifestEntryStatus.Deleted) continue;
+                if (entryFilter is not null && !entryFilter(e)) continue;
                 if (fileFilter is not null && !fileFilter(e.DataFile)) continue;
                 if (!eval.Partition(e.DataFile.Partition)) { byPartition++; continue; }
                 if (metrics is not null && !metrics.MightMatch(e.DataFile)) { byMetrics++; continue; }

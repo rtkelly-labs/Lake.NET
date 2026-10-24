@@ -75,24 +75,34 @@ public sealed class SigV4Handler : DelegatingHandler
     public static (string Canonical, string SignedHeaders) CanonicalRequest(HttpRequestMessage request, string payloadHash)
     {
         var uri = request.RequestUri ?? throw new ArgumentException("Request has no URI");
+        var all = request.Headers.Concat(request.Content?.Headers ?? Enumerable.Empty<KeyValuePair<string, IEnumerable<string>>>());
+        return CanonicalRequest(request.Method.Method, uri, all, payloadHash, s3: false);
+    }
+
+    /// <summary>
+    /// The SigV4 canonical request of a method, URI and headers. <paramref name="s3"/> selects S3's rule for the path:
+    /// each segment URI-encoded once, where every other service encodes it twice. <c>host</c> comes from the URI;
+    /// <c>authorization</c>, <c>user-agent</c> and <c>content-length</c> are never signed.
+    /// </summary>
+    public static (string Canonical, string SignedHeaders) CanonicalRequest(string method, Uri uri, IEnumerable<KeyValuePair<string, IEnumerable<string>>> requestHeaders,
+        string payloadHash, bool s3)
+    {
         var headers = new SortedDictionary<string, string>(StringComparer.Ordinal)
         {
             ["host"] = uri.IsDefaultPort ? uri.Host : $"{uri.Host}:{uri.Port}",
         };
-        void Add(string name, IEnumerable<string> values)
+        foreach (var (name, values) in requestHeaders)
         {
             var n = name.ToLowerInvariant();
-            if (n is "authorization" or "original-authorization" or "user-agent" or "content-length") return;
+            if (n is "authorization" or "original-authorization" or "user-agent" or "content-length" or "host") continue;
             var v = string.Join(",", values.Select(x => string.Join(' ', x.Split((char[]?)null, StringSplitOptions.RemoveEmptyEntries))));
-            headers[n] = headers.TryGetValue(n, out var prev) && n != "host" ? $"{prev},{v}" : v;
+            headers[n] = headers.TryGetValue(n, out var prev) ? $"{prev},{v}" : v;
         }
-        foreach (var h in request.Headers) Add(h.Key, h.Value);
-        if (request.Content is not null) foreach (var h in request.Content.Headers) Add(h.Key, h.Value);
 
         var signed = string.Join(';', headers.Keys);
         var canonical = string.Join('\n',
-            request.Method.Method,
-            CanonicalPath(uri.AbsolutePath),
+            method.ToUpperInvariant(),
+            CanonicalPath(uri.AbsolutePath, s3),
             CanonicalQuery(uri.Query),
             string.Concat(headers.Select(h => $"{h.Key}:{h.Value}\n")),
             signed,
@@ -100,9 +110,29 @@ public sealed class SigV4Handler : DelegatingHandler
         return (canonical, signed);
     }
 
-    /// <summary>Each path segment URI-encoded once more (all services except S3 double-encode).</summary>
-    private static string CanonicalPath(string absolutePath) =>
-        absolutePath.Length == 0 ? "/" : string.Join('/', absolutePath.Split('/').Select(seg => Encode(Uri.UnescapeDataString(seg)) is var once ? Encode(once) : once));
+    /// <summary>
+    /// The headers that sign an S3 request (what a remote signer returns): <c>x-amz-date</c>,
+    /// <c>x-amz-content-sha256</c> (<paramref name="payloadHash"/>, e.g. <c>UNSIGNED-PAYLOAD</c>), the session token when
+    /// there is one, and <c>Authorization</c>, over <paramref name="headers"/> plus those.
+    /// </summary>
+    public static IReadOnlyDictionary<string, string> SignS3(string method, Uri uri, IEnumerable<KeyValuePair<string, IEnumerable<string>>> headers, string payloadHash,
+        ImmutableCredentials credentials, string region, DateTime now)
+    {
+        var added = new Dictionary<string, string>(StringComparer.OrdinalIgnoreCase)
+        {
+            ["x-amz-date"] = now.ToString("yyyyMMdd'T'HHmmss'Z'", CultureInfo.InvariantCulture),
+            ["x-amz-content-sha256"] = payloadHash,
+        };
+        if (!string.IsNullOrEmpty(credentials.Token)) added["x-amz-security-token"] = credentials.Token;
+        var all = headers.Where(h => !added.ContainsKey(h.Key)).Concat(added.Select(a => KeyValuePair.Create(a.Key, (IEnumerable<string>)[a.Value])));
+        var (canonical, signed) = CanonicalRequest(method, uri, all, payloadHash, s3: true);
+        added["Authorization"] = Authorization(canonical, signed, now, region, "s3", credentials.AccessKey, credentials.SecretKey);
+        return added;
+    }
+
+    /// <summary>Each path segment URI-encoded once (S3), or once more (all services except S3 double-encode).</summary>
+    private static string CanonicalPath(string absolutePath, bool s3) =>
+        absolutePath.Length == 0 ? "/" : string.Join('/', absolutePath.Split('/').Select(seg => Encode(Uri.UnescapeDataString(seg)) is var once && !s3 ? Encode(once) : once));
 
     private static string CanonicalQuery(string query)
     {

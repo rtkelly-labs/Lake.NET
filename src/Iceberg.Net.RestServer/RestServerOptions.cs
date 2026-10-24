@@ -52,8 +52,31 @@ public sealed class RestServerOptions
     /// <summary>Storage credentials vended with loaded tables (STS AssumeRole). Off while no <c>RoleArn</c> is configured.</summary>
     public CredentialVendingOptions CredentialVending { get; set; } = new();
 
+    /// <summary>S3 remote signing (<c>…/tables/{table}/sign</c>) for clients that ask for <c>remote-signing</c>. Off by default.</summary>
+    public RemoteSigningOptions RemoteSigning { get; set; } = new();
+
     /// <summary><c>Idempotency-Key</c> deduplication of mutating requests.</summary>
     public IdempotencyOptions Idempotency { get; set; } = new();
+}
+
+/// <summary>
+/// S3 remote signing: the server signs clients' S3 requests for a table's objects with its own credentials, so clients
+/// hold none. Offered to clients that send <c>X-Iceberg-Access-Delegation: remote-signing</c> (and get no vended
+/// credentials instead).
+/// </summary>
+public sealed class RemoteSigningOptions
+{
+    public bool Enabled { get; set; }
+
+    /// <summary>The region requests are signed for (and returned as <c>client.region</c>). Default: the FileIO's <c>client.region</c>, else the client's.</summary>
+    public string? Region { get; set; }
+
+    /// <summary>The credentials requests are signed with. Default: the FileIO's <c>s3.*</c> keys, else the AWS SDK's default chain.</summary>
+    public string? AccessKeyId { get; set; }
+
+    public string? SecretAccessKey { get; set; }
+
+    public string? SessionToken { get; set; }
 }
 
 /// <summary>
@@ -90,7 +113,10 @@ public sealed class ScanPlanningOptions
     /// <summary>Plan in the background: <c>planTableScan</c> answers <c>submitted</c> and clients poll <c>plan/{plan-id}</c>.</summary>
     public bool Async { get; set; }
 
-    /// <summary>How long a plan's result stays available to <c>plan/{plan-id}</c> after it finished.</summary>
+    /// <summary>
+    /// How long a plan's result stays available to <c>plan/{plan-id}</c> after it finished. A plan still
+    /// <c>submitted</c> after this long (its server went away) is reported failed.
+    /// </summary>
     public TimeSpan PlanLifetime { get; set; } = TimeSpan.FromMinutes(10);
 }
 
@@ -112,6 +138,9 @@ public sealed class CredentialVendingOptions
 
     public int DurationSeconds { get; set; } = 3600;
 
+    /// <summary>Azure SAS tokens for <c>abfs[s]://</c> / <c>wasb[s]://</c> tables; on when any account key is configured.</summary>
+    public AdlsCredentialVendingOptions Adls { get; set; } = new();
+
     /// <summary>
     /// The server's own credentials for calling STS. Unset: the FileIO's <c>s3.access-key-id</c> /
     /// <c>s3.secret-access-key</c>, else the AWS SDK's default credential chain.
@@ -122,7 +151,28 @@ public sealed class CredentialVendingOptions
 
     public string? SessionToken { get; set; }
 
+    /// <summary>S3 (STS) vending is on.</summary>
     public bool Enabled => !string.IsNullOrEmpty(RoleArn);
+}
+
+/// <summary>Azure SAS vending (<see cref="AdlsSasCredentialVendor"/>).</summary>
+public sealed class AdlsCredentialVendingOptions
+{
+    /// <summary>Storage account name → its shared key (base64), e.g. <c>CredentialVending:Adls:Accounts:mylake</c>.</summary>
+    public Dictionary<string, string> Accounts { get; set; } = [];
+
+    /// <summary><c>directory</c> (a directory SAS on the table's path; needs a hierarchical namespace) or <c>container</c>.</summary>
+    public string Scope { get; set; } = "directory";
+
+    public int DurationSeconds { get; set; } = 3600;
+
+    /// <summary>The SAS version (<c>sv</c>).</summary>
+    public string Version { get; set; } = "2023-11-03";
+
+    /// <summary><c>spr</c>: <c>https</c> to refuse plain HTTP; unset allows both (emulators speak HTTP).</summary>
+    public string? Protocol { get; set; }
+
+    public bool Enabled => Accounts.Count > 0;
 }
 
 public sealed class IdempotencyOptions
@@ -131,6 +181,12 @@ public sealed class IdempotencyOptions
 
     /// <summary>Advertised as <c>idempotency-key-lifetime</c>; responses are kept at least this long (plus a minute's grace).</summary>
     public TimeSpan Lifetime { get; set; } = TimeSpan.FromMinutes(30);
+
+    /// <summary>
+    /// How long a duplicate waits for the first request with its key to finish. Past it the first is presumed lost (its
+    /// server went away mid-request) and, like a 5xx, not final: the duplicate runs instead.
+    /// </summary>
+    public TimeSpan PendingTimeout { get; set; } = TimeSpan.FromMinutes(5);
 }
 
 /// <summary>

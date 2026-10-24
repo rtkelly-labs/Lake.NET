@@ -76,10 +76,10 @@ public sealed class IdempotencyTests
         Assert.True(conflictReplay.Replayed);
 
         // Requests without a key, and reads, are not kept.
-        var kept = host.Service<IdempotencyStore>().Count;
+        var kept = await host.Service<IdempotencyStore>().CountAsync();
         await ProtocolTests.SendAsync(http, HttpMethod.Post, "/v1/namespaces", CreateNs("c"));
         await SendAsync(http, HttpMethod.Get, "/v1/namespaces", Guid.NewGuid().ToString());
-        Assert.Equal(kept, host.Service<IdempotencyStore>().Count);
+        Assert.Equal(kept, await host.Service<IdempotencyStore>().CountAsync());
     }
 
     [Fact]

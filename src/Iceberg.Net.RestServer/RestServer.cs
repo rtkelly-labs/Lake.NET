@@ -9,7 +9,7 @@ namespace Iceberg.Net.RestServer;
 
 /// <summary>
 /// Hosting: <see cref="AddIcebergRestCatalog"/> registers the options, store, FileIO, catalog service, authentication,
-/// the authorizer, the credential vendor, the scan planner and the idempotency store;
+/// the authorizer, the credential vendor, the server state store, the scan planner and the idempotency store;
 /// <see cref="Endpoints.MapIcebergRestCatalog"/> maps the routes. <see cref="Build"/> does both for a standalone server.
 /// An embedding application can register its own <see cref="ICatalogStore"/>, <see cref="IFileIO"/>,
 /// <see cref="IAuthorizer"/> or <see cref="IStorageCredentialVendor"/>; the last registration wins.
@@ -52,11 +52,21 @@ public static class RestServer
         services.TryAddSingleton<IStorageCredentialVendor>(sp =>
         {
             var options = sp.GetRequiredService<RestServerOptions>();
-            return options.CredentialVending.Enabled ? new StsCredentialVendor(options.CredentialVending, options.FileIO) : NoCredentialVendor.Instance;
+            var vendors = new List<IStorageCredentialVendor>();
+            if (options.CredentialVending.Enabled) vendors.Add(new StsCredentialVendor(options.CredentialVending, options.FileIO));
+            if (options.CredentialVending.Adls.Enabled) vendors.Add(new AdlsSasCredentialVendor(options.CredentialVending.Adls));
+            return vendors.Count switch { 0 => NoCredentialVendor.Instance, 1 => vendors[0], _ => new CompositeCredentialVendor(vendors) };
         });
+        services.TryAddSingleton(sp =>
+        {
+            var options = sp.GetRequiredService<RestServerOptions>();
+            return new S3RequestSigner(options.RemoteSigning, options.FileIO);
+        });
+        // Idempotency keys and plans live with the catalog when its store can keep them, so instances share them.
+        services.TryAddSingleton<IServerStateStore>(sp => sp.GetRequiredService<ICatalogStore>() as IServerStateStore ?? new InMemoryServerStateStore());
         services.TryAddSingleton(sp => new ScanPlanner(sp.GetRequiredService<CatalogService>(), sp.GetRequiredService<RestServerOptions>().ScanPlanning,
-            sp.GetService<ILoggerFactory>()?.CreateLogger<ScanPlanner>()));
-        services.TryAddSingleton(sp => new IdempotencyStore(sp.GetRequiredService<RestServerOptions>().Idempotency));
+            sp.GetRequiredService<IServerStateStore>(), sp.GetService<ILoggerFactory>()?.CreateLogger<ScanPlanner>()));
+        services.TryAddSingleton(sp => new IdempotencyStore(sp.GetRequiredService<RestServerOptions>().Idempotency, sp.GetRequiredService<IServerStateStore>()));
         services.AddIcebergAuth();
         return services;
     }

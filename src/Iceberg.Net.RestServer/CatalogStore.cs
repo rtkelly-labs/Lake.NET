@@ -66,9 +66,28 @@ public interface ICatalogStore
     Task RenameAsync(TableIdentifier from, TableIdentifier to, CatalogEntryKind kind, CancellationToken ct = default);
 }
 
-/// <summary>A process-local store: one lock, dictionaries. For tests and throwaway servers.</summary>
-public sealed class InMemoryCatalogStore : ICatalogStore
+/// <summary>
+/// A process-local store: one lock, dictionaries. For tests and throwaway servers. Its server state (idempotency keys,
+/// plans) is in memory too, shared by every server given this instance.
+/// </summary>
+public sealed class InMemoryCatalogStore : ICatalogStore, IServerStateStore
 {
+    private readonly InMemoryServerStateStore _state = new();
+
+    public Task<IdempotencyClaim?> ClaimAsync(string principal, string key, string fingerprint, DateTimeOffset now, DateTimeOffset expiredBefore, CancellationToken ct = default) =>
+        _state.ClaimAsync(principal, key, fingerprint, now, expiredBefore, ct);
+    public Task CompleteAsync(string principal, string key, DateTimeOffset claimed, StoredResponse response, CancellationToken ct = default) =>
+        _state.CompleteAsync(principal, key, claimed, response, ct);
+    public Task ReleaseAsync(string principal, string key, DateTimeOffset claimed, CancellationToken ct = default) => _state.ReleaseAsync(principal, key, claimed, ct);
+    public Task AddPlanAsync(PlanRecord plan, CancellationToken ct = default) => _state.AddPlanAsync(plan, ct);
+    public Task<bool> FinishPlanAsync(string planId, string status, string? result, string? error, DateTimeOffset finished, CancellationToken ct = default) =>
+        _state.FinishPlanAsync(planId, status, result, error, finished, ct);
+    public Task<PlanRecord?> LoadPlanAsync(string planId, CancellationToken ct = default) => _state.LoadPlanAsync(planId, ct);
+    public Task<bool> DeletePlanAsync(string planId, CancellationToken ct = default) => _state.DeletePlanAsync(planId, ct);
+    public Task ExpireAsync(DateTimeOffset claimsBefore, DateTimeOffset plansFinishedBefore, DateTimeOffset plansSubmittedBefore, CancellationToken ct = default) =>
+        _state.ExpireAsync(claimsBefore, plansFinishedBefore, plansSubmittedBefore, ct);
+    public Task<(int Claims, int Plans)> CountAsync(CancellationToken ct = default) => _state.CountAsync(ct);
+
     private readonly object _lock = new();
     private readonly Dictionary<Namespace, Dictionary<string, string>> _namespaces = [];
     private readonly Dictionary<TableIdentifier, (CatalogEntryKind Kind, string Location)> _entries = [];
