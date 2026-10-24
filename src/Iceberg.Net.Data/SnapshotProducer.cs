@@ -367,13 +367,22 @@ public sealed class SnapshotProducer
     /// <see cref="ICatalog.CommitTransactionAsync"/> across tables. On a conflict, re-stage from refreshed tables;
     /// files of an abandoned stage are left for orphan-file cleanup.
     /// </summary>
-    public async Task<TableCommit> StageAsync(CancellationToken ct = default)
+    public async Task<TableCommit> StageAsync(CancellationToken ct = default) => (await StageWithArtifactsAsync(ct)).Commit;
+
+    /// <summary>
+    /// <see cref="StageAsync"/>, also returning the staged snapshot and the files written for it (manifests, manifest
+    /// list, delete files), which <see cref="StagedCommit"/> removes when the commit is definitely not applied.
+    /// </summary>
+    internal async Task<(TableCommit Commit, Snapshot Snapshot, IReadOnlyList<string> Artifacts)> StageWithArtifactsAsync(CancellationToken ct)
     {
         var snapshot = await ApplyAsync(ct);
+        // The added files' manifests are reused across attempts, so they are not attempt artifacts; a stage owns them.
+        var artifacts = _attemptArtifacts.Concat(_writtenManifestPaths).Distinct(StringComparer.Ordinal).ToList();
         _attemptArtifacts.Clear();
-        return new TableCommit(_table.Identifier,
+        var commit = new TableCommit(_table.Identifier,
             [new UpdateRequirement.AssertTableUuid(_table.Metadata.TableUuid), BranchRequirement(_table.Metadata)],
             [new MetadataUpdate.AddSnapshot(snapshot), SetBranch(snapshot.SnapshotId)]);
+        return (commit, snapshot, artifacts);
     }
 
     /// <summary>Move the target branch to the new snapshot, keeping its retention settings (Java's <c>SnapshotRef.builderFrom</c>).</summary>

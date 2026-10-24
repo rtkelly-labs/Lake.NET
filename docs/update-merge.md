@@ -95,6 +95,42 @@ refreshed and the whole change planned again against the winner's state, never r
 Data files written by a lost attempt are not reused (they depend on the table state); they are left for orphan-file
 cleanup, which keeps young files.
 
+## Staged commits across tables
+
+`TableMutations.StageMergeAsync` and `StageUpdateAsync` take the same arguments as `MergeAsync` and `UpdateAsync`
+and do the same work, except the last step: they plan the change against the table's current state and write its
+files (data and delete files, manifests, manifest list), then return a `StagedCommit<MergeResult>` holding the
+`TableCommit` (requirements and updates) instead of committing it. `StagedCommit.StageAsync(table, ct => producer)`
+stages any `SnapshotProducer` the same way.
+
+```csharp
+// UPDATE stock SET qty = qty - 3 WHERE id = 1; INSERT INTO movements …; both or neither.
+var stock = await TableMutations.StageUpdateAsync(stockTable, Expr.Equal("id", 1L), u => u.Set("qty", r => (int)r[2]! - 3));
+var log = await TableMutations.StageMergeAsync(movements, [movement], ["id"], m => m.WhenNotMatchedInsert());
+await StagedCommit.CommitAllAsync([stock, log]);   // stock.Result / log.Result: the counts that committed
+```
+
+`StagedCommit.CommitAllAsync` commits them **atomically**:
+
+- One table commits through `CommitTableAsync`. Several go through `ICatalog.CommitTransactionAsync`, which needs
+  `ICatalog.SupportsMultiTableTransactions` (in-memory, JDBC in one database transaction, REST servers that advertise
+  `/transactions/commit`; not Glue, which throws `NotSupportedException`). Every table must be of the same catalog
+  instance, once.
+- **Conflicts re-plan everything.** On a `CommitFailedException` every table is refreshed and every change planned
+  again from scratch (the same serializable loop as a single mutation; conditions and clause callbacks run again
+  against the new state), then the transaction is retried with exponential back-off, up to the largest
+  `commit.retry.*` budget among the tables. A sequence number another writer took meanwhile, or a "server responded"
+  unknown outcome that resolves to "not applied", counts as a conflict, as in `SnapshotProducer`.
+- **Nothing is partially visible.** A failure leaves every table as it was. An exception a re-plan throws (a failed
+  check) is thrown as it is.
+- **Cleanup.** Whenever a plan is definitely abandoned (a lost race, retries spent, a failed re-plan, no
+  transactions), its manifests, manifest list and delete files are deleted; data files are left for orphan-file
+  cleanup, as for any lost attempt. After a `CommitStateUnknownException` nothing is deleted. A stage you decide not
+  to commit should be dropped with `DiscardAsync`.
+
+The EF Core provider's `SaveChanges` is built on this ([efcore.md](efcore.md#atomicity-across-tables)). Tests:
+`StagedCommitTests` (in-memory), `JdbcCatalogTests` (SQLite), `CatalogConformanceTests` (every catalog kind).
+
 ## Athena and other engines
 
 - Athena's own `UPDATE` and `MERGE INTO` always write **position deletes** (merge-on-read), whatever the table's
