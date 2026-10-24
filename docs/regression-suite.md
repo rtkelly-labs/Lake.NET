@@ -125,9 +125,10 @@ and its runs. So the limits that stop a decoder allocating or looping on a claim
 
 | Workflow | When | What |
 |---|---|---|
-| `iceberg-dotnet.yml` | every PR / push touching `iceberg-dotnet/**` | L0, spec-traceability freshness, all emulators + Spark + Trino + Polaris, BDD, L1/L2 |
-| `iceberg-dotnet-upkeep.yml` | weekly | spec drift vs apache/iceberg `main` (red only for upstream changes not yet reviewed with `tools/spec_trace.py drift --acknowledge`); the regression suite against `:latest` emulator images |
-| `iceberg-dotnet-aws.yml` | nightly, **dormant until `ICEBERG_AWS_ROLE_ARN` is set** | L1–L3 against AWS; shadow comparison of `ICEBERG_SHADOW_TABLES` |
+| `ci.yml` | every PR and push to `main` (its `ci` job is the required check) | L0, spec-traceability freshness, all emulators + Spark + Trino + Polaris, BDD, L1/L2 |
+| `upkeep.yml` | when dispatched | spec drift vs apache/iceberg `main` (red only for upstream changes not yet reviewed with `tools/spec_trace.py drift --acknowledge`); the regression suite against `:latest` emulator images |
+| `aws.yml` | when dispatched, **dormant until `ICEBERG_AWS_ROLE_ARN` is set** | L1–L3 against AWS; shadow comparison of `ICEBERG_SHADOW_TABLES` |
+| `release.yml` | when dispatched (a dry run unless unticked) | Release build, spec/netstandard/typed tests, pack, package smoke test, the commit's `ci` check; publishes the `CHANGELOG.md` version to NuGet (trusted publishing) |
 
 All are path-filtered or scheduled, so they do not affect the platform's CI time budget.
 
