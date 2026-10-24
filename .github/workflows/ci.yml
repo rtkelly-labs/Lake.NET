@@ -76,6 +76,9 @@ jobs:
           uv sync --project interop --group duckdb
           dotnet test tests/Iceberg.Net.Ecosystem.Tests --nologo
 
+      - name: REST catalog behaviour (Reqnroll, in-process server)
+        run: dotnet test tests/Iceberg.Net.RestCatalogBehaviour.Tests --nologo
+
       - name: BDD specification (Reqnroll)
         env:
           ICEBERG_PYTHON: ${{ github.workspace }}/interop/.venv/bin/python

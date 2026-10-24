@@ -26,6 +26,7 @@
     <Project Path="tests/Iceberg.Net.Linq.Tests/Iceberg.Net.Linq.Tests.csproj" />
     <Project Path="tests/Iceberg.Net.NetStandard.Tests/Iceberg.Net.NetStandard.Tests.csproj" />
     <Project Path="tests/Iceberg.Net.Regression.Tests/Iceberg.Net.Regression.Tests.csproj" />
+    <Project Path="tests/Iceberg.Net.RestCatalogBehaviour.Tests/Iceberg.Net.RestCatalogBehaviour.Tests.csproj" />
     <Project Path="tests/Iceberg.Net.RestProtocol.Tests/Iceberg.Net.RestProtocol.Tests.csproj" />
     <Project Path="tests/Iceberg.Net.RestServer.Tests/Iceberg.Net.RestServer.Tests.csproj" />
     <Project Path="tests/Iceberg.Net.Spec.Tests/Iceberg.Net.Spec.Tests.csproj" />
