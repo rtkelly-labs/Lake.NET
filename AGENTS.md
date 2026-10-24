@@ -4,6 +4,7 @@ Self-contained C# port of Apache Iceberg. Keep it that way: no references to cod
 
 | Task | Start here |
 |---|---|
+| Picking the project up: state, environment gotchas, open items | [docs/handover.md](docs/handover.md) |
 | What the spec requires and what we cover | [docs/spec-coverage.md](docs/spec-coverage.md); test ↔ section links in [docs/spec-traceability.md](docs/spec-traceability.md) (generated) |
 | What is planned, and how correctness is verified | [docs/roadmap.md](docs/roadmap.md) (delivery milestones + the 13 verification paths) |
 | How commits, retries and metadata state work | [docs/state-management.md](docs/state-management.md), [docs/architecture.md](docs/architecture.md) |
@@ -28,6 +29,7 @@ Self-contained C# port of Apache Iceberg. Keep it that way: no references to cod
 | What | Command |
 |---|---|
 | Build | `dotnet build` |
+| Everything (L0, typed, EF, BDD, REST server, ecosystem, regression) | `./run-tests.sh emulation` |
 | L0 spec tests | `dotnet test tests/Iceberg.Net.Spec.Tests` |
 | Typed layer (LINQ) | `dotnet test tests/Iceberg.Net.Linq.Tests` |
 | EF Core provider | `dotnet test tests/Iceberg.Net.EntityFrameworkCore.Tests` |

@@ -9,8 +9,14 @@ mode="${1:-emulation}"
 
 dotnet test tests/Iceberg.Net.Spec.Tests --nologo
 dotnet test tests/Iceberg.Net.NetStandard.Tests --nologo   # the netstandard2.0 builds of Core and Avro
+dotnet test tests/Iceberg.Net.Linq.Tests --nologo
+dotnet test tests/Iceberg.Net.EntityFrameworkCore.Tests --nologo
 [[ "$mode" == "spec" ]] && exit 0
 dotnet test tests/Iceberg.Net.Behaviour.Tests --nologo
+# In-process server; its PyIceberg/Spark cases need ICEBERG_PYTHON / ICEBERG_SPARK_JAR and skip without them.
+dotnet test tests/Iceberg.Net.RestServer.Tests --nologo
+# Spark/DuckDB oracle cases skip without Docker / ICEBERG_DUCKDB_PYTHON.
+dotnet test tests/Iceberg.Net.Ecosystem.Tests --nologo
 
 if [[ "$mode" == "emulation" ]]; then
   export ICEBERG_TEST_TARGET=emulation
