@@ -32,4 +32,6 @@ fi
 
 # Fail rather than skip when the chosen target is unreachable.
 export ICEBERG_REQUIRE_TARGET=1
+# Every REST operation, and the REST error contract across the emulated servers.
+dotnet test tests/Iceberg.Net.RestProtocol.Tests --nologo
 dotnet test tests/Iceberg.Net.Regression.Tests --nologo

@@ -86,6 +86,14 @@ jobs:
           ICEBERG_PYTHON: ${{ github.workspace }}/interop/.venv/bin/python
         run: dotnet test tests/Iceberg.Net.RestServer.Tests --nologo
 
+      # Every REST operation against this repository's server, the client's status mapping, and the error contract
+      # against the emulated REST servers (Java reference, Polaris, Nessie, Lakekeeper, Gravitino).
+      - name: REST protocol (every operation, and the error contract across REST servers)
+        env:
+          ICEBERG_TEST_TARGET: emulation
+          ICEBERG_REQUIRE_TARGET: "1"
+        run: dotnet test tests/Iceberg.Net.RestProtocol.Tests --nologo
+
       - name: L1/L2 regression (emulation)
         env:
           ICEBERG_TEST_TARGET: emulation
