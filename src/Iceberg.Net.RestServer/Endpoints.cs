@@ -48,12 +48,33 @@ public static class Endpoints
         "POST /v1/{prefix}/views/rename",
     ];
 
+    /// <summary>The scan planning routes, advertised when <see cref="ScanPlanningOptions.Enabled"/>.</summary>
+    public static readonly string[] Planning =
+    [
+        "POST /v1/{prefix}/namespaces/{namespace}/tables/{table}/plan",
+        "GET /v1/{prefix}/namespaces/{namespace}/tables/{table}/plan/{plan-id}",
+        "DELETE /v1/{prefix}/namespaces/{namespace}/tables/{table}/plan/{plan-id}",
+        "POST /v1/{prefix}/namespaces/{namespace}/tables/{table}/tasks",
+    ];
+
+    /// <summary>The credentials route, advertised when credentials are vended.</summary>
+    public const string Credentials = "GET /v1/{prefix}/namespaces/{namespace}/tables/{table}/credentials";
+
     public static void MapIcebergRestCatalog(this WebApplication app)
     {
         var options = app.Services.GetRequiredService<RestServerOptions>();
         var logger = app.Services.GetRequiredService<ILoggerFactory>().CreateLogger("Iceberg.Net.RestServer");
+        var vendor = app.Services.GetRequiredService<IStorageCredentialVendor>();
+        var vending = vendor is not NoCredentialVendor;
         // Create the store's tables before the first request.
         app.Services.GetRequiredService<ICatalogStore>().InitializeAsync().GetAwaiter().GetResult();
+
+        // Outside the error handler, so the response it keeps is the final one (errors included).
+        if (options.Idempotency.Enabled)
+        {
+            var idempotency = app.Services.GetRequiredService<IdempotencyStore>();
+            app.Use((ctx, next) => IdempotencyStore.Applies(ctx.Request) ? idempotency.InvokeAsync(ctx, () => next(ctx)) : next(ctx));
+        }
 
         // Every failure becomes the spec's ErrorModel; a 500 is logged (on a commit it means "outcome unknown").
         app.Use(async (ctx, next) =>
@@ -84,12 +105,15 @@ public static class Endpoints
         {
             var overrides = new Dictionary<string, string>(options.Overrides);
             if (options.Prefix is { Length: > 0 } prefix) overrides["prefix"] = prefix;
-            return Json(new JsonObject
+            var endpoints = Advertised.Concat(options.ScanPlanning.Enabled ? Planning : []).Concat(vending ? [Credentials] : []);
+            var config = new JsonObject
             {
                 ["defaults"] = MetadataJson.StringMap(options.Defaults),
                 ["overrides"] = MetadataJson.StringMap(overrides),
-                ["endpoints"] = new JsonArray(Advertised.Select(e => (JsonNode)e).ToArray()),
-            });
+                ["endpoints"] = new JsonArray(endpoints.Select(e => (JsonNode)e).ToArray()),
+            };
+            if (options.Idempotency.Enabled) config["idempotency-key-lifetime"] = System.Xml.XmlConvert.ToString(options.Idempotency.Lifetime);
+            return Json(config);
         });
 
         // ---------- namespaces ----------
@@ -97,7 +121,8 @@ public static class Endpoints
         v1.MapGet("/namespaces", async (HttpRequest req, CatalogService svc, CancellationToken ct) =>
         {
             var parent = req.Query["parent"].ToString() is { Length: > 0 } raw ? ParseNamespace(raw) : null;
-            var all = await svc.ListNamespacesAsync(parent, ct);
+            if (parent is not null) await req.HttpContext.RequireAsync(CatalogPrivilege.Browse, parent);
+            var all = await FilterAsync(await svc.ListNamespacesAsync(parent, ct), n => req.HttpContext.AllowsAsync(CatalogPrivilege.Browse, n));
             var (page, next) = Page(all, n => string.Join('\u001f', n.Levels), req);
             return Json(new JsonObject
             {
@@ -112,28 +137,37 @@ public static class Endpoints
             var (ns, props) = Parse(() => (
                 new Namespace(body["namespace"]!.AsArray().Select(l => l!.GetValue<string>()).ToList()),
                 MetadataJson.StringMapFrom(body["properties"])));
+            await req.HttpContext.RequireAsync(CatalogPrivilege.Admin, ns);
             await svc.CreateNamespaceAsync(ns, props, ct);
             return Json(new JsonObject { ["namespace"] = Levels(ns), ["properties"] = MetadataJson.StringMap(props) });
         });
 
-        v1.MapGet(Ns, async (string @namespace, CatalogService svc, CancellationToken ct) =>
+        v1.MapGet(Ns, async (string @namespace, HttpContext http, CatalogService svc, CancellationToken ct) =>
         {
             var ns = ParseNamespace(@namespace);
+            await http.RequireAsync(CatalogPrivilege.Browse, ns);
             var props = await svc.LoadNamespaceAsync(ns, ct);
             return Json(new JsonObject { ["namespace"] = Levels(ns), ["properties"] = MetadataJson.StringMap(props) });
         });
 
-        v1.MapMethods(Ns, ["HEAD"], async (string @namespace, CatalogService svc, CancellationToken ct) =>
-            await svc.NamespaceExistsAsync(ParseNamespace(@namespace), ct) ? Results.NoContent() : Results.NotFound());
-
-        v1.MapDelete(Ns, async (string @namespace, CatalogService svc, CancellationToken ct) =>
+        v1.MapMethods(Ns, ["HEAD"], async (string @namespace, HttpContext http, CatalogService svc, CancellationToken ct) =>
         {
-            await svc.DropNamespaceAsync(ParseNamespace(@namespace), ct);
+            var ns = ParseNamespace(@namespace);
+            await http.RequireAsync(CatalogPrivilege.Browse, ns);
+            return await svc.NamespaceExistsAsync(ns, ct) ? Results.NoContent() : Results.NotFound();
+        });
+
+        v1.MapDelete(Ns, async (string @namespace, HttpContext http, CatalogService svc, CancellationToken ct) =>
+        {
+            var ns = ParseNamespace(@namespace);
+            await http.RequireAsync(CatalogPrivilege.Admin, ns);
+            await svc.DropNamespaceAsync(ns, ct);
             return Results.NoContent();
         });
 
         v1.MapPost(Ns + "/properties", async (string @namespace, HttpRequest req, CatalogService svc, CancellationToken ct) =>
         {
+            await req.HttpContext.RequireAsync(CatalogPrivilege.Admin, ParseNamespace(@namespace));
             var body = await BodyAsync(req, ct);
             var (updates, removals) = Parse(() => (
                 MetadataJson.StringMapFrom(body["updates"]),
@@ -154,6 +188,7 @@ public static class Endpoints
 
         v1.MapPost(Ns + "/tables", async (string @namespace, HttpRequest req, CatalogService svc, CancellationToken ct) =>
         {
+            var ns = ParseNamespace(@namespace);
             var body = await BodyAsync(req, ct);
             var spec = Parse(() => new CreateTableSpec(
                 body["name"]!.GetValue<string>(),
@@ -163,8 +198,9 @@ public static class Endpoints
                 body["location"]?.GetValue<string>(),
                 MetadataJson.StringMapFrom(body["properties"]),
                 body["stage-create"]?.GetValue<bool>() ?? false));
-            var table = await svc.CreateTableAsync(ParseNamespace(@namespace), spec, ct);
-            return TableResult(req, table, options);
+            await req.HttpContext.RequireAsync(CatalogPrivilege.Write, ns, spec.Name);
+            var table = await svc.CreateTableAsync(ns, spec, ct);
+            return await TableResultAsync(req, table, options, vendor);
         });
 
         v1.MapPost(Ns + "/register", async (string @namespace, HttpRequest req, CatalogService svc, CancellationToken ct) =>
@@ -172,12 +208,15 @@ public static class Endpoints
             var body = await BodyAsync(req, ct);
             var (name, location, overwrite) = Parse(() => (
                 body["name"]!.GetValue<string>(), body["metadata-location"]!.GetValue<string>(), body["overwrite"]?.GetValue<bool>() ?? false));
-            return TableResult(req, await svc.RegisterTableAsync(ParseNamespace(@namespace), name, location, overwrite, ct), options);
+            var ns = ParseNamespace(@namespace);
+            await req.HttpContext.RequireAsync(overwrite ? CatalogPrivilege.Admin : CatalogPrivilege.Write, ns, name);
+            return await TableResultAsync(req, await svc.RegisterTableAsync(ns, name, location, overwrite, ct), options, vendor);
         });
 
         v1.MapGet(Tbl, async (string @namespace, string table, HttpRequest req, CatalogService svc, CancellationToken ct) =>
         {
-            var loaded = await svc.LoadTableAsync(Id(@namespace, table), ct);
+            var id = await AuthorizedAsync(req.HttpContext, CatalogPrivilege.Read, @namespace, table);
+            var loaded = await svc.LoadTableAsync(id, ct);
             var mode = req.Query["snapshots"].ToString() is { Length: > 0 } s ? s : "all";
             if (mode is not ("all" or "refs")) throw new BadRequestException($"snapshots must be 'all' or 'refs', not '{mode}'");
             var etag = ETag(loaded.MetadataLocation!, mode);
@@ -187,40 +226,83 @@ public static class Endpoints
                 var referenced = loaded.Metadata.Refs.Values.Select(r => r.SnapshotId).ToHashSet();
                 loaded = loaded with { Metadata = loaded.Metadata with { Snapshots = loaded.Metadata.Snapshots.Where(sn => referenced.Contains(sn.SnapshotId)).ToList() } };
             }
-            return TableResult(req, loaded, options, etag);
+            return await TableResultAsync(req, loaded, options, vendor, etag);
         });
 
-        v1.MapMethods(Tbl, ["HEAD"], async (string @namespace, string table, CatalogService svc, CancellationToken ct) =>
-            await svc.TableExistsAsync(Id(@namespace, table), ct) ? Results.NoContent() : Results.NotFound());
+        v1.MapMethods(Tbl, ["HEAD"], async (string @namespace, string table, HttpContext http, CatalogService svc, CancellationToken ct) =>
+            await svc.TableExistsAsync(await AuthorizedAsync(http, CatalogPrivilege.Read, @namespace, table), ct) ? Results.NoContent() : Results.NotFound());
 
         v1.MapPost(Tbl, async (string @namespace, string table, HttpRequest req, CatalogService svc, CancellationToken ct) =>
         {
+            var id = await AuthorizedAsync(req.HttpContext, CatalogPrivilege.Write, @namespace, table);
             var body = await BodyAsync(req, ct);
-            var id = Id(@namespace, table);
             if (body["identifier"] is { } given && !ParseIdentifier(given).Equals(id))
                 throw new BadRequestException($"The body's identifier {ParseIdentifier(given)} does not match the path's {id}");
             var committed = await svc.CommitTableAsync(ParseCommit(id, body), ct);
-            return TableResult(req, committed, options, includeConfig: false);
+            return await TableResultAsync(req, committed, options, vendor, includeConfig: false);
         });
 
         v1.MapDelete(Tbl, async (string @namespace, string table, HttpRequest req, CatalogService svc, CancellationToken ct) =>
         {
             var purge = bool.TryParse(req.Query["purgeRequested"].ToString(), out var p) && p;
-            await svc.DropTableAsync(Id(@namespace, table), purge, ct);
+            await svc.DropTableAsync(await AuthorizedAsync(req.HttpContext, CatalogPrivilege.Admin, @namespace, table), purge, ct);
             return Results.NoContent();
         });
 
         v1.MapPost(Tbl + "/unregister", async (string @namespace, string table, HttpRequest req, CatalogService svc, CancellationToken ct) =>
-            TableResult(req, await svc.UnregisterTableAsync(Id(@namespace, table), ct), options, includeConfig: false));
+            await TableResultAsync(req, await svc.UnregisterTableAsync(await AuthorizedAsync(req.HttpContext, CatalogPrivilege.Admin, @namespace, table), ct), options, vendor,
+                includeConfig: false));
 
         // Metrics reports (scan/commit) are accepted and discarded, as the spec allows.
-        v1.MapPost(Tbl + "/metrics", async (string @namespace, string table, CatalogService svc, CancellationToken ct) =>
-            await svc.TableExistsAsync(Id(@namespace, table), ct) ? Results.NoContent() : throw new NoSuchTableException($"Table does not exist: {Id(@namespace, table)}"));
+        v1.MapPost(Tbl + "/metrics", async (string @namespace, string table, HttpContext http, CatalogService svc, CancellationToken ct) =>
+            await svc.TableExistsAsync(await AuthorizedAsync(http, CatalogPrivilege.Read, @namespace, table), ct)
+                ? Results.NoContent()
+                : throw new NoSuchTableException($"Table does not exist: {Id(@namespace, table)}"));
+
+        if (options.ScanPlanning.Enabled)
+        {
+            v1.MapPost(Tbl + "/plan", async (string @namespace, string table, HttpRequest req, ScanPlanner planner, CancellationToken ct) =>
+            {
+                var id = await AuthorizedAsync(req.HttpContext, CatalogPrivilege.Read, @namespace, table);
+                var body = await BodyAsync(req, ct);
+                return Json(await planner.PlanAsync(id, Parse(() => PlanRequest.Parse(body)), ct));
+            });
+
+            v1.MapGet(Tbl + "/plan/{planId}", async (string @namespace, string table, string planId, HttpContext http, ScanPlanner planner) =>
+                Json(planner.Fetch(await AuthorizedAsync(http, CatalogPrivilege.Read, @namespace, table), planId)));
+
+            v1.MapDelete(Tbl + "/plan/{planId}", async (string @namespace, string table, string planId, HttpContext http, ScanPlanner planner) =>
+            {
+                planner.Cancel(await AuthorizedAsync(http, CatalogPrivilege.Read, @namespace, table), planId);
+                return Results.NoContent();
+            });
+
+            v1.MapPost(Tbl + "/tasks", async (string @namespace, string table, HttpRequest req, ScanPlanner planner, CancellationToken ct) =>
+            {
+                var id = await AuthorizedAsync(req.HttpContext, CatalogPrivilege.Read, @namespace, table);
+                var body = await BodyAsync(req, ct);
+                return Json(await planner.FetchTasksAsync(id, Parse(() => body["plan-task"]!.GetValue<string>()), ct));
+            });
+        }
+
+        if (vending)
+        {
+            v1.MapGet(Tbl + "/credentials", async (string @namespace, string table, HttpContext http, CatalogService svc, CancellationToken ct) =>
+            {
+                var id = await AuthorizedAsync(http, CatalogPrivilege.Read, @namespace, table);
+                var loaded = await svc.LoadTableAsync(id, ct);
+                var write = await http.AllowsAsync(CatalogPrivilege.Write, id.Namespace, id.Name);
+                var credentials = await vendor.VendAsync(id, loaded.Metadata.Location, write, ct);
+                return Json(new JsonObject { ["storage-credentials"] = new JsonArray(credentials.Select(c => (JsonNode)c.ToJson()).ToArray()) });
+            });
+        }
 
         v1.MapPost("/tables/rename", async (HttpRequest req, CatalogService svc, CancellationToken ct) =>
         {
             var body = await BodyAsync(req, ct);
             var (from, to) = Parse(() => (ParseIdentifier(body["source"]!), ParseIdentifier(body["destination"]!)));
+            await req.HttpContext.RequireAsync(CatalogPrivilege.Admin, from.Namespace, from.Name);
+            await req.HttpContext.RequireAsync(CatalogPrivilege.Write, to.Namespace, to.Name);
             await svc.RenameAsync(from, to, CatalogEntryKind.Table, ct);
             return Results.NoContent();
         });
@@ -229,6 +311,7 @@ public static class Endpoints
         {
             var body = await BodyAsync(req, ct);
             var commits = Parse(() => body["table-changes"]!.AsArray().Select(c => ParseCommit(ParseIdentifier(c!["identifier"]!), c)).ToList());
+            foreach (var c in commits) await req.HttpContext.RequireAsync(CatalogPrivilege.Write, c.Identifier.Namespace, c.Identifier.Name);
             await svc.CommitAsync(commits, ct);
             return Results.NoContent();
         });
@@ -248,27 +331,29 @@ public static class Endpoints
                 TypeJson.SchemaFromJson(body["schema"]!),
                 ViewJson.VersionFromJson(body["view-version"]!),
                 MetadataJson.StringMapFrom(body["properties"])));
+            await req.HttpContext.RequireAsync(CatalogPrivilege.Write, ns, name);
             return ViewResult(await svc.CreateViewAsync(new TableIdentifier(ns, name), location, schema, version, props, ct), options);
         });
 
-        v1.MapGet(Vw, async (string @namespace, string view, CatalogService svc, CancellationToken ct) =>
-            ViewResult(await svc.LoadViewAsync(Id(@namespace, view), ct), options));
+        v1.MapGet(Vw, async (string @namespace, string view, HttpContext http, CatalogService svc, CancellationToken ct) =>
+            ViewResult(await svc.LoadViewAsync(await AuthorizedAsync(http, CatalogPrivilege.Read, @namespace, view), ct), options));
 
-        v1.MapMethods(Vw, ["HEAD"], async (string @namespace, string view, CatalogService svc, CancellationToken ct) =>
-            await svc.ViewExistsAsync(Id(@namespace, view), ct) ? Results.NoContent() : Results.NotFound());
+        v1.MapMethods(Vw, ["HEAD"], async (string @namespace, string view, HttpContext http, CatalogService svc, CancellationToken ct) =>
+            await svc.ViewExistsAsync(await AuthorizedAsync(http, CatalogPrivilege.Read, @namespace, view), ct) ? Results.NoContent() : Results.NotFound());
 
         v1.MapPost(Vw, async (string @namespace, string view, HttpRequest req, CatalogService svc, CancellationToken ct) =>
         {
+            var id = await AuthorizedAsync(req.HttpContext, CatalogPrivilege.Write, @namespace, view);
             var body = await BodyAsync(req, ct);
             var (requirements, updates) = Parse(() => (
                 body["requirements"]?.AsArray().Select(r => ViewRequirement.FromJson(r!)).ToList() ?? [],
                 body["updates"]!.AsArray().Select(u => ViewUpdate.FromJson(u!)).ToList()));
-            return ViewResult(await svc.ReplaceViewAsync(Id(@namespace, view), requirements, updates, ct), options);
+            return ViewResult(await svc.ReplaceViewAsync(id, requirements, updates, ct), options);
         });
 
-        v1.MapDelete(Vw, async (string @namespace, string view, CatalogService svc, CancellationToken ct) =>
+        v1.MapDelete(Vw, async (string @namespace, string view, HttpContext http, CatalogService svc, CancellationToken ct) =>
         {
-            await svc.DropViewAsync(Id(@namespace, view), ct);
+            await svc.DropViewAsync(await AuthorizedAsync(http, CatalogPrivilege.Admin, @namespace, view), ct);
             return Results.NoContent();
         });
 
@@ -276,6 +361,8 @@ public static class Endpoints
         {
             var body = await BodyAsync(req, ct);
             var (from, to) = Parse(() => (ParseIdentifier(body["source"]!), ParseIdentifier(body["destination"]!)));
+            await req.HttpContext.RequireAsync(CatalogPrivilege.Admin, from.Namespace, from.Name);
+            await req.HttpContext.RequireAsync(CatalogPrivilege.Write, to.Namespace, to.Name);
             await svc.RenameAsync(from, to, CatalogEntryKind.View, ct);
             return Results.NoContent();
         });
@@ -286,7 +373,9 @@ public static class Endpoints
     private static async Task<IResult> ListEntriesAsync(string @namespace, CatalogEntryKind kind, HttpRequest req, CatalogService svc, CancellationToken ct)
     {
         var ns = ParseNamespace(@namespace);
-        var (page, next) = Page(await svc.ListAsync(ns, kind, ct), n => n, req);
+        await req.HttpContext.RequireAsync(CatalogPrivilege.Browse, ns);
+        var all = await FilterAsync(await svc.ListAsync(ns, kind, ct), n => req.HttpContext.AllowsAsync(CatalogPrivilege.Read, ns, n));
+        var (page, next) = Page(all, n => n, req);
         return Json(new JsonObject
         {
             ["identifiers"] = new JsonArray(page.Select(n => (JsonNode)new JsonObject { ["namespace"] = Levels(ns), ["name"] = n }).ToArray()),
@@ -323,6 +412,21 @@ public static class Endpoints
         var levels = raw.Replace("%1F", "\u001f", StringComparison.OrdinalIgnoreCase).Split('\u001f');
         if (levels.Any(l => l.Length == 0)) throw new BadRequestException($"Invalid namespace '{raw}'");
         return new Namespace(levels);
+    }
+
+    private static async Task<IReadOnlyList<T>> FilterAsync<T>(IReadOnlyList<T> items, Func<T, Task<bool>> allowed)
+    {
+        var kept = new List<T>(items.Count);
+        foreach (var item in items) if (await allowed(item)) kept.Add(item);
+        return kept;
+    }
+
+    /// <summary>The table or view the route names, once the request's principal is known to hold <paramref name="privilege"/> on it.</summary>
+    private static async Task<TableIdentifier> AuthorizedAsync(HttpContext http, CatalogPrivilege privilege, string @namespace, string name)
+    {
+        var id = Id(@namespace, name);
+        await http.RequireAsync(privilege, id.Namespace, id.Name);
+        return id;
     }
 
     private static TableIdentifier Id(string @namespace, string name) => new(ParseNamespace(@namespace), name.Replace("%2F", "/", StringComparison.OrdinalIgnoreCase));
@@ -367,14 +471,37 @@ public static class Endpoints
     private static string ETag(string metadataLocation, string mode) =>
         $"\"{Convert.ToHexString(SHA256.HashData(Encoding.UTF8.GetBytes($"{mode}:{metadataLocation}")))[..32].ToLowerInvariant()}\"";
 
-    private static IResult TableResult(HttpRequest req, LoadedTable t, RestServerOptions options, string? etag = null, bool includeConfig = true)
+    /// <summary>
+    /// A <c>LoadTableResult</c>. Its <c>config</c> is <see cref="RestServerOptions.TableConfig"/>, plus
+    /// <c>scan-planning-mode</c> when configured, plus vended credentials when the client asked for them
+    /// (<c>X-Iceberg-Access-Delegation: vended-credentials</c>) and a vendor is configured: those also go in
+    /// <c>storage-credentials</c>, scoped to the table's location, writable if the principal may write the table.
+    /// </summary>
+    private static async Task<IResult> TableResultAsync(HttpRequest req, LoadedTable t, RestServerOptions options, IStorageCredentialVendor vendor,
+        string? etag = null, bool includeConfig = true)
     {
         var body = new JsonObject
         {
             ["metadata-location"] = t.MetadataLocation,
             ["metadata"] = MetadataJson.ToJson(t.Metadata),
         };
-        if (includeConfig) body["config"] = MetadataJson.StringMap(options.TableConfig);
+        if (includeConfig)
+        {
+            var config = new Dictionary<string, string>(options.TableConfig);
+            if (options.ScanPlanning.Enabled && options.ScanPlanning.Mode is { Length: > 0 } mode) config["scan-planning-mode"] = mode;
+            if (vendor is not NoCredentialVendor && WantsVendedCredentials(req))
+            {
+                var write = await req.HttpContext.AllowsAsync(CatalogPrivilege.Write, t.Id.Namespace, t.Id.Name);
+                var credentials = await vendor.VendAsync(t.Id, t.Metadata.Location, write, req.HttpContext.RequestAborted);
+                if (credentials.Count > 0)
+                {
+                    body["storage-credentials"] = new JsonArray(credentials.Select(c => (JsonNode)c.ToJson()).ToArray());
+                    // Clients that predate storage-credentials read the keys from config; the longest prefix is the table's own.
+                    foreach (var (k, v) in credentials.OrderByDescending(c => c.Prefix.Length).First().Config) config[k] = v;
+                }
+            }
+            body["config"] = MetadataJson.StringMap(config);
+        }
         etag ??= t.MetadataLocation is null ? null : ETag(t.MetadataLocation, "all");
         if (etag is not null) req.HttpContext.Response.Headers.ETag = etag;
         return Json(body);
@@ -386,6 +513,9 @@ public static class Endpoints
         ["metadata"] = ViewJson.ToJson(v.Metadata),
         ["config"] = MetadataJson.StringMap(options.TableConfig),
     });
+
+    private static bool WantsVendedCredentials(HttpRequest req) =>
+        req.Headers["X-Iceberg-Access-Delegation"].SelectMany(v => (v ?? "").Split(',')).Any(v => v.Trim().Equals("vended-credentials", StringComparison.OrdinalIgnoreCase));
 
     private static IResult Json(JsonNode body) => Results.Content(body.ToJsonString(), "application/json");
 }

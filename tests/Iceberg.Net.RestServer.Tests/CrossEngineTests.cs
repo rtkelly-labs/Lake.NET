@@ -18,6 +18,7 @@ public sealed class KestrelHost : IAsyncDisposable
     private readonly WebApplication _app;
     public string Root { get; }
     public Uri Uri { get; }
+    public IServiceProvider Services => _app.Services;
 
     private KestrelHost(WebApplication app, string root, Uri uri)
     {
@@ -151,6 +152,37 @@ public sealed class CrossEngineTests
     }
 
     /// <summary>
+    /// PyIceberg 0.12 with <c>scan-planning-mode=server</c>: it plans through the server (split into plan tasks here),
+    /// applies the position deletes the server matched to each file, and reads the same rows we do.
+    /// </summary>
+    [SkippableFact]
+    [Spec("rest: planTableScan")]
+    [Spec("rest: fetchScanTasks")]
+    public async Task PyIceberg_reads_through_server_side_scan_planning()
+    {
+        Skip.If(Python is null, "ICEBERG_PYTHON is not set (an interpreter with interop/pyproject.toml installed)");
+        await using var host = await KestrelHost.StartAsync(o =>
+        {
+            o.Auth.Clients["spark"] = "spark-secret";
+            o.Auth.SigningKey = "cross-engine-signing-key-of-at-least-32-bytes";
+            o.ScanPlanning.FilesPerPlanTask = 3;
+        });
+        using var catalog = await ConnectAsync(host);
+        var table = await ScanPlanningTests.TableWithDeletesAsync(catalog, "planned", 2, "position");
+        var planner = host.Services.GetRequiredService<ScanPlanner>();
+        foreach (var maxId in new long?[] { null, 20 })
+        {
+            var before = planner.PlansStarted;
+            var read = await PyIcebergAsync([.. new[] { "plan-read", host.Uri.ToString().TrimEnd('/'), Credential, "db", "planned" }, .. maxId is { } m ? [m.ToString()] : Array.Empty<string>()]);
+            Assert.True(read["server_side"]!.GetValue<bool>());
+            Assert.True(planner.PlansStarted > before, "PyIceberg did not plan on the server");
+            var ours = maxId is { } max ? await TableScan.ReadAsync(table, Expressions.Expr.LessThan("id", max)) : await TableScan.ReadAllAsync(table);
+            Assert.Equal(Ids(ours).Select(i => (int)i), read["ids"]!.AsArray().Select(i => i!.GetValue<int>()));
+            Assert.NotEmpty(read["delete_files"]!.AsArray());
+        }
+    }
+
+    /// <summary>
     /// Spark 4 with Iceberg Java's RESTCatalog (apache/spark image, host network) against the server: Spark creates,
     /// inserts and deletes (merge-on-read position deletes), we read that and append, Spark reads our append and a table
     /// we created, and evolves its schema. The warehouse lives under <see cref="SparkOracle.SharedRoot"/>, mounted at the
@@ -197,6 +229,44 @@ public sealed class CrossEngineTests
         var all = await TableScan.ReadAllAsync(evolved);
         Assert.Equal(13, all.Count);
         Assert.Equal("from spark", all.Single(r => (long)r[0]! == 100)[6]);
+    }
+
+    /// <summary>
+    /// Spark 4 / Iceberg Java 1.12 told by the table config (<c>scan-planning-mode=server</c>) to plan on the server:
+    /// its reads of tables with v2 position deletes and v3 deletion vectors, whole and filtered, go through
+    /// <c>planTableScan</c> and plan tasks, and must return the rows we read.
+    /// </summary>
+    [SkippableFact]
+    [Spec("rest: planTableScan")]
+    [Spec("rest: fetchScanTasks")]
+    public async Task Spark_reads_through_server_side_scan_planning()
+    {
+        Require.Spark();
+        Directory.CreateDirectory(SparkOracle.SharedRoot);
+        await using var host = await KestrelHost.StartAsync(o =>
+        {
+            o.Auth.Clients["spark"] = "spark-secret";
+            o.Auth.SigningKey = "cross-engine-signing-key-of-at-least-32-bytes";
+            o.ScanPlanning.Mode = "server";
+            o.ScanPlanning.FilesPerPlanTask = 3;
+        }, SparkOracle.SharedRoot);
+        using var catalog = await ConnectAsync(host);
+        var v2 = await ScanPlanningTests.TableWithDeletesAsync(catalog, "pos_v2", 2, "position");
+        var v3 = await ScanPlanningTests.TableWithDeletesAsync(catalog, "dv_v3", 3, "position");
+        var planner = host.Services.GetRequiredService<ScanPlanner>();
+        var before = planner.PlansStarted;
+
+        var steps = await SparkAsync(host, host.Uri.ToString().TrimEnd('/'),
+            "SELECT id FROM rest.db.pos_v2 ORDER BY id",
+            "SELECT id FROM rest.db.pos_v2 WHERE id < 20 AND region <> 'us' ORDER BY id",
+            "SELECT id FROM rest.db.dv_v3 ORDER BY id",
+            "SELECT id FROM rest.db.dv_v3 WHERE region = 'eu' ORDER BY id");
+        Assert.True(planner.PlansStarted >= before + 4, $"Spark made {planner.PlansStarted - before} server plans");
+        var filter = Expressions.Expr.And(Expressions.Expr.LessThan("id", 20L), Expressions.Expr.NotEqual("region", "us"));
+        Assert.Equal(Ids(await TableScan.ReadAllAsync(v2)).Select(i => (int)i), SparkIds(steps[0]!));
+        Assert.Equal(Ids(await TableScan.ReadAsync(v2, filter)).Select(i => (int)i), SparkIds(steps[1]!));
+        Assert.Equal(Ids(await TableScan.ReadAllAsync(v3)).Select(i => (int)i), SparkIds(steps[2]!));
+        Assert.Equal(Ids(await TableScan.ReadAsync(v3, Expressions.Expr.Equal("region", "eu"))).Select(i => (int)i), SparkIds(steps[3]!));
     }
 
     private static IEnumerable<int> SparkIds(JsonNode step) => step["rows"]!.AsArray().Select(r => int.Parse(r!["id"]!.GetValue<string>()));

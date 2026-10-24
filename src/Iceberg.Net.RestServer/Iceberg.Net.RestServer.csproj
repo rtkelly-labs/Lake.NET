@@ -11,7 +11,7 @@
     <PackageReference Include="Microsoft.Data.Sqlite" />
   </ItemGroup>
   <ItemGroup>
-    <ProjectReference Include="../Iceberg.Net.Catalog/Iceberg.Net.Catalog.csproj" />
+    <ProjectReference Include="../Iceberg.Net.Data/Iceberg.Net.Data.csproj" />
   </ItemGroup>
   <ItemGroup>
     <InternalsVisibleTo Include="Iceberg.Net.RestServer.Tests" />

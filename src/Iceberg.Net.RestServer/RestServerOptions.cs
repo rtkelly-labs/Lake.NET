@@ -42,6 +42,95 @@ public sealed class RestServerOptions
     public Dictionary<string, string> FileIO { get; set; } = [];
 
     public RestServerAuthOptions Auth { get; set; } = new();
+
+    /// <summary>Role-based authorization: grants per principal. Off (everything allowed) while no grant is configured.</summary>
+    public RestServerAuthorizationOptions Authorization { get; set; } = new();
+
+    /// <summary>Server-side scan planning (<c>plan</c>, <c>plan/{plan-id}</c>, <c>tasks</c>).</summary>
+    public ScanPlanningOptions ScanPlanning { get; set; } = new();
+
+    /// <summary>Storage credentials vended with loaded tables (STS AssumeRole). Off while no <c>RoleArn</c> is configured.</summary>
+    public CredentialVendingOptions CredentialVending { get; set; } = new();
+
+    /// <summary><c>Idempotency-Key</c> deduplication of mutating requests.</summary>
+    public IdempotencyOptions Idempotency { get; set; } = new();
+}
+
+/// <summary>
+/// Static grants: principal → grant strings <c>{level}:{scope}</c>, where level is <c>read</c>, <c>write</c> or
+/// <c>admin</c> (each includes the ones before it) and scope is <c>*</c> or a dotted namespace or table path
+/// (<c>sales</c>, <c>sales.orders</c>), covering everything beneath it. The principal <c>*</c> grants to everyone
+/// authenticated. A principal is the token's <c>sub</c>: the OAuth2 client ID, <c>static-token</c> for static tokens,
+/// <c>anonymous</c> when authentication is off.
+/// </summary>
+public sealed class RestServerAuthorizationOptions
+{
+    public Dictionary<string, List<string>> Grants { get; set; } = [];
+
+    public bool Enabled => Grants.Count > 0;
+}
+
+public sealed class ScanPlanningOptions
+{
+    /// <summary>Serve the planning endpoints and advertise them in <c>/v1/config</c>.</summary>
+    public bool Enabled { get; set; } = true;
+
+    /// <summary>
+    /// <c>scan-planning-mode</c> returned in every loaded table's <c>config</c>, when set: <c>server</c> makes Iceberg
+    /// Java (1.12+) clients plan their scans here; <c>client</c> (or unset) leaves planning to them.
+    /// </summary>
+    public string? Mode { get; set; }
+
+    /// <summary>
+    /// A scan whose surviving manifests hold more data files than this (by the manifest list's counts) is answered with
+    /// plan tasks, each a group of manifests holding about this many files, which clients fetch one by one.
+    /// </summary>
+    public int FilesPerPlanTask { get; set; } = 5000;
+
+    /// <summary>Plan in the background: <c>planTableScan</c> answers <c>submitted</c> and clients poll <c>plan/{plan-id}</c>.</summary>
+    public bool Async { get; set; }
+
+    /// <summary>How long a plan's result stays available to <c>plan/{plan-id}</c> after it finished.</summary>
+    public TimeSpan PlanLifetime { get; set; } = TimeSpan.FromMinutes(10);
+}
+
+/// <summary>
+/// Vended credentials: STS <c>AssumeRole</c> on <see cref="RoleArn"/> with a session policy limited to the table's
+/// location (read-only for principals without write access), returned as <c>storage-credentials</c> and in the table
+/// <c>config</c> when the client sends <c>X-Iceberg-Access-Delegation: vended-credentials</c>.
+/// </summary>
+public sealed class CredentialVendingOptions
+{
+    public string? RoleArn { get; set; }
+
+    /// <summary>STS endpoint; default <c>https://sts.{Region}.amazonaws.com</c> (an emulator's URL in tests).</summary>
+    public string? StsEndpoint { get; set; }
+
+    public string Region { get; set; } = "us-east-1";
+
+    public string? ExternalId { get; set; }
+
+    public int DurationSeconds { get; set; } = 3600;
+
+    /// <summary>
+    /// The server's own credentials for calling STS. Unset: the FileIO's <c>s3.access-key-id</c> /
+    /// <c>s3.secret-access-key</c>, else the AWS SDK's default credential chain.
+    /// </summary>
+    public string? AccessKeyId { get; set; }
+
+    public string? SecretAccessKey { get; set; }
+
+    public string? SessionToken { get; set; }
+
+    public bool Enabled => !string.IsNullOrEmpty(RoleArn);
+}
+
+public sealed class IdempotencyOptions
+{
+    public bool Enabled { get; set; } = true;
+
+    /// <summary>Advertised as <c>idempotency-key-lifetime</c>; responses are kept at least this long (plus a minute's grace).</summary>
+    public TimeSpan Lifetime { get; set; } = TimeSpan.FromMinutes(30);
 }
 
 /// <summary>

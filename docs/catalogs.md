@@ -99,9 +99,11 @@ Glue endpoint for Lake Formation governance. Challenges:
   database opens in `JdbcCatalog`, Java and PyIceberg), or in memory. Details: [rest-server.md](rest-server.md).
 - It is in the conformance matrix as `dotnet-rest`, hosted by the regression suite on moto, and passes the
   conformance, view, soak and PyIceberg cross-engine suites. Its own tests also drive it from PyIceberg 0.12 and from
-  Spark 4.0.1 (Iceberg 1.12 `RESTCatalog`).
-- Not implemented: server-side scan planning, credential vending, remote signing and `Idempotency-Key`
-  deduplication.
+  Spark 4.0.1 (Iceberg 1.12 `RESTCatalog`), both of which can also plan their scans on it.
+- It plans scans on the server (`plan`, `tasks`; stateless plan tasks), enforces static role grants through a
+  pluggable `IAuthorizer` (403 `ForbiddenException`), vends STS credentials scoped to the table's prefix, and replays
+  responses by `Idempotency-Key`.
+- Not implemented: remote signing and incremental scan planning.
 
 ### Hive Metastore
 

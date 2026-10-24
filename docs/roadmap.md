@@ -42,14 +42,15 @@ Phase G, piece by piece:
 | Spark Connect | ⬜ not planned (no .NET client) | [spark-and-athena.md](spark-and-athena.md#running-a-script-on-emr-serverless-or-glue) |
 | Athena SQL (CREATE TABLE … `table_type`=ICEBERG, OPTIMIZE, VACUUM, properties, time travel) and runner | 🟡 SQL unit-tested; real Athena with the AWS run (#4) | `Iceberg.Net.Athena` |
 | DuckDB oracle | ✅ reads our CoW, position-delete, equality-delete and DV tables; skips where the extension cannot load | `interop/duckdb_oracle.py`, `DuckDbCrossEngineTests` |
-| REST catalog server (ASP.NET Core, SQL/in-memory stores, bearer/OAuth, multi-table transactions) | ✅ our client, PyIceberg and Spark against it | [rest-server.md](rest-server.md), `Iceberg.Net.RestServer` |
+| REST catalog server (ASP.NET Core, SQL/in-memory stores, bearer/OAuth, multi-table transactions, server-side scan planning, role grants, STS credential vending, `Idempotency-Key`) | ✅ our client, PyIceberg and Spark against it (both plan scans through it); vending against moto's STS | [rest-server.md](rest-server.md), `Iceberg.Net.RestServer` |
 
 Phase G progress: the REST catalog server is built ([rest-server.md](rest-server.md)). It runs as the `dotnet-rest`
 conformance kind and is checked against PyIceberg and Spark.
 
 Gaps the phases left open:
 - The EMR Serverless, Glue and Athena runners are tested against faked SDK clients; a real run needs the AWS sandbox (#4).
-- The REST server has no scan planning, credential vending, remote signing or authorization roles.
+- The REST server has no remote signing or incremental scan planning. Its idempotency keys and plan IDs are per
+  process. Credential vending covers S3 through STS only.
 - The change feed is Spark-checked only for tables without delete files (Java's changelog scan refuses them); our
   replay test covers the rest.
 

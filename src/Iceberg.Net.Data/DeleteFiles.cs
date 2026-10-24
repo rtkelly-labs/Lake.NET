@@ -206,6 +206,43 @@ public sealed class DeleteIndex
         return equality;
     }
 
+    /// <summary>
+    /// The delete files that apply to <paramref name="dataFile"/> (spec "Scan Planning"), chosen from metadata alone,
+    /// as a server-side planner reports them: its deletion vector when it has one (position delete files are then
+    /// ignored, as in <see cref="DeletedPositionsAsync"/>), else the position delete files with a data sequence number
+    /// ≥ its own that are global or in its partition and whose <c>file_path</c> bounds (or <c>referenced_data_file</c>)
+    /// admit its path; plus the equality delete files that apply. Position delete files may still hold no row for it.
+    /// </summary>
+    public IReadOnlyList<DataFile> DeleteFilesFor(DataFile dataFile, long dataSequenceNumber)
+    {
+        var result = new List<DataFile>();
+        if (_dvs.TryGetValue(dataFile.FilePath, out var dv))
+        {
+            if (dv.DataSequenceNumber >= dataSequenceNumber) result.Add(dv.File);
+        }
+        else
+        {
+            foreach (var pd in _positionFiles)
+                if (pd.DataSequenceNumber >= dataSequenceNumber && InScope(pd.File, dataFile) && MayReference(pd.File, dataFile.FilePath))
+                    result.Add(pd.File);
+        }
+        foreach (var eq in _equalityFiles)
+            if (AppliesTo(eq, dataFile, dataSequenceNumber)) result.Add(eq.File);
+        return result;
+    }
+
+    private bool InScope(DataFile delete, DataFile data) =>
+        _metadata.SpecById(delete.SpecId).IsUnpartitioned || (delete.SpecId == data.SpecId && delete.Partition.SequenceEqual(data.Partition));
+
+    private static bool MayReference(DataFile delete, string path)
+    {
+        if (delete.ReferencedDataFile is { } referenced) return referenced == path;
+        var bytes = System.Text.Encoding.UTF8.GetBytes(path);
+        if (delete.LowerBounds?.GetValueOrDefault(PositionDeleteFiles.FilePathFieldId) is { } lower && bytes.AsSpan().SequenceCompareTo(lower) < 0) return false;
+        if (delete.UpperBounds?.GetValueOrDefault(PositionDeleteFiles.FilePathFieldId) is { } upper && bytes.AsSpan().SequenceCompareTo(upper) > 0) return false;
+        return true;
+    }
+
     public DeleteEntry? DeletionVectorFor(string dataFile) => _dvs.GetValueOrDefault(dataFile);
 
     /// <summary>
