@@ -1,0 +1,11 @@
+<Project Sdk="Microsoft.NET.Sdk">
+  <PropertyGroup>
+    <RootNamespace>Iceberg.Net.Athena</RootNamespace>
+    <Description>Amazon Athena SQL for Iceberg tables (CREATE TABLE from an Iceberg schema, OPTIMIZE, VACUUM, table properties, time travel) and a StartQueryExecution runner with polling and paging.</Description>
+    <PackageTags>$(PackageTags);athena</PackageTags>
+  </PropertyGroup>
+  <ItemGroup>
+    <PackageReference Include="AWSSDK.Athena" />
+    <ProjectReference Include="../Iceberg.Net.Core/Iceberg.Net.Core.csproj" />
+  </ItemGroup>
+</Project>
