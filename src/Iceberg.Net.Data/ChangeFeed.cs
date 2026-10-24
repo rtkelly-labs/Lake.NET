@@ -131,7 +131,7 @@ public static class ChangeFeed
                     else partitions.Add(CherryPicker.PartitionKey(d.SpecId, d.Partition));
                 }
                 else if (d.ReferencedDataFile is { } target) referenced.Add(target);
-                else referenced.UnionWith((await after.PositionDeletesAsync(d.FilePath, d.FileFormat)).Keys);
+                else referenced.UnionWith((await after.PositionDeletesAsync(d)).Keys);
             }
             foreach (var task in await TableScan.PlanFilesAsync(table, snapshot.SnapshotId, null, ct))
             {

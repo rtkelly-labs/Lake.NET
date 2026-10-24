@@ -152,6 +152,8 @@ public sealed class SparkTablesFixture : IAsyncLifetime
 
 
         await BuildUpdateMergeAsync();
+        await BuildNestedUpdatesAsync();
+        await BuildCherryPicksAsync();
         await BuildQueriesAsync();
 
         // One Spark run: every table (some also with metadata tables and changelog), the MERGEs Spark replays, the read
@@ -160,7 +162,7 @@ public sealed class SparkTablesFixture : IAsyncLifetime
         SparkMadeWarehouse = Path.Combine(_warehouse, "spark-made");
         Spark = await SparkOracle.ReadTablesAsync(Tables
             .Select(kv => (withMetadataTables.Contains(kv.Key) ? "meta:" : "") + kv.Value.Table.MetadataLocation!)
-            .Concat(SparkMerges.Values).Concat(Queries.Select(q => q.Key))
+            .Concat(SparkMerges.Values).Concat(CherryPicks.Values).Concat(Queries.Select(q => q.Key))
             .Append($"create-refs:{SparkMadeWarehouse}"));
     }
 
@@ -221,6 +223,142 @@ public sealed class SparkTablesFixture : IAsyncLifetime
                 ["sql"] = MergeSql,
             }.ToJsonString());
             SparkMerges[name] = $"merge:{spec}";
+        }
+    }
+
+    /// <summary>id, address struct&lt;city, zip, geo struct&lt;lat, lon&gt;&gt; and tag struct&lt;code (required), note&gt;.</summary>
+    public static readonly Schema NestedUpdateSchema = new(0,
+    [
+        NestedField.Require(1, "id", PrimitiveType.Long),
+        NestedField.Optional(2, "address", new StructType([
+            NestedField.Optional(3, "city", PrimitiveType.String),
+            NestedField.Optional(4, "zip", PrimitiveType.String),
+            NestedField.Optional(5, "geo", new StructType([NestedField.Optional(6, "lat", PrimitiveType.Double), NestedField.Optional(7, "lon", PrimitiveType.Double)]))])),
+        NestedField.Optional(8, "tag", new StructType([NestedField.Require(9, "code", PrimitiveType.String), NestedField.Optional(10, "note", PrimitiveType.String)])),
+    ], identifierFieldIds: [1]);
+
+    /// <summary>Null address every 5th row, null geo every 3rd, null tag every 4th.</summary>
+    public static List<object?[]> NestedUpdateRows(int from, int count, string prefix = "") => Enumerable.Range(from, count).Select(i => new object?[]
+    {
+        (long)i,
+        i % 5 == 0 ? null : new object?[] { $"{prefix}city{i}", i % 2 == 0 ? null : $"z{i}", i % 3 == 0 ? null : new object?[] { i * 1.0, -i * 1.0 } },
+        i % 4 == 0 ? null : new object?[] { $"{prefix}c{i}", null },
+    }).ToList();
+
+    /// <summary>
+    /// The nested UPDATE / MERGE statements <see cref="BuildNestedUpdatesAsync"/> runs, in Spark SQL: one and two levels
+    /// deep, on rows whose enclosing struct (address, geo) is null, and a MERGE assigning two fields of one struct.
+    /// </summary>
+    public static readonly string[] NestedUpdateSql =
+    [
+        "UPDATE {target} SET address.city = concat('c-', CAST(id AS string)) WHERE id < 12",
+        "UPDATE {target} SET address.geo.lat = 9.5D WHERE id >= 6",
+        "UPDATE {target} SET tag.note = 'n' WHERE id IN (1, 2)",
+        "MERGE INTO {target} t USING {source} s ON t.id = s.id WHEN MATCHED THEN UPDATE SET t.address.zip = 'M', t.address.geo.lon = 1.25D WHEN NOT MATCHED THEN INSERT *",
+    ];
+
+    /// <summary>The statement Spark and we both refuse: tag is null in row 4 and its required code is not assigned.</summary>
+    public const string NestedUpdateRequiredSql = "UPDATE {target} SET tag.note = 'x' WHERE id = 4";
+
+    /// <summary>Nested UPDATE and MERGE (v2 copy-on-write, v3 deletion vectors), replayed by Spark on a copy of the table.</summary>
+    private async Task BuildNestedUpdatesAsync()
+    {
+        var sourceTable = await _catalog!.CreateTableAsync(new CreateTableRequest(TableIdentifier.Of("db", "nested_merge_source"), NestedUpdateSchema, FormatVersion: 2));
+        var source = NestedUpdateRows(15, 8, "s-"); // 15..19 match (15: null address), 20..22 are new
+        await TableMutations.InsertAsync(sourceTable, source);
+        sourceTable = await _catalog.LoadTableAsync(sourceTable.Identifier);
+
+        foreach (var v in new[] { 2, 3 })
+        {
+            var strategy = v == 2 ? DeleteStrategy.CopyOnWrite : DeleteStrategy.PositionDeletes;
+            var name = $"nested_updated_v{v}";
+            var t = await _catalog.CreateTableAsync(new CreateTableRequest(TableIdentifier.Of("db", name), NestedUpdateSchema, FormatVersion: v));
+            await TableMutations.InsertAsync(t, NestedUpdateRows(0, 20));
+            t = await _catalog.LoadTableAsync(t.Identifier);
+            var before = t.Metadata.CurrentSnapshotId;
+            await TableMutations.UpdateAsync(t, Expr.LessThan("id", 12L), u => u.Set("address.city", r => $"c-{r[0]}"), strategy);
+            await TableMutations.UpdateAsync(t, Expr.GreaterThanOrEqual("id", 6L), u => u.Set("address.geo.lat", 9.5), strategy);
+            await TableMutations.UpdateAsync(t, Expr.In("id", 1L, 2L), u => u.Set("tag.note", "n"), strategy);
+            await TableMutations.MergeAsync(t, source, ["id"], m => m.WhenMatchedUpdate(u => u.Set("address.zip", "M").Set("address.geo.lon", 1.25)).WhenNotMatchedInsert(), strategy);
+            NestedUpdateRefused[name] = await Record.ExceptionAsync(() => TableMutations.UpdateAsync(t, Expr.Equal("id", 4L), u => u.Set("tag.note", "x"), strategy));
+            t = await _catalog.LoadTableAsync(t.Identifier);
+            Tables[name] = new Built(t, (await TableScan.ReadAllAsync(t)).ToDictionary(r => (long)r[0]!), v >= 3 ? await TableScan.ReadWithLineageAsync(t) : null);
+
+            foreach (var (key, sql) in new[] { (name, (JsonNode)new JsonArray(NestedUpdateSql.Select(x => (JsonNode?)x).ToArray())), ($"{name}_required", NestedUpdateRequiredSql) })
+            {
+                var spec = Path.Combine(_warehouse, $"{key}.merge.json");
+                await File.WriteAllTextAsync(spec, new JsonObject
+                {
+                    ["target"] = t.MetadataLocation,
+                    ["snapshot_id"] = before,
+                    ["format_version"] = v,
+                    ["source"] = sourceTable.MetadataLocation,
+                    ["sql"] = sql,
+                    // A DataFrame copy would make tag.code nullable, and Spark would then write the null it refuses here.
+                    ["ddl"] = "CREATE TABLE {target} (id bigint NOT NULL, address struct<city: string, zip: string, geo: struct<lat: double, lon: double>>, " +
+                        $"tag struct<code: string NOT NULL, note: string>) USING iceberg TBLPROPERTIES ('format-version'='{v}')",
+                }.ToJsonString());
+                SparkMerges[key] = $"merge:{spec}";
+            }
+        }
+    }
+
+    /// <summary>What our nested UPDATE that leaves a required field of a null struct unassigned threw (by table).</summary>
+    public Dictionary<string, Exception?> NestedUpdateRefused { get; } = new();
+
+    /// <summary>
+    /// Keys of <see cref="Spark"/> for cherry-picks (interop/spark_oracle.py "cherrypick:" entries): Spark runs
+    /// <c>CALL system.cherrypick_snapshot</c> on a copy of the table before our picks, and Iceberg Java describes what
+    /// its picks and ours committed.
+    /// </summary>
+    public Dictionary<string, string> CherryPicks { get; } = new();
+
+    /// <summary>
+    /// An append and a dynamic partition overwrite staged (WAP-style: committed, then rolled back) under spec 0
+    /// (identity region); the spec then becomes bucket(4, id) and main appends under it; then both are cherry-picked.
+    /// </summary>
+    private async Task BuildCherryPicksAsync()
+    {
+        foreach (var v in new[] { 2, 3 })
+        {
+            var name = $"cherry_picked_v{v}";
+            var spec = Partitioning.PartitionSpec.BuilderFor(Keyed).Identity("region").Build();
+            var t = await _catalog!.CreateTableAsync(new CreateTableRequest(TableIdentifier.Of("db", name), Keyed, spec, FormatVersion: v));
+            await TableMutations.InsertAsync(t, CatalogConformanceTests.Rows(0, 10));
+            var parent = t.Metadata.CurrentSnapshotId!.Value;
+
+            await TableMutations.InsertAsync(t, CatalogConformanceTests.Rows(100, 4));
+            var staged = t.Metadata.CurrentSnapshotId!.Value;
+            await t.ManageSnapshots().RollbackTo(parent).CommitAsync();
+
+            var eu = (await TableScan.PlanFilesAsync(t)).Where(x => (string?)x.File.Partition[0] == "eu").Select(x => x.File.FilePath).ToHashSet();
+            var replacement = CatalogConformanceTests.Rows(300, 2).Select(r => { r[4] = "eu"; return r; }).ToList();
+            await SnapshotProducer.Overwrite(t, f => eu.Contains(f.FilePath)).Set("replace-partitions", "true")
+                .AddFiles(await TableWriter.WriteAsync(t, replacement)).CommitAsync();
+            var stagedOverwrite = t.Metadata.CurrentSnapshotId!.Value;
+            await t.ManageSnapshots().RollbackTo(parent).CommitAsync();
+
+            await t.UpdateSpecAsync(p => p.RemoveField("region").AddField("id", Transforms.Transform.Bucket(4)));
+            t = await _catalog.LoadTableAsync(t.Identifier);
+            await TableMutations.InsertAsync(t, CatalogConformanceTests.Rows(200, 4)); // under spec 1, eu rows included
+            t = await _catalog.LoadTableAsync(t.Identifier);
+            var head = t.Metadata.CurrentSnapshotId!.Value;
+            var beforePicks = t.MetadataLocation;
+
+            await t.ManageSnapshots().CherryPick(stagedOverwrite).CommitAsync();
+            await t.ManageSnapshots().CherryPick(staged).CommitAsync();
+            t = await _catalog.LoadTableAsync(t.Identifier);
+            Tables[name] = new Built(t, (await TableScan.ReadAllAsync(t)).ToDictionary(r => (long)r[0]!), v >= 3 ? await TableScan.ReadWithLineageAsync(t) : null);
+
+            var path = Path.Combine(_warehouse, $"{name}.cherrypick.json");
+            await File.WriteAllTextAsync(path, new JsonObject
+            {
+                ["before"] = beforePicks,
+                ["after"] = t.MetadataLocation,
+                ["head"] = head,
+                ["picks"] = new JsonArray(stagedOverwrite, staged),
+            }.ToJsonString());
+            CherryPicks[name] = $"cherrypick:{path}";
         }
     }
 
@@ -285,7 +423,8 @@ public sealed class SparkTablesFixture : IAsyncLifetime
 
     /// <summary>Tables Spark also dumps the metadata tables and the changelog of.</summary>
     public static IEnumerable<string> MetadataTableNames() =>
-        ["refs_v2", "refs_v3", "PositionDeletes_v2", "PositionDeletes_v3", "EqualityDeletes_v2", "CopyOnWrite_v3", "partitioned_v3", "spec_evolved_v2"];
+        ["refs_v2", "refs_v3", "PositionDeletes_v2", "PositionDeletes_v3", "EqualityDeletes_v2", "CopyOnWrite_v3", "partitioned_v3", "spec_evolved_v2",
+         "cherry_picked_v2", "cherry_picked_v3"];
 
     /// <summary>Where Spark built its own table with branches, tags, a rollback and a cherry-pick.</summary>
     public string? SparkMadeWarehouse { get; private set; }
@@ -320,10 +459,15 @@ public sealed class SparkCrossEngineTests(SparkTablesFixture fx) : IClassFixture
         "CopyOnWrite_v2", "PositionDeletes_v2", "EqualityDeletes_v2",
         "CopyOnWrite_v3", "PositionDeletes_v3", "EqualityDeletes_v3",
         "upgraded_v2_to_v3", "partitioned_v3", "compacted_v3", "merged_v3", "evolved_v2", "expired_v2", "spec_evolved_v2",
-        "updated_v2", "updated_v3", "merged_into_v2", "merged_into_v3",
+        "updated_v2", "updated_v3", "merged_into_v2", "merged_into_v3", "cherry_picked_v2", "cherry_picked_v3",
     };
 
-    public static TheoryData<string> AllNames() { var all = Names(); all.Add("nested_v3"); return all; }
+    public static TheoryData<string> AllNames()
+    {
+        var all = Names();
+        foreach (var n in new[] { "nested_v3", "nested_updated_v2", "nested_updated_v3" }) all.Add(n);
+        return all;
+    }
 
     private JsonNode SparkView(string name)
     {
@@ -451,6 +595,8 @@ public sealed class SparkCrossEngineTests(SparkTablesFixture fx) : IClassFixture
     [InlineData("avro_nested_v3")]
     [InlineData("updated_v3")]
     [InlineData("merged_into_v3")]
+    [InlineData("nested_updated_v3")]
+    [InlineData("cherry_picked_v3")]
     public void Spark_derives_the_same_row_lineage(string name)
     {
         Require.Spark();
@@ -489,6 +635,107 @@ public sealed class SparkCrossEngineTests(SparkTablesFixture fx) : IClassFixture
         Assert.Contains(33L, ours.Keys);
         Assert.DoesNotContain(31L, ours.Keys);
         Assert.DoesNotContain(1L, ours.Keys);
+    }
+
+    /// <summary>
+    /// Nested UPDATE and MERGE (<c>Set("address.city", …)</c>, two levels deep, and through null structs): Spark reads
+    /// our result as we do, and running the same SQL on a copy of the table ends with the same rows. Spark's nested
+    /// assignment turns a null enclosing struct into a struct whose other fields are null, as ours does.
+    /// </summary>
+    [Spec("Nested Types")]
+    [Spec("Row-level Deletes")]
+    [SkippableTheory]
+    [InlineData("nested_updated_v2")]
+    [InlineData("nested_updated_v3")]
+    public void Spark_runs_the_same_nested_updates(string name)
+    {
+        Require.Spark();
+        var schema = SparkTablesFixture.NestedUpdateSchema;
+        var rows = fx.Tables[name].Rows;
+        var ours = SparkJson.Rows(schema, rows.Values).OrderBy(kv => kv.Key).ToList();
+        Assert.Equal(ours, SparkJson.Rows(schema, SparkView(name)["rows"]!.AsArray()).OrderBy(kv => kv.Key));
+        var replay = fx.Spark![fx.SparkMerges[name]]!;
+        Assert.True(replay["error"] is null, $"Spark failed the nested updates on {name}: {replay["error"]}");
+        Assert.Equal(ours, SparkJson.Rows(schema, replay["rows"]!.AsArray()).OrderBy(kv => kv.Key));
+
+        // The cases that matter did occur: null address (0, 10, 15), null geo (6, 9), inserted rows.
+        Assert.Equal(new object?[] { "c-0", null, null }, rows[0][1]);
+        Assert.Equal(new object?[] { "c-10", null, new object?[] { 9.5, null } }, rows[10][1]);
+        Assert.Equal(new object?[] { null, "M", new object?[] { 9.5, 1.25 } }, rows[15][1]);
+        Assert.Equal(new object?[] { "c-6", null, new object?[] { 9.5, null } }, rows[6][1]);
+        Assert.Equal(new object?[] { "c-9", "z9", new object?[] { 9.5, null } }, rows[9][1]);
+        Assert.Equal(new object?[] { "c1", "n" }, rows[1][2]);
+        Assert.Equal(23, rows.Count);
+    }
+
+    /// <summary>
+    /// Assigning a field of a null struct whose other field is required: Spark fails the statement at run time
+    /// (<c>NOT_NULL_ASSERT_VIOLATION</c>) and commits nothing; we refuse it with an <see cref="ArgumentException"/>
+    /// before writing anything.
+    /// </summary>
+    [Spec("Nested Types")]
+    [SkippableTheory]
+    [InlineData("nested_updated_v2")]
+    [InlineData("nested_updated_v3")]
+    public void Spark_and_we_refuse_to_leave_a_required_field_of_a_null_struct_null(string name)
+    {
+        Require.Spark();
+        Assert.IsType<ArgumentException>(fx.NestedUpdateRefused[name]);
+        Assert.Contains("required field 'code'", fx.NestedUpdateRefused[name]!.Message);
+        var replay = fx.Spark![fx.SparkMerges[$"{name}_required"]]!;
+        var error = replay["error"]?.GetValue<string>();
+        Assert.True(error is not null, $"Spark accepted it: {replay["rows"]?.ToJsonString()}");
+        Assert.Contains("NOT_NULL_ASSERT_VIOLATION", error);
+    }
+
+    /// <summary>Summary keys that name the engine, or count manifests (Java's manifest layout is not ours to match).</summary>
+    private static readonly HashSet<string> EngineSummaryKeys =
+        ["engine-name", "engine-version", "iceberg-version", "app-id", "app-name", "spark.app.id", "manifests-created", "manifests-kept", "manifests-replaced"];
+
+    /// <summary>One committed snapshot as Iceberg Java describes it (spark_oracle.py describe_picks), without engine identity.</summary>
+    private static string Pick(JsonNode p)
+    {
+        static string Files(JsonNode? files) => string.Join(";", files!.AsArray().Select(f =>
+            $"{NormPath(f!["path"]!.GetValue<string>())}|{f["spec_id"]}|{f["partition"]}|{f["record_count"]}|{Text(f["first_row_id"])}"));
+        var summary = p["summary"]!.AsObject().Where(kv => !EngineSummaryKeys.Contains(kv.Key)).OrderBy(kv => kv.Key, StringComparer.Ordinal).Select(kv => $"{kv.Key}={kv.Value}");
+        return $"{p["operation"]}\n  summary: {string.Join(",", summary)}\n  first_row_id: {Text(p["first_row_id"])}\n  added: {Files(p["added"])}\n  removed: {Files(p["removed"])}";
+    }
+
+    /// <summary>
+    /// Cherry-picking an append and a dynamic partition overwrite staged under an older partition spec: Spark's
+    /// <c>CALL system.cherrypick_snapshot</c> on a copy of the table commits what we committed (operation, summary,
+    /// added and removed files with their spec and partition, row IDs), and reads our result as we do.
+    /// </summary>
+    [Spec("Partition Evolution")]
+    [Spec("Snapshot References")]
+    [SkippableTheory]
+    [InlineData("cherry_picked_v2")]
+    [InlineData("cherry_picked_v3")]
+    public void Spark_cherry_picks_snapshots_of_an_older_spec_as_we_do(string name)
+    {
+        Require.Spark();
+        var view = fx.Spark![fx.CherryPicks[name]]!;
+        Assert.True(view["error"] is null, $"Spark failed to cherry-pick on {name}: {view["error"]}");
+        var spark = view["spark"]!["picks"]!.AsArray().Select(p => Pick(p!)).ToList();
+        var ours = view["ours"]!["picks"]!.AsArray().Select(p => Pick(p!)).ToList();
+        Assert.Equal(2, spark.Count);
+        Assert.True(spark.SequenceEqual(ours), $"spark:\n{string.Join("\n", spark)}\nours:\n{string.Join("\n", ours)}");
+
+        var theirs = view["spark"]!["description"]!;
+        var mine = view["ours"]!["description"]!;
+        Assert.Equal(SparkJson.Rows(fx.Tables[name].Table.Schema, mine["rows"]!.AsArray()).OrderBy(kv => kv.Key), SparkJson.Rows(fx.Tables[name].Table.Schema, theirs["rows"]!.AsArray()).OrderBy(kv => kv.Key));
+        if (theirs["row_lineage"] is { } lineage) Assert.Equal(lineage.ToJsonString(), mine["row_lineage"]!.ToJsonString());
+
+        // The replayed files kept spec 0 (identity region) and the overwrite replaced only spec 0's eu partition.
+        var picks = view["spark"]!["picks"]!.AsArray();
+        Assert.All(picks.SelectMany(p => p!["added"]!.AsArray()), f => Assert.Equal(0, f!["spec_id"]!.GetValue<int>()));
+        Assert.All(picks[0]!["removed"]!.AsArray(), f => Assert.Equal("region=eu", f!["partition"]!.GetValue<string>()));
+        Assert.NotEmpty(picks[0]!["removed"]!.AsArray());
+        var ids = fx.Tables[name].Rows.Keys.Order().ToList();
+        Assert.Contains(300L, ids);
+        Assert.Contains(100L, ids);
+        Assert.Contains(200L, ids); // main's eu row under spec 1 survives the overwrite of spec 0's eu partition
+        Assert.DoesNotContain(0L, ids);
     }
 
     /// <summary>

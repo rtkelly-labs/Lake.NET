@@ -4,7 +4,9 @@ Runs inside the apache/spark image via spark-submit (see TestSupport/SparkOracle
 
     read-metadata <metadata.json>   load the table from its metadata file and print rows, snapshots, deletes, lineage
     read-tables <metadata.json>...  the same for many tables in one JVM: {location: description | {"error": ...}}
-                                    an argument "merge:<spec.json>" instead replays a MERGE in Spark (see merge_in_spark)
+                                    an argument "merge:<spec.json>" instead replays a MERGE (or UPDATEs) in Spark
+                                    (see merge_in_spark); "cherrypick:<spec.json>" cherry-picks snapshots of a copy of
+                                    our table with Spark's procedure (see cherrypick_in_spark)
                                     an argument "query:<json>" is instead a read query (see run_query), keyed by itself
                                     "meta:<metadata.json>" also dumps the metadata tables and the changelog;
                                     "create-refs:<dir>" first has Spark build a table with branches, tags, a
@@ -149,26 +151,122 @@ MERGE_PREFIX = "merge:"
 
 
 def merge_in_spark(spark: SparkSession, spec_path: str) -> dict[str, Any]:
-    """Copy snapshot_id of target into a Spark table, run sql (MERGE INTO {target} USING {source}) with source, describe.
+    """Copy snapshot_id of target into a Spark table, run sql (a template or a list of them: MERGE INTO {target} USING
+    {source}, UPDATE {target} ...) with source, describe.
 
-    spec: {"target": metadata.json, "snapshot_id": id, "format_version": n, "source": metadata.json, "sql": template}.
+    spec: {"target": metadata.json, "snapshot_id": id, "format_version": n, "source"?: metadata.json, "sql": template(s),
+    "ddl"?: CREATE TABLE {target} ... (to keep NOT NULL columns, which a DataFrame copy loses)}.
+    A statement Spark refuses is reported as the entry's error (nothing after it runs).
     """
     spec = json.loads(Path(spec_path).read_text())
     target = f"fx.merges.t_{uuid.uuid4().hex}"
     spark.sql("CREATE NAMESPACE IF NOT EXISTS fx.merges")
-    (
+    rows = (
         spark.read.format("iceberg")
         .option("snapshot-id", str(spec["snapshot_id"]))
         .load(spec["target"])
-        .writeTo(target)
-        .tableProperty("format-version", str(spec["format_version"]))
-        .create()
     )
-    spark.read.format("iceberg").load(spec["source"]).createOrReplaceTempView(
-        "merge_source"
-    )
-    spark.sql(spec["sql"].format(target=target, source="merge_source"))
+    if spec.get("ddl"):
+        # writeTo().create() makes every column nullable (as CTAS does); "ddl" keeps NOT NULL, nested ones included.
+        spark.sql(spec["ddl"].format(target=target))
+        rows.writeTo(target).append()
+    else:
+        rows.writeTo(target).tableProperty(
+            "format-version", str(spec["format_version"])
+        ).create()
+    if spec.get("source"):
+        spark.read.format("iceberg").load(spec["source"]).createOrReplaceTempView(
+            "merge_source"
+        )
+    statements = spec["sql"] if isinstance(spec["sql"], list) else [spec["sql"]]
+    for sql in statements:
+        spark.sql(sql.format(target=target, source="merge_source"))
     return describe_catalog_table(spark, target)
+
+
+CHERRYPICK_PREFIX = "cherrypick:"
+
+
+def hadoop_copy(spark: SparkSession, metadata_location: str) -> str:
+    """A Hadoop-catalog table whose v1.metadata.json is a copy of ours: same snapshots, manifests and data files (by
+    absolute path), so Spark's procedures can commit to it without touching our table. Returns its name."""
+    warehouse = Path(FIXTURE_ROOT) / "cherrypick"
+    spark.conf.set("spark.sql.catalog.cp", "org.apache.iceberg.spark.SparkCatalog")
+    spark.conf.set("spark.sql.catalog.cp.type", "hadoop")
+    spark.conf.set("spark.sql.catalog.cp.warehouse", f"file://{warehouse}")
+    name = f"t_{uuid.uuid4().hex}"
+    meta_dir = warehouse / "db" / name / "metadata"
+    meta_dir.mkdir(parents=True)
+    src = metadata_location.removeprefix("file://").removeprefix("file:")
+    shutil.copy(src, meta_dir / "v1.metadata.json")
+    (meta_dir / "version-hint.text").write_text("1")
+    return f"cp.db.{name}"
+
+
+def describe_picks(spark: SparkSession, table: str, head: int) -> dict[str, Any]:
+    """Every snapshot main gained after head (oldest first) as Iceberg Java sees it: operation, summary, and the data
+    files it added and removed (path, spec, partition path, records, first_row_id); plus the table's rows."""
+    jt = spark._jvm.org.apache.iceberg.spark.Spark3Util.loadIcebergTable(
+        spark._jsparkSession, table
+    )
+    io = jt.io()
+    specs = jt.specs()
+
+    def files(iterable: Any) -> list[dict[str, Any]]:
+        out = []
+        it = iterable.iterator()
+        while it.hasNext():
+            f = it.next()
+            out.append(
+                {
+                    "path": f.location(),
+                    "spec_id": f.specId(),
+                    "partition": specs.get(f.specId()).partitionToPath(f.partition()),
+                    "record_count": f.recordCount(),
+                    "first_row_id": f.firstRowId(),
+                }
+            )
+        return sorted(out, key=lambda x: x["path"])
+
+    chain = []
+    snap = jt.currentSnapshot()
+    while snap is not None and snap.snapshotId() != head:
+        chain.append(snap)
+        parent = snap.parentId()
+        snap = jt.snapshot(parent) if parent is not None else None
+    chain.reverse()
+    return {
+        "picks": [
+            {
+                "operation": s.operation(),
+                "summary": {k: s.summary()[k] for k in s.summary().keySet()},
+                "first_row_id": s.firstRowId(),
+                "added": files(s.addedDataFiles(io)),
+                "removed": files(s.removedDataFiles(io)),
+            }
+            for s in chain
+        ],
+        "description": describe_catalog_table(spark, table),
+    }
+
+
+def cherrypick_in_spark(spark: SparkSession, spec_path: str) -> dict[str, Any]:
+    """CALL system.cherrypick_snapshot on a copy of our table before the picks, and what our picks committed, both
+    described by Iceberg Java (describe_picks).
+
+    spec: {"before": metadata.json, "after": metadata.json, "head": main's snapshot ID before, "picks": [ids, in order]}.
+    """
+    spec = json.loads(Path(spec_path).read_text())
+    theirs = hadoop_copy(spark, spec["before"])
+    for snapshot_id in spec["picks"]:
+        spark.sql(
+            f"CALL cp.system.cherrypick_snapshot('{theirs.removeprefix('cp.')}', {snapshot_id})"
+        )
+    ours = hadoop_copy(spark, spec["after"])
+    return {
+        "spark": describe_picks(spark, theirs, spec["head"]),
+        "ours": describe_picks(spark, ours, spec["head"]),
+    }
 
 
 def run_query(spark: SparkSession, spec: dict[str, Any]) -> dict[str, Any]:
@@ -327,6 +425,11 @@ def cmd_read_tables(locations: list[str]) -> dict[str, Any]:
         meta = arg.startswith("meta:")
         location = arg.removeprefix("meta:")
         try:
+            if location.startswith(CHERRYPICK_PREFIX):
+                result[location] = cherrypick_in_spark(
+                    spark, location.removeprefix(CHERRYPICK_PREFIX)
+                )
+                continue
             if location.startswith(MERGE_PREFIX):
                 result[location] = merge_in_spark(
                     spark, location.removeprefix(MERGE_PREFIX)

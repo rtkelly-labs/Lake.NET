@@ -563,6 +563,69 @@ public sealed class ReadPathTests : IDisposable
         Assert.Equal((1L, 0L), (byLocation.WholeReads, byLocation.RangeRequests));
     }
 
+    /// <summary>
+    /// Avro is row-oriented: a projection cannot skip column bytes, and blocks have no statistics to prune by. What
+    /// ranges buy is streaming: the file is fetched in 1 MiB chunks, one ahead of decoding, every byte once, and a read
+    /// that stops after the first block has fetched the first chunk and the one ahead, not the file.
+    /// </summary>
+    [Spec("Avro")]
+    [Fact]
+    public async Task An_avro_read_streams_in_chunks_and_an_early_stop_fetches_only_the_first_ones()
+    {
+        var local = new LocalFileIO();
+        var random = new Random(11);
+        var rows = Enumerable.Range(0, 150_000).Select(i => new object?[] { (long)i, random.NextInt64(), random.NextInt64(), new object?[] { random.NextInt64(), random.NextInt64() } }).ToList();
+        var file = await AvroDataFiles.WriteAsync(local, Path.Combine(_warehouse, "wide", $"{Guid.NewGuid():N}.avro"), WideSchema, 0, [], rows);
+        Assert.True(file.FileSizeInBytes > 5_000_000, $"{file.FileSizeInBytes}");
+        const long chunk = 1024 * 1024;
+
+        // By location (size unknown): one whole-object read, the oracle.
+        var byLocation = new CountingFileIO(local);
+        var all = await DataFiles.ReadAsync(byLocation, file.FilePath, "AVRO", WideSchema);
+        Assert.Equal((1L, 0L), (byLocation.WholeReads, byLocation.RangeRequests));
+        Assert.Equal(Canonical(rows), Canonical(all));
+
+        // A manifest's file (size known): the same rows, streamed in chunks, each byte fetched once.
+        var io = new CountingFileIO(local);
+        Assert.Equal(Canonical(all), Canonical(await ReadFile(io, file, WideSchema)));
+        Assert.Equal(0, io.WholeReads);
+        Assert.Equal(file.FileSizeInBytes, io.BytesRead);
+        Assert.Equal((file.FileSizeInBytes + chunk - 1) / chunk, io.RangeRequests);
+
+        // Stopping after the first block (a Take, a LIMIT): the first chunk and at most the one fetched ahead.
+        var early = new CountingFileIO(local);
+        await foreach (var batch in DataFiles.ReadBatchesAsync(early, file, WideSchema))
+        {
+            Assert.Equal(rows.Take(batch.Rows.Count).Select(r => r[0]), batch.Rows.Select(r => r[0]));
+            break;
+        }
+        Assert.True(early.RangeRequests <= 2, $"{early.RangeRequests} requests");
+        Assert.True(early.BytesRead <= 2 * chunk && early.BytesRead < file.FileSizeInBytes / 2, $"read {early.BytesRead} of {file.FileSizeInBytes} bytes");
+    }
+
+    [Fact]
+    public async Task A_sequential_reader_serves_spans_across_chunks_and_never_goes_back()
+    {
+        var local = new LocalFileIO();
+        var path = Path.Combine(_warehouse, "seq.bin");
+        var content = Enumerable.Range(0, 10_000).Select(i => (byte)(i * 7)).ToArray();
+        await local.WriteAsync(path, content);
+        var io = new CountingFileIO(local);
+        await using (var r = new SequentialRangeReader(io, path, content.Length) { ChunkSize = 1000 })
+        {
+            var (buffer, index, available) = await r.EnsureAsync(0, 10); // the first chunk, and one ahead
+            Assert.Equal(content[..1000], buffer.AsSpan(index, available).ToArray());
+            (buffer, index, available) = await r.EnsureAsync(900, 1500); // 900..1000 kept, 1000..2000 from the chunk ahead, 2000..2400 fetched
+            Assert.True(available >= 1500);
+            Assert.Equal(content[900..2400], buffer.AsSpan(index, 1500).ToArray());
+            (buffer, index, available) = await r.EnsureAsync(9_990, 100); // a skip: clamped to the end
+            Assert.Equal(content[9_990..], buffer.AsSpan(index, available).ToArray());
+            await Assert.ThrowsAsync<InvalidOperationException>(async () => await r.EnsureAsync(5, 1));
+            Assert.Equal(r.Requests, io.RangeRequests);
+        }
+        Assert.True(io.BytesRead < content.Length, $"{io.BytesRead}"); // the skipped middle was never fetched
+    }
+
     [Fact]
     public async Task A_ranged_stream_serves_reads_across_fetched_ranges()
     {

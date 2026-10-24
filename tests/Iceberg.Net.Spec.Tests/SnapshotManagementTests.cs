@@ -276,7 +276,8 @@ public sealed class SnapshotManagementTests : IDisposable
         await Append(t, 7, 1); // p=1 only: does not touch the replaced partition
         await t.ManageSnapshots().CherryPick(staged).CommitAsync();
         Assert.Equal([1L, 3, 5, 7, 100], await Ids(t, SnapshotSelector.Current));
-        Assert.Equal("true", t.Metadata.CurrentSnapshot!.Summary["replace-partitions"]);
+        Assert.Equal(Operations.Overwrite, t.Metadata.CurrentSnapshot!.Operation);
+        Assert.False(t.Metadata.CurrentSnapshot.Summary.ContainsKey("replace-partitions")); // as Java's CherryPickOperation
         t = await Valid(t);
 
         var staged2 = await StageOverwriteOfP0("y");
@@ -307,7 +308,8 @@ public sealed class SnapshotManagementTests : IDisposable
         // A dynamic overwrite staged under spec 0: main's spec-1 append since its parent is in other partitions (partitions
         // are compared with their spec), so it replays, and the p=0 rows it replaced (0, 2) stay replaced.
         await t.ManageSnapshots().CherryPick(stagedOverwrite).CommitAsync();
-        Assert.Equal("true", t.Metadata.CurrentSnapshot!.Summary["replace-partitions"]);
+        Assert.Equal(Operations.Overwrite, t.Metadata.CurrentSnapshot!.Operation);
+        Assert.False(t.Metadata.CurrentSnapshot.Summary.ContainsKey("replace-partitions")); // as Java's CherryPickOperation
         Assert.Equal([1L, 3, 20, 21, 100], await Ids(t, SnapshotSelector.Current));
         t = await Valid(t);
 

@@ -49,15 +49,16 @@ conformance kind and is checked against PyIceberg and Spark.
 
 Gaps the phases left open:
 - The EMR Serverless, Glue and Athena runners are tested against faked SDK clients; a real run needs the AWS sandbox (#4).
-- Nested UPDATE and cherry-pick across partition specs are not yet Spark-checked.
-- Avro data files are still fetched whole (ranged reads cover Parquet).
 - The REST server has no scan planning, credential vending, remote signing or authorization roles.
 - The change feed is Spark-checked only for tables without delete files (Java's changelog scan refuses them); our
   replay test covers the rest.
 
 Closed in the second build-out: nested UPDATE, ranged Parquet reads, delete files after a schema change, cherry-pick
 across partition specs, strictly increasing snapshot timestamps, the manifest abstraction, and the three LINQ gaps
-(pruned residual deletes, kept field IDs, time-travel pushdown on renamed columns).
+(pruned residual deletes, kept field IDs, time-travel pushdown on renamed columns). Since then: nested UPDATE/MERGE
+and cherry-pick across partition specs are Spark-checked (one difference fixed: a replayed overwrite no longer records
+`replace-partitions`), and Avro data and delete files are streamed in ranged chunks with read-ahead instead of
+fetched whole.
 
 Closed since: atomic `SaveChanges` across tables. `TableMutations.StageMergeAsync` / `StageUpdateAsync` stage a
 mutation, and `StagedCommit.CommitAllAsync` commits several in one `CommitTransactionAsync`, re-planning all of them

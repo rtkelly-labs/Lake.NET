@@ -363,8 +363,10 @@ internal static class CherryPicker
             var replaced = added.Select(f => PartitionKey(f.SpecId, f.Partition)).ToHashSet(StringComparer.Ordinal);
             var removedPaths = removed.Select(f => f.FilePath).ToHashSet(StringComparer.Ordinal);
 
+            // Like Java, the replay records source-snapshot-id but not replace-partitions (Spark's cherrypick_snapshot
+            // leaves it out too: SparkCrossEngineTests.Spark_cherry_picks_snapshots_of_an_older_spec_as_we_do).
             var producer = dynamicOverwrite
-                ? SnapshotProducer.Overwrite(table, f => removedPaths.Contains(f.FilePath)).WithSnapshotIsolation().Set(ReplacePartitions, "true")
+                ? SnapshotProducer.Overwrite(table, f => removedPaths.Contains(f.FilePath)).WithSnapshotIsolation()
                 : SnapshotProducer.Append(table);
             producer.AddFiles(added.Select(f => f with { FirstRowId = null }))
                 .Set(SourceSnapshotId, snapshotId.ToString(CultureInfo.InvariantCulture))
