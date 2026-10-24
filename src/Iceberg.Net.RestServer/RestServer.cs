@@ -52,7 +52,10 @@ public static class RestServer
         services.TryAddSingleton<IStorageCredentialVendor>(sp =>
         {
             var options = sp.GetRequiredService<RestServerOptions>();
-            return options.CredentialVending.Enabled ? new StsCredentialVendor(options.CredentialVending, options.FileIO) : NoCredentialVendor.Instance;
+            var vendors = new List<IStorageCredentialVendor>();
+            if (options.CredentialVending.Enabled) vendors.Add(new StsCredentialVendor(options.CredentialVending, options.FileIO));
+            if (options.CredentialVending.Adls.Enabled) vendors.Add(new AdlsSasCredentialVendor(options.CredentialVending.Adls));
+            return vendors.Count switch { 0 => NoCredentialVendor.Instance, 1 => vendors[0], _ => new CompositeCredentialVendor(vendors) };
         });
         services.TryAddSingleton(sp =>
         {

@@ -16,7 +16,8 @@ public sealed record VendedCredential(string Prefix, IReadOnlyDictionary<string,
 /// <summary>
 /// Vends short-lived storage credentials for a table's location. Asked only when the client sends
 /// <c>X-Iceberg-Access-Delegation: vended-credentials</c> (or calls <c>loadCredentials</c>), after authorization.
-/// Register your own to replace the STS one.
+/// The built-in ones are <see cref="StsCredentialVendor"/> (S3) and <see cref="AdlsSasCredentialVendor"/> (Azure), combined
+/// by <see cref="CompositeCredentialVendor"/> when both are configured. Register your own (GCS, a broker) to replace them.
 /// </summary>
 public interface IStorageCredentialVendor
 {

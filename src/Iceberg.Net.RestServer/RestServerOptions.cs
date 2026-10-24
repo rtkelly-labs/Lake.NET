@@ -138,6 +138,9 @@ public sealed class CredentialVendingOptions
 
     public int DurationSeconds { get; set; } = 3600;
 
+    /// <summary>Azure SAS tokens for <c>abfs[s]://</c> / <c>wasb[s]://</c> tables; on when any account key is configured.</summary>
+    public AdlsCredentialVendingOptions Adls { get; set; } = new();
+
     /// <summary>
     /// The server's own credentials for calling STS. Unset: the FileIO's <c>s3.access-key-id</c> /
     /// <c>s3.secret-access-key</c>, else the AWS SDK's default credential chain.
@@ -148,7 +151,28 @@ public sealed class CredentialVendingOptions
 
     public string? SessionToken { get; set; }
 
+    /// <summary>S3 (STS) vending is on.</summary>
     public bool Enabled => !string.IsNullOrEmpty(RoleArn);
+}
+
+/// <summary>Azure SAS vending (<see cref="AdlsSasCredentialVendor"/>).</summary>
+public sealed class AdlsCredentialVendingOptions
+{
+    /// <summary>Storage account name → its shared key (base64), e.g. <c>CredentialVending:Adls:Accounts:mylake</c>.</summary>
+    public Dictionary<string, string> Accounts { get; set; } = [];
+
+    /// <summary><c>directory</c> (a directory SAS on the table's path; needs a hierarchical namespace) or <c>container</c>.</summary>
+    public string Scope { get; set; } = "directory";
+
+    public int DurationSeconds { get; set; } = 3600;
+
+    /// <summary>The SAS version (<c>sv</c>).</summary>
+    public string Version { get; set; } = "2023-11-03";
+
+    /// <summary><c>spr</c>: <c>https</c> to refuse plain HTTP; unset allows both (emulators speak HTTP).</summary>
+    public string? Protocol { get; set; }
+
+    public bool Enabled => Accounts.Count > 0;
 }
 
 public sealed class IdempotencyOptions
