@@ -11,6 +11,7 @@ dotnet test tests/Iceberg.Net.Spec.Tests --nologo
 dotnet test tests/Iceberg.Net.NetStandard.Tests --nologo   # the netstandard2.0 builds of Core and Avro
 dotnet test tests/Iceberg.Net.Linq.Tests --nologo
 dotnet test tests/Iceberg.Net.EntityFrameworkCore.Tests --nologo
+dotnet test tests/Iceberg.Net.RestCatalogBehaviour.Tests --nologo   # REST catalog behaviour (Reqnroll, in-process)
 [[ "$mode" == "spec" ]] && exit 0
 dotnet test tests/Iceberg.Net.Behaviour.Tests --nologo
 # In-process server; its PyIceberg/Spark cases need ICEBERG_PYTHON / ICEBERG_SPARK_JAR and skip without them.
