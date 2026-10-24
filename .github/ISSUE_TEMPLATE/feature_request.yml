@@ -1,0 +1,36 @@
+name: Feature Request
+description: Suggest an idea or capability for Iceberg.NET
+title: "feat: "
+labels: ["type: feature"]
+body:
+  - type: markdown
+    attributes:
+      value: |
+        Thank you for suggesting a feature or improvement for Iceberg.NET!
+  - type: textarea
+    id: problem
+    attributes:
+      label: Problem Statement
+      description: Is your feature request related to a problem or limitation?
+      placeholder: A clear and concise description of the problem (e.g. I'm always frustrated when...)
+    validations:
+      required: true
+  - type: textarea
+    id: proposed-solution
+    attributes:
+      label: Proposed Solution / API
+      description: Describe the solution or new capability you would like to see.
+      placeholder: Detail the proposed workflow, CLI syntax, function signature, or UI.
+    validations:
+      required: true
+  - type: textarea
+    id: alternatives
+    attributes:
+      label: Alternatives Considered
+      description: Describe any alternative solutions or features you've considered.
+  - type: checkboxes
+    id: willingness
+    attributes:
+      label: Contribution
+      options:
+        - label: I would be willing to submit a pull request implementing this feature

@@ -1,9 +1,8 @@
-# iceberg-dotnet — a C# port of Apache Iceberg
+[![AI Assisted](https://img.shields.io/badge/development-AI%20assisted-792ee5.svg?logo=openai&logoColor=white)](AI_POLICY.md)
 
-**Status:** M0 (foundations) — exploratory, on branch only, **not for production writes yet**.
-**Scope of this folder:** fully self-contained. Nothing outside `iceberg-dotnet/` depends on it and it
-depends on nothing outside itself (apart from the path-filtered workflow
-`.github/workflows/iceberg-dotnet.yml`), so it can be lifted into its own repository unchanged.
+# Iceberg.NET — a C# port of Apache Iceberg
+
+**Status:** M0 (foundations) — exploratory, **not for production writes yet**.
 
 ## Why this exists
 
@@ -42,7 +41,7 @@ Not yet: ORC data files, filters or partitions through lists and maps. See [docs
 ## Layout
 
 ```
-iceberg-dotnet/
+Iceberg.NET/
 ├── src/
 │   ├── Iceberg.Net.Core      spec model, transforms, metadata state machine, JSON
 │   ├── Iceberg.Net.Avro      Avro container codec + manifest/manifest-list encoding
@@ -93,3 +92,13 @@ var all = await TableScan.ReadAllAsync(table);
 
 Requires the .NET 8 SDK (newer SDKs roll forward), Docker for emulation, and `uv` (or `ICEBERG_PYTHON`)
 for the PyIceberg oracle.
+
+---
+
+## 🤖 AI Utilization & Transparency
+
+This project leverages AI-assisted software engineering and agentic workflows for rapid development, test scaffolding, and documentation.
+
+* **Human Accountability:** The maintainer reviews all architecture, code changes, and pull requests, assuming 100% responsibility for the correctness, stability, and security of all merged code.
+* **Automated Verification:** All features and contributions are validated by automated test suites (.NET 8 & .NET 9), strict type checking, and automated CI pipelines.
+* **Community Policy:** For contributor guidelines regarding generative AI tooling, see [**`AI_POLICY.md`**](AI_POLICY.md).

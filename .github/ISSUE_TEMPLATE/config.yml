@@ -1,0 +1,8 @@
+blank_issues_enabled: false
+contact_links:
+  - name: GitHub Discussions / Community Questions
+    url: https://github.com/rtkelly-labs/Iceberg.NET/discussions
+    about: Ask questions, share ideas, or get help with Iceberg.NET.
+  - name: Security Vulnerability Disclosure
+    url: https://github.com/rtkelly-labs/Iceberg.NET/security/policy
+    about: Please report security vulnerabilities privately via our security policy.
