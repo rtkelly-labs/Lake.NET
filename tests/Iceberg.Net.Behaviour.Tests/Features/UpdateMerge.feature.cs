@@ -111,28 +111,28 @@ namespace Iceberg.Net.Behaviour.Tests.Features
         {
 #line 7
   #line hidden
-            global::Reqnroll.Table table1 = new global::Reqnroll.Table(new string[] {
+            global::Reqnroll.Table table21 = new global::Reqnroll.Table(new string[] {
                         "id",
                         "name",
                         "region"});
-            table1.AddRow(new string[] {
+            table21.AddRow(new string[] {
                         "1",
                         "alice",
                         "eu"});
-            table1.AddRow(new string[] {
+            table21.AddRow(new string[] {
                         "2",
                         "bob",
                         "us"});
-            table1.AddRow(new string[] {
+            table21.AddRow(new string[] {
                         "3",
                         "carol",
                         "eu"});
-            table1.AddRow(new string[] {
+            table21.AddRow(new string[] {
                         "4",
                         "dave",
                         "us"});
 #line 8
-    await testRunner.GivenAsync("the default rows are:", ((string)(null)), table1, "Given ");
+    await testRunner.GivenAsync("the default rows are:", ((string)(null)), table21, "Given ");
 #line hidden
         }
         
@@ -206,28 +206,28 @@ namespace Iceberg.Net.Behaviour.Tests.Features
 #line 18
     await testRunner.ThenAsync("the change reports 1 updated, 0 deleted and 0 inserted", ((string)(null)), ((global::Reqnroll.Table)(null)), "Then ");
 #line hidden
-                global::Reqnroll.Table table2 = new global::Reqnroll.Table(new string[] {
+                global::Reqnroll.Table table22 = new global::Reqnroll.Table(new string[] {
                             "id",
                             "name",
                             "region"});
-                table2.AddRow(new string[] {
+                table22.AddRow(new string[] {
                             "1",
                             "alice",
                             "eu"});
-                table2.AddRow(new string[] {
+                table22.AddRow(new string[] {
                             "2",
                             "robert",
                             "us"});
-                table2.AddRow(new string[] {
+                table22.AddRow(new string[] {
                             "3",
                             "carol",
                             "eu"});
-                table2.AddRow(new string[] {
+                table22.AddRow(new string[] {
                             "4",
                             "dave",
                             "us"});
 #line 19
-    await testRunner.AndAsync("the table contains exactly:", ((string)(null)), table2, "And ");
+    await testRunner.AndAsync("the table contains exactly:", ((string)(null)), table22, "And ");
 #line hidden
 #line 25
     await testRunner.AndAsync(string.Format("the table\'s delete files are {0}", deleteFiles), ((string)(null)), ((global::Reqnroll.Table)(null)), "And ");
@@ -276,28 +276,28 @@ namespace Iceberg.Net.Behaviour.Tests.Features
 #line 38
     await testRunner.WhenAsync(string.Format("I set region to \"apac\" where id is 3 with {0}", strategy), ((string)(null)), ((global::Reqnroll.Table)(null)), "When ");
 #line hidden
-                global::Reqnroll.Table table3 = new global::Reqnroll.Table(new string[] {
+                global::Reqnroll.Table table23 = new global::Reqnroll.Table(new string[] {
                             "id",
                             "name",
                             "region"});
-                table3.AddRow(new string[] {
+                table23.AddRow(new string[] {
                             "1",
                             "alice",
                             "eu"});
-                table3.AddRow(new string[] {
+                table23.AddRow(new string[] {
                             "2",
                             "bob",
                             "us"});
-                table3.AddRow(new string[] {
+                table23.AddRow(new string[] {
                             "3",
                             "carol",
                             "apac"});
-                table3.AddRow(new string[] {
+                table23.AddRow(new string[] {
                             "4",
                             "dave",
                             "us"});
 #line 39
-    await testRunner.ThenAsync("the table contains exactly:", ((string)(null)), table3, "Then ");
+    await testRunner.ThenAsync("the table contains exactly:", ((string)(null)), table23, "Then ");
 #line hidden
 #line 45
     await testRunner.AndAsync("the row with id 3 is stored in the \"apac\" partition", ((string)(null)), ((global::Reqnroll.Table)(null)), "And ");
@@ -428,20 +428,20 @@ namespace Iceberg.Net.Behaviour.Tests.Features
 #line 68
     await testRunner.WhenAsync(string.Format("I set name to \"robert\" where id is 2 with {0}", strategy), ((string)(null)), ((global::Reqnroll.Table)(null)), "When ");
 #line hidden
-                global::Reqnroll.Table table4 = new global::Reqnroll.Table(new string[] {
+                global::Reqnroll.Table table24 = new global::Reqnroll.Table(new string[] {
                             "id",
                             "name",
                             "region"});
-                table4.AddRow(new string[] {
+                table24.AddRow(new string[] {
                             "3",
                             "caz",
                             "eu"});
-                table4.AddRow(new string[] {
+                table24.AddRow(new string[] {
                             "5",
                             "erin",
                             "eu"});
 #line 69
-    await testRunner.AndAsync(string.Format("I merge the feed with {0}, updating matches and inserting new rows:", strategy), ((string)(null)), table4, "And ");
+    await testRunner.AndAsync(string.Format("I merge the feed with {0}, updating matches and inserting new rows:", strategy), ((string)(null)), table24, "And ");
 #line hidden
 #line 73
     await testRunner.ThenAsync("rows 1, 2, 3 and 4 keep their row ids", ((string)(null)), ((global::Reqnroll.Table)(null)), "Then ");
@@ -489,50 +489,50 @@ namespace Iceberg.Net.Behaviour.Tests.Features
 #line 82
     await testRunner.GivenAsync(string.Format("a format v{0} table keyed by \"id\" holding the default rows", version), ((string)(null)), ((global::Reqnroll.Table)(null)), "Given ");
 #line hidden
-                global::Reqnroll.Table table5 = new global::Reqnroll.Table(new string[] {
+                global::Reqnroll.Table table25 = new global::Reqnroll.Table(new string[] {
                             "id",
                             "name",
                             "region"});
-                table5.AddRow(new string[] {
+                table25.AddRow(new string[] {
                             "2",
                             "bobby",
                             "us"});
-                table5.AddRow(new string[] {
+                table25.AddRow(new string[] {
                             "5",
                             "erin",
                             "eu"});
 #line 83
-    await testRunner.WhenAsync(string.Format("I merge the feed with {0}, updating matches and inserting new rows:", strategy), ((string)(null)), table5, "When ");
+    await testRunner.WhenAsync(string.Format("I merge the feed with {0}, updating matches and inserting new rows:", strategy), ((string)(null)), table25, "When ");
 #line hidden
 #line 87
     await testRunner.ThenAsync("the change reports 1 updated, 0 deleted and 1 inserted", ((string)(null)), ((global::Reqnroll.Table)(null)), "Then ");
 #line hidden
-                global::Reqnroll.Table table6 = new global::Reqnroll.Table(new string[] {
+                global::Reqnroll.Table table26 = new global::Reqnroll.Table(new string[] {
                             "id",
                             "name",
                             "region"});
-                table6.AddRow(new string[] {
+                table26.AddRow(new string[] {
                             "1",
                             "alice",
                             "eu"});
-                table6.AddRow(new string[] {
+                table26.AddRow(new string[] {
                             "2",
                             "bobby",
                             "us"});
-                table6.AddRow(new string[] {
+                table26.AddRow(new string[] {
                             "3",
                             "carol",
                             "eu"});
-                table6.AddRow(new string[] {
+                table26.AddRow(new string[] {
                             "4",
                             "dave",
                             "us"});
-                table6.AddRow(new string[] {
+                table26.AddRow(new string[] {
                             "5",
                             "erin",
                             "eu"});
 #line 88
-    await testRunner.AndAsync("the table contains exactly:", ((string)(null)), table6, "And ");
+    await testRunner.AndAsync("the table contains exactly:", ((string)(null)), table26, "And ");
 #line hidden
 #line 95
     await testRunner.AndAsync(string.Format("PyIceberg {0}", pyiceberg), ((string)(null)), ((global::Reqnroll.Table)(null)), "And ");
@@ -572,47 +572,47 @@ namespace Iceberg.Net.Behaviour.Tests.Features
 #line 107
     await testRunner.GivenAsync(string.Format("a format v{0} table keyed by \"id\" holding the default rows", version), ((string)(null)), ((global::Reqnroll.Table)(null)), "Given ");
 #line hidden
-                global::Reqnroll.Table table7 = new global::Reqnroll.Table(new string[] {
+                global::Reqnroll.Table table27 = new global::Reqnroll.Table(new string[] {
                             "id",
                             "name",
                             "region"});
-                table7.AddRow(new string[] {
+                table27.AddRow(new string[] {
                             "3",
                             "caz",
                             "eu"});
-                table7.AddRow(new string[] {
+                table27.AddRow(new string[] {
                             "5",
                             "erin",
                             "eu"});
 #line 108
     await testRunner.WhenAsync(string.Format("I merge the \"eu\" feed with {0}, updating matches, inserting new rows and deleting" +
-                            " unlisted rows:", strategy), ((string)(null)), table7, "When ");
+                            " unlisted rows:", strategy), ((string)(null)), table27, "When ");
 #line hidden
 #line 112
     await testRunner.ThenAsync("the change reports 1 updated, 1 deleted and 1 inserted", ((string)(null)), ((global::Reqnroll.Table)(null)), "Then ");
 #line hidden
-                global::Reqnroll.Table table8 = new global::Reqnroll.Table(new string[] {
+                global::Reqnroll.Table table28 = new global::Reqnroll.Table(new string[] {
                             "id",
                             "name",
                             "region"});
-                table8.AddRow(new string[] {
+                table28.AddRow(new string[] {
                             "2",
                             "bob",
                             "us"});
-                table8.AddRow(new string[] {
+                table28.AddRow(new string[] {
                             "3",
                             "caz",
                             "eu"});
-                table8.AddRow(new string[] {
+                table28.AddRow(new string[] {
                             "4",
                             "dave",
                             "us"});
-                table8.AddRow(new string[] {
+                table28.AddRow(new string[] {
                             "5",
                             "erin",
                             "eu"});
 #line 113
-    await testRunner.AndAsync("the table contains exactly:", ((string)(null)), table8, "And ");
+    await testRunner.AndAsync("the table contains exactly:", ((string)(null)), table28, "And ");
 #line hidden
 #line 119
     await testRunner.AndAsync("PyIceberg reads the same rows", ((string)(null)), ((global::Reqnroll.Table)(null)), "And ");
@@ -648,20 +648,20 @@ namespace Iceberg.Net.Behaviour.Tests.Features
 #line 127
     await testRunner.GivenAsync("a format v2 table keyed by \"id\" holding the default rows", ((string)(null)), ((global::Reqnroll.Table)(null)), "Given ");
 #line hidden
-                global::Reqnroll.Table table9 = new global::Reqnroll.Table(new string[] {
+                global::Reqnroll.Table table29 = new global::Reqnroll.Table(new string[] {
                             "id",
                             "name",
                             "region"});
-                table9.AddRow(new string[] {
+                table29.AddRow(new string[] {
                             "2",
                             "bobby",
                             "us"});
-                table9.AddRow(new string[] {
+                table29.AddRow(new string[] {
                             "2",
                             "rob",
                             "us"});
 #line 128
-    await testRunner.WhenAsync("I merge the feed with copy-on-write, updating matches and inserting new rows:", ((string)(null)), table9, "When ");
+    await testRunner.WhenAsync("I merge the feed with copy-on-write, updating matches and inserting new rows:", ((string)(null)), table29, "When ");
 #line hidden
 #line 132
     await testRunner.ThenAsync("the write fails with \"cardinality violation\"", ((string)(null)), ((global::Reqnroll.Table)(null)), "Then ");

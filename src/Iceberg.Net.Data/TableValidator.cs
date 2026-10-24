@@ -141,7 +141,7 @@ public static class TableValidator
             List<ManifestEntry> entries;
             try
             {
-                entries = ManifestCodec.ReadManifest(await io.ReadAllAsync(mf.ManifestPath, ct), m.SpecById(mf.PartitionSpecId), m.CurrentSchema, mf).Entries.ToList();
+                entries = (await ManifestStore.ReadAsync(io, mf.ManifestPath, m.SpecById(mf.PartitionSpecId), m.CurrentSchema, mf, ct: ct)).Entries.ToList();
             }
             catch (Exception e) when (e is not OperationCanceledException)
             {

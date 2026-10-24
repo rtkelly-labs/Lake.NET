@@ -94,7 +94,7 @@ public static class ChangeFeed
         var addedDeletes = new List<DataFile>();
         foreach (var mf in manifests.Where(mf => mf.AddedSnapshotId == snapshot.SnapshotId))
         {
-            var entries = ManifestCodec.ReadManifest(await table.IO.ReadAllAsync(mf.ManifestPath, ct), m.SpecById(mf.PartitionSpecId), m.CurrentSchema, mf).Entries;
+            var entries = (await ManifestStore.ReadAsync(table.IO, mf.ManifestPath, m.SpecById(mf.PartitionSpecId), m.CurrentSchema, mf, ct: ct)).Entries;
             foreach (var e in entries.Where(e => e.SnapshotId == snapshot.SnapshotId))
             {
                 var file = e.DataFile with { SpecId = mf.PartitionSpecId };

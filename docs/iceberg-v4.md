@@ -39,7 +39,7 @@ can use it. Until then producers stay on v2 (Athena-read tables) or v3.
 | Change | What the spec says | What it means for this library | Size |
 |---|---|---|---|
 | **Root manifest replaces the manifest list** | One root manifest per snapshot. It can reference leaf manifests, v1–v3 manifests and **data files directly** | Planning becomes a tree walk with the root as entry point. A small commit can be **one file**: the root with its changes inlined ("single-file commits"). A new maintenance operation is needed to fold inlined entries into leaf manifests later | L |
-| **Manifests are Parquet** | Root and leaf manifests are Parquet files with a new `tracked_file` schema, not compatible with v1–v3's `manifest_entry`. A manifest may mix partition specs | Manifests are read and written in 13 places across 6 files, all through the Avro `ManifestCodec`. A manifest abstraction is the first step, with v1–v3 Avro and v4 Parquet behind it. ParquetSharp, already the data-file engine, can do the Parquet side | M |
+| **Manifests are Parquet** | Root and leaf manifests are Parquet files with a new `tracked_file` schema, not compatible with v1–v3's `manifest_entry`. A manifest may mix partition specs | **Abstraction done.** Every manifest and manifest-list read and write in the library (17 call sites across 9 files) goes through `ManifestStore` (Iceberg.Net.Catalog). It picks an `IManifestFormat` by the file's magic bytes when reading, so an upgraded table keeps reading its Avro manifests, and by format version when writing. `AvroManifestFormat` wraps `ManifestCodec`; a Parquet manifest is refused by name for now. A v4 `ParquetManifestFormat` (ParquetSharp, already the data-file engine) slots in beside it, and the `tracked_file` model is the rest of the work | M |
 | **Tracking statuses** | Live is ADDED, EXISTING or MODIFIED. Changes are DELETED or REPLACED. A leaf entry can be marked deleted or replaced in place through the **manifest deletion vector** stored on its root entry | Every place that interprets manifest status changes. That includes the serializable-commit validation (`ValidateNoConflictingDataAsync`), expiry reachability and `TableValidator`. "Modified" is a new concept: an entry changes without the file being re-added | M |
 | **Manifest deletion vectors (Mumbling bitmaps)** | Positions of a leaf manifest that are no longer live, as a Mumbling bitmap. Three bitmaps: `dv`, `deleted_positions`, `replaced_positions` | A new bitmap codec next to the Roaring one in `Iceberg.Net.Puffin`, built from its spec's test vectors and fuzzed under the `Corruption` contract like every decoder | S–M |
 | **Deletion vector in the data file's entry** | A data file's DV lives in its own `deletion_vector` field, and its offset and size must match the Puffin footer. No separate delete manifests for new deletes | Planning is one phase: the DV comes with the file. `DeleteIndex` reads it from the entry. Writing a DV marks the data file's entry MODIFIED, with a REPLACED entry for change detection | M |
@@ -60,8 +60,8 @@ These neighbouring specs are not tied to v4, but are new and relevant to the sam
 
 1. **Now, because it pays off on v3 as well:**
    - ~~**Strictly increasing snapshot timestamps**~~, enforced by `SnapshotProducer` and checked by `TableValidator` (done).
-   - **A manifest abstraction**: route the 13 call sites through one reader/writer interface, so a v4 Parquet
-     implementation slots in beside the Avro one.
+   - ~~**A manifest abstraction**~~ (done): `ManifestStore` and `IManifestFormat`, so a v4 Parquet implementation
+     slots in beside the Avro one.
    - **A typed column-statistics model** inside the library, with the v1–v3 byte maps as one serialization. Pruning
      and the LINQ count path then work against it.
    - **Producer guidance**: prefer deletion vectors (or copy-on-write) to equality deletes on new v3 tables, so

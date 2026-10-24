@@ -41,7 +41,7 @@ public static partial class TableScan
     {
         if (snapshot.ManifestList is null)
             throw new NotSupportedException("v1 snapshots with an embedded 'manifests' list are not supported yet");
-        return ManifestCodec.ReadManifestList(await table.IO.ReadAllAsync(snapshot.ManifestList, ct)).Manifests;
+        return (await ManifestStore.ReadListAsync(table.IO, snapshot.ManifestList, ct));
     }
 
     private static Snapshot? Resolve(TableMetadata m, long? snapshotId) =>
@@ -88,7 +88,7 @@ public static partial class TableScan
             }
             if (!eval.Manifest.MightMatch(manifest.Partitions)) { skipped++; continue; }
             read++;
-            var contents = ManifestCodec.ReadManifest(await table.IO.ReadAllAsync(manifest.ManifestPath, ct), spec, schema, manifest);
+            var contents = (await ManifestStore.ReadAsync(table.IO, manifest.ManifestPath, spec, schema, manifest, ct: ct));
             foreach (var e in contents.Entries)
             {
                 if (e.Status == ManifestEntryStatus.Deleted) continue;

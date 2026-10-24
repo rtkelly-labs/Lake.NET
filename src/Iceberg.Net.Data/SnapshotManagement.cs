@@ -414,7 +414,7 @@ internal static class CherryPicker
         var removed = new List<DataFile>();
         foreach (var manifest in (await TableScan.ManifestsAsync(table, snapshot, ct)).Where(mf => mf.Content == ManifestContent.Data && mf.AddedSnapshotId == snapshot.SnapshotId))
         {
-            var entries = ManifestCodec.ReadManifest(await table.IO.ReadAllAsync(manifest.ManifestPath, ct), m.SpecById(manifest.PartitionSpecId), m.CurrentSchema, manifest).Entries;
+            var entries = (await ManifestStore.ReadAsync(table.IO, manifest.ManifestPath, m.SpecById(manifest.PartitionSpecId), m.CurrentSchema, manifest, ct: ct)).Entries;
             foreach (var e in entries.Where(e => e.SnapshotId == snapshot.SnapshotId))
             {
                 var file = e.DataFile with { SpecId = manifest.PartitionSpecId };

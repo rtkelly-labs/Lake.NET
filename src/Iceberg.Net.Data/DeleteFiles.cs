@@ -128,7 +128,7 @@ public sealed class DeleteIndex
         var m = table.Metadata;
         foreach (var manifest in manifests.Where(mf => mf.Content == ManifestContent.Deletes))
         {
-            var contents = ManifestCodec.ReadManifest(await table.IO.ReadAllAsync(manifest.ManifestPath, ct), m.SpecById(manifest.PartitionSpecId), m.CurrentSchema, manifest);
+            var contents = (await ManifestStore.ReadAsync(table.IO, manifest.ManifestPath, m.SpecById(manifest.PartitionSpecId), m.CurrentSchema, manifest, ct: ct));
             foreach (var e in contents.Entries.Where(e => e.Status != ManifestEntryStatus.Deleted))
             {
                 var entry = new DeleteEntry(e.DataFile, e.SequenceNumber ?? 0, manifest);

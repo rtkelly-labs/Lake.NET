@@ -22,7 +22,7 @@ public static class TableFiles
             if (snapshot.ManifestList is { } list)
             {
                 files.Add(list);
-                manifests = ManifestCodec.ReadManifestList(await io.ReadAllAsync(list, ct)).Manifests.Select(m => (m.ManifestPath, m.PartitionSpecId));
+                manifests = (await ManifestStore.ReadListAsync(io, list, ct)).Select(m => (m.ManifestPath, m.PartitionSpecId));
             }
             else manifests = (snapshot.Manifests ?? []).Select(p => (p, metadata.DefaultSpecId)); // v1 embedded manifest paths
 
@@ -30,7 +30,7 @@ public static class TableFiles
             {
                 files.Add(path);
                 if (!readManifests.Add(path)) continue; // manifests are shared between snapshots; read each once
-                var contents = ManifestCodec.ReadManifest(await io.ReadAllAsync(path, ct), metadata.SpecById(specId), metadata.CurrentSchema);
+                var contents = (await ManifestStore.ReadAsync(io, path, metadata.SpecById(specId), metadata.CurrentSchema, ct: ct));
                 foreach (var e in contents.Entries) files.Add(e.DataFile.FilePath);
             }
             foreach (var s in metadata.Statistics.Where(s => s.SnapshotId == snapshot.SnapshotId)) files.Add(s.StatisticsPath);
