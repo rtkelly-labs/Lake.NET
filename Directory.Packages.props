@@ -17,21 +17,21 @@
     <!-- ActivitySource/Meter (IcebergTelemetry) for netstandard2.0; in-box on .NET 8 -->
     <PackageVersion Include="System.Diagnostics.DiagnosticSource" Version="8.0.1" />
     <!-- AWS -->
-    <PackageVersion Include="AWSSDK.S3" Version="4.0.6" />
-    <PackageVersion Include="AWSSDK.Glue" Version="4.0.6" />
-    <PackageVersion Include="AWSSDK.Athena" Version="4.0.3" />
+    <PackageVersion Include="AWSSDK.S3" Version="4.0.104.6" />
+    <PackageVersion Include="AWSSDK.Glue" Version="4.0.116" />
+    <PackageVersion Include="AWSSDK.Athena" Version="4.0.100.21" />
     <!-- EF Core provider (src/Iceberg.Net.EntityFrameworkCore): the major matches the net8.0 target -->
-    <PackageVersion Include="Microsoft.EntityFrameworkCore" Version="8.0.11" />
+    <PackageVersion Include="Microsoft.EntityFrameworkCore" Version="8.0.32" />
     <!-- Only for EF Core's ExecuteUpdate/ExecuteDelete operators and SetPropertyCalls (they live in the relational package); no relational services are used -->
-    <PackageVersion Include="Microsoft.EntityFrameworkCore.Relational" Version="8.0.11" />
+    <PackageVersion Include="Microsoft.EntityFrameworkCore.Relational" Version="8.0.32" />
     <!-- REST catalog server (src/Iceberg.Net.RestServer): bearer/JWT auth; tests host it with WebApplicationFactory -->
-    <PackageVersion Include="Microsoft.AspNetCore.Authentication.JwtBearer" Version="8.0.11" />
-    <PackageVersion Include="Microsoft.AspNetCore.Mvc.Testing" Version="8.0.11" />
+    <PackageVersion Include="Microsoft.AspNetCore.Authentication.JwtBearer" Version="8.0.32" />
+    <PackageVersion Include="Microsoft.AspNetCore.Mvc.Testing" Version="8.0.32" />
     <!-- Iceberg.Net.Spark: running generated Iceberg procedure scripts on EMR Serverless -->
-    <PackageVersion Include="AWSSDK.EMRServerless" Version="4.0.3" />
+    <PackageVersion Include="AWSSDK.EMRServerless" Version="4.0.101.4" />
     <!-- Tests -->
     <PackageVersion Include="Microsoft.NET.Test.Sdk" Version="17.12.0" />
-    <PackageVersion Include="Microsoft.Data.Sqlite" Version="8.0.11" />
+    <PackageVersion Include="Microsoft.Data.Sqlite" Version="8.0.32" />
     <PackageVersion Include="Apache.Arrow" Version="23.0.0" />
     <PackageVersion Include="xunit" Version="2.9.2" />
     <PackageVersion Include="xunit.runner.visualstudio" Version="2.8.2" />
