@@ -16,6 +16,7 @@ Puffin (`format/puffin-spec.md`) is Iceberg's container for blobs that don't fit
 |---|---|---|
 | Read/write Puffin files | `PuffinFile.Write` / `PuffinFile.Read` | blobs uncompressed or `zstd`; LZ4-compressed **footers** are rejected on read (none of the engines we read write them by default) |
 | Deletion vectors | `DeletionVector.Encode/Decode`, `RoaringPositionBitmap` | Roaring64 portable format; array + bitmap containers written, run containers also read; CRC-32 verified |
+| Mumbling bitmaps (v4 manifest deletion vectors) | `MumblingBitmap`, `MumblingPfor` | `format/mumbling-spec.md` v1: positions 0–2,097,151, sparse/dense 256-bit containers, PFOR-encoded descriptors; not yet used (no v4 manifests) |
 | Theta sketches | `ThetaSketch` | DataSketches compact/ordered serial v3, seed 9001, MurmurHash3_x64_128 over Iceberg single-value bytes |
 | Row deletes (v2 → position delete files, v3 → DVs) | `SnapshotProducer.DeleteRows` | at most one DV per data file: an existing DV (or applicable v2 position deletes) is folded in and the old DV removed |
 | **Converter: v2 position deletes → v3 DVs** | `SnapshotProducer.ConvertPositionDeletesToDeletionVectors` | after `upgrade-format-version 3`; folds every position delete file into one DV per data file, drops dangling deletes, operation `replace` |
@@ -28,6 +29,9 @@ Puffin (`format/puffin-spec.md`) is Iceberg's container for blobs that don't fit
 Puffin      = "PFA1" Blob* "PFA1" FooterJSON FooterSize(int32 LE) Flags(4 bytes, bit0 = LZ4 footer) "PFA1"
 DV blob     = Length(int32 BE, = 4 + |vector|) D1 D3 39 64 Vector CRC32(BE, over magic+vector)
 Vector      = Count(int64 LE) { Key(uint32 LE, ≤ int.MaxValue) RoaringBitmap32(portable) }*
+Mumbling    = 01 Cardinality(uint24 LE) Containers(uint16 LE, ≤ 8192) PFOR(descriptors) Container*
+              descriptor 000nnnnn = sparse, n sorted byte offsets; 001xxxxx = dense, 32 bytes MSB-first
+PFOR chunk  = (b1 | b2 << 4) e m  Primary(b1 bits × n, MSB-first)  ExceptionOffset(byte) × e  High(b2 bits × e)
 Theta       = preLongs(1|2|3) serVer=3 family=3 0 0 flags(0x1A, 0x1E empty) seedHash(LE, 0x93CC for 9001)
               [count int32, 4 zero bytes]          if preLongs ≥ 2
               [theta int64]                       if preLongs = 3 (estimation mode)
@@ -41,6 +45,7 @@ Theta       = preLongs(1|2|3) serVer=3 family=3 0 0 flags(0x1A, 0x1E empty) seed
 | Exact-mode sketches byte-identical; hash of `"iceberg"` = `0x032E42766A92E119` | Apache DataSketches (C++ via Python) | `PuffinSpecTests` (committed fixtures) |
 | Estimation-mode sketch from DataSketches deserialises with the same theta/retained/estimate | DataSketches | `PuffinSpecTests` |
 | DVs written by pyroaring (incl. run containers) decode to the same positions | pyroaring (CRoaring) + zlib | `PuffinSpecTests` |
+| Mumbling PFOR examples encode and decode byte for byte; the spec's container examples decode | `format/mumbling-spec.md` (no other implementation to compare with yet) | `MumblingBitmapTests` |
 | PyIceberg applies our v2 position deletes and v3 DVs, and decodes our DVs (CRC verified with zlib) | PyIceberg 0.12 scan + `deletion_vectors_from_puffin_file` | `PuffinCrossEngineTests` |
 | Converted (v2 → v3) table reads identically in PyIceberg | PyIceberg | `PuffinCrossEngineTests` |
 | DataSketches reads our NDV blobs with identical estimates | DataSketches | `PuffinCrossEngineTests` |

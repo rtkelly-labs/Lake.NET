@@ -23,6 +23,11 @@ checked against the full filter afterwards, so pruning never changes the result.
 | File (metrics) | value/null/NaN counts, lower/upper bounds in the manifest | `MetricsEvaluator.MightMatch(DataFile)` | `FilesSkippedByMetrics` |
 | Row group (Parquet) | footer column-chunk statistics | `MetricsEvaluator.MightMatch(rows, metricsOf)` (the same evaluator) | `RowGroupsSkipped` |
 
+Both metrics levels run on the typed statistics model (`ColumnStats`, Iceberg.Net.Core `Manifests`): a file's
+v1–v3 maps are decoded per predicate with the predicate's type, and row-group footers are converted into the same
+record, so one evaluator serves both (and v4 `content_stats` later). `ColumnStatsTests` checks that every type and
+predicate prunes exactly as decoding the raw maps did.
+
 Row-group statistics are read by field ID (Parquet `field_id`, or names through `schema.name-mapping.default` for files
 written without IDs). Only leaves outside lists and maps are used. Values are converted exactly as the reader converts
 them: int → long, float → double, unscaled decimals. Statistics are optional and writers disagree about them, so

@@ -25,8 +25,9 @@ Legend: ✅ implemented and tested · 🟡 partial · ⬜ not started · — not
 | `timestamp_ns`, `timestamptz_ns` | | | ✓ | ✅ model, JSON, transforms, Parquet I/O | `TransformSpecTests` |
 | Data file formats | ✓ | ✓ | ✓ | ✅ Parquet read/write; Avro data and delete files read (field IDs, every logical type, both map encodings) and written when `write.format.default=avro`; ⬜ ORC | `AvroDataFileTests`, `SparkFixtureTests.Reads_spark_avro_data_files_and_writes_on_top`, `SparkCrossEngineTests` (Spark reads our Avro) |
 | `variant` | | | ✓ | 🟡 model + JSON only (no shredding/encoding) | `MetadataSpecTests` |
-| `geometry`, `geography` (CRS, algorithm) | | | ✓ | 🟡 model + JSON only (WKB I/O and bounds not done) | `MetadataSpecTests` |
+| `geometry`, `geography` (CRS, algorithm) | | | ✓ | 🟡 model + JSON only (WKB I/O not done; bound points decode into `GeoPoint`, never used to prune) | `MetadataSpecTests` |
 | `unknown` | | | ✓ | 🟡 model + JSON + promotion rule | `MetadataSpecTests` |
+| `file` (v4) | | | | 🟡 model + JSON; its 7 field IDs reserved; refused below v4 (so unusable until v4 lands); no Parquet/Avro mapping | `FileTypeTests` |
 | struct / list / map with field IDs | ✓ | ✓ | ✓ | ✅ model, JSON, Parquet read/write (3-level lists/maps; 2-level lists read), nested schema evolution (dotted paths); metrics for every primitive reachable through structs (not inside lists/maps, as Java); filters and partition sources may be fields inside structs (dotted names), not inside lists/maps | `MetadataSpecTests`, `NestedTypesTests`, Spark/PyIceberg cross-checks |
 | `initial-default` / `write-default` | | | ✓ | ✅ JSON single-value form (Appendix D) round-trips; reader applies initial defaults; `AddRequiredColumn(…, initialDefault)` | `MetadataSpecTests`, `SingleValueJsonTests`, `SchemaUpdateTests` |
 | Identifier field IDs (required, non-float) | ✓ | ✓ | ✓ | ✅ | `MetadataSpecTests` |
@@ -63,7 +64,8 @@ Legend: ✅ implemented and tested · 🟡 partial · ⬜ not started · — not
 | Snapshot ID and sequence-number inheritance (ADDED only) | ✅ | `AvroSpecTests` |
 | Sequence numbers (`last-sequence-number`, monotonic, `file_sequence_number`) | ✅ | `StateManagementTests` |
 | Snapshot summary (operation + totals) | ✅ append/overwrite/delete totals | `LocalTableTests` |
-| Single-value binary serialisation (Appendix D) for bounds | ✅ incl. promoted-width reads | `AvroSpecTests` |
+| Single-value binary serialisation (Appendix D) for bounds | ✅ incl. promoted-width reads; geo-point and variant bound forms ("Bound serialization"); decoded into the typed `ColumnStats` model, lossless back to bytes | `AvroSpecTests`, `ColumnStatsTests` |
+| v4 `content_stats` (typed field stats) | 🟡 model and layout only (`ContentStatsLayout`: base IDs, members, geo structs, promotion); no v4 manifests read or written | `ContentStatsLayoutTests` |
 | v1 snapshots with embedded `manifests` list | ⬜ (refused explicitly) | |
 | Manifest compaction / merge-append | ✅ Java defaults (`commit.manifest-merge.enabled`, min count 100, 8 MB); sequence numbers and `first_row_id` preserved | `MergeAppendTests`, `ModelBasedTests`, `SparkCrossEngineTests` |
 | Scan planning: filter expressions, manifest pruning by partition summaries, file pruning by partition projection and column metrics, Parquet row-group pruning on footer statistics | ✅ identity/bucket/truncate/temporal projection; Java null semantics; doubtful statistics never prune | `ExpressionTests`, `ScanPruningTests` and `ReadPathTests` (random filters ≡ full scan), `FilterCrossEngineTests` (PyIceberg), `SparkCrossEngineTests` |
