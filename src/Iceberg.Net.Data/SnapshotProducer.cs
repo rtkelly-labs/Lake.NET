@@ -254,6 +254,19 @@ public sealed class SnapshotProducer
         return this;
     }
 
+    private TimeProvider _clock = TimeProvider.System;
+
+    /// <summary>
+    /// The clock snapshot timestamps are taken from (default: the system clock). Whatever it says, a snapshot's
+    /// <c>timestamp-ms</c> is strictly greater than its parent's on the same branch (Iceberg v4's rule; harmless on
+    /// v1–v3): <c>max(now, parent + 1)</c>, so a clock that stands still or runs behind still yields an ordered history.
+    /// </summary>
+    public SnapshotProducer WithClock(TimeProvider clock)
+    {
+        _clock = clock ?? throw new ArgumentNullException(nameof(clock));
+        return this;
+    }
+
     public SnapshotProducer AddFiles(IEnumerable<DataFile> files)
     {
         _added.AddRange(files);
@@ -553,7 +566,7 @@ public sealed class SnapshotProducer
             SnapshotId = snapshotId,
             ParentSnapshotId = parent?.SnapshotId,
             SequenceNumber = sequenceNumber,
-            TimestampMs = DateTimeOffset.UtcNow.ToUnixTimeMilliseconds(),
+            TimestampMs = Math.Max(_clock.GetUtcNow().ToUnixTimeMilliseconds(), parent is null ? long.MinValue : parent.TimestampMs + 1),
             ManifestList = listPath,
             SchemaId = m.CurrentSchemaId,
             Summary = Summary(operation, parent, deletedFiles, deletedRecords, deletedSize, deleteChange),

@@ -92,6 +92,14 @@ public static class TableValidator
             }
         }
 
+        // v4: a snapshot's timestamp is strictly greater than its parent's. Earlier versions do not require it (and
+        // tables written by clocks that skew, or by fast writers within one millisecond, break it), so it is not
+        // reported for them, not even as a warning. SnapshotProducer always writes it.
+        if (m.FormatVersion >= 4)
+            foreach (var s in m.Snapshots)
+                if (s.ParentSnapshotId is { } p && m.SnapshotById(p) is { } parent && s.TimestampMs <= parent.TimestampMs)
+                    error("META-TIMESTAMP-ORDER", $"snapshot {s.SnapshotId} timestamp-ms {s.TimestampMs} is not greater than its parent's ({parent.TimestampMs})", null);
+
         if (m.FormatVersion >= 3)
         {
             var ranges = m.Snapshots.Where(s => s.FirstRowId is not null).Select(s => (Start: s.FirstRowId!.Value, End: s.FirstRowId!.Value + (s.AddedRows ?? 0), s.SnapshotId)).ToList();
