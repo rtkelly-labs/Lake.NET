@@ -102,6 +102,23 @@ The commit asserts every ref. After a lost race, the retention is recomputed on 
 after the commit has succeeded, by diffing reachability against the committed metadata. One gap is shared with Java: a
 ref created concurrently on a snapshot being expired is dropped with it.
 
+### Which files may be deleted
+
+Metadata can name any path, so the operations that delete files only delete under the table's own directories:
+its `location` and the `write.data.path`, `write.metadata.path` and `write.object-storage.path` properties
+(`TableLocations`). Paths with `.` or `..` segments never count as inside.
+
+| Operation | Outside the table's directories | `gc.enabled=false` |
+|---|---|---|
+| `Maintenance.ExpireAsync` | skipped and listed in `ExpireResult.SkippedFiles` | refused, as Java's `RemoveSnapshots` |
+| `DropTableAsync(purge: true)` (catalogs and the REST server) | skipped | data and delete files kept; manifests, manifest lists, statistics and metadata files deleted, as Java's `dropTableData` |
+| `Maintenance.DeleteOrphanFilesAsync` | only the location is listed | refused |
+
+Java deletes whatever the metadata names; skipping paths outside the table is a deliberate difference. Orphan
+cleanup also refreshes the table before planning, refuses an `olderThan` under 24 hours (as Spark's procedure does), and
+refuses a location that is a bucket, container or file-system root or has dot segments. Catalogs refuse namespace
+levels and table names that would reshape a default location (empty, `.`, `..`, `/`, `\`, control characters).
+
 ## Metadata tables
 
 `MetadataTables` returns typed rows whose `Columns` use Spark's column names: `Snapshots`, `History`, `Refs`,

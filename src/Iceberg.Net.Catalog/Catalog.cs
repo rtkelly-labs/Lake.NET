@@ -221,12 +221,20 @@ public abstract partial class MetastoreCatalog(string name, IFileIO io) : ICatal
     /// <summary>Default table location: <c>{warehouse}/{ns}.db/{table}</c> (the Hive/Glue convention Athena also uses).</summary>
     protected abstract Task<string> DefaultTableLocationAsync(TableIdentifier id, CancellationToken ct);
 
+    /// <summary><see cref="DefaultTableLocationAsync"/> for an identifier whose parts are safe to put in a path.</summary>
+    protected Task<string> SafeDefaultLocationAsync(TableIdentifier id, CancellationToken ct)
+    {
+        foreach (var level in id.Namespace.Levels) TableLocations.RequireSafeName(level, "Namespace level");
+        TableLocations.RequireSafeName(id.Name, "Table name");
+        return DefaultTableLocationAsync(id, ct);
+    }
+
     public async Task<Table> CreateTableAsync(CreateTableRequest r, CancellationToken ct = default)
     {
         using var telemetry = IcebergTelemetry.StartCatalogCall(Name, GetType().Name, "create_table", r.Identifier.ToString());
         if (!await NamespaceExistsAsync(r.Identifier.Namespace, ct)) throw new NoSuchNamespaceException($"Namespace {r.Identifier.Namespace} does not exist");
         if (await CurrentMetadataLocationAsync(r.Identifier, ct) is not null) throw new AlreadyExistsException($"Table {r.Identifier} already exists");
-        var location = r.Location ?? await DefaultTableLocationAsync(r.Identifier, ct);
+        var location = r.Location ?? await SafeDefaultLocationAsync(r.Identifier, ct);
         var fresh = TableMetadata.NewTable(r.Schema, r.Spec, r.SortOrder, location, r.Properties, r.FormatVersion, Clock, r.PreserveFieldIds);
         var metadata = await WriteAndSwapAsync(r.Identifier, null, loc => fresh with { MetadataFileLocation = loc }, ct);
         return telemetry.Succeeded(new Table(this, r.Identifier, metadata, FileIO));
@@ -258,9 +266,11 @@ public abstract partial class MetastoreCatalog(string name, IFileIO io) : ICatal
         if (metadata is not null)
         {
             // Entry first, files second: a crash in between leaves orphans, never a table pointing at missing files.
-            var files = await TableFiles.ReachableAsync(metadata, FileIO, metadata.Snapshots, ct);
+            // As Java's dropTableData, a table without gc.enabled keeps its data files; only metadata goes. Paths outside
+            // the table's own directories are never deleted, whatever the metadata names.
+            var files = await TableFiles.ReachableAsync(metadata, FileIO, metadata.Snapshots, ct, dataFiles: TableLocations.IsGcEnabled(metadata));
             files.UnionWith(metadata.MetadataLog.Select(l => l.MetadataFile).Append(location));
-            await TableFiles.DeleteAllAsync(FileIO, files, ct);
+            await TableFiles.DeleteAllAsync(FileIO, TableLocations.Partition(metadata, files).Inside, ct);
         }
         telemetry.Succeeded();
     }
@@ -408,7 +418,7 @@ public class InMemoryCatalog(string warehouse, IFileIO? io = null, string name =
             if (!_namespaces.ContainsKey(id.Namespace)) throw new NoSuchNamespaceException($"Namespace {id.Namespace} does not exist");
             if (_views.ContainsKey(id) || _tables.ContainsKey(id)) throw new AlreadyExistsException($"{id} already exists");
         }
-        var metadata = ViewMetadata.Create(await DefaultTableLocationAsync(id, ct), definition.Schema, definition.ToVersion(), properties, Clock());
+        var metadata = ViewMetadata.Create(await SafeDefaultLocationAsync(id, ct), definition.Schema, definition.ToVersion(), properties, Clock());
         return await WriteViewAsync(id, null, metadata, ct);
     }
 

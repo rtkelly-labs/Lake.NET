@@ -15,6 +15,11 @@ public sealed record ExpireResult(IReadOnlyList<long> Expired, IReadOnlyList<str
 {
     /// <summary>Branches and tags removed because their snapshot was older than their max-ref-age.</summary>
     public IReadOnlyList<string> RemovedRefs { get; init; } = [];
+    /// <summary>
+    /// Files only expired snapshots referenced that were not deleted because they are outside the table's own
+    /// directories (<see cref="TableLocations.Prefixes"/>): another table's files, or paths the metadata should not name.
+    /// </summary>
+    public IReadOnlyList<string> SkippedFiles { get; init; } = [];
 }
 
 /// <summary>
@@ -42,6 +47,8 @@ public static class Maintenance
     public const string MinSnapshotsToKeep = "history.expire.min-snapshots-to-keep";
     public const string MaxRefAgeMs = "history.expire.max-ref-age-ms";
     public const long MaxSnapshotAgeMsDefault = 5L * 24 * 60 * 60 * 1000;
+    /// <summary>The youngest file orphan cleanup may delete: anything younger may belong to a writer still running.</summary>
+    public static readonly TimeSpan MinOrphanAge = TimeSpan.FromDays(1);
 
     /// <summary>Expire snapshots and delete the files only they referenced; see <see cref="ExpireAsync(Table, ExpireOptions?, CancellationToken)"/>.</summary>
     public static async Task<IReadOnlyList<long>> ExpireSnapshotsAsync(Table table, long olderThanMs, int? retainLast = null, CancellationToken ct = default) =>
@@ -62,11 +69,15 @@ public static class Maintenance
     /// younger than the table-wide age. Everything else expires. With <see cref="ExpireOptions.CleanExpiredFiles"/>, files
     /// reachable from expired snapshots but from no retained one — manifest lists, manifests, data, delete and statistics
     /// files — are deleted once the commit has succeeded. Nothing is deleted if the commit fails or its outcome is unknown.
-    /// The commit asserts every ref it based its decision on; after a lost race the retention is recomputed.
+    /// The commit asserts every ref it based its decision on; after a lost race the retention is recomputed. Only files
+    /// under the table's own directories are deleted; the rest are reported in <see cref="ExpireResult.SkippedFiles"/>.
+    /// As Java, a table with <c>gc.enabled=false</c> is refused: it does not own its files.
     /// </summary>
     public static async Task<ExpireResult> ExpireAsync(Table table, ExpireOptions? options, CancellationToken ct = default)
     {
         options ??= new ExpireOptions();
+        if (!TableLocations.IsGcEnabled(table.Metadata))
+            throw new ValidationException("Cannot expire snapshots: GC is disabled (deleting files may corrupt other tables)");
         var policy = CommitRetryPolicy.From(table.Metadata);
         for (var attempt = 0; ; attempt++)
         {
@@ -96,8 +107,13 @@ public static class Maintenance
             var after = table.Metadata;
             var candidates = await TableFiles.ReachableAsync(m, table.IO, expire, ct);
             candidates.ExceptWith(await TableFiles.ReachableAsync(after, table.IO, after.Snapshots, ct));
-            await TableFiles.DeleteAllAsync(table.IO, candidates, ct);
-            return new ExpireResult(expired, candidates.Order(StringComparer.Ordinal).ToList()) { RemovedRefs = removedRefs };
+            var (inside, outside) = TableLocations.Partition(after, candidates);
+            await TableFiles.DeleteAllAsync(table.IO, inside, ct);
+            return new ExpireResult(expired, inside.Order(StringComparer.Ordinal).ToList())
+            {
+                RemovedRefs = removedRefs,
+                SkippedFiles = outside.Order(StringComparer.Ordinal).ToList(),
+            };
         }
     }
 
@@ -167,34 +183,36 @@ public static class Maintenance
     /// <summary>
     /// Delete files under the table location that no snapshot or metadata file references (Java's
     /// <c>DeleteOrphanFiles</c>): leftovers of failed or abandoned writes. Only files older than
-    /// <paramref name="olderThan"/> (default 3 days, as Java) are candidates, so in-flight writes of other writers are
-    /// safe; <paramref name="dryRun"/> only reports. Locations are compared after normalising URI forms
-    /// (<c>s3a://</c>/<c>s3n://</c> vs <c>s3://</c>, <c>file:/</c> vs <c>file:///</c> vs bare paths).
+    /// <paramref name="olderThan"/> (default 3 days, as Java; at least <see cref="MinOrphanAge"/>, as Spark's procedure)
+    /// are candidates, so in-flight writes of other writers are safe; <paramref name="dryRun"/> only reports. The table is
+    /// refreshed first, so files committed since it was loaded are not taken for orphans. Refused when the location is
+    /// not safe to list under (<see cref="TableLocations.RequireSafeRoot"/>) or <c>gc.enabled</c> is false. Locations are
+    /// compared after normalising URI forms (<c>s3a://</c>/<c>s3n://</c> vs <c>s3://</c>, <c>file:/</c> vs
+    /// <c>file:///</c> vs bare paths).
     /// </summary>
     public static async Task<IReadOnlyList<string>> DeleteOrphanFilesAsync(Table table, TimeSpan? olderThan = null, bool dryRun = false, CancellationToken ct = default)
     {
         if (table.IO is not IO.ISupportsListing lister) throw new NotSupportedException($"{table.IO.GetType().Name} cannot list files");
+        var age = olderThan ?? TimeSpan.FromDays(3);
+        if (age < MinOrphanAge)
+            throw new ArgumentOutOfRangeException(nameof(olderThan), age, $"Orphan cleanup needs files at least {MinOrphanAge.TotalHours:0} hours old: younger ones may belong to a writer still running");
+        await table.RefreshAsync(ct);
         var m = table.Metadata;
+        if (!TableLocations.IsGcEnabled(m))
+            throw new ValidationException("Cannot remove orphan files: GC is disabled (deleting files may corrupt other tables)");
+        TableLocations.RequireSafeRoot(m.Location);
         var referenced = await TableFiles.ReachableAsync(m, table.IO, m.Snapshots, ct);
         referenced.UnionWith(m.MetadataLog.Select(l => l.MetadataFile));
         if (m.MetadataFileLocation is { } current) referenced.UnionWith([current, current[..(current.LastIndexOf('/') + 1)] + "version-hint.text"]);
         referenced.UnionWith(m.Statistics.Select(s => s.StatisticsPath));
         referenced.UnionWith(m.PartitionStatistics.Select(s => s.StatisticsPath));
-        var keep = referenced.Select(Normalise).ToHashSet(StringComparer.Ordinal);
+        var keep = referenced.Select(TableLocations.Normalise).ToHashSet(StringComparer.Ordinal);
 
-        var cutoff = DateTime.UtcNow - (olderThan ?? TimeSpan.FromDays(3));
+        var cutoff = DateTime.UtcNow - age;
         var orphans = new List<string>();
         await foreach (var f in lister.ListAsync(m.Location.TrimEnd('/') + "/", ct))
-            if (f.LastModifiedUtc < cutoff && !keep.Contains(Normalise(f.Location))) orphans.Add(f.Location);
+            if (f.LastModifiedUtc < cutoff && !keep.Contains(TableLocations.Normalise(f.Location))) orphans.Add(f.Location);
         if (!dryRun) await TableFiles.DeleteAllAsync(table.IO, orphans, ct);
         return orphans;
-    }
-
-    private static string Normalise(string location)
-    {
-        if (location.StartsWith("s3a://", StringComparison.Ordinal) || location.StartsWith("s3n://", StringComparison.Ordinal)) return "s3://" + location[6..];
-        if (location.StartsWith("file://", StringComparison.Ordinal)) return new Uri(location).LocalPath;
-        if (location.StartsWith("file:", StringComparison.Ordinal)) return Uri.UnescapeDataString(location[5..]);
-        return location;
     }
 }

@@ -178,9 +178,12 @@ public sealed class CatalogService(ICatalogStore store, IFileIO io, RestServerOp
         var m = table.Metadata;
         try
         {
-            var files = await TableFiles.ReachableAsync(m, FileIO, m.Snapshots, ct);
+            // Only the table's own directories, and data files only when the table owns them (gc.enabled), as the catalogs do.
+            var files = await TableFiles.ReachableAsync(m, FileIO, m.Snapshots, ct, dataFiles: TableLocations.IsGcEnabled(m));
             files.UnionWith(m.MetadataLog.Select(l => l.MetadataFile).Append(table.MetadataLocation!));
-            await TableFiles.DeleteAllAsync(FileIO, files, ct);
+            var (inside, outside) = TableLocations.Partition(m, files);
+            if (outside.Count > 0) Logger?.LogWarning("Purging {Table}: skipped {Count} files outside its location", id, outside.Count);
+            await TableFiles.DeleteAllAsync(FileIO, inside, ct);
         }
         catch (Exception e) when (e is not OperationCanceledException)
         {
