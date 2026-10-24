@@ -33,17 +33,19 @@ internal sealed class PredicateTranslator
 
     private readonly IReadOnlyList<IcebergMemberBinding> _members;
     private readonly Schema _read;
-    private readonly Schema _current;
     private readonly Dictionary<string, Column> _columns = [];
     private ParameterExpression _parameter = null!;
 
     /// <param name="read">The schema rows are read with (the selected snapshot's).</param>
-    /// <param name="current">The table's current schema: file planning binds filters to it, so a pushed-down column must have the same name in both.</param>
-    public PredicateTranslator(IReadOnlyList<IcebergMemberBinding> members, Schema read, Schema current)
+    /// <remarks>
+    /// Members are bound to the current schema; filters are written with the read schema's names, because the core binds
+    /// a scan's filter (for planning and for rows) to the selected snapshot's schema. So a column renamed since a
+    /// time-travel snapshot still prunes, under its old name.
+    /// </remarks>
+    public PredicateTranslator(IReadOnlyList<IcebergMemberBinding> members, Schema read)
     {
         _members = members;
         _read = read;
-        _current = current;
     }
 
     public Translation Translate(LambdaExpression predicate)
@@ -356,8 +358,8 @@ internal sealed class PredicateTranslator
         if (binding!.Field.Type is not PrimitiveType) return null;
         var id = binding.Field.Id;
         var readName = _read.FindColumnName(id);
-        // Planning binds to the current schema and row filtering to the read schema, by name: both must agree.
-        if (readName is null || readName != _current.FindColumnName(id)) return null;
+        // A column dropped since the read snapshot's schema (or added after it) is not there to filter on.
+        if (readName is null) return null;
         if (_read.FindField(id)!.Type is not PrimitiveType readType || !readType.Equals(binding.Field.Type)) return null;
         var col = new Column(readName, binding.Field, binding, binding.ClrType, !_read.AlwaysPresent(id));
         _columns[key] = col;

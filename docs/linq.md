@@ -94,8 +94,10 @@ Every member type also maps as `Nullable<T>`.
   `[IcebergField(Nullability = ...)]`.
 - `[IcebergKey]` members become identifier fields, which is the default upsert key.
 
-`catalog.CreateTableAsync<T>(id)` creates the table. Catalogs renumber field IDs on create, so a model whose explicit
-IDs are not in that order is refused before anything is created.
+`catalog.CreateTableAsync<T>(id)` creates the table and keeps the model's field IDs
+(`CreateTableRequest.PreserveFieldIds`). Catalogs that build the metadata locally (in-memory, Glue, JDBC) keep them as
+given, gaps included. A REST server builds the metadata itself and may renumber, so for any other catalog a model whose
+explicit IDs are not in the order a server assigns them is refused before anything is created.
 
 ## Query translation
 
@@ -127,7 +129,8 @@ Each top-level `&&` conjunct of those filters is translated on its own:
 | member vs member, method calls (`Length`, `Contains` on strings, `ToUpper`, …), computed members | residual | |
 | constants the column cannot hold exactly (`x.IntCol < 2.5`, sub-µs ticks, decimal with more scale, local `DateTime` vs UTC) | residual | literal round-trip check |
 | `byte[] ==` | residual | reference equality in C# |
-| a column renamed or dropped since a time-travel snapshot | residual | core plans with current names, filters with the snapshot's |
+| a column renamed since a time-travel snapshot | pushed down under the snapshot's name | the core binds the filter to the snapshot's schema |
+| a column dropped since, or added after, a time-travel snapshot | residual | |
 
 The rules follow C# semantics, not SQL's. A lifted comparison with null is false and its negation is true. A
 non-nullable member reads a null column as its default, so `x.Qty == 0` over an optional `qty` becomes
@@ -171,7 +174,7 @@ Each call commits one snapshot through `TableMutations`.
 |---|---|
 | `table.InsertAsync(items)` | `InsertAsync(rows)` |
 | `table.UpsertAsync(items, key: x => x.Id / x => new { x.A, x.B })` | `UpsertAsync(rows, keyColumns)`; no key → identifier fields |
-| `query.ExecuteDeleteAsync()` | exact filter → `DeleteWhereAsync(Expression)` (with pruning). With a residual → `DeleteWhereAsync(Func)` over `pushed && residual(T)`: correct, but every file is read. Strict queries throw. |
+| `query.ExecuteDeleteAsync()` | exact filter → `DeleteWhereAsync(Expression)`. With a residual → `DeleteWhereAsync(Expression pushed, refine: residual(T))`: the pushed superset still prunes files by partition and metrics, and the residual decides each remaining row. Strict queries throw. |
 | `query.ExecuteUpdateAsync(s => s.SetProperty(x => x.P, value).SetProperty(x => x.Q, x => x.Q + 1))` | `UpdateAsync(filter, RowUpdate)`; each value is a constant (captured values evaluated once) or a `Func<object?[], object?>` that maps the row to `T`, evaluates the expression and converts the result to the column's physical value. Filters must translate exactly. |
 | `table.MergeAsync(items, on: x => x.Id, m => m.WhenMatchedUpdate(s => s.SetProperty(x => x.Qty, (t, src) => t.Qty + src.Qty)).WhenMatchedUpdateAll().WhenMatchedDelete((t, s) => …).WhenNotMatchedInsert(s => …).WhenNotMatchedBySourceDelete(x => …))` | `MergeAsync(rows, on, MergeBuilder)`; conditions see both rows as `T`; source values in assignments are looked up by the target row's key; the by-source filter must translate exactly |
 
@@ -186,4 +189,4 @@ Each call commits one snapshot through `TableMutations`.
 - `ToLower`/`Contains`/`EndsWith`, string ordering and arithmetic in filters are residuals.
 - Projection decodes only the columns the query uses (the core reads by field ID, row group by row group), but a data
   file's bytes are still fetched whole.
-- A time-travel filter on a column renamed or dropped since that snapshot is evaluated as a residual on `T`.
+- A time-travel filter on a column dropped since that snapshot (or added after it) is evaluated as a residual on `T`.
