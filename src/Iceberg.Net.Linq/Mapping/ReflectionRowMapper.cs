@@ -86,9 +86,10 @@ internal sealed class StructBinding
 
     private static NestedField? Resolve(ModelMember m, IReadOnlyList<NestedField> fields, IReadOnlyList<MappedField>? mapped, IcebergMapperOptions options, string path, Type type)
     {
-        if (m.Attribute is { Id: > 0 } a)
-            return fields.FirstOrDefault(f => f.Id == a.Id)
-                ?? (options.IgnoreUnmatchedMembers ? null : throw new InvalidOperationException($"{type.Name}.{m.Name} is bound to field ID {a.Id}, which is not in the schema{(path.Length > 0 ? $" at '{path.TrimEnd('.')}'" : "")}"));
+        var explicitId = m.Attribute is { Id: > 0 } a ? a.Id : path.Length == 0 ? options.FieldIds?.Invoke(m.Name) : null;
+        if (explicitId is { } fieldId)
+            return fields.FirstOrDefault(f => f.Id == fieldId)
+                ?? (options.IgnoreUnmatchedMembers ? null : throw new InvalidOperationException($"{type.Name}.{m.Name} is bound to field ID {fieldId}, which is not in the schema{(path.Length > 0 ? $" at '{path.TrimEnd('.')}'" : "")}"));
         var name = m.Attribute?.Name ?? options.NameConverter?.Invoke(m.Name) ?? m.Name;
         var exact = fields.FirstOrDefault(f => f.Name == name);
         if (exact is not null) return exact;

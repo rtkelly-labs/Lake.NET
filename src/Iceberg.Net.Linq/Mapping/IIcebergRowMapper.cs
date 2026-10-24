@@ -80,6 +80,12 @@ public sealed record IcebergMapperOptions
 
     /// <summary>Skip members that match no column, instead of failing the bind.</summary>
     public bool IgnoreUnmatchedMembers { get; init; }
+
+    /// <summary>
+    /// Field IDs for top-level members without <c>[IcebergField(id)]</c>, by property name (null: bind by name). Lets a
+    /// model configured elsewhere (an EF Core model, say) bind by ID, which survives renames.
+    /// </summary>
+    public Func<string, int?>? FieldIds { get; init; }
 }
 
 public static class IcebergNaming

@@ -18,6 +18,10 @@
     <PackageVersion Include="AWSSDK.S3" Version="4.0.6" />
     <PackageVersion Include="AWSSDK.Glue" Version="4.0.6" />
     <PackageVersion Include="AWSSDK.Athena" Version="4.0.3" />
+    <!-- EF Core provider (src/Iceberg.Net.EntityFrameworkCore): the major matches the net8.0 target -->
+    <PackageVersion Include="Microsoft.EntityFrameworkCore" Version="8.0.11" />
+    <!-- Only for EF Core's ExecuteUpdate/ExecuteDelete operators and SetPropertyCalls (they live in the relational package); no relational services are used -->
+    <PackageVersion Include="Microsoft.EntityFrameworkCore.Relational" Version="8.0.11" />
     <!-- Tests -->
     <PackageVersion Include="Microsoft.NET.Test.Sdk" Version="17.12.0" />
     <PackageVersion Include="Microsoft.Data.Sqlite" Version="8.0.11" />

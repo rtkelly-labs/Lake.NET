@@ -103,7 +103,7 @@ internal sealed class MergeContext<T>(Table table, IIcebergRowBinding<T> binding
     public IcebergExpression? ExactFilter(Expression<Func<T, bool>>? filter)
     {
         if (filter is null) return null;
-        var t = new PredicateTranslator(binding.Members, table.Schema, table.Schema).Translate(filter);
+        var t = new PredicateTranslator(binding.Members, table.Schema).Translate(filter);
         return t.Exact ? t.Filter : throw new NotSupportedException($"WhenNotMatchedBySourceDelete needs a filter that translates completely into an Iceberg expression: {filter}");
     }
 
@@ -191,20 +191,19 @@ public static class IcebergWrites
     }
 
     /// <summary>
-    /// <c>DELETE … WHERE</c> for the query's filters. A fully translated filter deletes with file pruning
-    /// (<c>DeleteWhereAsync(Expression)</c>); with a residual filter the rows are matched in .NET instead (every file is
-    /// read), and strict queries throw. Only <c>Where</c> may precede it, and only on the current snapshot.
+    /// <c>DELETE … WHERE</c> for the query's filters. The translated filter prunes files by partition and metrics
+    /// (<c>DeleteWhereAsync(Expression)</c>); a residual (the untranslatable part) is evaluated on each remaining row as
+    /// <typeparamref name="T"/> (<c>DeleteWhereAsync(Expression, refine)</c>). Strict queries with a residual throw. Only <c>Where</c> may precede it, and only on the current snapshot.
     /// </summary>
     public static Task<MutationResult> ExecuteDeleteAsync<T>(this IQueryable<T> query, DeleteStrategy strategy = DeleteStrategy.Default, CancellationToken ct = default)
     {
         var (source, plan) = MutationPlan(query, "ExecuteDeleteAsync");
         var table = source.Table;
         if (plan.Residual.Count == 0) return TableMutations.DeleteWhereAsync(table, plan.Request.Filter, strategy, ct);
-        var schema = table.Schema;
-        var read = source.Binding.CreateReader(schema);
-        var pushed = RowEvaluator.Compile(Binder.Bind(schema, plan.Request.Filter));
+        // The pushed filter (a superset) prunes files; the residual refines each surviving row as T.
+        var read = source.Binding.CreateReader(table.Schema);
         var residual = plan.ResidualFilter!;
-        return TableMutations.DeleteWhereAsync(table, row => pushed(row) && residual(read(row)), strategy, ct);
+        return TableMutations.DeleteWhereAsync(table, plan.Request.Filter, row => residual(read(row)), strategy, ct);
     }
 
     /// <summary>

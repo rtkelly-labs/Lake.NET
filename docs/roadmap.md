@@ -29,7 +29,7 @@ shape.
 | **C. Read path** | Projection by field ID, row-group pruning, streaming, time travel with the snapshot's schema, metadata counts | ✅ [read-path.md](read-path.md) |
 | **D. Snapshot management** | Branches/tags, rollback, cherry-pick, fast-forward, branch writes (WAP), per-ref retention, metadata tables, change feed, partial-progress compaction, position-delete rewrite | ✅ [snapshot-management.md](snapshot-management.md) |
 | **E. Typed layer** | `Iceberg.Net.Linq`: mapping by field ID, LINQ provider, typed writes in EF Core's bulk shape | ✅ [linq.md](linq.md) |
-| **F. EF Core provider** | Non-relational provider over phase E: model, queries, `ExecuteUpdate`/`ExecuteDelete`, `SaveChanges` | ⬜ |
+| **F. EF Core provider** | Non-relational provider over phase E: model, queries, `ExecuteUpdate`/`ExecuteDelete`, `SaveChanges` | ✅ [efcore.md](efcore.md) (`SaveChanges` is atomic per table, not across tables) |
 | **G. Ecosystem** | DuckDB oracle, OpenTelemetry, Spark procedure helpers and job submission, Athena helpers, a REST catalog server | ⬜ |
 
 Gaps the phases left open:
@@ -38,8 +38,7 @@ Gaps the phases left open:
 - Delete files are decoded with the current schema.
 - Cherry-pick replay needs the default partition spec.
 - The change feed is Spark-checked only for tables without delete files (Java's changelog scan refuses them).
-- In the LINQ layer, a delete with a residual reads every file, and a time-travel filter on a renamed column runs in memory.
-- `CreateTableAsync` always renumbers field IDs.
+- `SaveChanges` across tables is not atomic, because `MergeAsync` cannot stage a commit for `CommitTransactionAsync`.
 
 ### Upstream changes to plan for (from the spec-drift check)
 

@@ -65,6 +65,33 @@ public sealed class TypedWriteTests : CatalogTest
     }
 
     [Fact]
+    public async Task ExecuteDelete_with_a_residual_still_prunes_files_by_the_translated_part()
+    {
+        var warehouse = Path.Combine(Path.GetTempPath(), "iceberg-dotnet-linq", Guid.NewGuid().ToString("N"));
+        var io = new ReadCountingFileIO(new Iceberg.Net.IO.LocalFileIO());
+        using var catalog = new InMemoryCatalog(warehouse, io);
+        try
+        {
+            await catalog.CreateNamespaceAsync(Namespace.Of("l"));
+            var table = await catalog.CreateTableAsync<Order>(NewId("orders"), Snake);
+            var orders = SampleOrders();
+            foreach (var chunk in orders.Chunk(14)) await table.InsertAsync(chunk, Mapper);
+            io.DataFilesOpened.Clear();
+
+            // id <= 10 lives in the first of three files; the residual (string length) is decided per row.
+            var r = await table.AsQueryable<Order>(SnakeQuery).Where(x => x.Id <= 10 && x.Customer.Length == 5).ExecuteDeleteAsync();
+            var expected = orders.Where(x => !(x.Id <= 10 && x.Customer.Length == 5)).ToList();
+            Assert.Equal(orders.Count - expected.Count, r.RowsDeleted);
+            Assert.Single(io.DataFilesOpened.Distinct());
+            Assert.Equal(Ids(expected), Ids(await table.AsQueryable<Order>(SnakeQuery).ToListAsync()));
+        }
+        finally
+        {
+            if (Directory.Exists(warehouse)) Directory.Delete(warehouse, recursive: true);
+        }
+    }
+
+    [Fact]
     public async Task Update_setters_translate_into_row_update_assignments()
     {
         var (table, orders) = await OrdersTableAsync();
@@ -150,4 +177,24 @@ public sealed class TypedWriteTests : CatalogTest
 internal static class QueryTestExtensions
 {
     public static Task<T> SingleAsync2<T>(this IQueryable<T> q, System.Linq.Expressions.Expression<Func<T, bool>> predicate) => q.Where(predicate).SingleAsync();
+}
+
+/// <summary>Records which data files a scan opens.</summary>
+internal sealed class ReadCountingFileIO(Iceberg.Net.IO.IFileIO inner) : Iceberg.Net.IO.IFileIO
+{
+    public List<string> DataFilesOpened { get; } = [];
+
+    private void Note(string l)
+    {
+        if (l.EndsWith(".parquet", StringComparison.Ordinal)) lock (DataFilesOpened) DataFilesOpened.Add(l);
+    }
+
+    public Task<byte[]> ReadAllAsync(string l, CancellationToken ct = default) { Note(l); return inner.ReadAllAsync(l, ct); }
+    public Task<Stream> OpenReadAsync(string l, CancellationToken ct = default) { Note(l); return inner.OpenReadAsync(l, ct); }
+    public Task<byte[]> ReadRangeAsync(string l, long offset, int length, CancellationToken ct = default) { Note(l); return inner.ReadRangeAsync(l, offset, length, ct); }
+    public Task<long> LengthAsync(string l, CancellationToken ct = default) => inner.LengthAsync(l, ct);
+    public Task<bool> ExistsAsync(string l, CancellationToken ct = default) => inner.ExistsAsync(l, ct);
+    public Task WriteAsync(string l, ReadOnlyMemory<byte> content, bool overwrite = false, CancellationToken ct = default) => inner.WriteAsync(l, content, overwrite, ct);
+    public Task DeleteAsync(string l, CancellationToken ct = default) => inner.DeleteAsync(l, ct);
+    public void Dispose() => inner.Dispose();
 }

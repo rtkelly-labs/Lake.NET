@@ -3,6 +3,7 @@ using System.Text.Json.Nodes;
 using Iceberg.Net.Catalog;
 using Iceberg.Net.Json;
 using Iceberg.Net.Metadata;
+using Iceberg.Net.Partitioning;
 using Iceberg.Net.Types;
 
 namespace Iceberg.Net.Linq;
@@ -52,20 +53,35 @@ public static class IcebergSchema
     }
 
     /// <summary>
-    /// Create a table whose schema is <see cref="FromType{T}"/>. Fails before creating anything when the model's explicit
-    /// field IDs would not survive the catalog's ID assignment on create.
+    /// Create a table whose schema is <see cref="FromType{T}"/>, keeping the model's field IDs
+    /// (<see cref="CreateTableRequest.PreserveFieldIds"/>). Catalogs that build the metadata locally (in-memory, Glue,
+    /// JDBC) keep them as given. A REST server builds the metadata itself and may renumber, so for other catalogs a model
+    /// whose explicit IDs are not the ones a server would assign (1, 2, … siblings before children) is refused before
+    /// anything is created.
     /// </summary>
     public static Task<Table> CreateTableAsync<T>(this ICatalog catalog, TableIdentifier identifier, IcebergMapperOptions? options = null,
+        IReadOnlyDictionary<string, string>? properties = null, int formatVersion = TableMetadata.DefaultFormatVersion, CancellationToken ct = default) =>
+        catalog.CreateTableAsync(identifier, FromType<T>(options), typeof(T).Name, spec: null, properties, formatVersion, ct);
+
+    /// <summary>As <see cref="CreateTableAsync{T}"/> for a schema already derived from a model (and an optional partition spec).</summary>
+    public static async Task<Table> CreateTableAsync(this ICatalog catalog, TableIdentifier identifier, Schema schema, string modelName, PartitionSpec? spec,
         IReadOnlyDictionary<string, string>? properties = null, int formatVersion = TableMetadata.DefaultFormatVersion, CancellationToken ct = default)
     {
-        var schema = FromType<T>(options);
-        var last = 0;
-        var fresh = TypeUtil.AssignFreshIds(schema, () => ++last);
-        if (!fresh.SameSchema(schema))
-            throw new InvalidOperationException(
-                $"{typeof(T).Name}'s explicit field IDs are not the ones a catalog assigns on create (1, 2, … siblings before children): " +
-                "create the table from the schema and bind the model by name, or number the model's fields in that order");
-        return catalog.CreateTableAsync(new CreateTableRequest(identifier, schema, Properties: properties, FormatVersion: formatVersion), ct);
+        var keepsIds = catalog is MetastoreCatalog;
+        if (!keepsIds)
+        {
+            var last = 0;
+            var fresh = TypeUtil.AssignFreshIds(schema, () => ++last);
+            if (!fresh.SameSchema(schema))
+                throw new InvalidOperationException(
+                    $"{modelName}'s explicit field IDs are not the ones a REST catalog assigns on create (1, 2, … siblings before children): " +
+                    "create the table from the schema and bind the model by name, or number the model's fields in that order");
+        }
+        var table = await catalog.CreateTableAsync(new CreateTableRequest(identifier, schema, spec, Properties: properties, FormatVersion: formatVersion,
+            PreserveFieldIds: true), ct);
+        if (!table.Schema.SameSchema(schema))
+            throw new InvalidOperationException($"{catalog.Name} created {identifier} with field IDs other than {modelName}'s; bind the model by name");
+        return table;
     }
 
     private sealed class Node

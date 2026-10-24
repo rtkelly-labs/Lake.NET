@@ -124,7 +124,7 @@ internal sealed class QuerySource<T> : IQuerySource
         var metadata = Table.Metadata;
         var readSchema = TimeTravel.SchemaFor(metadata, TimeTravel.Resolve(metadata, Snapshot));
         var binding = Binding;
-        var translator = new PredicateTranslator(binding.Members, readSchema, metadata.CurrentSchema);
+        var translator = new PredicateTranslator(binding.Members, readSchema);
         var filter = IcebergExpression.True;
         var residual = new List<LambdaExpression>();
         foreach (var where in pushed)
