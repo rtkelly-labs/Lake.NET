@@ -169,6 +169,15 @@ def env_catalog(kind: str) -> Catalog:
             **{"header.X-Iceberg-Access-Delegation": ""},
             **s3,
         )
+    if kind == "dotnet-rest":
+        # This repository's REST server, started by the C# regression suite (DotnetRestServer.cs) on a free port.
+        return load_catalog(
+            "dotnet-rest",
+            type="rest",
+            uri=os.environ["ICEBERG_DOTNET_REST_URI"],
+            **{"header.X-Iceberg-Access-Delegation": ""},
+            **s3,
+        )
     if kind == "rest":
         return load_catalog(
             "rest",

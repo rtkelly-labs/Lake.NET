@@ -15,9 +15,10 @@ public sealed class CatalogConformanceTests
 {
     /// <summary>
     /// "rest" is the Iceberg project's Java test server; "polaris" is Apache Polaris, implemented independently;
-    /// "jdbc" is our JdbcCatalog over SQLite, in the tables PyIceberg's SqlCatalog and Java's JdbcCatalog share.
+    /// "jdbc" is our JdbcCatalog over SQLite, in the tables PyIceberg's SqlCatalog and Java's JdbcCatalog share;
+    /// "dotnet-rest" is this repository's REST catalog server (src/Iceberg.Net.RestServer), hosted by the suite.
     /// </summary>
-    public static TheoryData<string> Catalogs => new() { "glue", "rest", "polaris", "gravitino", "nessie", "lakekeeper", "jdbc" };
+    public static TheoryData<string> Catalogs => new() { "glue", "rest", "polaris", "gravitino", "nessie", "lakekeeper", "jdbc", "dotnet-rest" };
 
     public static readonly Schema Schema = new(
         NestedField.Require(1, "id", PrimitiveType.Long),
