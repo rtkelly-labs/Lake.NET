@@ -1,4 +1,5 @@
 using Iceberg.Net.Catalog;
+using Iceberg.Net.Diagnostics;
 using Iceberg.Net.Expressions;
 using Iceberg.Net.Manifests;
 using Iceberg.Net.Metadata;
@@ -217,6 +218,7 @@ public static partial class TableMutations
     private static async Task<(Snapshot? Snapshot, T Outcome, int Attempts)> RetryAsync<T>(Table table, Func<Task<(SnapshotProducer? Producer, T Outcome)>> plan, CancellationToken ct)
     {
         var policy = CommitRetryPolicy.From(table.Metadata);
+        using var telemetry = IcebergTelemetry.StartCommit(table.Identifier.ToString(), null); // the producer's attempts report into it
         for (var attempt = 1; ; attempt++)
         {
             if (attempt > 1) await table.RefreshAsync(ct);
@@ -233,17 +235,19 @@ public static partial class TableMutations
                 var before = table.Metadata.CurrentSnapshotId;
                 await table.RefreshAsync(ct);
                 if (table.Metadata.CurrentSnapshotId == before) throw;
+                telemetry.Retrying(attempt, e);
                 await BackOffAsync(policy, attempt, ct);
                 continue;
             }
-            if (producer is null) return (null, outcome, attempt);
+            if (producer is null) { telemetry.NothingToCommit(); return (null, outcome, attempt); }
 
             try
             {
                 return (await producer.CommitAsync(ct), outcome, attempt);
             }
-            catch (CommitFailedException) when (attempt <= policy.NumRetries)
+            catch (CommitFailedException conflict) when (attempt <= policy.NumRetries)
             {
+                telemetry.Retrying(attempt, conflict);
                 await BackOffAsync(policy, attempt, ct);
             }
         }

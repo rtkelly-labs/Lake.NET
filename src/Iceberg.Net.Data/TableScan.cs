@@ -1,6 +1,7 @@
 using System.Globalization;
 using Iceberg.Net.Avro;
 using Iceberg.Net.Catalog;
+using Iceberg.Net.Diagnostics;
 using Iceberg.Net.Expressions;
 using Iceberg.Net.Manifests;
 using Iceberg.Net.Metadata;
@@ -73,6 +74,7 @@ public static partial class TableScan
     private static async Task<ScanPlan> PlanCoreAsync(Table table, Snapshot snapshot, IReadOnlyList<ManifestFile> manifests, Schema schema, Expression bound,
         Func<DataFile, bool>? fileFilter, CancellationToken ct)
     {
+        using var telemetry = IcebergTelemetry.StartScanPlanning(table.Identifier.ToString(), snapshot.SnapshotId);
         var m = table.Metadata;
         var metrics = bound is AlwaysTrue ? null : new MetricsEvaluator(bound);
         var bySpec = new Dictionary<int, (ManifestEvaluator Manifest, Func<IReadOnlyList<object?>, bool> Partition)>();
@@ -98,6 +100,7 @@ public static partial class TableScan
                 tasks.Add(new ScanTask(e.DataFile, e.SequenceNumber ?? 0, manifest.ManifestPath));
             }
         }
+        telemetry.Planned(read, skipped, tasks.Count, byPartition, byMetrics);
         return new ScanPlan(tasks, read, skipped, byPartition, byMetrics);
     }
 

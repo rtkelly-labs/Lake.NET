@@ -1,6 +1,7 @@
 using System.Globalization;
 using Iceberg.Net.Avro;
 using Iceberg.Net.Catalog;
+using Iceberg.Net.Diagnostics;
 using Iceberg.Net.Expressions;
 using Iceberg.Net.Manifests;
 using Iceberg.Net.Metadata;
@@ -292,6 +293,7 @@ public sealed class SnapshotProducer
     {
         var policy = CommitRetryPolicy.From(_table.Metadata);
         if (_retries is { } r) policy = policy with { NumRetries = r };
+        using var telemetry = IcebergTelemetry.StartCommit(_table.Identifier.ToString(), _operation);
         for (var attempt = 0; ; attempt++)
         {
             try
@@ -324,17 +326,20 @@ public sealed class SnapshotProducer
                         throw new CommitFailedException($"Commit of snapshot {snapshot.SnapshotId} was not applied ({unknown.Message})", unknown);
                 }
                 _attemptArtifacts.Clear();
+                telemetry.Committed(snapshot.SnapshotId, snapshot.Operation);
                 await CleanupAsync(ct);
                 return snapshot;
             }
-            catch (CommitFailedException) when (attempt < policy.NumRetries)
+            catch (CommitFailedException conflict) when (attempt < policy.NumRetries)
             {
                 _staleArtifacts.AddRange(_attemptArtifacts);
                 _attemptArtifacts.Clear();
                 var wait = Math.Min(policy.MaxWaitMs, policy.MinWaitMs * (1 << Math.Min(attempt, 20)));
+                telemetry.Retrying(attempt + 1, conflict, TimeSpan.FromMilliseconds(wait));
                 await Task.Delay(wait + Random.Shared.Next(wait / 10 + 1), ct);
                 await _table.RefreshAsync(ct);
             }
+            catch (Exception e) when (telemetry.FailedWith(e)) { throw; } // records the outcome; the filter never catches
         }
     }
 

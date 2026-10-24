@@ -2,6 +2,7 @@ using System.Net;
 using System.Net.Http.Headers;
 using System.Text;
 using System.Text.Json.Nodes;
+using Iceberg.Net.Diagnostics;
 using Iceberg.Net.IO;
 using Iceberg.Net.Json;
 using Iceberg.Net.Metadata;
@@ -289,6 +290,7 @@ public sealed class RestCatalog : ICatalog, IViewCatalog
 
     public async Task<Table> CreateTableAsync(CreateTableRequest r, CancellationToken ct = default)
     {
+        using var telemetry = IcebergTelemetry.StartCatalogCall(Name, nameof(RestCatalog), "create_table", r.Identifier.ToString());
         var props = new Dictionary<string, string>(r.Properties ?? new Dictionary<string, string>())
         {
             ["format-version"] = r.FormatVersion.ToString(System.Globalization.CultureInfo.InvariantCulture),
@@ -304,7 +306,7 @@ public sealed class RestCatalog : ICatalog, IViewCatalog
         if (r.Spec is not null) body["partition-spec"] = TypeJson.SpecToJson(r.Spec);
         if (r.SortOrder is not null) body["write-order"] = TypeJson.SortOrderToJson(r.SortOrder);
         var resp = await SendAsync(HttpMethod.Post, $"{NsPath(r.Identifier.Namespace)}/tables", body, ct, conflict: m => new AlreadyExistsException(m));
-        return ToTable(r.Identifier, resp!);
+        return telemetry.Succeeded(ToTable(r.Identifier, resp!));
     }
 
     private const string TransactionsEndpoint = "POST /v1/{prefix}/transactions/commit";
@@ -321,8 +323,11 @@ public sealed class RestCatalog : ICatalog, IViewCatalog
         ScanPlanningProtocol.PlanAsync((m, path, body, c) => SendAsync(m, path, body, c), TablePath(table.Identifier), table.Metadata, request,
             timeout ?? TimeSpan.FromMinutes(5), ct);
 
-    public async Task<Table> LoadTableAsync(TableIdentifier id, CancellationToken ct = default) =>
-        ToTable(id, (await SendAsync(HttpMethod.Get, TablePath(id), null, ct))!);
+    public async Task<Table> LoadTableAsync(TableIdentifier id, CancellationToken ct = default)
+    {
+        using var telemetry = IcebergTelemetry.StartCatalogCall(Name, nameof(RestCatalog), "load_table", id.ToString());
+        return telemetry.Succeeded(ToTable(id, (await SendAsync(HttpMethod.Get, TablePath(id), null, ct))!));
+    }
 
     public async Task<bool> TableExistsAsync(TableIdentifier id, CancellationToken ct = default)
     {
@@ -354,11 +359,16 @@ public sealed class RestCatalog : ICatalog, IViewCatalog
             conflict: m => new AlreadyExistsException(m));
     }
 
-    public Task DropTableAsync(TableIdentifier id, bool purge = false, CancellationToken ct = default) =>
-        SendAsync(HttpMethod.Delete, $"{TablePath(id)}?purgeRequested={(purge ? "true" : "false")}", null, ct);
+    public async Task DropTableAsync(TableIdentifier id, bool purge = false, CancellationToken ct = default)
+    {
+        using var telemetry = IcebergTelemetry.StartCatalogCall(Name, nameof(RestCatalog), "drop_table", id.ToString());
+        await SendAsync(HttpMethod.Delete, $"{TablePath(id)}?purgeRequested={(purge ? "true" : "false")}", null, ct);
+        telemetry.Succeeded();
+    }
 
     public async Task<TableMetadata> CommitTableAsync(TableCommit commit, CancellationToken ct = default)
     {
+        using var telemetry = IcebergTelemetry.StartCatalogCall(Name, nameof(RestCatalog), "commit_table", commit.Identifier.ToString());
         var body = new JsonObject
         {
             ["requirements"] = new JsonArray(commit.Requirements.Select(r => (JsonNode)UpdateJson.ToJson(r)).ToArray()),
@@ -366,11 +376,12 @@ public sealed class RestCatalog : ICatalog, IViewCatalog
         };
         var resp = await SendAsync(HttpMethod.Post, TablePath(commit.Identifier), body, ct,
             conflict: m => new CommitFailedException(m), commit: true);
-        return MetadataJson.FromJson(resp!["metadata"]!) with { MetadataFileLocation = resp["metadata-location"]?.GetValue<string>() };
+        return telemetry.Succeeded(MetadataJson.FromJson(resp!["metadata"]!) with { MetadataFileLocation = resp["metadata-location"]?.GetValue<string>() });
     }
 
     public async Task CommitTransactionAsync(IReadOnlyList<TableCommit> commits, CancellationToken ct = default)
     {
+        using var telemetry = IcebergTelemetry.StartCatalogCall(Name, nameof(RestCatalog), "commit_transaction");
         // A server that lists its endpoints and not this one does not do atomic multi-table commits (e.g. Gravitino).
         if (Endpoints.Count > 0 && !Endpoints.Contains(TransactionsEndpoint))
             throw new NotSupportedException("This REST server does not advertise multi-table transactions (POST /v1/{prefix}/transactions/commit)");
@@ -388,6 +399,7 @@ public sealed class RestCatalog : ICatalog, IViewCatalog
             }).ToArray()),
         };
         await SendAsync(HttpMethod.Post, $"v1/{_prefix}transactions/commit", body, ct, conflict: m => new CommitFailedException(m), commit: true);
+        telemetry.Succeeded();
     }
 
     private Table ToTable(TableIdentifier id, JsonNode loadResult)
