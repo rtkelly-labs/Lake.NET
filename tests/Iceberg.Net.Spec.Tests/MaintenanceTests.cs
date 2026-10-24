@@ -199,6 +199,24 @@ public sealed class MaintenanceTests : IDisposable
     }
 
     [Fact]
+    public async Task Expiry_through_a_stale_handle_deletes_nothing_once_another_writer_disables_gc()
+    {
+        var stale = await _catalog.CreateTableAsync(new CreateTableRequest(TableIdentifier.Of("m", "gc_race"), Schema));
+        await TableMutations.InsertAsync(stale, Rows(0, 3));
+        await TableMutations.UpsertAsync(stale, Rows(0, 3, "b"), strategy: DeleteStrategy.CopyOnWrite);
+        var other = await _catalog.LoadTableAsync(stale.Identifier);
+        await other.CommitAsync([], [new Metadata.MetadataUpdate.SetProperties(new Dictionary<string, string> { [TableLocations.GcEnabled] = "false" })]);
+        var before = FilesUnder(stale).ToHashSet();
+
+        // The commit asserts the UUID and refs, which still hold, so it lands; the committed metadata disables GC.
+        var result = await Maintenance.ExpireAsync(stale, long.MaxValue, retainLast: 1);
+
+        Assert.NotEmpty(result.Expired);
+        Assert.Empty(result.DeletedFiles);
+        Assert.Superset(before, FilesUnder(stale).ToHashSet()); // every file is still there
+    }
+
+    [Fact]
     public async Task Orphan_cleanup_refuses_a_short_age_and_an_unsafe_location()
     {
         var t = await _catalog.CreateTableAsync(new CreateTableRequest(TableIdentifier.Of("m", "orphan_guard"), Schema));

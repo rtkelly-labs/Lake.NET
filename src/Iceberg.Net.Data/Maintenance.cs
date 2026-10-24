@@ -76,12 +76,12 @@ public static class Maintenance
     public static async Task<ExpireResult> ExpireAsync(Table table, ExpireOptions? options, CancellationToken ct = default)
     {
         options ??= new ExpireOptions();
-        if (!TableLocations.IsGcEnabled(table.Metadata))
-            throw new ValidationException("Cannot expire snapshots: GC is disabled (deleting files may corrupt other tables)");
         var policy = CommitRetryPolicy.From(table.Metadata);
         for (var attempt = 0; ; attempt++)
         {
             var m = table.Metadata;
+            // Checked on every attempt: a retry refreshes the table, and another writer may have turned GC off meanwhile.
+            RequireGc(m);
             var (expire, removedRefs) = PlanExpiry(m, options);
             if (expire.Count == 0 && removedRefs.Count == 0) return new ExpireResult([], []);
             var requirements = new List<UpdateRequirement> { new UpdateRequirement.AssertTableUuid(m.TableUuid) };
@@ -105,6 +105,8 @@ public static class Maintenance
             if (!options.CleanExpiredFiles) return new ExpireResult(expired, []) { RemovedRefs = removedRefs };
             // Reachability diff against the committed metadata, so snapshots another writer added meanwhile are retained.
             var after = table.Metadata;
+            // The commit asserted refs and the UUID, not properties: if the committed state disables GC, delete nothing.
+            if (!TableLocations.IsGcEnabled(after)) return new ExpireResult(expired, []) { RemovedRefs = removedRefs };
             var candidates = await TableFiles.ReachableAsync(m, table.IO, expire, ct);
             candidates.ExceptWith(await TableFiles.ReachableAsync(after, table.IO, after.Snapshots, ct));
             var (inside, outside) = TableLocations.Partition(after, candidates);
@@ -115,6 +117,12 @@ public static class Maintenance
                 SkippedFiles = outside.Order(StringComparer.Ordinal).ToList(),
             };
         }
+    }
+
+    private static void RequireGc(TableMetadata m)
+    {
+        if (!TableLocations.IsGcEnabled(m))
+            throw new ValidationException("Cannot expire snapshots: GC is disabled (deleting files may corrupt other tables)");
     }
 
     /// <summary>Java's <c>RemoveSnapshots.internalApply</c>: the snapshots to remove and the refs that aged out.</summary>
