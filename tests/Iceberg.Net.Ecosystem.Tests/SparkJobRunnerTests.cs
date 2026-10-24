@@ -124,6 +124,51 @@ public sealed class SparkJobRunnerTests : IDisposable
         Assert.Equal(SparkJobState.Succeeded, run.State);
     }
 
+    [Fact]
+    public async Task Glue_repoints_an_existing_job_keeping_every_other_setting()
+    {
+        var client = new FakeGlue(); var fake = client.Calls;
+        var options = new GlueJobOptions { JobName = "iceberg-sql", StagingPrefix = _staging, Spark = SparkCatalogConfig.Glue("glue", "s3://lake/wh") };
+        var runner = new GlueSqlJobRunner(client, _stager, options);
+        var job = new Glue.Job
+        {
+            Name = "iceberg-sql", Role = "arn:aws:iam::1:role/glue", GlueVersion = "4.0", WorkerType = "G.2X", NumberOfWorkers = 5, MaxCapacity = 10,
+            Timeout = 60, MaxRetries = 2, Description = "nightly", SecurityConfiguration = "kms", ExecutionClass = "FLEX",
+            Connections = new Glue.ConnectionsList { Connections = ["vpc"] },
+            NonOverridableArguments = new() { ["--enable-metrics"] = "true" },
+            Command = new Glue.JobCommand { Name = "glueetl", PythonVersion = "3", ScriptLocation = "s3://old/iceberg_sql_driver-000000000000.py" },
+            DefaultArguments = new() { ["--extra-py-files"] = "s3://libs/x.zip", ["--datalake-formats"] = "iceberg" },
+        };
+        fake.On<Glue.GetJobRequest, Glue.GetJobResponse>(_ => new Glue.GetJobResponse { Job = job })
+            .On<Glue.UpdateJobRequest, Glue.UpdateJobResponse>(r =>
+            {
+                job.Command = r.JobUpdate.Command;
+                job.DefaultArguments = r.JobUpdate.DefaultArguments;
+                return new Glue.UpdateJobResponse { JobName = r.JobName };
+            });
+
+        await runner.EnsureJobAsync();
+        await runner.EnsureJobAsync(); // now current: no second update
+
+        // UpdateJob overwrites the whole definition, so everything not being changed must be sent back as it was.
+        var update = Assert.Single(fake.Sent<Glue.UpdateJobRequest>()).JobUpdate;
+        Assert.Equal(_stager.DriverLocation, update.Command.ScriptLocation);
+        Assert.Equal(("glueetl", "3"), (update.Command.Name, update.Command.PythonVersion));
+        Assert.Equal(("arn:aws:iam::1:role/glue", "4.0", "G.2X", 5), (update.Role, update.GlueVersion, update.WorkerType, update.NumberOfWorkers));
+        Assert.Null(update.MaxCapacity); // Glue refuses MaxCapacity together with a worker type
+        Assert.Equal((60, 2, "nightly", "kms", "FLEX"), (update.Timeout, update.MaxRetries, update.Description, update.SecurityConfiguration, update.ExecutionClass.Value));
+        Assert.Equal(["vpc"], update.Connections.Connections);
+        Assert.Equal("true", update.NonOverridableArguments["--enable-metrics"]);
+        Assert.Equal("s3://libs/x.zip", update.DefaultArguments["--extra-py-files"]);
+        Assert.Equal(runner.DefaultArguments()["--conf"], update.DefaultArguments["--conf"]);
+
+        // A changed catalog configuration is applied even though the driver is current.
+        var moved = new GlueSqlJobRunner(client, _stager, options with { Spark = SparkCatalogConfig.Glue("glue", "s3://lake/elsewhere") });
+        await moved.EnsureJobAsync();
+        Assert.Equal(2, fake.Sent<Glue.UpdateJobRequest>().Count());
+        Assert.Contains("warehouse=s3://lake/elsewhere", job.DefaultArguments["--conf"]);
+    }
+
     [Theory]
     [InlineData("STARTING", SparkJobState.Pending)]
     [InlineData("RUNNING", SparkJobState.Running)]

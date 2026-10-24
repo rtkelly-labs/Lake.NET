@@ -1,6 +1,7 @@
 #!/usr/bin/env bash
 # Start the full-emulation stack (moto + Iceberg REST fixture) and wait until both answer.
-#   --spark   also fetch the Spark oracle (apache/spark image + pinned Iceberg runtime jar into .cache/)
+#   --spark   also fetch the Spark oracle (apache/spark image + pinned Iceberg runtime jar into .cache/), and the jars the
+#             EMR Serverless / Glue job emulation adds (iceberg-aws-bundle, hadoop-aws + the two AWS SDK modules S3A needs)
 #   --trino   also start Trino (Iceberg connector over the REST fixture + moto S3) on :8080
 #   --polaris also start Apache Polaris (second REST catalog implementation) on :8182, catalog "regression"
 #   --nessie  also start Project Nessie's Iceberg REST API (fourth REST implementation) on :19120 (jar from Maven Central)
@@ -51,5 +52,23 @@ if [[ "$SPARK" == 1 ]]; then
     mv ".cache/$JAR.part" ".cache/$JAR"
   fi
   echo "$JAR_SHA256  .cache/$JAR" | sha256sum -c --quiet
-  echo "Spark oracle:          $SPARK_IMAGE + $JAR"
+  # The managed-Spark job emulation (SparkJobServiceEmulator): Iceberg's GlueCatalog/S3FileIO and S3A for s3:// paths.
+  # The AWS SDK modules match the SDK version inside iceberg-aws-bundle-1.12.0 (2.54.17).
+  while read -r sha path; do
+    file="$(basename "$path")"
+    if [[ ! -f ".cache/$file" ]]; then
+      for attempt in 1 2 3 4 5; do
+        curl -fsSL -o ".cache/$file.part" "https://repo1.maven.org/maven2/$path" && break
+        sleep $((attempt * 2))
+      done
+      mv ".cache/$file.part" ".cache/$file"
+    fi
+    echo "$sha  .cache/$file" | sha256sum -c --quiet
+  done <<'JARS'
+dd7e49ffa4ac9b215bed846581991259e3aec9bb2fa08d6cec029c46cd66d957 org/apache/iceberg/iceberg-aws-bundle/1.12.0/iceberg-aws-bundle-1.12.0.jar
+01334a07e179cae2b7e251f24857f11e3759108c9d6a79dcbe362a4295227da2 org/apache/hadoop/hadoop-aws/3.4.1/hadoop-aws-3.4.1.jar
+7bef0ea4efd5e0860bab63e08317040951edb51b72a5be734284c28b8324ab87 software/amazon/awssdk/s3-transfer-manager/2.54.17/s3-transfer-manager-2.54.17.jar
+0b00ae3d55c3d1213ca47b5651dc4c2a0080fc9b6192dde3d53c3da6c1811bcb software/amazon/awssdk/apache-client/2.54.17/apache-client-2.54.17.jar
+JARS
+  echo "Spark oracle:          $SPARK_IMAGE + $JAR (+ AWS jars for the EMR/Glue job emulation)"
 fi

@@ -82,12 +82,17 @@ public sealed class AthenaQueryRunner(IAmazonAthena athena, AthenaQueryOptions o
             var page = await athena.GetQueryResultsAsync(new GetQueryResultsRequest { QueryExecutionId = id, NextToken = token }, ct);
             if (first && page.ResultSet?.ResultSetMetadata?.ColumnInfo is { } info) columns.AddRange(info.Select(c => c.Name));
             var pageRows = page.ResultSet?.Rows ?? [];
-            // A SELECT's first row repeats the column names (DDL and DML results have no header).
-            var skip = first && pageRows.Count > 0 && columns.Count > 0 && pageRows[0].Data.Select(d => d.VarCharValue).SequenceEqual(columns) ? 1 : 0;
-            rows.AddRange(pageRows.Skip(skip).Select(r => (IReadOnlyList<string?>)r.Data.Select(d => (string?)d.VarCharValue).ToList()));
+            // A query's (StatementType DML: SELECT, INSERT, ...) first row repeats the column names; DDL and UTILITY
+            // results (SHOW, DESCRIBE, ...) have none, so a first row that merely equals the names is data there.
+            var skip = first && execution.StatementType != StatementType.DDL && execution.StatementType != StatementType.UTILITY && pageRows.Count > 0
+                && columns.Count > 0 && Cells(pageRows[0]).SequenceEqual(columns) ? 1 : 0;
+            rows.AddRange(pageRows.Skip(skip).Select(r => (IReadOnlyList<string?>)Cells(r).ToList()));
             token = page.NextToken;
             first = false;
         } while (!string.IsNullOrEmpty(token));
         return new AthenaQueryResult(id, columns, rows, execution.Statistics?.DataScannedInBytes, execution.Statistics?.EngineExecutionTimeInMillis);
     }
+
+    // A NULL is a datum without VarCharValue; the SDK leaves an empty row's Data list null.
+    private static IEnumerable<string?> Cells(Row row) => (row.Data ?? []).Select(d => d.VarCharValue);
 }

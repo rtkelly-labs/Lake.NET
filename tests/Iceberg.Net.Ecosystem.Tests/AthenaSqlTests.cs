@@ -96,6 +96,38 @@ public sealed class AthenaSqlTests
         Assert.Throws<ArgumentException>(() => AthenaSql.MetadataTable(Events, "secrets"));
     }
 
+    [Fact]
+    public void Trino_dialect_for_what_athena_says_its_own_way()
+    {
+        var t = Events with { Catalog = "iceberg" };
+        var spec = PartitionSpec.BuilderFor(Schema).Day("event_ts").Bucket("id", 16).Truncate("name", 4).Build();
+        Assert.Equal("""
+            CREATE TABLE "iceberg"."analytics"."events" (
+              "id" bigint,
+              "name" varchar COMMENT 'display name',
+              "event_ts" timestamp(6),
+              "amount" decimal(38, 2),
+              "tags" array(varchar),
+              "attrs" map(varchar, integer),
+              "loc" row("lat" double, "lon" double))
+            WITH (format_version = 2, partitioning = ARRAY['day("event_ts")', 'bucket("id", 16)', 'truncate("name", 4)'], location = 's3://lake/it''s')
+            """.ReplaceLineEndings("\n"), TrinoSql.CreateTable(t, Schema, spec, "s3://lake/it's", formatVersion: 2));
+        Assert.Equal("timestamp(6) with time zone", TrinoSql.Type(PrimitiveType.TimestampTz));
+        Assert.Equal("uuid", TrinoSql.Type(PrimitiveType.Uuid));
+        Assert.Throws<NotSupportedException>(() => TrinoSql.Type(PrimitiveType.TimestampNs));
+        Assert.Throws<ArgumentException>(() => TrinoSql.CreateTable(t, new Schema(0, [NestedField.Optional(1, "Id", PrimitiveType.Long)])));
+
+        Assert.Equal("ALTER TABLE \"iceberg\".\"analytics\".\"events\" EXECUTE optimize", TrinoSql.Optimize(t));
+        Assert.Equal("ALTER TABLE \"iceberg\".\"analytics\".\"events\" EXECUTE optimize(file_size_threshold => '134217728B') WHERE \"region\" = 'eu'",
+            TrinoSql.Optimize(t, 128L << 20, "\"region\" = 'eu'"));
+        Assert.Equal(
+        [
+            "ALTER TABLE \"iceberg\".\"analytics\".\"events\" EXECUTE expire_snapshots(retention_threshold => '432000000ms')",
+            "ALTER TABLE \"iceberg\".\"analytics\".\"events\" EXECUTE remove_orphan_files(retention_threshold => '432000000ms')",
+        ], TrinoSql.Vacuum(t, TimeSpan.FromDays(5)));
+        Assert.Throws<ArgumentOutOfRangeException>(() => TrinoSql.Duration(TimeSpan.FromSeconds(-1)));
+    }
+
     private sealed class FakeAthena() : AmazonAthenaClient(new BasicAWSCredentials("test", "test"), RegionEndpoint.EUWest1)
     {
         public FakeCalls Calls { get; } = new();
@@ -146,6 +178,29 @@ public sealed class AthenaSqlTests
         Assert.Equal("s3://results/", start.ResultConfiguration.OutputLocation);
         Assert.Equal("analytics", start.QueryExecutionContext.Database);
         Assert.Equal(3, athena.Calls.Sent<GetQueryExecutionRequest>().Count());
+    }
+
+    [Fact]
+    public async Task Utility_results_have_no_header_row_to_drop()
+    {
+        // SHOW TABLES returns one column, tab_name, and no header row: a table named tab_name is data.
+        var athena = new FakeAthena();
+        athena.Calls
+            .On<StartQueryExecutionRequest, StartQueryExecutionResponse>(_ => new StartQueryExecutionResponse { QueryExecutionId = "q" })
+            .On<GetQueryExecutionRequest, GetQueryExecutionResponse>(_ => new GetQueryExecutionResponse
+            {
+                QueryExecution = new QueryExecution { StatementType = StatementType.UTILITY, Status = new QueryExecutionStatus { State = QueryExecutionState.SUCCEEDED } },
+            })
+            .On<GetQueryResultsRequest, GetQueryResultsResponse>(_ => new GetQueryResultsResponse
+            {
+                ResultSet = new ResultSet
+                {
+                    ResultSetMetadata = new ResultSetMetadata { ColumnInfo = [new ColumnInfo { Name = "tab_name" }] },
+                    Rows = [Row("tab_name"), Row("events"), new Row()],
+                },
+            });
+        var result = await new AthenaQueryRunner(athena, new AthenaQueryOptions { WorkGroup = "wg" }).RunAsync("SHOW TABLES IN analytics");
+        Assert.Equal([["tab_name"], ["events"], []], result.Rows.Select(r => r.ToArray()));
     }
 
     [Fact]

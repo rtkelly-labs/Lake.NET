@@ -34,28 +34,17 @@ public sealed class GlueSqlJobRunner(IAmazonGlue glue, SparkScriptStager stager,
         ["--job-language"] = "python",
     };
 
-    /// <summary>Create the job (script = the staged driver) if it does not exist, or point it at the current driver.</summary>
+    /// <summary>
+    /// Create the job (script = the staged driver) if it does not exist; otherwise point it at the current driver and
+    /// set this runner's arguments (<see cref="DefaultArguments"/>) when either differs, keeping everything else.
+    /// </summary>
     public async Task EnsureJobAsync(CancellationToken ct = default)
     {
         var driver = await stager.StageDriverAsync(ct);
-        var command = new JobCommand { Name = "glueetl", PythonVersion = "3", ScriptLocation = driver };
+        Job existing;
         try
         {
-            var existing = (await glue.GetJobAsync(new GetJobRequest { JobName = options.JobName }, ct)).Job;
-            if (existing.Command?.ScriptLocation == driver) return;
-            await glue.UpdateJobAsync(new UpdateJobRequest
-            {
-                JobName = options.JobName,
-                JobUpdate = new JobUpdate
-                {
-                    Role = existing.Role,
-                    Command = command,
-                    GlueVersion = existing.GlueVersion ?? options.GlueVersion,
-                    DefaultArguments = existing.DefaultArguments ?? DefaultArguments(),
-                    WorkerType = existing.WorkerType,
-                    NumberOfWorkers = existing.NumberOfWorkers,
-                },
-            }, ct);
+            existing = (await glue.GetJobAsync(new GetJobRequest { JobName = options.JobName }, ct)).Job;
         }
         catch (EntityNotFoundException)
         {
@@ -63,14 +52,57 @@ public sealed class GlueSqlJobRunner(IAmazonGlue glue, SparkScriptStager stager,
             {
                 Name = options.JobName,
                 Role = options.RoleArn ?? throw new InvalidOperationException($"Glue job {options.JobName} does not exist; set RoleArn to create it"),
-                Command = command,
+                Command = new JobCommand { Name = "glueetl", PythonVersion = "3", ScriptLocation = driver },
                 GlueVersion = options.GlueVersion,
                 WorkerType = options.WorkerType,
                 NumberOfWorkers = options.NumberOfWorkers,
+                Timeout = options.TimeoutMinutes,
                 DefaultArguments = DefaultArguments(),
             }, ct);
+            return;
         }
+        var arguments = new Dictionary<string, string>(existing.DefaultArguments ?? []);
+        var stale = existing.Command?.ScriptLocation != driver;
+        foreach (var (k, v) in DefaultArguments())
+            if (!arguments.TryGetValue(k, out var current) || current != v)
+            {
+                arguments[k] = v;
+                stale = true;
+            }
+        if (stale) await glue.UpdateJobAsync(new UpdateJobRequest { JobName = options.JobName, JobUpdate = ToUpdate(existing, driver, arguments) }, ct);
     }
+
+    /// <summary>
+    /// UpdateJob replaces the whole job definition (anything left out is reset), so every setting of the existing job
+    /// is carried over and only the script and arguments change.
+    /// </summary>
+    internal JobUpdate ToUpdate(Job existing, string driver, Dictionary<string, string> arguments) => new()
+    {
+        JobMode = existing.JobMode,
+        JobRunQueuingEnabled = existing.JobRunQueuingEnabled,
+        Description = existing.Description,
+        LogUri = existing.LogUri,
+        Role = existing.Role,
+        ExecutionProperty = existing.ExecutionProperty,
+        Command = new JobCommand
+        {
+            Name = existing.Command?.Name ?? "glueetl", PythonVersion = existing.Command?.PythonVersion ?? "3", Runtime = existing.Command?.Runtime, ScriptLocation = driver,
+        },
+        DefaultArguments = arguments,
+        NonOverridableArguments = existing.NonOverridableArguments,
+        Connections = existing.Connections,
+        MaxRetries = existing.MaxRetries,
+        Timeout = existing.Timeout,
+        // GetJob reports MaxCapacity for worker-type jobs too, but UpdateJob refuses it together with a worker type.
+        MaxCapacity = existing.WorkerType is null ? existing.MaxCapacity : null,
+        WorkerType = existing.WorkerType,
+        NumberOfWorkers = existing.NumberOfWorkers,
+        SecurityConfiguration = existing.SecurityConfiguration,
+        NotificationProperty = existing.NotificationProperty,
+        GlueVersion = existing.GlueVersion ?? options.GlueVersion,
+        ExecutionClass = existing.ExecutionClass,
+        MaintenanceWindow = existing.MaintenanceWindow,
+    };
 
     public async Task<SparkJobRun> SubmitAsync(SparkSqlScript script, string? runName = null, CancellationToken ct = default)
     {

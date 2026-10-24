@@ -19,11 +19,13 @@ a failure instead. Every test is linked to the spec section it verifies ([spec-t
 | L2 · Spark | `SparkCrossEngineTests` | `emulation/up.sh --spark` | Spark + Iceberg Java reads every write path (CoW, position deletes, DVs, equality deletes, v2→v3 upgrade, multi-transform partitioning) with the same rows, snapshots, delete kinds and row lineage |
 | L2 · Java scan planning | `ServerScanPlanningTests` (L0, committed plans), `SparkCrossEngineTests.Java_plans_our_tables_and_we_read_its_plans` | `emulation/up.sh --spark` for the live half | Iceberg Java plans scans (interop/java/ScanPlanOracle.java, the Spark image's JDK + Iceberg 1.12) and serializes the REST `PlanTableScanResponse`; we read those plans, of Spark's tables and of every table we write, exactly as our own planner does. No emulated REST server implements planning, so this is the server side |
 | L2 · Trino | `TrinoCrossEngineTests` | `emulation/up.sh --trino` | Trino reads our writes; we read Trino's MoR DELETE/UPDATE/MERGE; mixed histories agree in both |
+| L2 · managed services | `ManagedSparkJobTests`, `AthenaRunnerEmulationTests`, `AthenaSqlOnTrinoTests` | moto; `--spark` for the job runs, `--trino` for the Athena SQL | The EMR Serverless, Glue and Athena runners with the real SDK clients against moto (staging, job creation, submission, polling through moto's state manager, cancel/stop, Athena results and paging); the staged job run from moto S3 by Spark on a Glue table in moto, as the service would (`SparkJobServiceEmulator`); Athena's query SQL run by Trino, Athena-only statements' Trino dialect ([spark-and-athena.md](spark-and-athena.md)) |
 | **BDD** | `Iceberg.Net.Behaviour.Tests` (Reqnroll) | PyIceberg oracle for the cross-engine steps | Gherkin specification of write modes × delete mechanisms × format versions, concurrency and conversion; deep fsck after every scenario |
 | **L3 AWS-only** | `AthenaTests` | AWS + Athena workgroup | Athena reads our tables (counts, sums, partition pruning on our transforms); we read Athena-written tables including its position deletes |
 
-Current results (emulation, everything up): see the test inventory in [handover.md](handover.md#test-inventory).
-The regression suite passes 256 with 3 skipped (2 Athena tests need AWS; Nessie has no v3).
+Current results (emulation, everything up, 2026-10-24): **L0 752/752**, **L1+L2 266/270** (2 Athena tests skip
+without AWS; Nessie skips the v3 conformance case; the Athena paging fidelity case skips on a moto started before shim
+3 and passes on a restarted one), **Ecosystem 55/55**. The full inventory is in [handover.md](handover.md#test-inventory).
 
 ## Environment variables
 
@@ -37,7 +39,7 @@ The regression suite passes 256 with 3 skipped (2 Athena tests need AWS; Nessie 
 | `ICEBERG_REST_URI` | `http://localhost:8181` | optional | REST catalog under test |
 | `ICEBERG_POLARIS_URI` | `http://localhost:8182/api/catalog` | — | Polaris (emulation only) |
 | `ICEBERG_TRINO_URI` | `http://localhost:8080` | — | Trino (emulation only) |
-| `ICEBERG_SPARK` / `ICEBERG_SPARK_IMAGE` / `ICEBERG_SPARK_JAR` | on / `apache/spark:4.0.1` / `emulation/.cache/…jar` | — | Spark oracle; `ICEBERG_SPARK=0` disables it, `ICEBERG_SPARK_KEEP=1` keeps its tables for debugging |
+| `ICEBERG_SPARK` / `ICEBERG_SPARK_IMAGE` / `ICEBERG_SPARK_JAR` | on / `apache/spark:4.0.1` / `emulation/.cache/…jar` | — | Spark oracle; `ICEBERG_SPARK=0` disables it, `ICEBERG_SPARK_KEEP=1` keeps its tables for debugging. The managed-job emulation also needs the AWS jars `up.sh --spark` puts next to the runtime jar |
 | `ICEBERG_DUCKDB_PYTHON` / `ICEBERG_DUCKDB` / `ICEBERG_DUCKDB_REQUIRED` | `ICEBERG_PYTHON` / on / off | — | DuckDB oracle (`Iceberg.Net.Ecosystem.Tests`): the Python with the interop `duckdb` group; `ICEBERG_DUCKDB=0` disables it; `ICEBERG_DUCKDB_REQUIRED=1` (CI) fails instead of skipping when the extension cannot load ([spark-and-athena.md](spark-and-athena.md#duckdb-oracle)) |
 | `ICEBERG_WAREHOUSE` | `s3://iceberg-regression/warehouse` | **required** `s3://bucket/prefix` | where test tables live (Glue tables under `/glue`) |
 | `ICEBERG_ATHENA_WORKGROUP` | — | e.g. `primary` | enables L3 |

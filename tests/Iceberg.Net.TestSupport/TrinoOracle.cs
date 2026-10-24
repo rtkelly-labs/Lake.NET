@@ -31,11 +31,15 @@ public static class TrinoOracle
 
     public static string Table(string ns, string table) => $"{Catalog}.\"{ns}\".\"{table}\"";
 
-    /// <summary>Run one statement to completion. Trino errors become <see cref="InvalidOperationException"/> with Trino's message.</summary>
-    public static async Task<Result> QueryAsync(string sql)
+    /// <summary>
+    /// Run one statement to completion, with optional session properties (e.g. <c>iceberg.expire_snapshots_min_retention</c>).
+    /// Trino errors become <see cref="InvalidOperationException"/> with Trino's message.
+    /// </summary>
+    public static async Task<Result> QueryAsync(string sql, IReadOnlyDictionary<string, string>? session = null)
     {
         using var request = new HttpRequestMessage(HttpMethod.Post, new Uri(Uri, "/v1/statement")) { Content = new StringContent(sql, Encoding.UTF8) };
         request.Headers.Add("X-Trino-User", "iceberg-dotnet");
+        if (session is { Count: > 0 }) request.Headers.Add("X-Trino-Session", string.Join(",", session.Select(p => $"{p.Key}={p.Value}")));
         var response = await Send(request);
         var columns = new List<string>();
         var rows = new List<JsonArray>();

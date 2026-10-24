@@ -42,6 +42,10 @@ in `EmulatorFidelityTests` that also runs against AWS, which is how we know the 
 |---|---|---|---|---|---|
 | 1 | Glue `UpdateTable` rejects a stale `VersionId` with `ConcurrentModificationException` | ignores `VersionId` | Concurrent Glue commits **silently lose snapshots** (observed: 4 writers → 3 snapshots) | check `VersionId` against the table's current version under a lock | `Glue_update_table_enforces_version_id` |
 | 2 | Glue `CreateTable` is atomic per name | racy under threads | two concurrent creates can both succeed | serialise create | (covered by conformance create tests) |
+| 3 | Athena `GetQueryResults` returns at most 1000 rows per page (`MaxResults` ≤ 1000, a SELECT's header row counting) with a `NextToken` | returns every row at once, ignores `MaxResults` | a client that ignores `NextToken` passes in emulation and drops rows on AWS | page the stored result by `MaxResults`/`NextToken`, refuse `MaxResults` > 1000 | `Athena_get_query_results_pages_at_1000_rows` |
+
+`moto_server.py` lists the shims it applies at `GET /__shims`; a test of a shim skips (with "restart it") when the
+running moto predates that shim, rather than failing on a stale emulator.
 
 Verified *without* a shim (moto already matches AWS):
 
@@ -54,11 +58,24 @@ Verified *without* a shim (moto already matches AWS):
 
 | Gap | Impact | Covered by |
 |---|---|---|
-| **Athena** | Cannot check that our tables are readable by the production engine, nor read Athena-written tables (position deletes) | `AthenaTests` — AWS mode only |
+| **Athena** (the engine) | Cannot check that our tables are readable by the production engine, nor read Athena-written tables (position deletes). moto's Athena API records queries and serves results it is given (`/moto-api/static/athena/query-results`) but executes nothing; Trino 478 runs the query dialect instead (`AthenaSqlOnTrinoTests`) | `AthenaTests` — AWS mode only |
+| **EMR Serverless / Glue job execution** | moto records job runs but runs nothing, and its run states are canned (EMR: `SUCCESS` at once; Glue: `STARTING → RUNNING → SUCCEEDED`, steppable with `/moto-api/state-manager/set-transition`), so a run's state never reflects what Spark did. moto 5.2.4 has no Glue `UpdateJob` or `BatchStopJobRun` | `ManagedSparkJobTests` run the staged job in Spark with `SparkJobServiceEmulator` (below); the state link needs AWS |
 | Lake Formation, IAM policies | Permission failures only show up in AWS | AWS mode |
 | Glue Iceberg REST / S3 Tables REST endpoints (SigV4) | No emulator | AWS mode once SigV4 lands |
 | S3 consistency/latency, throttling (503 SlowDown) | Retry paths under load | AWS mode; `FaultInjectingFileIO` covers write failures, not throttling yet |
 | Trino reading deletion vectors | Trino 478 refuses v3 DVs (`Unexpected PUFFIN file format`) | Spark reads them; a characterization test flags a Trino upgrade that adds support |
+
+## Managed Spark job emulation
+
+`tests/Iceberg.Net.Regression.Tests/SparkJobServiceEmulator.cs` plays EMR Serverless or Glue for a run moto
+accepted: it reads the run (and Glue job) back from moto through the SDK and `spark-submit`s exactly what it holds —
+the `s3://` entry point and statements the runner staged in moto S3, the `sparkSubmitParameters` or Glue `--conf`
+— in `apache/spark:4.0.1` on the host network. It adds what the service's environment would: Iceberg's AWS
+integration (`iceberg-aws-bundle-1.12.0`; EMR 7 and Glue `--datalake-formats iceberg` ship it), an `s3://` file system
+(S3A from `hadoop-aws-3.4.1` plus the SDK's `s3-transfer-manager` and `apache-client` 2.54.17, the SDK version inside
+the bundle) and, for every Iceberg catalog in the job's configuration, Glue/S3 endpoint overrides to moto. It refuses
+a Glue job that is not `glueetl` / Python 3 or lacks `--datalake-formats iceberg`, as Glue could not run it as an
+Iceberg job. The jars are fetched, SHA-256 pinned, by `emulation/up.sh --spark`.
 
 ## Running without Docker
 
