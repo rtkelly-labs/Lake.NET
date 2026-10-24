@@ -1,0 +1,24 @@
+<Project Sdk="Microsoft.NET.Sdk">
+  <PropertyGroup>
+    <IsPackable>false</IsPackable>
+    <IsTestProject>true</IsTestProject>
+    <RootNamespace>Iceberg.Net.RestCatalogBehaviour.Tests</RootNamespace>
+    <Description>Executable specifications (Gherkin, Reqnroll) for the REST catalog: the server in-process, driven by RestCatalog and raw HTTP.</Description>
+  </PropertyGroup>
+  <ItemGroup>
+    <PackageReference Include="Microsoft.NET.Test.Sdk" />
+    <PackageReference Include="Microsoft.AspNetCore.Mvc.Testing" />
+    <PackageReference Include="xunit" />
+    <PackageReference Include="xunit.runner.visualstudio" PrivateAssets="all" />
+    <PackageReference Include="Xunit.SkippableFact" />
+    <PackageReference Include="Reqnroll.xUnit" />
+  </ItemGroup>
+  <ItemGroup>
+    <ProjectReference Include="../../src/Iceberg.Net.RestServer/Iceberg.Net.RestServer.csproj" />
+    <ProjectReference Include="../../src/Iceberg.Net.Data/Iceberg.Net.Data.csproj" />
+  </ItemGroup>
+  <ItemGroup>
+    <!-- The in-process server host (WebApplicationFactory, no sockets) is the only code shared with another test project. -->
+    <Compile Include="../Iceberg.Net.RestServer.Tests/ServerHost.cs" Link="ServerHost.cs" />
+  </ItemGroup>
+</Project>
