@@ -23,9 +23,8 @@ a failure instead. Every test is linked to the spec section it verifies ([spec-t
 | **BDD** | `Iceberg.Net.Behaviour.Tests` (Reqnroll) | PyIceberg oracle for the cross-engine steps | Gherkin specification of write modes × delete mechanisms × format versions, concurrency and conversion; deep fsck after every scenario |
 | **L3 AWS-only** | `AthenaTests` | AWS + Athena workgroup | Athena reads our tables (counts, sums, partition pruning on our transforms); we read Athena-written tables including its position deletes |
 
-Current results (emulation, everything up, 2026-10-24): **L0 752/752**, **L1+L2 266/270** (2 Athena tests skip
-without AWS; Nessie skips the v3 conformance case; the Athena paging fidelity case skips on a moto started before shim
-3 and passes on a restarted one), **Ecosystem 55/55**. The full inventory is in [handover.md](handover.md#test-inventory).
+Current results (emulation, everything up, 2026-10-24): **L0 752/752**, **L1+L2 267/270** (2 Athena tests skip
+without AWS; Nessie skips the v3 conformance case; the Athena paging fidelity case needs a moto started after shim 3), **Ecosystem 55/55**. The full inventory is in [handover.md](handover.md#test-inventory).
 
 ## Environment variables
 

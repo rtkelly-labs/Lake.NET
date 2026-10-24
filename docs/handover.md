@@ -38,9 +38,9 @@ The counts are from the last local run on the branch. Every suite passed.
 | `Iceberg.Net.Linq.Tests` | 84 | nothing |
 | `Iceberg.Net.EntityFrameworkCore.Tests` | 33 | nothing |
 | `Iceberg.Net.Behaviour.Tests` (BDD) | 65 | `ICEBERG_PYTHON` |
-| `Iceberg.Net.RestServer.Tests` | 79 | `ICEBERG_PYTHON`, `ICEBERG_SPARK_JAR`, Docker, moto for the vending cases; skips otherwise |
-| `Iceberg.Net.Ecosystem.Tests` | 52 | Docker (Spark), `ICEBERG_DUCKDB_PYTHON` (DuckDB); skips otherwise |
-| `Iceberg.Net.Regression.Tests` | 256 passed, 3 skipped | the emulators. The skips are expected: two Athena tests need AWS, and Nessie doesn't do v3 |
+| `Iceberg.Net.RestServer.Tests` | 106 | `ICEBERG_PYTHON`, `ICEBERG_SPARK_JAR`, Docker, moto for the vending cases; skips otherwise |
+| `Iceberg.Net.Ecosystem.Tests` | 55 | Docker (Spark), `ICEBERG_DUCKDB_PYTHON` (DuckDB); skips otherwise |
+| `Iceberg.Net.Regression.Tests` | 267 passed, 3 skipped | the emulators. The skips are expected: two Athena tests need AWS, and Nessie doesn't do v3 |
 
 `./run-tests.sh emulation` runs them all. The settings used locally:
 
@@ -73,8 +73,12 @@ These cost time during the build-out, and may not apply on a normal workstation 
 
 - **AWS (needs an account):**
   - The L3 Athena tests and the real Glue catalog.
-  - The EMR Serverless and Glue job runners. They run against moto and a local Spark stand-in, not real services.
-  - The Athena runner, against real Athena. The remaining roadmap action is the AWS sandbox (#4).
+  - The EMR Serverless and Glue runners use the real SDK clients against moto, and the staged job runs in Spark
+    against moto's Glue and S3. What only AWS can show: the services running the job themselves, their reported
+    outcome, and Glue `UpdateJob` / `BatchStopJobRun` (moto lacks both).
+  - The Athena runner uses the real SDK against moto, and Athena's query SQL runs on Trino. Athena's own DDL,
+    `OPTIMIZE` and `VACUUM` still need real Athena.
+  - The remaining roadmap action is the AWS sandbox (#4).
 - **REST server:** see [rest-server.md](rest-server.md#not-implemented) for what is still missing.
 - **Change feed with delete files:** Spark can't check it, because Java's changelog scan refuses delete files. Our
   replay test covers it.
