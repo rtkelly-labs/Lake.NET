@@ -7,7 +7,7 @@
 | [state-management.md](state-management.md) | What Iceberg's release history taught about table state (sequence numbers, row lineage, unknown commits, idempotency, isolation, maintenance) and where we stand |
 | [ports-and-engines.md](ports-and-engines.md) | Other implementations (Java, PyIceberg, Go, Rust, C++, .NET attempts) and reference engines (Spark runtime, Athena, Trino, Flink, DuckDB, Snowflake) |
 | [catalogs.md](catalogs.md) | Integration challenges for each catalog provider: Glue, Glue/S3 Tables REST, Polaris, Unity, Nessie, Lakekeeper, Gravitino, Hive, JDBC, DynamoDB |
-| [rest-server.md](rest-server.md) | The REST catalog server (`Iceberg.Net.RestServer`): running it, storage, authentication and role grants, server-side scan planning, credential vending, idempotency keys, endpoints, what is not implemented |
+| [rest-server.md](rest-server.md) | The REST catalog server (`Iceberg.Net.RestServer`): running it, storage, authentication and role grants, server-side and incremental scan planning, credential vending (S3, Azure), remote signing, idempotency keys shared across instances, endpoints, what is not implemented |
 | [update-merge.md](update-merge.md) | UPDATE and MERGE: clause semantics, strategies, cardinality, row lineage, concurrency |
 | [read-path.md](read-path.md) | Scans: pruning levels (manifests, files, row groups), projection by field ID, streaming, time travel semantics |
 | [snapshot-management.md](snapshot-management.md) | Branches, tags, rollback, cherry-pick, write-audit-publish, per-ref retention, metadata tables, change feed |

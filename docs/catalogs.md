@@ -88,7 +88,8 @@ Glue endpoint for Lake Formation governance. Challenges:
   - The warehouse uses a `hard` delete profile, because the default soft-delete defers the purge.
   - Remote signing is switched off (`remote-signing-enabled: false`). Lakekeeper enables it by default even
     without STS, and then pins PyIceberg to `FsspecFileIO` and signs every S3 request. Those signed requests
-    occasionally came back 403 from moto. Our client never uses remote signing; it brings its own credentials.
+    occasionally came back 403 from moto. Our client brings its own credentials there; it can sign remotely
+    (`AccessDelegation = "remote-signing"`), which is tested against this repository's server.
 - Gravitino: federated REST across underlying catalogs; multi-level namespaces; some optional endpoints were
   historically unimplemented — rely on the `/v1/config` `endpoints` list, not assumptions.
 
@@ -100,10 +101,12 @@ Glue endpoint for Lake Formation governance. Challenges:
 - It is in the conformance matrix as `dotnet-rest`, hosted by the regression suite on moto, and passes the
   conformance, view, soak and PyIceberg cross-engine suites. Its own tests also drive it from PyIceberg 0.12 and from
   Spark 4.0.1 (Iceberg 1.12 `RESTCatalog`), both of which can also plan their scans on it.
-- It plans scans on the server (`plan`, `tasks`; stateless plan tasks), enforces static role grants through a
-  pluggable `IAuthorizer` (403 `ForbiddenException`), vends STS credentials scoped to the table's prefix, and replays
-  responses by `Idempotency-Key`.
-- Not implemented: remote signing and incremental scan planning.
+- It plans scans on the server (`plan`, `tasks`; stateless plan tasks; incremental append scans), enforces static role
+  grants through a pluggable `IAuthorizer` (403 `ForbiddenException`), vends STS credentials scoped to the table's
+  prefix and Azure SAS tokens, signs S3 requests for clients that hold no credentials (remote signing: our client,
+  Spark and PyIceberg, on a moto that checks signatures), and replays responses by `Idempotency-Key`. Idempotency keys
+  and plan IDs live in its database, so instances behind a load balancer share them.
+- Not implemented: GCS credentials, and signing for anything but S3.
 
 ### Hive Metastore
 
