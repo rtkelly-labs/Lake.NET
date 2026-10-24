@@ -53,6 +53,7 @@ internal static class Targets
         },
         ["deletion-vector"] = b => DeletionVector.Decode(b),
         ["roaring"] = b => RoaringPositionBitmap.Deserialize(b),
+        ["mumbling"] = b => MumblingBitmap.Deserialize(b),
         ["theta"] = b => ThetaSketch.Deserialize(b),
     };
 }

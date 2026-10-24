@@ -2,7 +2,7 @@
 # Coverage-guided fuzzing of one decoder with SharpFuzz + libFuzzer (see docs/regression-suite.md, "Fuzzing").
 #
 #   tools/fuzz.sh <target> [seconds]     targets: metadata view-metadata manifest-list manifest puffin
-#                                                 deletion-vector roaring theta
+#                                                 deletion-vector roaring mumbling theta
 #
 # Needs clang with the libFuzzer runtime (Ubuntu: apt-get install clang libclang-rt-18-dev). Builds
 # libfuzzer-dotnet from a pinned source file, instruments the decoder assemblies, seeds the corpus from the committed
@@ -45,6 +45,7 @@ case $target in
   puffin) seed "$fixtures"/puffin/dv.puffin ;;
   deletion-vector) dotnet "$out/Iceberg.Net.Fuzz.dll" extract-blob "$fixtures"/puffin/dv.puffin "$corpus/dv.bin" ;;
   roaring) printf '\x01\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x3a\x30\x00\x00\x01\x00\x00\x00\x00\x00\x02\x00\x10\x00\x00\x00\x01\x00\x02\x00\x03\x00' > "$corpus/one-container" ;;
+  mumbling) printf '\x01\x03\x00\x00\x01\x00\x00\x00\x03\x00\x22\xff' > "$corpus/sparse" ;;
   theta) for f in "$fixtures"/puffin/theta-*.bin; do seed "$f"; done ;;
   *) echo "unknown target $target" >&2; exit 2 ;;
 esac
