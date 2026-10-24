@@ -58,6 +58,32 @@ Clients point at the base URI:
 | `CredentialVending:*` | off | See [Credential vending](#credential-vending) |
 | `RemoteSigning:*` | off | See [Remote signing](#remote-signing) |
 | `Idempotency:Enabled`, `Idempotency:Lifetime`, `Idempotency:PendingTimeout` | on, `00:30:00`, `00:05:00` | See [Idempotency keys](#idempotency-keys) |
+| `Locations:Allowed:{n}` | none | Storage roots besides `Warehouse` that namespace, table and view locations may use, e.g. `gs://lake/wh`. See [Storage locations](#storage-locations) |
+
+## Storage locations
+
+The server acts on locations with its own access: it reads and writes metadata there, vends credentials and signs
+requests scoped to them, and purges under them. So every location a client chooses is held to three rules, checked when
+a namespace is created or its `location` changes, when a table or view is created, registered or staged, and on any
+commit that changes a table's `location`, `write.data.path`, `write.metadata.path` or `write.object-storage.path`:
+
+1. **Allowed storage.** Strictly below `Warehouse` or one of `Locations:Allowed`, with no `.` or `..` segments.
+   Another bucket, `s3://*`, a bucket root or a local path elsewhere is refused.
+2. **Its namespace.** A namespace's root is its `location` property, else `{Warehouse}/{levels}`. A table's or view's
+   locations must be below its namespace's root, so each namespace has one storage root; put tables on other storage in
+   a namespace rooted there. Namespace roots may nest only along the namespace hierarchy, and a namespace that holds
+   tables or views cannot change its `location`.
+3. **Its own directories.** No two tables or views, and no table and child namespace, share a directory. A new table
+   cannot take a renamed table's old directory, and a second name cannot be registered onto files a table still owns
+   (unregister it first).
+
+Register checks the metadata location against rules 1 and 2 before reading anything. Table, view and namespace names
+that would reshape a path (`..`, `/`, `\`, empty, control characters) are refused. Every refusal is a 400.
+
+The S3 signer applies the same scoping to requests: a table's own objects only, with no sub-resource beyond what clients
+send (multipart, versions, the Java SDK's `x-id`) and no header that changes access or retention (`x-amz-acl`,
+`x-amz-grant-*`, `x-amz-object-lock-*`); bucket requests only for the table's buckets, with each operation's own
+parameters.
 
 ## Storage
 

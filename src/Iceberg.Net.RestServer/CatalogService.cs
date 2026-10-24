@@ -33,7 +33,7 @@ public sealed record CreateTableSpec(
 /// <see cref="CommitFailedException"/> (HTTP 409) and its file is deleted; any other failure after the write leaves
 /// the file in place, because the swap may have happened.
 /// </summary>
-public sealed class CatalogService(ICatalogStore store, IFileIO io, RestServerOptions options)
+public sealed partial class CatalogService(ICatalogStore store, IFileIO io, RestServerOptions options)
 {
     public ICatalogStore Store { get; } = store;
     public IFileIO FileIO { get; } = io;
@@ -45,6 +45,10 @@ public sealed class CatalogService(ICatalogStore store, IFileIO io, RestServerOp
     public async Task CreateNamespaceAsync(Namespace ns, IReadOnlyDictionary<string, string> properties, CancellationToken ct)
     {
         if (ns.Levels.Count == 0 || ns.Levels.Any(l => l.Length == 0)) throw new BadRequestException("Namespace must have at least one non-empty level");
+        foreach (var level in ns.Levels)
+            if (level is "." or ".." || level.Any(c => c is '/' or '\\' || char.IsControl(c))) throw new BadRequestException($"Namespace level '{level}' cannot be used in a storage path");
+        if (await Store.LoadNamespaceAsync(ns, ct) is null)
+            await RequireNamespaceRootAsync(ns, NamespaceRoot(ns, properties), properties.ContainsKey("location"), ct);
         await Store.CreateNamespaceAsync(ns, properties, ct);
     }
 
@@ -66,6 +70,13 @@ public sealed class CatalogService(ICatalogStore store, IFileIO io, RestServerOp
         var both = removals.Where(updates.ContainsKey).ToList();
         if (both.Count > 0) throw new UnprocessableEntityException($"Properties cannot be both set and removed: {string.Join(", ", both)}");
         var current = await LoadNamespaceAsync(ns, ct);
+        if (updates.ContainsKey("location") || removals.Contains("location"))
+        {
+            var after = current.Where(kv => !removals.Contains(kv.Key)).Concat(updates).GroupBy(kv => kv.Key).ToDictionary(g => g.Key, g => g.Last().Value);
+            if (await Store.ListAsync(ns, CatalogEntryKind.Table, ct) is { Count: > 0 } || await Store.ListAsync(ns, CatalogEntryKind.View, ct) is { Count: > 0 })
+                throw new BadRequestException($"Namespace {ns} has tables or views: its location cannot change");
+            await RequireNamespaceRootAsync(ns, NamespaceRoot(ns, after), after.ContainsKey("location"), ct);
+        }
         await Store.UpdateNamespacePropertiesAsync(ns, updates, removals, ct);
         return (updates.Keys.ToList(), removals.Where(current.ContainsKey).ToList(), removals.Where(k => !current.ContainsKey(k)).ToList());
     }
@@ -114,7 +125,7 @@ public sealed class CatalogService(ICatalogStore store, IFileIO io, RestServerOp
     public async Task<LoadedTable> CreateTableAsync(Namespace ns, CreateTableSpec request, CancellationToken ct)
     {
         var id = new TableIdentifier(ns, request.Name);
-        if (string.IsNullOrEmpty(request.Name)) throw new BadRequestException("Table name must not be empty");
+        RequireEntryName(request.Name, "Table");
         await LoadNamespaceAsync(ns, ct);
         if (await Store.KindAsync(id, ct) is { } existing) throw new AlreadyExistsException($"{(existing == CatalogEntryKind.View ? "View" : "Table")} already exists: {id}");
 
@@ -133,6 +144,7 @@ public sealed class CatalogService(ICatalogStore store, IFileIO io, RestServerOp
         {
             throw new BadRequestException(e.Message);
         }
+        await RequireTableLocationsAsync(id, fresh, ct);
         if (request.StageCreate) return new LoadedTable(id, null, fresh); // nothing is written until the create commits
 
         var metadataLocation = MetastoreCatalog.NewMetadataLocation(fresh, null);
@@ -145,7 +157,16 @@ public sealed class CatalogService(ICatalogStore store, IFileIO io, RestServerOp
     public async Task<LoadedTable> RegisterTableAsync(Namespace ns, string name, string metadataLocation, bool overwrite, CancellationToken ct)
     {
         var id = new TableIdentifier(ns, name);
-        await LoadNamespaceAsync(ns, ct);
+        RequireEntryName(name, "Table");
+        var nsProperties = await LoadNamespaceAsync(ns, ct);
+        var current = await Store.GetAsync(id, CatalogEntryKind.Table, ct);
+        if (await Store.KindAsync(id, ct) == CatalogEntryKind.View || current is not null && !overwrite)
+            throw new AlreadyExistsException($"Table already exists: {id}");
+        var nsRoot = NamespaceRoot(ns, nsProperties) ?? throw new BadRequestException("The server has no warehouse configured and the namespace has no location");
+        // Checked before anything is read: the server reads with its own access.
+        RequireAllowed(metadataLocation, $"Table {id} metadata location");
+        if (!Root(metadataLocation).StartsWith(Root(nsRoot), StringComparison.Ordinal))
+            throw new BadRequestException($"Table {id} metadata location {metadataLocation} is outside its namespace's location {nsRoot}");
         TableMetadata metadata;
         try
         {
@@ -153,11 +174,9 @@ public sealed class CatalogService(ICatalogStore store, IFileIO io, RestServerOp
         }
         catch (Exception e) when (e is FileNotFoundException or DirectoryNotFoundException or InvalidDataException or System.Text.Json.JsonException)
         {
-            throw new BadRequestException($"Cannot read table metadata at {metadataLocation}: {e.Message}");
+            throw new BadRequestException($"Cannot read table metadata at {metadataLocation} ({e.GetType().Name})");
         }
-        var current = await Store.GetAsync(id, CatalogEntryKind.Table, ct);
-        if (await Store.KindAsync(id, ct) == CatalogEntryKind.View || current is not null && !overwrite)
-            throw new AlreadyExistsException($"Table already exists: {id}");
+        await RequireTableLocationsAsync(id, metadata, ct);
         await Store.SwapAsync([new PointerSwap(id, current, metadataLocation)], CatalogEntryKind.Table, ct);
         return new LoadedTable(id, metadataLocation, metadata);
     }
@@ -231,6 +250,7 @@ public sealed class CatalogService(ICatalogStore store, IFileIO io, RestServerOp
                     await LoadNamespaceAsync(id.Namespace, ct);
                     if (await Store.KindAsync(id, ct) is not null) throw new CommitFailedException($"Requirement failed: {id} already exists");
                     updated = await BuildCreatedAsync(id, commit.Updates, ct);
+                    await RequireTableLocationsAsync(id, updated, ct);
                     changed = true;
                 }
                 else
@@ -238,6 +258,8 @@ public sealed class CatalogService(ICatalogStore store, IFileIO io, RestServerOp
                     var builder = Apply(() => TableMetadataBuilder.From(current, Clock).ApplyAll(commit.Updates));
                     changed = builder.Changes.Count > 0;
                     updated = changed ? Apply(() => builder.Build(MetastoreCatalog.NewMetadataLocation(builder.Build(""), currentLocation))) : current;
+                    if (changed && !TableDirectories(updated).SequenceEqual(TableDirectories(current)))
+                        await RequireTableLocationsAsync(id, updated, ct);
                 }
 
                 if (!changed)
@@ -351,7 +373,9 @@ public sealed class CatalogService(ICatalogStore store, IFileIO io, RestServerOp
         await LoadNamespaceAsync(id.Namespace, ct);
         if (await Store.KindAsync(id, ct) is { } existing) throw new AlreadyExistsException($"{(existing == CatalogEntryKind.View ? "View" : "Table")} already exists: {id}");
         if (version.Representations.Count == 0) throw new BadRequestException("A view version needs at least one representation");
+        RequireEntryName(id.Name, "View");
         var metadata = ViewMetadata.Create(location ?? await DefaultLocationAsync(id, ct), schema, version, properties, Clock());
+        await RequireEntryLocationsAsync(id, CatalogEntryKind.View, [metadata.Location], ct);
         return await WriteViewAsync(id, null, metadata, ct, onTaken: () => new AlreadyExistsException($"View already exists: {id}"));
     }
 
@@ -360,6 +384,7 @@ public sealed class CatalogService(ICatalogStore store, IFileIO io, RestServerOp
         var current = await LoadViewAsync(id, ct);
         foreach (var r in requirements) r.Validate(current.Metadata);
         var updated = Apply(() => ViewUpdate.ApplyAll(current.Metadata, updates, Clock()));
+        if (updated.Location != current.Metadata.Location) await RequireEntryLocationsAsync(id, CatalogEntryKind.View, [updated.Location], ct);
         return await WriteViewAsync(id, current.MetadataLocation, updated, ct);
     }
 
