@@ -128,11 +128,12 @@ one snapshot. They bypass the change tracker, as in EF Core, and return the numb
 ## SaveChanges
 
 For each table with changes, the added, modified and deleted entities become **one MERGE on the primary key**
-(`TableMutations.MergeAsync`), so the table gets **exactly one snapshot**:
+(`TableMutations.MergeAsync`, or `StageMergeAsync` when several tables commit together), so the table gets **exactly one
+snapshot**:
 
 | Entity state | MERGE clause | When the key is… |
 |---|---|---|
-| Added | `WHEN NOT MATCHED THEN INSERT` | …already in the table: `DbUpdateException`, and nothing is committed for that table |
+| Added | `WHEN NOT MATCHED THEN INSERT` | …already in the table: `DbUpdateException`, and nothing is committed for that table (for any table, when the save is [atomic](#atomicity-across-tables)) |
 | Modified | `WHEN MATCHED THEN UPDATE`. Every mapped column comes from the entity; unmapped columns keep their values | …missing: `DbUpdateConcurrencyException` (EF Core's "expected one row, affected zero") |
 | Deleted | `WHEN MATCHED THEN DELETE` | …missing: `DbUpdateConcurrencyException` |
 | Deleted, then Added with the same key | `UPDATE` with the new entity's values | …missing: `DbUpdateConcurrencyException` |
@@ -143,18 +144,35 @@ merge on the new state and runs the checks again. An unrelated concurrent change
 lost, and a conflicting one is reported. When the commit retries run out, the result is
 `DbUpdateConcurrencyException`. A `ValidationException` or `CommitStateUnknownException` becomes `DbUpdateException`.
 
-### Atomicity across tables: per table only
+### Atomicity across tables
 
-Tables commit **one after another**, in table-name order. Each table's commit is atomic. **A `SaveChanges` that spans
-tables is not atomic.** When table B fails after table A committed, A's change stays in the table. To make a retry
-replay only what failed, the provider then marks A's entities as saved (Unchanged, or Detached for deletes) and
-rethrows B's error. B's entities keep their states.
+When a `SaveChanges` spans several tables and the catalog can commit several tables atomically
+(`ICatalog.SupportsMultiTableTransactions`: `InMemoryCatalog`, `JdbcCatalog`, and a `RestCatalog` whose server
+advertises `POST /v1/{prefix}/transactions/commit`, as `Iceberg.Net.RestServer` does), **the whole save is one
+catalog transaction**:
 
-The catalog API has a multi-table commit (`ICatalog.CommitTransactionAsync`, REST `/transactions/commit`, JDBC), and
-`SnapshotProducer.StageAsync` can stage a single producer for it. The row-level writes behind `SaveChanges`
-(`TableMutations.MergeAsync`) can only commit directly; they cannot yet stage. So the provider does not offer
-cross-table atomicity. Adding it needs a staged variant of `MergeAsync` in the core. `BeginTransaction` throws
-`NotSupportedException`.
+1. Each table's MERGE is **staged** (`TableMutations.StageMergeAsync`): planned against the table's current state, its
+   files written, its commit (requirements and updates) returned instead of applied.
+2. `StagedCommit.CommitAllAsync` sends every table's commit in one `CommitTransactionAsync`. Either every table gets
+   its snapshot or none does.
+3. When another writer moved any of the tables first (`CommitFailedException`), **every** table is refreshed and every
+   MERGE planned again, so the key, token and `RequireUnchangedSnapshot` checks run against the state the transaction
+   lands on. Then the transaction is retried with back-off (the largest `commit.retry.*` budget of the tables).
+
+Nothing is accepted before the transaction succeeds. On any failure (a duplicate key found while staging table B, a
+token found changed on a re-plan, retries spent) no table changes, every entity keeps its state, and the files written
+for the abandoned plans are deleted (manifests, manifest lists and delete files; data files are left for orphan-file
+cleanup, as for any lost attempt). A save of one table commits directly, as before.
+
+**Catalogs without multi-table transactions** (Glue; a REST server that does not advertise the endpoint, such as
+Gravitino 1.3) fall back to committing **one table after another**, in table-name order. Each table's commit is
+atomic, the save is not: when table B fails after table A committed, A's change stays. To make a retry replay only what
+failed, the provider then marks A's entities as saved (Unchanged, or Detached for deletes) and rethrows B's error; B's
+entities keep their states. To refuse that instead, set `UseIceberg(…, o => o.RequireAtomicSaveChanges())`: a save
+that spans tables then throws `NotSupportedException` before anything is written (a save of one table still works).
+
+`BeginTransaction` throws `NotSupportedException`: a transaction cannot stay open across calls, because the catalog
+commits all tables in one request.
 
 ### Concurrency
 
@@ -188,12 +206,18 @@ The `tests/Iceberg.Net.EntityFrameworkCore.Tests` suite runs against `InMemoryCa
 - `SaveChanges` for every state, replace, duplicate keys, missing rows and preserved extra columns;
 - row versions and tokens, including against a racing commit;
 - `RequireUnchangedSnapshot`;
-- partial failure across tables.
+- atomic `SaveChanges` across tables: one transaction, a failure in a later table leaving earlier ones unchanged, a
+  token changed by a racing commit caught on the re-plan, an unrelated racing commit merged;
+- the per-table fallback and `RequireAtomicSaveChanges` on a catalog without transactions.
+
+`tests/Iceberg.Net.RestServer.Tests/EfCoreTransactionTests` runs atomic `SaveChanges` against the REST server
+in-process (`WebApplicationFactory`, both stores), including a conflict the server reports (409) on table B that rolls
+back table A.
 
 Not provided:
 
 - migrations;
-- cross-table atomic `SaveChanges`;
+- explicit transactions (`BeginTransaction`);
 - compiled queries;
 - navigations, owned and complex types;
 - struct, list and map columns;

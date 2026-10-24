@@ -14,8 +14,8 @@ namespace Iceberg.Net.EntityFrameworkCore.Storage;
 
 /// <summary>
 /// <c>SaveChanges</c>: the added, modified and deleted entities of each table become one MERGE by primary key, so
-/// each table gets exactly one snapshot. Tables are committed one after another (see docs/efcore.md for what that
-/// means for atomicity).
+/// each table gets exactly one snapshot. Several tables are staged and committed in one catalog transaction when the
+/// catalog supports it, and otherwise one after another (see docs/efcore.md for what that means for atomicity).
 /// </summary>
 internal sealed class IcebergDatabase(DatabaseDependencies dependencies, IcebergSession session) : Database(dependencies)
 {
@@ -27,15 +27,32 @@ internal sealed class IcebergDatabase(DatabaseDependencies dependencies, Iceberg
             .GroupBy(e => IcebergEntityMapping.For(e.EntityType))
             .OrderBy(g => g.Key.TableName, StringComparer.Ordinal)
             .ToList();
+        if (groups.Count > 1)
+        {
+            if (session.Catalog.SupportsMultiTableTransactions) return await SaveAtomicallyAsync(groups, ct);
+            if (session.Options.RequireAtomicSaveChanges)
+                throw new NotSupportedException($"SaveChanges spans {groups.Count} tables ({string.Join(", ", groups.Select(g => g.Key.TableName))}), " +
+                    $"but the {session.Catalog.Name} catalog cannot commit several tables atomically, and RequireAtomicSaveChanges is set. Nothing was saved");
+        }
+
         var committed = new List<(IUpdateEntry Entry, IReadOnlyList<(IProperty, object)> Generated)>();
         var count = 0;
         foreach (var group in groups)
         {
             try
             {
-                var generated = await SaveTableAsync(group.Key, group.ToList(), ct);
-                committed.AddRange(group.Select(e => (e, generated.TryGetValue(e, out var g) ? g : (IReadOnlyList<(IProperty, object)>)[])));
-                count += group.Count();
+                var save = await PrepareTableAsync(group.Key, group.ToList(), ct);
+                try
+                {
+                    await TableMutations.MergeAsync(save.Table, save.Source, save.KeyColumns, save.Clauses, session.Options.DeleteStrategy, ct);
+                }
+                catch (Exception e) when (Translate(e, save) is { } translated)
+                {
+                    throw translated;
+                }
+                session.Forget(save.Table);
+                committed.AddRange(save.Entries.Select(e => (e, save.Generated.TryGetValue(e, out var g) ? g : (IReadOnlyList<(IProperty, object)>)[])));
+                count += save.Entries.Count;
             }
             catch when (committed.Count > 0)
             {
@@ -49,6 +66,69 @@ internal sealed class IcebergDatabase(DatabaseDependencies dependencies, Iceberg
             foreach (var (property, value) in generated) entry.SetStoreGeneratedValue(property, value);
         return count;
     }
+
+    /// <summary>
+    /// Stage every table's MERGE, then commit them in one catalog transaction: all tables change or none does. After a
+    /// lost race every MERGE is planned again, so its key and concurrency-token checks run against the state the
+    /// transaction commits on. Nothing is accepted before the transaction succeeds.
+    /// </summary>
+    private async Task<int> SaveAtomicallyAsync(List<IGrouping<IcebergEntityMapping, IUpdateEntry>> groups, CancellationToken ct)
+    {
+        var saves = new List<TableSave>();
+        var staged = new List<StagedCommit>();
+        try
+        {
+            foreach (var group in groups)
+            {
+                var save = await PrepareTableAsync(group.Key, group.ToList(), ct);
+                saves.Add(save);
+                try
+                {
+                    staged.Add(await TableMutations.StageMergeAsync(save.Table, save.Source, save.KeyColumns, save.Clauses, session.Options.DeleteStrategy, ct));
+                }
+                catch (Exception e) when (Translate(e, save) is { } translated)
+                {
+                    throw translated;
+                }
+            }
+        }
+        catch
+        {
+            foreach (var s in staged) await s.DiscardAsync(CancellationToken.None);
+            throw;
+        }
+
+        try
+        {
+            await StagedCommit.CommitAllAsync(staged, ct);
+        }
+        catch (Exception e) when (Translate(e, saves) is { } translated)
+        {
+            throw translated;
+        }
+        foreach (var save in saves)
+        {
+            session.Forget(save.Table);
+            foreach (var (entry, generated) in save.Generated)
+                foreach (var (property, value) in generated) entry.SetStoreGeneratedValue(property, value);
+        }
+        return saves.Sum(s => s.Entries.Count);
+    }
+
+    /// <summary>A core exception as EF Core's (null: let it through, e.g. one the MERGE's own checks threw).</summary>
+    private static Exception? Translate(Exception e, params TableSave[] saves)
+    {
+        var what = string.Join(", ", saves.Select(s => $"{s.Mapping.EntityType.DisplayName()} to {s.Table.Identifier}"));
+        var entries = saves.SelectMany(s => s.Entries).ToList();
+        return e switch
+        {
+            CommitFailedException => new DbUpdateConcurrencyException($"Commit of {what} kept conflicting with concurrent commits: {e.Message}", e, entries),
+            ValidationException or CommitStateUnknownException or ArgumentException => new DbUpdateException($"Saving {what} failed: {e.Message}", e, entries),
+            _ => null,
+        };
+    }
+
+    private static Exception? Translate(Exception e, List<TableSave> saves) => Translate(e, saves.ToArray());
 
     private static void AcceptCommitted(IEnumerable<(IUpdateEntry Entry, IReadOnlyList<(IProperty, object)> Generated)> committed)
     {
@@ -74,7 +154,12 @@ internal sealed class IcebergDatabase(DatabaseDependencies dependencies, Iceberg
         public IUpdateEntry Expected => Entries.FirstOrDefault(e => e.EntityState == EntityState.Deleted) ?? Entries[0];
     }
 
-    private async Task<Dictionary<IUpdateEntry, IReadOnlyList<(IProperty, object)>>> SaveTableAsync(IcebergEntityMapping mapping, List<IUpdateEntry> entries, CancellationToken ct)
+    /// <summary>One table's part of a save: the MERGE's source rows, key and clauses, and the row versions it writes.</summary>
+    private sealed record TableSave(IcebergEntityMapping Mapping, Table Table, IReadOnlyList<IUpdateEntry> Entries, List<object?[]> Source,
+        List<string> KeyColumns, Action<MergeBuilder> Clauses, Dictionary<IUpdateEntry, IReadOnlyList<(IProperty, object)>> Generated);
+
+    /// <summary>Load the table and build its MERGE. Its clauses make every check, so they hold for the state the commit lands on.</summary>
+    private async Task<TableSave> PrepareTableAsync(IcebergEntityMapping mapping, List<IUpdateEntry> entries, CancellationToken ct)
     {
         if (mapping.KeyProperties.Count == 0)
             throw new InvalidOperationException($"{mapping.EntityType.DisplayName()} has no key; keyless entity types are read-only");
@@ -160,41 +245,29 @@ internal sealed class IcebergDatabase(DatabaseDependencies dependencies, Iceberg
         }
 
         var source = items.Keys.ToList();
-        try
-        {
-            await TableMutations.MergeAsync(table, source, keyColumns, m => m
-                .WhenMatchedDelete((target, src) =>
-                {
-                    var item = items[src];
-                    Expect(item, target);
-                    return item.Change == Change.Delete;
-                })
-                .WhenMatchedUpdate((target, src) =>
-                {
-                    // Columns the model does not map keep the table's values.
-                    var updated = (object?[])target.Clone();
-                    foreach (var p in mappedPositions) updated[p] = src[p];
-                    return updated;
-                })
-                .WhenNotMatchedInsert(src =>
-                {
-                    var item = items[src];
-                    if (item.Change == Change.Insert) return true;
-                    throw new DbUpdateConcurrencyException(
-                        $"{mapping.EntityType.DisplayName()} with key [{string.Join(", ", keyPositions.Select(p => src[p]))}] was {(item.Change == Change.Update ? "modified" : "deleted")} " +
-                        $"in the context but table {table.Identifier} has no row with that key (deleted by another writer?)", item.Entries);
-                }), session.Options.DeleteStrategy, ct);
-        }
-        catch (CommitFailedException e)
-        {
-            throw new DbUpdateConcurrencyException($"Commit to {table.Identifier} kept conflicting with concurrent commits: {e.Message}", e, entries);
-        }
-        catch (Exception e) when (e is ValidationException or CommitStateUnknownException or ArgumentException)
-        {
-            throw new DbUpdateException($"Saving {mapping.EntityType.DisplayName()} to {table.Identifier} failed: {e.Message}", e, entries);
-        }
-        session.Forget(table);
-        return generated;
+        void Clauses(MergeBuilder m) => m
+            .WhenMatchedDelete((target, src) =>
+            {
+                var item = items[src];
+                Expect(item, target);
+                return item.Change == Change.Delete;
+            })
+            .WhenMatchedUpdate((target, src) =>
+            {
+                // Columns the model does not map keep the table's values.
+                var updated = (object?[])target.Clone();
+                foreach (var p in mappedPositions) updated[p] = src[p];
+                return updated;
+            })
+            .WhenNotMatchedInsert(src =>
+            {
+                var item = items[src];
+                if (item.Change == Change.Insert) return true;
+                throw new DbUpdateConcurrencyException(
+                    $"{mapping.EntityType.DisplayName()} with key [{string.Join(", ", keyPositions.Select(p => src[p]))}] was {(item.Change == Change.Update ? "modified" : "deleted")} " +
+                    $"in the context but table {table.Identifier} has no row with that key (deleted by another writer?)", item.Entries);
+            });
+        return new TableSave(mapping, table, entries, source, keyColumns, Clauses, generated);
     }
 
     private static DbUpdateConcurrencyException Moved(IcebergEntityMapping mapping, Table table, long? read, IEnumerable<Item> items) =>

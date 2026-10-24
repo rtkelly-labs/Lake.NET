@@ -188,20 +188,4 @@ public sealed class SaveChangesTests : EfTest
         await foreach (var row in TableScan.ReadRowsAsync(await TableAsync("orders"), new ScanRequest { Columns = ["id", "qty", "source_system"] })) rows.Add(row);
         Assert.Equal([(1L, 99, "erp"), (2L, 2, "erp")], rows.Select(r => ((long)r[0]!, (int)r[1]!, (string)r[2]!)).OrderBy(r => r.Item1));
     }
-
-    [Fact]
-    public async Task A_failure_on_a_later_table_keeps_earlier_tables_committed_and_accepted()
-    {
-        await SeedOrdersAsync(2);
-        await using var ctx = NewContext();
-        // Tables commit in name order: customer, then orders. The order insert fails (duplicate key).
-        var customer = new Customer { Name = "kim", Region = "eu" };
-        ctx.Customers.Add(customer);
-        ctx.Orders.Add(new Order { Id = 1, Customer = "dup", CreatedAt = new DateTime(2026, 1, 1) });
-        await Assert.ThrowsAsync<DbUpdateException>(() => ctx.SaveChangesAsync());
-        Assert.Equal(EntityState.Unchanged, ctx.Entry(customer).State);
-        Assert.Equal(1, customer.Version);
-        await using var check = NewContext();
-        Assert.Equal(1, await check.Customers.CountAsync());
-    }
 }

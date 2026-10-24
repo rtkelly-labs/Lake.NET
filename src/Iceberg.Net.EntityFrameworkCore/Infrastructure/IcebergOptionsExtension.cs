@@ -24,6 +24,7 @@ public sealed class IcebergOptionsExtension : IDbContextOptionsExtension
         Strict = copy.Strict;
         DeleteStrategy = copy.DeleteStrategy;
         RequireUnchangedSnapshot = copy.RequireUnchangedSnapshot;
+        RequireAtomicSaveChanges = copy.RequireAtomicSaveChanges;
         FormatVersion = copy.FormatVersion;
         TableProperties = copy.TableProperties;
     }
@@ -43,6 +44,13 @@ public sealed class IcebergOptionsExtension : IDbContextOptionsExtension
     /// </summary>
     public bool RequireUnchangedSnapshot { get; private set; }
 
+    /// <summary>
+    /// Fail a <c>SaveChanges</c> that spans several tables with <see cref="NotSupportedException"/>, before anything is
+    /// written, when the catalog cannot commit several tables atomically
+    /// (<see cref="ICatalog.SupportsMultiTableTransactions"/>), instead of committing table by table.
+    /// </summary>
+    public bool RequireAtomicSaveChanges { get; private set; }
+
     /// <summary>Format version for tables <c>EnsureCreated</c> creates (default: the library default, v2).</summary>
     public int? FormatVersion { get; private set; }
 
@@ -53,6 +61,7 @@ public sealed class IcebergOptionsExtension : IDbContextOptionsExtension
     public IcebergOptionsExtension WithStrict(bool strict) => new(this) { Strict = strict };
     public IcebergOptionsExtension WithDeleteStrategy(DeleteStrategy strategy) => new(this) { DeleteStrategy = strategy };
     public IcebergOptionsExtension WithRequireUnchangedSnapshot(bool require) => new(this) { RequireUnchangedSnapshot = require };
+    public IcebergOptionsExtension WithRequireAtomicSaveChanges(bool require) => new(this) { RequireAtomicSaveChanges = require };
     public IcebergOptionsExtension WithFormatVersion(int version) => new(this) { FormatVersion = version };
     public IcebergOptionsExtension WithTableProperties(IReadOnlyDictionary<string, string> properties) => new(this) { TableProperties = properties };
 
@@ -96,6 +105,12 @@ public sealed class IcebergDbContextOptionsBuilder(DbContextOptionsBuilder build
 
     /// <summary>Table-level optimistic concurrency: see <see cref="IcebergOptionsExtension.RequireUnchangedSnapshot"/>.</summary>
     public IcebergDbContextOptionsBuilder RequireUnchangedSnapshot(bool require = true) => With(e => e.WithRequireUnchangedSnapshot(require));
+
+    /// <summary>
+    /// Refuse to save several tables non-atomically: see <see cref="IcebergOptionsExtension.RequireAtomicSaveChanges"/>.
+    /// Without it, a catalog without multi-table transactions (Glue) commits table by table.
+    /// </summary>
+    public IcebergDbContextOptionsBuilder RequireAtomicSaveChanges(bool require = true) => With(e => e.WithRequireAtomicSaveChanges(require));
 
     /// <summary>Format version of tables created by <c>EnsureCreated</c>.</summary>
     public IcebergDbContextOptionsBuilder FormatVersion(int version) => With(e => e.WithFormatVersion(version));
