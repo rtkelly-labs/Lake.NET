@@ -12,3 +12,9 @@ dependencies = [
 
 [tool.uv]
 package = false
+
+[dependency-groups]
+# interop/duckdb_oracle.py (DuckDB's iceberg extension as an oracle): `uv sync --project interop --group duckdb`.
+# The extension itself is downloaded by DuckDB on first use; offline, also install duckdb-extensions,
+# duckdb-extension-iceberg and duckdb-extension-avro at the same version (see docs/spark-and-athena.md).
+duckdb = ["duckdb==1.5.5"]
