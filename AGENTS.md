@@ -45,6 +45,7 @@ Self-contained C# port of Apache Iceberg. Keep it that way: no references to cod
 | Regenerate Puffin/DataSketches/Roaring fixtures | `uv run --project interop python -I interop/pyiceberg_oracle.py puffin-fixtures tests/Iceberg.Net.Spec.Tests/fixtures/puffin` |
 | Regenerate Spark fixtures | see `interop/spark_oracle.py` docstring (`docker run apache/spark … spark_oracle.py fixtures`) |
 | Spec traceability matrix / upstream drift | `python3 tools/spec_trace.py matrix` (writes the gitignored `docs/spec-traceability.md`) / `python3 tools/spec_trace.py drift` |
+| Refresh the reference REST OpenAPI (after moving the pinned ref) | `uv run --with pyyaml --no-project python -I tools/openapi_reference.py` (OpenApiConformanceTests diff the server's `/openapi/v1.json` against it) |
 | Shadow-compare a table with PyIceberg | `dotnet run --project tools/ShadowCompare -- --metadata <metadata.json>` |
 | Mutation testing (slow; nothing else may build meanwhile) | `cd mutation && dotnet stryker --config-file stryker-puffin.json` |
 | Python lint/format (repo rules) | from repo root: `uv run ruff check iceberg-dotnet && uv run ruff format iceberg-dotnet` |

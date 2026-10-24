@@ -74,6 +74,7 @@ public static class RestServer
             sp.GetRequiredService<IServerStateStore>(), sp.GetService<ILoggerFactory>()?.CreateLogger<ScanPlanner>()));
         services.TryAddSingleton(sp => new IdempotencyStore(sp.GetRequiredService<RestServerOptions>().Idempotency, sp.GetRequiredService<IServerStateStore>()));
         services.AddIcebergAuth();
+        services.AddIcebergOpenApi();
         return services;
     }
 
