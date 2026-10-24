@@ -78,16 +78,16 @@ Feature: Tables
     Then the table "sales.orders" does not exist
     And none of the data or metadata files of "sales.orders" exist
 
-  @spec:rest:registertable @spec:rest:loadtable
-  Scenario: An existing metadata file can be registered under a new name
+  @spec:rest:registertable @spec:rest:unregistertable @spec:rest:loadtable
+  Scenario: An unregistered table's metadata file can be registered under a new name
     Given the table "sales.orders" holding:
       | id | name | region |
       | 1  | a    | eu     |
-    When I register the current metadata file of "sales.orders" as "sales.orders_copy"
-    Then the table "sales.orders_copy" holds exactly:
+    When I unregister "sales.orders"
+    And I register the last metadata file of "sales.orders" as "sales.orders_restored"
+    Then the table "sales.orders_restored" holds exactly:
       | id | name | region |
       | 1  | a    | eu     |
-    And "sales.orders_copy" has the same metadata file as "sales.orders"
 
   @spec:rest:registertable
   Scenario: A metadata file cannot be registered under a name that is taken
