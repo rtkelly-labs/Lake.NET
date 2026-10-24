@@ -103,7 +103,7 @@ Glue endpoint for Lake Formation governance. Challenges:
   Spark 4.0.1 (Iceberg 1.12 `RESTCatalog`), both of which can also plan their scans on it.
 - It plans scans on the server (`plan`, `tasks`; stateless plan tasks; incremental append scans), enforces static role
   grants through a pluggable `IAuthorizer` (403 `ForbiddenException`), vends STS credentials scoped to the table's
-  prefix and Azure SAS tokens, signs S3 requests for clients that hold no credentials (remote signing: our client,
+  prefix, Azure SAS tokens and downscoped GCS tokens, signs S3 requests for clients that hold no credentials (remote signing: our client,
   Spark and PyIceberg, on a moto that checks signatures), and replays responses by `Idempotency-Key`. Idempotency keys
   and plan IDs live in its database, so instances behind a load balancer share them.
 - Not implemented: GCS credentials, and signing for anything but S3.

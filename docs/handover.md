@@ -38,7 +38,7 @@ The counts are from the last local run on the branch. Every suite passed.
 | `Iceberg.Net.Linq.Tests` | 84 | nothing |
 | `Iceberg.Net.EntityFrameworkCore.Tests` | 33 | nothing |
 | `Iceberg.Net.Behaviour.Tests` (BDD) | 65 | `ICEBERG_PYTHON` |
-| `Iceberg.Net.RestServer.Tests` | 106 | `ICEBERG_PYTHON`, `ICEBERG_SPARK_JAR`, Docker, moto for the vending cases; skips otherwise |
+| `Iceberg.Net.RestServer.Tests` | 125 | `ICEBERG_PYTHON`, `ICEBERG_SPARK_JAR`, Docker, moto for the vending cases, the `apache/gravitino-iceberg-rest:1.3.1` image for the Java GCS check; skips otherwise |
 | `Iceberg.Net.Ecosystem.Tests` | 55 | Docker (Spark), `ICEBERG_DUCKDB_PYTHON` (DuckDB); skips otherwise |
 | `Iceberg.Net.Regression.Tests` | 267 passed, 3 skipped | the emulators. The skips are expected: two Athena tests need AWS, and Nessie doesn't do v3 |
 
@@ -79,6 +79,10 @@ These cost time during the build-out, and may not apply on a normal workstation 
   - The Athena runner uses the real SDK against moto, and Athena's query SQL runs on Trino. Athena's own DDL,
     `OPTIMIZE` and `VACUUM` still need real Athena.
   - The remaining roadmap action is the AWS sandbox (#4).
+- **GCP (needs a project):** the REST server's GCS credential vending is checked offline only (the token exchange
+  against a scripted STS; PyIceberg and Iceberg Java sending the vended token). Run it once against a real bucket:
+  the exchange, then a reader's and a writer's token inside and outside the table's prefix
+  ([rest-server.md](rest-server.md#google-cloud-storage)).
 - **REST server:** see [rest-server.md](rest-server.md#not-implemented) for what is still missing.
 - **Change feed with delete files:** Spark can't check it, because Java's changelog scan refuses delete files. Our
   replay test covers it.

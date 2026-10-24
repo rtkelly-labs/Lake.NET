@@ -198,7 +198,7 @@ When the client sends `X-Iceberg-Access-Delegation: vended-credentials` and a ve
 location, and the same keys in `config` for clients that predate `storage-credentials`. `GET …/tables/{t}/credentials`
 (loadCredentials) returns them on their own and is advertised only when vending is on. Commit responses carry no
 `config`, so no credentials. Clients must refresh before the credentials expire
-(`s3.session-token-expires-at-ms`, `adls.sas-token-expires-at-ms.*`). This library's client does not refresh yet
+(`s3.session-token-expires-at-ms`, `adls.sas-token-expires-at-ms.*`, `gcs.oauth2.token-expires-at`). This library's client does not refresh yet
 ([catalogs.md](catalogs.md)), so long writers should reload the table.
 
 The S3 vendor (`StsCredentialVendor`) calls STS `AssumeRole` (the Query API over HTTP, signed with the library's
@@ -243,12 +243,72 @@ well, `CompositeCredentialVendor` combines both, and each answers only for its o
   directory SAS, so the default directory scope is checked only against the SDK vector, not by an emulator. This library
   has no ADLS FileIO, so the test drives Azurite's Blob REST API directly.
 
+### Google Cloud Storage
+
+`GcsDownscopedCredentialVendor` vends downscoped OAuth access tokens for tables at `gs://{bucket}/{path}` (PyIceberg's
+`gcs://` too), through Google's [Credential Access Boundary](https://cloud.google.com/iam/docs/downscoping-short-lived-credentials)
+flow: the server's own token is exchanged at Google's STS for one that can do less. Configuring a source token (or
+registering an `IGcpAccessTokenSource`) turns it on; with S3 or Azure vending on as well, `CompositeCredentialVendor`
+combines them, and each answers only for its own schemes. There is no Google SDK dependency: the exchange and the
+source tokens are plain HTTP.
+
+| Key | Meaning |
+|---|---|
+| `CredentialVending:Gcs:AccessToken`, `:AccessTokenExpiresAt` | A fixed source token and its expiry (tests and short runs: Google tokens live an hour at most) |
+| `CredentialVending:Gcs:ServiceAccountKeyFile` | A service account JSON key; source tokens are minted with an RS256 JWT assertion (JWT bearer grant to the key's `token_uri`, scope `cloud-platform`) |
+| `CredentialVending:Gcs:UseMetadataServer`, `:MetadataEndpoint` | The GCE / GKE / Cloud Run metadata server's default service account (`$GCE_METADATA_HOST`, else `metadata.google.internal`) |
+| `CredentialVending:Gcs:StsEndpoint` | `https://sts.googleapis.com/v1/token` |
+
+The first one set wins. Source tokens are cached until a quarter of their lifetime (at least a minute) remains. The
+source principal needs the `cloud-platform` scope and must itself hold everything a vended token may do (object admin
+on the buckets, for writers).
+
+- **The exchange:** `POST` to the STS endpoint, form-encoded: `grant_type=urn:ietf:params:oauth:grant-type:token-exchange`,
+  `subject_token_type` and `requested_token_type` `urn:ietf:params:oauth:token-type:access_token`, `subject_token` (the
+  source token) and `options`, the URL-encoded access boundary:
+
+  ```json
+  {"accessBoundary":{"accessBoundaryRules":[{
+    "availablePermissions":["inRole:roles/storage.objectViewer"],
+    "availableResource":"//storage.googleapis.com/projects/_/buckets/lake",
+    "availabilityCondition":{"expression":"resource.name.startsWith('projects/_/buckets/lake/objects/wh/db/t/') || api.getAttribute('storage.googleapis.com/objectListPrefix', '').startsWith('wh/db/t/')"}}]}}
+  ```
+
+- **Permissions:** `roles/storage.objectViewer` for principals with `read`, `roles/storage.objectAdmin` (create,
+  overwrite, delete) for principals with `write` on the table. The condition is the same for both: objects under the
+  table's prefix, and list requests whose `prefix` starts with it (listing is checked on the bucket, so the object
+  clause alone would refuse it). A list request for the table location without the trailing `/` is refused, as with
+  the S3 session policy. Quotes, backslashes and control characters in the path are escaped in the CEL strings.
+- **Returned config:** `gcs.oauth2.token` and `gcs.oauth2.token-expires-at` (milliseconds since the epoch), under
+  `storage-credentials` with prefix `gs://{bucket}/{path}/` and in `config`. These are the keys of Iceberg Java's
+  `GCPProperties` (1.11 parses the expiry with `Long.parseLong` into a `Date`; `GCSFileIO` implements
+  `SupportsStorageCredentials` and picks the longest matching prefix) and of PyIceberg 0.12 (`GCS_TOKEN`,
+  `GCS_TOKEN_EXPIRES_AT_MS`, passed to PyArrow's `GcsFileSystem` as `access_token` and
+  `credential_token_expiration`). Put `gcs.project-id` or `gcs.service.host` in `TableConfig`. The server sends no
+  `gcs.oauth2.refresh-credentials-endpoint`, so Java does not refresh the token itself (as with S3 and Azure).
+- **Expiry and caching:** the STS response's `expires_in` when present, capped by the source token's expiry (Google's
+  STS omits `expires_in` for some source tokens, and a downscoped token never outlives its source); with neither, no
+  expiry key is sent and nothing is cached. Tokens are cached per (location, access) until a quarter of their lifetime
+  remains.
+- **How it is checked, and what is not:** `GcsCredentialVendingTests` assert the exact exchange request against a
+  scripted STS (the form fields, the boundary JSON, the CEL condition, the role per access level, escaping),
+  response parsing, expiry, caching, errors (which never echo the source token), the metadata-server and
+  service-account requests (the JWT is verified with the public key), and an in-process server that combines it with
+  the S3 and Azure vendors and returns reader and writer tokens from loadTable, createTable and loadCredentials.
+  `GcsCrossEngineTests` load a `gs://` table with PyIceberg 0.12 (`PyArrowFileIO`) and with Iceberg Java 1.11
+  (`RESTCatalog`'s `ResolvingFileIO` delegating to `GCSFileIO`, run from the `apache/gravitino-iceberg-rest:1.3.1`
+  image's jars) and point `gcs.service.host` at a recording HTTP endpoint: both send the vended token as
+  `Authorization: Bearer` for objects under the table, so the key names, prefix and expiry format are what they read.
+  **Nothing here talks to Google.** The request shape follows Google's documented format but no real STS has accepted
+  it, and no real bucket has enforced a vended token's role or condition (in particular the `objectListPrefix` clause,
+  and whether a bucket needs uniform bucket-level access for the condition). `fsouza/fake-gcs-server` ignores
+  authentication, so it cannot check either. A first run against a GCP project should confirm: the exchange succeeds,
+  a reader's token reads and lists under the table and is refused writes and other prefixes, and a writer's token
+  writes and deletes only under it.
+
 ### Other storage
 
-GCS has no built-in vendor. Vending there means minting a downscoped OAuth token (a Credential Access Boundary through
-Google's STS); `fsouza/fake-gcs-server` can be pulled here but ignores authentication, so it could not verify such a
-token, and none was built. Register an `IStorageCredentialVendor` for GCS or a credential broker; it replaces the
-built-in ones.
+For anything else (or a credential broker), register an `IStorageCredentialVendor`; it replaces the built-in ones.
 
 ## Remote signing
 
@@ -358,8 +418,9 @@ Errors always have the `{"error": {"message", "type", "code"}}` shape:
 - Remote signing for anything but S3, the spec's newer `remote-signing-config` field (Iceberg 1.12 works without it),
   and signing for staged creates or just-dropped tables (see [Remote signing](#remote-signing)).
 - Per-partition residual simplification, and `storage-credentials` in planning responses (clients use the table's).
-- GCS credentials, and an emulator-checked ADLS directory SAS (Azurite cannot). Register an `IStorageCredentialVendor`
-  for other storage.
+- GCS vending checked against Google itself (the exchange and the clients' use of the tokens are checked offline; see
+  [Google Cloud Storage](#google-cloud-storage)), and an emulator-checked ADLS directory SAS (Azurite cannot). Register
+  an `IStorageCredentialVendor` for other storage.
 - Functions, `register-view`, and a custom `namespace-separator`.
 - Audit logging and storing metrics reports.
 - Several warehouses behind one server. Run one server per warehouse, or share a database with a different
@@ -369,8 +430,9 @@ Errors always have the `{"error": {"message", "type", "code"}}` shape:
 
 | Where | What |
 |---|---|
-| `tests/Iceberg.Net.RestServer.Tests` | `CatalogContractTests` run the catalog contract (namespaces, round trip, concurrent writers, stale requirements, time travel, rename/register/purge, v3, multi-table transactions, views) through `RestCatalog` against the server under `WebApplicationFactory`, over both stores. `ProtocolTests` cover status codes, the ErrorModel, paging, ETag, staged creates and registration. `ConcurrencyTests` cover two racing commits (exactly one 409), a lost compare-and-swap (409, its file removed) and two servers over one database. `AuthTests` and `SqlStoreTests` cover the rest. `ScanPlanningTests` read server plans with our client and compare them with local scans (v2/v3, position deletes, DVs, equality deletes, filters, time travel, plan tasks, async), plus the protocol (plan IDs, plan-task tokens, `stats-fields`, case-insensitivity, 400/404). `IncrementalScanPlanningTests` check incremental plans against the change feed. `AuthorizationTests`, `CredentialVendingTests` (fake vendor, scripted STS, and moto's STS when the emulators run: the vended keys are then used for S3), `AzureCredentialVendingTests` (Azure SDK vectors; Azurite when its image is present), `RemoteSigningTests` (AWS's example, the authorization rules, and our client against `AuthenticatingMoto`), `IdempotencyTests` (replays, 422, concurrent duplicates, a lost commit response) and `SharedStateTests` (two servers sharing keys and plan IDs; the state store contract) cover the rest |
+| `tests/Iceberg.Net.RestServer.Tests` | `CatalogContractTests` run the catalog contract (namespaces, round trip, concurrent writers, stale requirements, time travel, rename/register/purge, v3, multi-table transactions, views) through `RestCatalog` against the server under `WebApplicationFactory`, over both stores. `ProtocolTests` cover status codes, the ErrorModel, paging, ETag, staged creates and registration. `ConcurrencyTests` cover two racing commits (exactly one 409), a lost compare-and-swap (409, its file removed) and two servers over one database. `AuthTests` and `SqlStoreTests` cover the rest. `ScanPlanningTests` read server plans with our client and compare them with local scans (v2/v3, position deletes, DVs, equality deletes, filters, time travel, plan tasks, async), plus the protocol (plan IDs, plan-task tokens, `stats-fields`, case-insensitivity, 400/404). `IncrementalScanPlanningTests` check incremental plans against the change feed. `AuthorizationTests`, `CredentialVendingTests` (fake vendor, scripted STS, and moto's STS when the emulators run: the vended keys are then used for S3), `AzureCredentialVendingTests` (Azure SDK vectors; Azurite when its image is present), `GcsCredentialVendingTests` (the token exchange against a scripted STS, the source tokens, the combined vendors in the server), `RemoteSigningTests` (AWS's example, the authorization rules, and our client against `AuthenticatingMoto`), `IdempotencyTests` (replays, 422, concurrent duplicates, a lost commit response) and `SharedStateTests` (two servers sharing keys and plan IDs; the state store contract) cover the rest |
 | `CrossEngineTests` (same project) | The server on a Kestrel port. **PyIceberg 0.12** (OAuth2 client credentials) creates, appends, evolves and reads tables interleaved with our client, including a staged create transaction, reads through server-side scan planning (`scan-planning-mode=server`, split into plan tasks, with position deletes), and appends and reads through remote signing. **Spark 4.0.1 / Iceberg 1.12** (apache/spark image on the host network) creates, inserts, deletes with merge-on-read position deletes, reads our appends, alters and inserts into a table we created, and (told `scan-planning-mode=server` by the table config) reads tables with v2 position deletes and v3 DVs through server-side planning and plan tasks, matches our incremental plans with its incremental reads, and reads and writes S3 through remote signing (with `iceberg-aws-bundle-1.12.0.jar` next to the runtime jar). They need `ICEBERG_PYTHON` and the Spark oracle (`emulation/up.sh --spark`, or `ICEBERG_SPARK_JAR`), and skip without them; the signing tests also need Docker and the `motoserver/moto:5.2.4` image. `ICEBERG_SPARK_LOG=<file>` keeps the full Spark output of a failed run |
+| `GcsCrossEngineTests` (same project) | PyIceberg 0.12 and Iceberg Java 1.11 (`GCSFileIO`, from the `apache/gravitino-iceberg-rest:1.3.1` image's jars, `docker run --network host`) load a `gs://` table with vended credentials and send the token to a recording GCS endpoint. Need `ICEBERG_PYTHON` and that image respectively; skip without them |
 | `tests/Iceberg.Net.Regression.Tests` | The `dotnet-rest` catalog kind (`DotnetRestServer.cs`): the server on a free port with its warehouse on moto. It runs `CatalogConformanceTests`, `ViewConformanceTests`, the PyIceberg `CrossEngineTests` and the soak test |
 
 ```bash

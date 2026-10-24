@@ -28,7 +28,8 @@ public sealed class KestrelHost : IAsyncDisposable
     }
 
     /// <param name="under">Parent directory of the server's warehouse and database (default: a temp directory).</param>
-    public static async Task<KestrelHost> StartAsync(Action<RestServerOptions>? configure = null, string? under = null)
+    /// <param name="services">Registrations made before the server's own (which do not replace them).</param>
+    public static async Task<KestrelHost> StartAsync(Action<RestServerOptions>? configure = null, string? under = null, Action<IServiceCollection>? services = null)
     {
         var root = Path.Combine(under ?? Path.Combine(Path.GetTempPath(), "iceberg-restserver-tests"), Guid.NewGuid().ToString("N"));
         Directory.CreateDirectory(root);
@@ -38,7 +39,11 @@ public sealed class KestrelHost : IAsyncDisposable
             o.SqlitePath = Path.Combine(root, "catalog.db");
             o.Warehouse = Path.Combine(root, "warehouse");
             configure?.Invoke(o);
-        }, b => b.Logging.SetMinimumLevel(LogLevel.Warning));
+        }, b =>
+        {
+            b.Logging.SetMinimumLevel(LogLevel.Warning);
+            services?.Invoke(b.Services);
+        });
         await app.StartAsync();
         var address = app.Services.GetRequiredService<IServer>().Features.Get<IServerAddressesFeature>()!.Addresses.First();
         return new KestrelHost(app, root, new Uri(address));

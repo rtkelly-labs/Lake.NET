@@ -141,6 +141,9 @@ public sealed class CredentialVendingOptions
     /// <summary>Azure SAS tokens for <c>abfs[s]://</c> / <c>wasb[s]://</c> tables; on when any account key is configured.</summary>
     public AdlsCredentialVendingOptions Adls { get; set; } = new();
 
+    /// <summary>Downscoped Google Cloud tokens for <c>gs://</c> tables; on when a source token is configured.</summary>
+    public GcsCredentialVendingOptions Gcs { get; set; } = new();
+
     /// <summary>
     /// The server's own credentials for calling STS. Unset: the FileIO's <c>s3.access-key-id</c> /
     /// <c>s3.secret-access-key</c>, else the AWS SDK's default credential chain.
@@ -153,6 +156,40 @@ public sealed class CredentialVendingOptions
 
     /// <summary>S3 (STS) vending is on.</summary>
     public bool Enabled => !string.IsNullOrEmpty(RoleArn);
+}
+
+/// <summary>
+/// GCS vending (<see cref="GcsDownscopedCredentialVendor"/>): where the server's own Google token comes from, and
+/// Google's STS. On when one source is configured (or an <see cref="IGcpAccessTokenSource"/> is registered).
+/// </summary>
+public sealed class GcsCredentialVendingOptions
+{
+    /// <summary>A fixed source token (tests, short runs: Google tokens live an hour at most).</summary>
+    public string? AccessToken { get; set; }
+
+    /// <summary>When <see cref="AccessToken"/> expires; vended tokens never outlive it.</summary>
+    public DateTimeOffset? AccessTokenExpiresAt { get; set; }
+
+    /// <summary>A service account JSON key file; its tokens are minted with a signed JWT.</summary>
+    public string? ServiceAccountKeyFile { get; set; }
+
+    /// <summary>Use the GCE / GKE / Cloud Run metadata server's default service account.</summary>
+    public bool UseMetadataServer { get; set; }
+
+    /// <summary>The metadata server; default <c>http://$GCE_METADATA_HOST</c>, else <c>http://metadata.google.internal</c>.</summary>
+    public string? MetadataEndpoint { get; set; }
+
+    /// <summary>Google's STS token endpoint.</summary>
+    public string StsEndpoint { get; set; } = "https://sts.googleapis.com/v1/token";
+
+    public bool Enabled => !string.IsNullOrEmpty(AccessToken) || !string.IsNullOrEmpty(ServiceAccountKeyFile) || UseMetadataServer;
+
+    /// <summary>The configured source token: a static token, else a service account key, else the metadata server.</summary>
+    public IGcpAccessTokenSource CreateTokenSource() =>
+        !string.IsNullOrEmpty(AccessToken) ? new StaticGcpAccessTokenSource(AccessToken, AccessTokenExpiresAt)
+        : !string.IsNullOrEmpty(ServiceAccountKeyFile) ? ServiceAccountGcpAccessTokenSource.FromFile(ServiceAccountKeyFile)
+        : UseMetadataServer ? new MetadataServerGcpAccessTokenSource(MetadataEndpoint)
+        : throw new InvalidOperationException("CredentialVending:Gcs needs AccessToken, ServiceAccountKeyFile or UseMetadataServer");
 }
 
 /// <summary>Azure SAS vending (<see cref="AdlsSasCredentialVendor"/>).</summary>
