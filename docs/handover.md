@@ -42,6 +42,17 @@ The counts are from the last local run on the branch. Every suite passed.
 | `Iceberg.Net.Ecosystem.Tests` | 55 | Docker (Spark), `ICEBERG_DUCKDB_PYTHON` (DuckDB); skips otherwise |
 | `Iceberg.Net.Regression.Tests` | 267 passed, 3 skipped | the emulators. The skips are expected: two Athena tests need AWS, and Nessie doesn't do v3 |
 
+Two more checks ran on the final code:
+- **Package smoke test** (`tools/package-smoke.sh`, also run in CI). Every library packs. Throwaway console apps
+  install them from the local feed and run:
+  - a Data consumer (create, insert, upsert, filtered read);
+  - an EF Core consumer (`EnsureCreated`, `SaveChanges`, a filtered query), which also uses the Spark and Athena SQL
+    helpers;
+  - a netstandard2.0 library built against Core and Avro.
+- **Fuzzing** (`tools/fuzz.sh`, libFuzzer): no findings.
+  - Mumbling bitmap: 2.8 M runs in 3 minutes.
+  - Manifest, Puffin, deletion-vector and metadata decoders: 0.9–1.6 M runs each in 90 seconds.
+
 `./run-tests.sh emulation` runs them all. The settings used locally:
 
 ```bash
