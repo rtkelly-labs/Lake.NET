@@ -8,6 +8,7 @@ using Microsoft.Extensions.Logging;
 using Iceberg.Net.Catalog;
 using Iceberg.Net.Data;
 using Iceberg.Net.IO;
+using Iceberg.Net.TestSupport;
 
 namespace Iceberg.Net.RestServer.Tests;
 
@@ -25,9 +26,10 @@ public sealed class KestrelHost : IAsyncDisposable
         Uri = uri;
     }
 
-    public static async Task<KestrelHost> StartAsync(Action<RestServerOptions>? configure = null)
+    /// <param name="under">Parent directory of the server's warehouse and database (default: a temp directory).</param>
+    public static async Task<KestrelHost> StartAsync(Action<RestServerOptions>? configure = null, string? under = null)
     {
-        var root = Path.Combine(Path.GetTempPath(), "iceberg-restserver-tests", Guid.NewGuid().ToString("N"));
+        var root = Path.Combine(under ?? Path.Combine(Path.GetTempPath(), "iceberg-restserver-tests"), Guid.NewGuid().ToString("N"));
         Directory.CreateDirectory(root);
         var app = RestServer.Build(["--urls", "http://127.0.0.1:0"], o =>
         {
@@ -75,11 +77,11 @@ public sealed class CrossEngineTests
         return JsonNode.Parse((await stdout).Trim().Split('\n')[^1])!;
     }
 
-    private static Task<KestrelHost> StartSecuredAsync() => KestrelHost.StartAsync(o =>
+    private static Task<KestrelHost> StartSecuredAsync(string? under = null) => KestrelHost.StartAsync(o =>
     {
         o.Auth.Clients["spark"] = "spark-secret";
         o.Auth.SigningKey = "cross-engine-signing-key-of-at-least-32-bytes";
-    });
+    }, under);
 
     private static Task<RestCatalog> ConnectAsync(KestrelHost host) =>
         RestCatalog.ConnectAsync(new RestCatalogOptions { Uri = host.Uri, Credential = Credential, AccessDelegation = null }, _ => new LocalFileIO());
@@ -146,5 +148,81 @@ public sealed class CrossEngineTests
         var read = await PyIcebergAsync("read", host.Uri.ToString().TrimEnd('/'), Credential, "net", "events");
         Assert.Equal(Enumerable.Range(0, 25).Where(i => i % 2 == 0), read["ids"]!.AsArray().Select(i => i!.GetValue<int>()));
         Assert.Equal(2, read["snapshots"]!.GetValue<int>());
+    }
+
+    /// <summary>
+    /// Spark 4 with Iceberg Java's RESTCatalog (apache/spark image, host network) against the server: Spark creates,
+    /// inserts and deletes (merge-on-read position deletes), we read that and append, Spark reads our append and a table
+    /// we created, and evolves its schema. The warehouse lives under <see cref="SparkOracle.SharedRoot"/>, mounted at the
+    /// same path in the container.
+    /// </summary>
+    [SkippableFact]
+    public async Task Spark_and_the_dotnet_client_share_tables_through_the_server()
+    {
+        Require.Spark();
+        Directory.CreateDirectory(SparkOracle.SharedRoot);
+        await using var host = await StartSecuredAsync(SparkOracle.SharedRoot);
+        var uri = host.Uri.ToString().TrimEnd('/');
+
+        var first = await SparkAsync(host, uri,
+            "CREATE NAMESPACE IF NOT EXISTS rest.spark",
+            "CREATE TABLE rest.spark.events (id BIGINT, name STRING, region STRING) USING iceberg PARTITIONED BY (region) "
+                + "TBLPROPERTIES ('format-version'='2', 'write.delete.mode'='merge-on-read')",
+            "INSERT INTO rest.spark.events VALUES " + string.Join(", ", Enumerable.Range(0, 10).Select(i => $"({i}, 's-{i}', '{(i % 2 == 0 ? "eu" : "us")}')")),
+            "DELETE FROM rest.spark.events WHERE id = 3",
+            "SELECT id FROM rest.spark.events ORDER BY id");
+        Assert.Equal(Enumerable.Range(0, 10).Where(i => i != 3), SparkIds(first[^1]!));
+
+        using var catalog = await ConnectAsync(host);
+        var events = await catalog.LoadTableAsync(TableIdentifier.Of("spark", "events"));
+        Assert.Equal(Enumerable.Range(0, 10).Where(i => i != 3).Select(i => (long)i), Ids(await TableScan.ReadAllAsync(events)));
+        Assert.Equal("1", events.Metadata.CurrentSnapshot!.Summary["added-position-delete-files"]);
+        var rows = Enumerable.Range(10, 5).Select(i => new object?[] { (long)i, $"net-{i}", i % 2 == 0 ? "eu" : "us" }).ToList();
+        await SnapshotProducer.Append(events).AddFiles(await TableWriter.WriteAsync(events, rows)).CommitAsync();
+
+        await catalog.CreateNamespaceAsync(Namespace.Of("net"));
+        var ours = await catalog.CreateTableAsync(new CreateTableRequest(TableIdentifier.Of("net", "events"), CatalogContractTests.Schema, CatalogContractTests.Spec));
+        await SnapshotProducer.Append(ours).AddFiles(await TableWriter.WriteAsync(ours, CatalogContractTests.Rows(0, 12))).CommitAsync();
+
+        var second = await SparkAsync(host, uri,
+            "SELECT id FROM rest.spark.events ORDER BY id",
+            "SELECT id FROM rest.net.events ORDER BY id",
+            "ALTER TABLE rest.net.events ADD COLUMN note STRING",
+            "INSERT INTO rest.net.events (id, name, amount, event_ts, region, qty, note) VALUES (100, 'spark', 1.0, TIMESTAMP '2024-01-02 00:00:00', 'eu', 1, 'from spark')");
+        Assert.Equal(Enumerable.Range(0, 15).Where(i => i != 3), SparkIds(second[0]!));
+        Assert.Equal(Enumerable.Range(0, 12), SparkIds(second[1]!));
+
+        var evolved = await catalog.LoadTableAsync(ours.Identifier);
+        Assert.NotNull(evolved.Schema.FindField("note"));
+        var all = await TableScan.ReadAllAsync(evolved);
+        Assert.Equal(13, all.Count);
+        Assert.Equal("from spark", all.Single(r => (long)r[0]! == 100)[6]);
+    }
+
+    private static IEnumerable<int> SparkIds(JsonNode step) => step["rows"]!.AsArray().Select(r => int.Parse(r!["id"]!.GetValue<string>()));
+
+    private static async Task<JsonArray> SparkAsync(KestrelHost host, string uri, params string[] steps)
+    {
+        var stepsFile = Path.Combine(host.Root, $"steps-{Guid.NewGuid():N}.json");
+        await File.WriteAllTextAsync(stepsFile, new JsonArray(steps.Select(s => (JsonNode)s).ToArray()).ToJsonString());
+        var jar = Environment.GetEnvironmentVariable("ICEBERG_SPARK_JAR") ?? Path.Combine(TestEnvironment.RepoDir(), "emulation", ".cache", SparkOracle.JarName);
+        var interop = Path.Combine(AppContext.BaseDirectory, "interop");
+        var psi = new ProcessStartInfo("docker") { RedirectStandardOutput = true, RedirectStandardError = true };
+        foreach (var a in new[]
+        {
+            "run", "--rm", "--user", "root", "--network", "host", "-e", "SPARK_LOCAL_IP=127.0.0.1",
+            "-v", $"{Path.GetDirectoryName(jar)}:/jars:ro", "-v", $"{interop}:/client:ro", "-v", $"{SparkOracle.SharedRoot}:{SparkOracle.SharedRoot}",
+            SparkOracle.Image, "/opt/spark/bin/spark-submit", "--jars", $"/jars/{Path.GetFileName(jar)}", "/client/spark_rest_client.py",
+            uri, Credential, stepsFile,
+        }) psi.ArgumentList.Add(a);
+        using var p = Process.Start(psi)!;
+        var stdout = p.StandardOutput.ReadToEndAsync();
+        var stderr = p.StandardError.ReadToEndAsync();
+        await p.WaitForExitAsync().WaitAsync(TimeSpan.FromMinutes(10));
+        var output = await stdout;
+        var marker = output.LastIndexOf("@@ORACLE@@", StringComparison.Ordinal);
+        if (p.ExitCode != 0 || marker < 0)
+            throw new InvalidOperationException($"Spark failed ({p.ExitCode}): {string.Join('\n', (await stderr).Split('\n').TakeLast(40))}");
+        return JsonNode.Parse(output[(marker + "@@ORACLE@@".Length)..])!.AsArray();
     }
 }
