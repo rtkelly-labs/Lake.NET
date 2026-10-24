@@ -45,9 +45,21 @@ public sealed partial class CatalogService
         {
             throw new BadRequestException($"{what}: {e.Message}");
         }
+        // A local file system reads a//b as a/b, so two spellings would name one directory: one spelling only.
+        if (PathPart(TableLocations.Normalise(location).TrimEnd('/')).Contains("//", StringComparison.Ordinal))
+            throw new BadRequestException($"{what} {location} has an empty path segment");
         var root = Root(location);
         if (!AllowedRoots().Any(r => root.Length > r.Length && root.StartsWith(r, StringComparison.Ordinal)))
             throw new BadRequestException($"{what} {location} is outside the storage this server allows (Iceberg:Warehouse, Iceberg:Locations:Allowed)");
+    }
+
+    /// <summary>The part after <c>scheme://authority</c>, or the whole of a local path.</summary>
+    private static string PathPart(string normalised)
+    {
+        var scheme = normalised.IndexOf("://", StringComparison.Ordinal);
+        if (scheme < 0) return normalised;
+        var slash = normalised.IndexOf('/', scheme + 3);
+        return slash < 0 ? "" : normalised[slash..];
     }
 
     /// <summary>A namespace's root: its <c>location</c> property, else <c>{warehouse}/{levels}</c>; null without either.</summary>
@@ -75,6 +87,19 @@ public sealed partial class CatalogService
     /// <summary>The directories a table writes to: its location and the <c>write.*.path</c> properties.</summary>
     private static IEnumerable<string> TableDirectories(TableMetadata m) =>
         new[] { m.Location }.Concat(TableLocations.PathProperties.Select(p => m.Properties.GetValueOrDefault(p))).OfType<string>().Where(l => l.Length > 0);
+
+    /// <summary>
+    /// The directories of every table and view in any namespace (a rename keeps a table's directories, so its current
+    /// namespace says nothing about where its files are), except <paramref name="self"/> and the entries of
+    /// <paramref name="skip"/>'s namespaces.
+    /// </summary>
+    private async Task<List<(string What, string Location)>> OccupiedAnywhereAsync((TableIdentifier Id, CatalogEntryKind Kind)? self, Func<Namespace, bool> skip, CancellationToken ct)
+    {
+        var occupied = new List<(string, string)>();
+        foreach (var ns in await AllNamespacesAsync(ct))
+            if (!skip(ns)) occupied.AddRange(await OccupiedAsync(ns, self, ct));
+        return occupied;
+    }
 
     /// <summary>The directories of every table and view in <paramref name="ns"/>, except <paramref name="self"/>.</summary>
     private async Task<List<(string What, string Location)>> OccupiedAsync(Namespace ns, (TableIdentifier Id, CatalogEntryKind Kind)? self, CancellationToken ct)
@@ -109,12 +134,29 @@ public sealed partial class CatalogService
             if (!(root.Length > Root(nsRoot).Length && root.StartsWith(Root(nsRoot), StringComparison.Ordinal)))
                 throw new BadRequestException($"{what} location {location} is outside its namespace's location {nsRoot}");
         }
-        foreach (var (other, location) in await OccupiedAsync(id.Namespace, (id, kind), ct))
+        foreach (var (other, location) in await OccupiedAnywhereAsync((id, kind), _ => false, ct))
             if (directories.FirstOrDefault(d => Overlaps(d, location)) is { } clash)
                 throw new BadRequestException($"{what} location {clash} overlaps {other} at {location}");
         foreach (var child in await Store.ListNamespacesAsync(id.Namespace, ct))
-            if (NamespaceRoot(child, await LoadNamespaceAsync(child, ct)) is { } childRoot && directories.FirstOrDefault(d => Overlaps(d, childRoot)) is { } clash)
+            // An implied namespace (a.b when only a and a.b.c were created) has no properties, so its root is the default.
+            if (NamespaceRoot(child, await Store.LoadNamespaceAsync(child, ct) ?? new Dictionary<string, string>()) is { } childRoot && directories.FirstOrDefault(d => Overlaps(d, childRoot)) is { } clash)
                 throw new BadRequestException($"{what} location {clash} overlaps namespace {child} at {childRoot}");
+    }
+
+    /// <summary>
+    /// Rule 3 within one transaction: the store holds none of its changes until they all swap in, so the tables whose
+    /// directories it creates or moves are checked against every other table in it.
+    /// </summary>
+    private static void RequireDisjointInTransaction(IReadOnlyList<(TableIdentifier Id, TableMetadata Metadata, bool Moved)> tables)
+    {
+        for (var i = 0; i < tables.Count; i++)
+            for (var j = i + 1; j < tables.Count; j++)
+            {
+                if (!tables[i].Moved && !tables[j].Moved) continue;
+                foreach (var a in TableDirectories(tables[i].Metadata))
+                    if (TableDirectories(tables[j].Metadata).FirstOrDefault(b => Overlaps(a, b)) is { } b)
+                        throw new BadRequestException($"Table {tables[i].Id} location {a} overlaps table {tables[j].Id} at {b} in the same transaction");
+            }
     }
 
     private Task RequireTableLocationsAsync(TableIdentifier id, TableMetadata metadata, CancellationToken ct) =>
@@ -131,12 +173,8 @@ public sealed partial class CatalogService
             if (NamespaceRoot(other, await Store.LoadNamespaceAsync(other, ct) ?? new Dictionary<string, string>()) is { } otherRoot && Overlaps(root, otherRoot))
                 throw new BadRequestException($"Namespace {ns} location {root} overlaps namespace {other} at {otherRoot}");
         }
-        for (var depth = ns.Levels.Count - 1; depth >= 1; depth--)
-        {
-            var ancestor = Namespace.Of([.. ns.Levels.Take(depth)]);
-            if (await Store.LoadNamespaceAsync(ancestor, ct) is null) continue;
-            foreach (var (what, location) in await OccupiedAsync(ancestor, null, ct))
-                if (Overlaps(root, location)) throw new BadRequestException($"Namespace {ns} location {root} overlaps {what} at {location}");
-        }
+        // Its own and its descendants' entries belong under it; anyone else's, a renamed table's included, must not.
+        foreach (var (what, location) in await OccupiedAnywhereAsync(null, other => other == ns || IsAncestor(ns, other), ct))
+            if (Overlaps(root, location)) throw new BadRequestException($"Namespace {ns} location {root} overlaps {what} at {location}");
     }
 }

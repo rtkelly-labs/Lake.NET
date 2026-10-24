@@ -110,6 +110,55 @@ public sealed class LocationPolicyTests : IAsyncLifetime
     }
 
     [Fact]
+    public async Task A_table_renamed_into_another_namespace_keeps_its_directory()
+    {
+        await _catalog.CreateNamespaceAsync(Namespace.Of("archive"));
+        await _catalog.CreateTableAsync(new CreateTableRequest(TableIdentifier.Of("sales", "orders"), ScanPlanningTests.Schema));
+        await _catalog.RenameTableAsync(TableIdentifier.Of("sales", "orders"), TableIdentifier.Of("archive", "orders"));
+        // archive.orders still writes to sales/orders: neither a new sales.orders nor a namespace there may claim it.
+        var e = await Assert.ThrowsAsync<HttpRequestException>(() =>
+            _catalog.CreateTableAsync(new CreateTableRequest(TableIdentifier.Of("sales", "orders"), ScanPlanningTests.Schema)));
+        Assert.Equal(HttpStatusCode.BadRequest, e.StatusCode);
+        await AssertRefusedAsync("/v1/namespaces", new JsonObject { ["namespace"] = new JsonArray("sales", "orders") });
+    }
+
+    [Fact]
+    public async Task A_second_spelling_of_a_directory_is_refused()
+    {
+        await _catalog.CreateTableAsync(new CreateTableRequest(TableIdentifier.Of("sales", "orders"), ScanPlanningTests.Schema));
+        // A local file system reads sales//orders as sales/orders.
+        await AssertRefusedAsync("/v1/namespaces/sales/tables", CreateBody("t", _host.Warehouse + "/sales//orders"));
+        await AssertRefusedAsync("/v1/namespaces/sales/tables", CreateBody("t", _host.Warehouse + "/sales//t"));
+        Assert.False(await _catalog.TableExistsAsync(TableIdentifier.Of("sales", "t")));
+    }
+
+    [Fact]
+    public async Task A_transaction_cannot_move_two_tables_into_one_directory()
+    {
+        var a = await _catalog.CreateTableAsync(new CreateTableRequest(TableIdentifier.Of("sales", "a"), ScanPlanningTests.Schema));
+        var b = await _catalog.CreateTableAsync(new CreateTableRequest(TableIdentifier.Of("sales", "b"), ScanPlanningTests.Schema));
+        var shared = Wh("sales", "shared");
+        var e = await Assert.ThrowsAsync<HttpRequestException>(() => _catalog.CommitTransactionAsync(
+        [
+            new TableCommit(a.Identifier, [new UpdateRequirement.AssertTableUuid(a.Metadata.TableUuid)], [new MetadataUpdate.SetLocation(shared)]),
+            new TableCommit(b.Identifier, [new UpdateRequirement.AssertTableUuid(b.Metadata.TableUuid)], [new MetadataUpdate.SetLocation(shared + "/inner")]),
+        ]));
+        Assert.Equal(HttpStatusCode.BadRequest, e.StatusCode);
+        Assert.Equal(a.Location, (await _catalog.LoadTableAsync(a.Identifier)).Location);
+        Assert.Equal(b.Location, (await _catalog.LoadTableAsync(b.Identifier)).Location);
+    }
+
+    [Fact]
+    public async Task An_implied_child_namespace_does_not_block_creates_in_its_parent()
+    {
+        // The memory store lists a.b as a child of a once a.b.c exists, though a.b was never created.
+        await _catalog.CreateNamespaceAsync(Namespace.Of("a"));
+        await _catalog.CreateNamespaceAsync(Namespace.Of("a", "b", "c"));
+        await _catalog.CreateTableAsync(new CreateTableRequest(TableIdentifier.Of("a", "t"), ScanPlanningTests.Schema));
+        Assert.True(await _catalog.TableExistsAsync(TableIdentifier.Of("a", "t")));
+    }
+
+    [Fact]
     public async Task Register_checks_the_metadata_location_before_reading_it()
     {
         var existing = Path.Combine(_host.Root, "catalog.db"); // exists, outside the namespace

@@ -231,6 +231,7 @@ public sealed partial class CatalogService(ICatalogStore store, IFileIO io, Rest
         var results = new List<LoadedTable>();
         var swaps = new List<PointerSwap>();
         var written = new List<string>();
+        var resulting = new List<(TableIdentifier, TableMetadata, bool)>();
         try
         {
             foreach (var commit in commits)
@@ -252,14 +253,16 @@ public sealed partial class CatalogService(ICatalogStore store, IFileIO io, Rest
                     updated = await BuildCreatedAsync(id, commit.Updates, ct);
                     await RequireTableLocationsAsync(id, updated, ct);
                     changed = true;
+                    resulting.Add((id, updated, true));
                 }
                 else
                 {
                     var builder = Apply(() => TableMetadataBuilder.From(current, Clock).ApplyAll(commit.Updates));
                     changed = builder.Changes.Count > 0;
                     updated = changed ? Apply(() => builder.Build(MetastoreCatalog.NewMetadataLocation(builder.Build(""), currentLocation))) : current;
-                    if (changed && !TableDirectories(updated).SequenceEqual(TableDirectories(current)))
-                        await RequireTableLocationsAsync(id, updated, ct);
+                    var moved = changed && !TableDirectories(updated).SequenceEqual(TableDirectories(current));
+                    if (moved) await RequireTableLocationsAsync(id, updated, ct);
+                    resulting.Add((id, updated, moved));
                 }
 
                 if (!changed)
@@ -274,6 +277,7 @@ public sealed partial class CatalogService(ICatalogStore store, IFileIO io, Rest
                 swaps.Add(new PointerSwap(id, currentLocation, newLocation));
                 results.Add(new LoadedTable(id, newLocation, updated));
             }
+            RequireDisjointInTransaction(resulting);
         }
         catch
         {

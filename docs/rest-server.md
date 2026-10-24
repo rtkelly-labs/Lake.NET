@@ -67,15 +67,17 @@ requests scoped to them, and purges under them. So every location a client choos
 a namespace is created or its `location` changes, when a table or view is created, registered or staged, and on any
 commit that changes a table's `location`, `write.data.path`, `write.metadata.path` or `write.object-storage.path`:
 
-1. **Allowed storage.** Strictly below `Warehouse` or one of `Locations:Allowed`, with no `.` or `..` segments.
-   Another bucket, `s3://*`, a bucket root or a local path elsewhere is refused.
+1. **Allowed storage.** Strictly below `Warehouse` or one of `Locations:Allowed`, with no `.` or `..` segments
+   and no empty ones (a local file system reads `a//b` as `a/b`). Another bucket, `s3://*`, a bucket root or a local path elsewhere is refused.
 2. **Its namespace.** A namespace's root is its `location` property, else `{Warehouse}/{levels}`. A table's or view's
    locations must be below its namespace's root, so each namespace has one storage root; put tables on other storage in
    a namespace rooted there. Namespace roots may nest only along the namespace hierarchy, and a namespace that holds
    tables or views cannot change its `location`.
 3. **Its own directories.** No two tables or views, and no table and child namespace, share a directory. A new table
-   cannot take a renamed table's old directory, and a second name cannot be registered onto files a table still owns
-   (unregister it first).
+   cannot take a renamed table's old directory, even after a rename into another namespace, and a second name cannot
+   be registered onto files a table still owns (unregister it first). The tables in one transaction are checked against
+   each other as well as against the catalog. The check reads every table's metadata, so creates and moves cost more as
+   the catalog grows.
 
 Register checks the metadata location against rules 1 and 2 before reading anything. Table, view and namespace names
 that would reshape a path (`..`, `/`, `\`, empty, control characters) are refused. Every refusal is a 400.
