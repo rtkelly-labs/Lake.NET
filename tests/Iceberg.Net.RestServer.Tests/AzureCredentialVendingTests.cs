@@ -62,6 +62,8 @@ public sealed class AzureCredentialVendingTests
     {
         var settings = new Dictionary<string, string>
         {
+            // Table locations must be under the namespace's root, which is under the warehouse.
+            ["Warehouse"] = $"abfss://lake@{Account}.dfs.core.windows.net/wh",
             ["CredentialVending:Adls:Accounts:" + Account] = Key,
             ["CredentialVending:RoleArn"] = "arn:aws:iam::123456789012:role/unused", // S3 vending on too: both vendors are combined
             ["Auth:Clients:writer"] = "writer-secret",

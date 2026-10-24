@@ -247,6 +247,9 @@ public sealed class GcsCredentialVendingTests
             ["Authorization:Grants:writer:0"] = "admin:*",
             ["Authorization:Grants:reader:0"] = "read:db",
             ["TableConfig:gcs.project-id"] = "my-project",
+            // Each namespace has one storage root: db on GCS, db.az on ADLS.
+            ["Warehouse"] = "gs://lake/wh",
+            ["Locations:Allowed:0"] = "abfss://c@acct.dfs.core.windows.net/wh",
         };
         await using var host = ServerHost.Start(settings: settings, services: s => s.AddSingleton<IFileIO>(new MemoryFileIO()).AddSingleton(gcs));
         using var http = host.Http();
@@ -288,11 +291,16 @@ public sealed class GcsCredentialVendingTests
         Assert.Equal(2, sts.Requests.Count); // the writer's (create, then cached) and the reader's
 
         // An Azure table on the same server gets a SAS from the Azure vendor and no GCS token.
-        await SendAsync(http, HttpMethod.Post, "/v1/namespaces/db/tables", writer, new JsonObject
+        await SendAsync(http, HttpMethod.Post, "/v1/namespaces", writer, new JsonObject
         {
-            ["name"] = "az", ["location"] = "abfss://c@acct.dfs.core.windows.net/wh/db/az", ["schema"] = Json.TypeJson.SchemaToJson(ScanPlanningTests.Schema),
+            ["namespace"] = new JsonArray("db", "az"), ["properties"] = new JsonObject { ["location"] = "abfss://c@acct.dfs.core.windows.net/wh/db/az" },
         });
-        var (_, azure) = await SendAsync(http, HttpMethod.Get, "/v1/namespaces/db/tables/az", reader, delegation: "vended-credentials");
+        var (azCreated, _) = await SendAsync(http, HttpMethod.Post, "/v1/namespaces/db%1Faz/tables", writer, new JsonObject
+        {
+            ["name"] = "az", ["schema"] = Json.TypeJson.SchemaToJson(ScanPlanningTests.Schema),
+        });
+        Assert.Equal(HttpStatusCode.OK, azCreated);
+        var (_, azure) = await SendAsync(http, HttpMethod.Get, "/v1/namespaces/db%1Faz/tables/az", reader, delegation: "vended-credentials");
         var azureCredential = azure!["storage-credentials"]!.AsArray().Single()!;
         Assert.NotNull(azureCredential["config"]!["adls.sas-token.acct.dfs.core.windows.net"]);
         Assert.Null(azureCredential["config"]!["gcs.oauth2.token"]);
