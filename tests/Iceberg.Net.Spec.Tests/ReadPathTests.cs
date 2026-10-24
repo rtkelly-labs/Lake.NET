@@ -582,4 +582,76 @@ public sealed class ReadPathTests : IDisposable
         Assert.Equal(0, s.Read(new byte[100]));
         Assert.Equal((5L, 25_010L), (io.RangeRequests, io.BytesRead)); // the tail fetch: MinimumFetch clamped to the end
     }
+
+    // ---------- equality deletes across schema evolution ----------
+
+    /// <summary>
+    /// id, k (int) and v; ids 1..6 with k = id; then an equality delete on k ∈ {2, 4}, a rename of k to key and its
+    /// promotion to long, and a new row with key 2 (written after the delete, so live).
+    /// </summary>
+    private async Task<(Table Table, long Deleted, long Promoted)> EvolvedEqualityDeletes()
+    {
+        var schema = new Schema(0, [NestedField.Require(1, "id", PrimitiveType.Long), NestedField.Optional(2, "k", PrimitiveType.Int), NestedField.Optional(3, "v", PrimitiveType.String)]);
+        var t = await Create(schema);
+        await TableMutations.InsertAsync(t, Enumerable.Range(1, 6).Select(i => new object?[] { (long)i, i, $"v{i}" }).ToList());
+        await TableMutations.DeleteByKeysAsync(t, ["k"], [[2], [4]], DeleteStrategy.EqualityDeletes);
+        t = await Reload(t);
+        var deleted = t.Metadata.CurrentSnapshotId!.Value;
+        await t.UpdateSchemaAsync(u => u.RenameColumn("k", "key").UpdateColumn("key", PrimitiveType.Long));
+        t = await Reload(t);
+        await TableMutations.InsertAsync(t, [[7L, 2L, "v7"]]);
+        t = await Reload(t);
+        return (t, deleted, t.Metadata.CurrentSnapshotId!.Value);
+    }
+
+    [Fact]
+    public async Task Equality_deletes_apply_across_a_rename_and_a_type_promotion()
+    {
+        var (t, deleted, promoted) = await EvolvedEqualityDeletes();
+
+        // Time travel to the delete: the old schema (k int), deletes decoded with it.
+        var old = await Read(t, new ScanRequest { Snapshot = SnapshotSelector.Id(deleted) });
+        Assert.Equal(["1|1|v1", "3|3|v3", "5|5|v5", "6|6|v6"], old.Select(r => string.Join('|', r)).Order());
+        Assert.IsType<int>(old[0][1]);
+        Assert.Equal(["id", "k", "v"], TableScan.SchemaOf(t, new ScanRequest { Snapshot = SnapshotSelector.Id(deleted) }).Columns.Select(c => c.Name));
+
+        // The current snapshot: key long; the new key-2 row is not deleted (its sequence number is later).
+        var now = await Read(t, new ScanRequest { Snapshot = SnapshotSelector.Id(promoted) });
+        Assert.Equal(["1|1|v1", "3|3|v3", "5|5|v5", "6|6|v6", "7|2|v7"], now.Select(r => string.Join('|', r)).Order());
+        Assert.IsType<long>(now[0][1]);
+
+        // Filtering and projecting by the old name at the old snapshot, and the legacy current-schema API.
+        Assert.Equal([3L], (await Read(t, new ScanRequest { Snapshot = SnapshotSelector.Id(deleted), Filter = Expr.Equal("k", 3), Columns = ["id"] })).Select(r => r[0]));
+        Assert.Equal(4, (await TableScan.ReadAllAsync(t, deleted)).Count);
+        Assert.Equal(4, await TableScan.CountAsync(t, new ScanRequest { Snapshot = SnapshotSelector.Id(deleted) }));
+    }
+
+    [Fact]
+    public async Task Equality_deletes_still_apply_after_their_column_is_dropped()
+    {
+        var (t, deleted, promoted) = await EvolvedEqualityDeletes();
+        await t.UpdateSchemaAsync(u => u.DeleteColumn("key"));
+        t = await Reload(t);
+
+        // The current state no longer has the column, but the deletes on it stand: the deleted rows stay deleted.
+        Assert.Equal(["1|v1", "3|v3", "5|v5", "6|v6", "7|v7"], (await TableScan.ReadAllAsync(t)).Select(r => string.Join('|', r)).Order());
+        Assert.Equal(["1|v1", "3|v3", "5|v5", "6|v6"], (await TableScan.ReadAllAsync(t, deleted)).Select(r => string.Join('|', r)).Order());
+        Assert.Equal(5, await TableScan.CountAsync(t, new ScanRequest()));
+        Assert.Equal([1L, 3L], (await Read(t, new ScanRequest { Filter = Expr.LessThan("id", 4L), Columns = ["id"] })).Select(r => r[0]).Order());
+        // Time travel still reads the old snapshots in their own schemas.
+        Assert.Equal(4, (await Read(t, new ScanRequest { Snapshot = SnapshotSelector.Id(deleted) })).Count);
+        Assert.Equal(5, (await Read(t, new ScanRequest { Snapshot = SnapshotSelector.Id(promoted) })).Count);
+
+        // Writers that read existing rows apply them too: an UPDATE, the change feed and a compaction.
+        await TableMutations.UpdateAsync(t, Expr.Equal("id", 1L), u => u.Set("v", "w1"), DeleteStrategy.PositionDeletes);
+        t = await Reload(t);
+        var replayed = new List<string>();
+        await foreach (var c in ChangeFeed.ChangesAsync(t, null))
+            if (c.ChangeType == ChangeType.Insert) replayed.Add(string.Join('|', c.Row));
+            else Assert.True(replayed.Remove(string.Join('|', c.Row)));
+        Assert.Equal(["1|w1", "3|v3", "5|v5", "6|v6", "7|v7"], replayed.Order());
+        await Compaction.RewriteDataFilesAsync(t, new RewriteOptions(MinInputFiles: 1, RewriteAll: true));
+        t = await Reload(t);
+        Assert.Equal(["1|w1", "3|v3", "5|v5", "6|v6", "7|v7"], (await TableScan.ReadAllAsync(t)).Select(r => string.Join('|', r)).Order());
+    }
 }

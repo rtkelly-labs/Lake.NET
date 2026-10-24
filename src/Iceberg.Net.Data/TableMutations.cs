@@ -317,18 +317,19 @@ public static partial class TableMutations
         var deletes = await TableScan.DeletesAsync(table, null, ct);
         var mapping = NameMapping.ForTable(table.Metadata.Properties);
         var v3 = table.Metadata.FormatVersion >= 3;
-        var projection = v3 ? RowLineage.WithLineage(table.Schema) : table.Schema;
+        // Columns, then lineage, then equality-delete columns the schema no longer has (deletes on them still apply).
+        var projection = deletes.WithEqualityColumns(v3 ? RowLineage.WithLineage(table.Schema) : table.Schema);
         var n = table.Schema.Columns.Count;
         var result = new List<FileMatch>();
         foreach (var task in await TableScan.PlanFilesAsync(table, prune, null, ct))
         {
             var rows = await DataFiles.ReadAsync(table.IO, task.File, projection, mapping, ct);
-            var isDeleted = deletes.IsEmpty ? null : await deletes.RowFilterAsync(task.File, task.DataSequenceNumber, table.Schema, ct);
+            var isDeleted = deletes.IsEmpty ? null : await deletes.RowFilterAsync(task.File, task.DataSequenceNumber, projection, ct);
             var m = new FileMatch(task.File, [], [], [], [], []);
             for (var pos = 0; pos < rows.Count; pos++)
             {
+                if (isDeleted?.Invoke(pos, rows[pos]) == true) continue;
                 var row = rows[pos][..n];
-                if (isDeleted?.Invoke(pos, row) == true) continue;
                 (long?, long?) lineage = v3
                     ? ((long?)rows[pos][n] ?? (task.File.FirstRowId is { } f ? f + pos : null), (long?)rows[pos][n + 1] ?? task.DataSequenceNumber)
                     : (null, null);

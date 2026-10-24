@@ -47,6 +47,14 @@ The scan decodes the union of three sets of top-level columns, resolved by field
 2. the columns the filter references (for a predicate on `a.b.c`, the whole top-level struct `a`);
 3. the equality-delete columns of the snapshot.
 
+An equality-delete column the read schema lacks is still decoded, because the delete still applies. This happens when the
+column was dropped after the delete, or when a time-travel snapshot's schema predates it. `DeleteIndex.WithEqualityColumns`
+appends it from the newest table schema that has it. Delete keys and data values are both decoded by field ID with that
+one type, so a rename or an `int` → `long` promotion between the delete and the read changes nothing. The same applies to
+UPDATE/MERGE/DELETE, compaction, the change feed, lineage reads and fingerprints. The appended columns are dropped before
+rows are returned. `ReadPathTests.Equality_deletes_apply_across_a_rename_and_a_type_promotion` and
+`…_still_apply_after_their_column_is_dropped` cover this; before the fix, reads after the drop threw.
+
 The filter is rebound by field ID to positions in that read schema. Columns the request does not ask for are dropped
 before rows are returned.
 

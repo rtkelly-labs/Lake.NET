@@ -114,17 +114,17 @@ public static partial class TableScan
         var deletes = await DeletesAsync(table, snapshotId, ct);
         var mapping = NameMapping.ForTable(table.Metadata.Properties);
         var schema = table.Schema;
-        var projection = RowLineage.WithLineage(schema);
+        var projection = deletes.WithEqualityColumns(RowLineage.WithLineage(schema));
         var n = schema.Columns.Count;
         var result = new List<LineageRow>();
         foreach (var task in await PlanFilesAsync(table, snapshotId, null, ct))
         {
             var fileRows = await DataFiles.ReadAsync(table.IO, task.File, projection, mapping, ct);
-            var isDeleted = deletes.IsEmpty ? null : await deletes.RowFilterAsync(task.File, task.DataSequenceNumber, schema, ct);
+            var isDeleted = deletes.IsEmpty ? null : await deletes.RowFilterAsync(task.File, task.DataSequenceNumber, projection, ct);
             for (var pos = 0; pos < fileRows.Count; pos++)
             {
+                if (isDeleted?.Invoke(pos, fileRows[pos]) == true) continue;
                 var row = fileRows[pos][..n];
-                if (isDeleted?.Invoke(pos, row) == true) continue;
                 var rowId = (long?)fileRows[pos][n] ?? (task.File.FirstRowId is { } first ? first + pos : null);
                 var seq = (long?)fileRows[pos][n + 1] ?? (table.Metadata.FormatVersion >= 3 ? task.DataSequenceNumber : null);
                 result.Add(new LineageRow(row, rowId, seq));
