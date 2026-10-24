@@ -362,7 +362,12 @@ public sealed class DeleteIndex
             ?? throw new FormatException($"No blob at offset {dv.ContentOffset} in {dv.FilePath}");
         // The spec stores deletion vectors uncompressed; the writer enforces it and so does the reader.
         if (blob.CompressionCodec is not null) throw new InvalidDataException($"Deletion vector in {dv.FilePath} is compressed ({blob.CompressionCodec})");
-        return DeletionVector.Decode(contents.Payload(blob), maxCardinality: dv.RecordCount);
+        var positions = DeletionVector.Decode(contents.Payload(blob), maxCardinality: dv.RecordCount);
+        // record_count is the deletion vector's cardinality, not a bound: a mismatch means the manifest and the rows it
+        // deletes disagree.
+        if (positions.Cardinality != dv.RecordCount)
+            throw new InvalidDataException($"Deletion vector in {dv.FilePath} holds {positions.Cardinality} positions; its manifest entry says {dv.RecordCount}");
+        return positions;
     }
 
     private async Task<PuffinFile.Contents> LoadPuffinAsync(string location, CancellationToken ct) => PuffinFile.Read(await _io.ReadAllAsync(location, ct));

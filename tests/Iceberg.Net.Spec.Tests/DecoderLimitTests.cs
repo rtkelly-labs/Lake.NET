@@ -1,7 +1,10 @@
 using System.Buffers.Binary;
 using System.IO.Compression;
 using System.Text;
+using System.Diagnostics;
 using Iceberg.Net.Avro;
+using Iceberg.Net.Catalog;
+using Iceberg.Net.Data;
 using Iceberg.Net.Manifests;
 using Iceberg.Net.Puffin;
 using Iceberg.Net.Types;
@@ -173,5 +176,102 @@ public sealed class DecoderLimitTests
         Assert.Throws<ArgumentOutOfRangeException>(() => IcebergTime.TimestampFromMicros(long.MaxValue));
         Assert.Throws<ArgumentOutOfRangeException>(() => IcebergTime.TimestampFromMicros(long.MinValue / 2));
         Assert.Equal(new DateTime(1970, 1, 1, 0, 0, 1, DateTimeKind.Utc), IcebergTime.TimestampFromMicros(1_000_000));
+    }
+
+    [Spec("Avro")]
+    [Fact]
+    public void An_avro_block_cannot_claim_millions_of_records_even_with_the_bytes_for_them() =>
+        Assert.Throws<InvalidDataException>(() => AvroContainer.Read(Container(
+            """{"type":"record","name":"r","fields":[{"name":"b","type":"boolean"}]}""", "null", AvroBinary.MaxRecordsPerBlock + 1L, new byte[16])));
+
+    [Spec("Avro")]
+    [Fact]
+    public void Measuring_a_schema_that_reuses_named_records_stays_linear()
+    {
+        // Flat, so JSON depth is no limit: field f0 defines an empty record r0, and each field f{i} defines r{i} holding two
+        // fields of type r{i-1}. A walk that does not remember shared named types visits 2^60 nodes.
+        var defs = new List<string> { """{"name":"f0","type":{"type":"record","name":"r0","fields":[]}}""" };
+        for (var i = 1; i <= 60; i++)
+            defs.Add("{\"name\":\"f" + i + "\",\"type\":{\"type\":\"record\",\"name\":\"r" + i + "\",\"fields\":[{\"name\":\"a\",\"type\":\"r" + (i - 1)
+                + "\"},{\"name\":\"b\",\"type\":\"r" + (i - 1) + "\"}]}}");
+        var schema = "{\"type\":\"record\",\"name\":\"top\",\"fields\":[" + string.Join(",", defs) + "]}";
+        var parsed = AvroSchemaJson.Parse(schema);
+        var clock = Stopwatch.StartNew();
+        Assert.Equal(0, AvroBinary.MinEncodedBytes(parsed));
+        Assert.True(clock.Elapsed < TimeSpan.FromSeconds(5), $"took {clock.Elapsed}");
+    }
+
+    private sealed class NonSeekable(Stream inner) : Stream
+    {
+        public override bool CanRead => true;
+        public override bool CanSeek => false;
+        public override bool CanWrite => false;
+        public override long Length => throw new NotSupportedException();
+        public override long Position { get => throw new NotSupportedException(); set => throw new NotSupportedException(); }
+        public override int Read(byte[] buffer, int offset, int count) => inner.Read(buffer, offset, count);
+        public override void Flush() { }
+        public override long Seek(long offset, SeekOrigin origin) => throw new NotSupportedException();
+        public override void SetLength(long value) => throw new NotSupportedException();
+        public override void Write(byte[] buffer, int offset, int count) => throw new NotSupportedException();
+    }
+
+    [Spec("Avro")]
+    [Fact]
+    public void A_huge_fixed_is_refused_on_a_stream_that_cannot_report_its_length()
+    {
+        var schema = AvroSchemaJson.Parse("""{"type":"fixed","name":"f","size":2000000000}""");
+        Assert.Throws<InvalidDataException>(() => AvroBinary.Read(new NonSeekable(new MemoryStream([1, 2, 3])), schema));
+    }
+
+    [Spec("Avro")]
+    [Fact]
+    public void The_writer_splits_blocks_so_its_own_files_stay_readable()
+    {
+        var schema = AvroSchemaJson.Parse("""{"type":"record","name":"r","fields":[{"name":"b","type":"bytes"}]}""");
+        var big = new byte[100 * 1024];
+        var records = Enumerable.Range(0, 200).Select(_ => (object?)new object?[] { big }).ToList(); // ~20 MiB > WriterFlushBytes
+        var file = AvroContainer.Write(schema, new Dictionary<string, string>(), records);
+        Assert.Equal(200, AvroContainer.Read(file).Records.Count);
+    }
+
+    [Spec("Deletion Vectors")]
+    [Fact]
+    public void A_bitmap_container_must_hold_exactly_its_declared_values()
+    {
+        var bytes = new List<byte>();
+        bytes.AddRange(BitConverter.GetBytes(1L));
+        bytes.AddRange(BitConverter.GetBytes(0u));     // key
+        bytes.AddRange(BitConverter.GetBytes(12346u)); // no-run cookie
+        bytes.AddRange(BitConverter.GetBytes(1));      // one container
+        bytes.AddRange(BitConverter.GetBytes((ushort)0));
+        bytes.AddRange(BitConverter.GetBytes((ushort)4096)); // declares 4,097 values: a bitmap container
+        bytes.AddRange(BitConverter.GetBytes(16));     // offset
+        bytes.AddRange(Enumerable.Repeat((byte)0xFF, 8192)); // but sets all 65,536
+        Assert.Throws<FormatException>(() => RoaringPositionBitmap.Deserialize([.. bytes], maxCardinality: 4097));
+    }
+
+    [Spec("Deletion Vectors")]
+    [Fact]
+    public async Task A_deletion_vector_must_hold_exactly_the_positions_its_manifest_entry_records()
+    {
+        var warehouse = Path.Combine(Path.GetTempPath(), "iceberg-dotnet-limits", Guid.NewGuid().ToString("N"));
+        using var catalog = new InMemoryCatalog(warehouse);
+        try
+        {
+            await catalog.CreateNamespaceAsync(Namespace.Of("m"));
+            var schema = new Schema(0, [NestedField.Require(1, "id", PrimitiveType.Long)], identifierFieldIds: [1]);
+            var t = await catalog.CreateTableAsync(new CreateTableRequest(TableIdentifier.Of("m", "dv"), schema, FormatVersion: 3));
+            await TableMutations.InsertAsync(t, Enumerable.Range(0, 10).Select(i => new object?[] { (long)i }).ToList());
+            await TableMutations.DeleteByKeysAsync(t, ["id"], [[1L], [2L], [3L]], DeleteStrategy.PositionDeletes);
+            var index = await TableScan.DeletesAsync(await catalog.LoadTableAsync(t.Identifier));
+            var dv = index.All.Single(e => e.IsDeletionVector).File;
+            Assert.Equal(3, (await index.ReadDeletionVectorAsync(dv)).Cardinality);
+            await Assert.ThrowsAsync<InvalidDataException>(() => index.ReadDeletionVectorAsync(dv with { RecordCount = 4 }));
+            await Assert.ThrowsAnyAsync<Exception>(() => index.ReadDeletionVectorAsync(dv with { RecordCount = 2 }));
+        }
+        finally
+        {
+            if (Directory.Exists(warehouse)) Directory.Delete(warehouse, recursive: true);
+        }
     }
 }

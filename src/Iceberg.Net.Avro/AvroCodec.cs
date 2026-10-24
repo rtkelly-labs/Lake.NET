@@ -21,6 +21,16 @@ public static class AvroBinary
     /// <summary>Records allowed in one block of a schema that encodes in zero bytes (Iceberg never writes one).</summary>
     public const int MaxZeroWidthRecords = 1 << 20;
 
+    /// <summary>
+    /// Records allowed in any one block. Writers flush blocks by size (Java's sync interval is tens of kilobytes; this
+    /// library's writer flushes at <see cref="WriterFlushBytes"/> or 1,000 records), so millions of tiny records in one
+    /// block is hostile: each decoded record is an allocation.
+    /// </summary>
+    public const int MaxRecordsPerBlock = 1 << 22;
+
+    /// <summary>Encoded bytes after which the container writer starts a new block, well under <see cref="MaxBlockBytes"/>.</summary>
+    public const int WriterFlushBytes = 16 * 1024 * 1024;
+
     /// <summary>Inflate a <c>deflate</c> block, refusing output beyond <see cref="MaxBlockBytes"/>.</summary>
     public static byte[] Inflate(byte[] data)
     {
@@ -36,18 +46,38 @@ public static class AvroBinary
     /// </summary>
     public static void CheckRecordCount(long count, int blockBytes, AvroSchema schema)
     {
+        if (count > MaxRecordsPerBlock) throw new InvalidDataException($"Avro block count {count} exceeds the limit of {MaxRecordsPerBlock} records");
         var limit = MinEncodedBytes(schema) > 0 ? blockBytes : MaxZeroWidthRecords;
         if (count > limit) throw new InvalidDataException($"Avro block count {count} exceeds what its {blockBytes} bytes can hold");
     }
 
-    /// <summary>The fewest bytes one value of <paramref name="schema"/> can encode to.</summary>
-    public static long MinEncodedBytes(AvroSchema schema) => schema switch
+    /// <summary>
+    /// The fewest bytes one value of <paramref name="schema"/> can encode to. Named types are shared by reference, so each
+    /// schema node is measured once: a chain of records that each use the previous one twice stays linear.
+    /// </summary>
+    public static long MinEncodedBytes(AvroSchema schema) => MinEncodedBytes(schema, new Dictionary<AvroSchema, long>(ByReference.Instance));
+
+    /// <summary>Schema nodes by identity (records compare by value, which would revisit shared named types).</summary>
+    private sealed class ByReference : IEqualityComparer<AvroSchema>
     {
-        AvroPrimitive { Kind: AvroKind.Null } => 0,
-        AvroRecord r => r.Fields.Sum(f => MinEncodedBytes(f.Schema)),
-        AvroFixed f => f.Size,
-        _ => 1, // every other primitive, and arrays, maps and unions (a count or branch varint)
-    };
+        public static readonly ByReference Instance = new();
+        public bool Equals(AvroSchema? x, AvroSchema? y) => ReferenceEquals(x, y);
+        public int GetHashCode(AvroSchema obj) => System.Runtime.CompilerServices.RuntimeHelpers.GetHashCode(obj);
+    }
+
+    private static long MinEncodedBytes(AvroSchema schema, Dictionary<AvroSchema, long> seen)
+    {
+        if (seen.TryGetValue(schema, out var known)) return known;
+        var width = schema switch
+        {
+            AvroPrimitive { Kind: AvroKind.Null } => 0,
+            AvroRecord r => r.Fields.Aggregate(0L, (sum, f) => sum + MinEncodedBytes(f.Schema, seen)),
+            AvroFixed f => f.Size,
+            _ => 1L, // every other primitive, and arrays, maps and unions (a count or branch varint)
+        };
+        seen[schema] = width;
+        return width;
+    }
 
     public static void Write(Stream s, AvroSchema schema, object? value)
     {
@@ -195,7 +225,7 @@ public static class AvroBinary
             }
             case AvroFixed f:
             {
-                if (f.Size < 0 || (s.CanSeek && f.Size > s.Length - s.Position))
+                if (f.Size < 0 || f.Size > MaxBlockBytes || (s.CanSeek && f.Size > s.Length - s.Position))
                     throw new InvalidDataException($"Avro fixed of {f.Size} bytes exceeds the remaining {(s.CanSeek ? s.Length - s.Position : 0)}");
                 var b = new byte[f.Size];
                 s.ReadExactly(b);
@@ -310,16 +340,31 @@ public static class AvroContainer
         var sync = Compat.RandomBytes(16);
         output.Write(sync);
 
-        foreach (var block in records.Chunk(blockSize))
+        // A block ends at blockSize records or AvroBinary.WriterFlushBytes encoded bytes, so every block stays within what
+        // the readers accept (AvroBinary.MaxBlockBytes, MaxRecordsPerBlock); a single record over the limit is refused.
+        using var raw = new MemoryStream();
+        var count = 0;
+        void Flush()
         {
-            using var raw = new MemoryStream();
-            foreach (var r in block) AvroBinary.Write(raw, schema, r);
+            if (count == 0) return;
             var data = codec == AvroCodecKind.Deflate ? Deflate(raw.ToArray()) : raw.ToArray();
-            AvroBinary.WriteLong(output, block.Length);
+            AvroBinary.WriteLong(output, count);
             AvroBinary.WriteLong(output, data.Length);
             output.Write(data);
             output.Write(sync);
+            raw.SetLength(0);
+            count = 0;
         }
+        foreach (var r in records)
+        {
+            var start = raw.Length;
+            AvroBinary.Write(raw, schema, r);
+            if (raw.Length - start > AvroBinary.MaxBlockBytes)
+                throw new InvalidOperationException($"An Avro record of {raw.Length - start} bytes exceeds the {AvroBinary.MaxBlockBytes}-byte block limit readers accept");
+            count++;
+            if (count >= blockSize || raw.Length >= AvroBinary.WriterFlushBytes) Flush();
+        }
+        Flush();
         return output.ToArray();
     }
 

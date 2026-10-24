@@ -226,6 +226,8 @@ public sealed class RoaringPositionBitmap
                     for (var v = 0; v < cards[i]; v++) c.Add(BinaryPrimitives.ReadUInt16LittleEndian(data[(pos + 2 * v)..]));
                     pos += 2 * cards[i];
                 }
+                // Whatever its kind, a container must hold exactly what its header declared (and was charged for).
+                if (c.Cardinality != cards[i]) throw new FormatException($"Roaring container {keys[i]} holds {c.Cardinality} values, not its declared {cards[i]}");
                 bm._containers[keys[i]] = c;
             }
             return (bm, pos);
