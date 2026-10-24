@@ -85,13 +85,16 @@ public static class ChangeFeed
         var parentManifests = snapshot.ParentSnapshotId is { } p && m.SnapshotById(p) is { } parent ? await TableScan.ManifestsAsync(table, parent, ct) : [];
         var after = await DeleteIndex.LoadAsync(table, manifests, ct);
         var before = await DeleteIndex.LoadAsync(table, parentManifests, ct);
+        // Rows are read with any equality-delete columns the schema lacks appended, and returned without them.
+        var n = schema.Columns.Count;
+        var read = before.WithEqualityColumns(after.WithEqualityColumns(schema));
 
         var addedData = new List<(DataFile File, long Seq)>();
         var removedData = new List<(DataFile File, long Seq)>();
         var addedDeletes = new List<DataFile>();
         foreach (var mf in manifests.Where(mf => mf.AddedSnapshotId == snapshot.SnapshotId))
         {
-            var entries = ManifestCodec.ReadManifest(await table.IO.ReadAllAsync(mf.ManifestPath, ct), m.SpecById(mf.PartitionSpecId), m.CurrentSchema, mf).Entries;
+            var entries = (await ManifestStore.ReadAsync(table.IO, mf.ManifestPath, m.SpecById(mf.PartitionSpecId), m.CurrentSchema, mf, ct: ct)).Entries;
             foreach (var e in entries.Where(e => e.SnapshotId == snapshot.SnapshotId))
             {
                 var file = e.DataFile with { SpecId = mf.PartitionSpecId };
@@ -107,10 +110,10 @@ public static class ChangeFeed
         var changes = new List<(object?[], ChangeType)>();
         foreach (var (file, seq) in removedData)
         {
-            var rows = await DataFiles.ReadAsync(table.IO, file, schema, mapping, ct);
-            var deleted = await before.RowFilterAsync(file, seq, schema, ct);
+            var rows = await DataFiles.ReadAsync(table.IO, file, read, mapping, ct);
+            var deleted = await before.RowFilterAsync(file, seq, read, ct);
             for (var pos = 0; pos < rows.Count; pos++)
-                if (deleted?.Invoke(pos, rows[pos]) != true) changes.Add((rows[pos], ChangeType.Delete));
+                if (deleted?.Invoke(pos, rows[pos]) != true) changes.Add((rows[pos][..n], ChangeType.Delete));
         }
 
         if (addedDeletes.Count > 0)
@@ -135,21 +138,21 @@ public static class ChangeFeed
                 var file = task.File;
                 if (addedPaths.Contains(file.FilePath)) continue;
                 if (!global && !referenced.Contains(file.FilePath) && !partitions.Contains(CherryPicker.PartitionKey(file.SpecId, file.Partition))) continue;
-                var now = await after.RowFilterAsync(file, task.DataSequenceNumber, schema, ct);
+                var now = await after.RowFilterAsync(file, task.DataSequenceNumber, read, ct);
                 if (now is null) continue;
-                var was = await before.RowFilterAsync(file, task.DataSequenceNumber, schema, ct);
-                var rows = await DataFiles.ReadAsync(table.IO, file, schema, mapping, ct);
+                var was = await before.RowFilterAsync(file, task.DataSequenceNumber, read, ct);
+                var rows = await DataFiles.ReadAsync(table.IO, file, read, mapping, ct);
                 for (var pos = 0; pos < rows.Count; pos++)
-                    if (now(pos, rows[pos]) && was?.Invoke(pos, rows[pos]) != true) changes.Add((rows[pos], ChangeType.Delete));
+                    if (now(pos, rows[pos]) && was?.Invoke(pos, rows[pos]) != true) changes.Add((rows[pos][..n], ChangeType.Delete));
             }
         }
 
         foreach (var (file, seq) in addedData)
         {
-            var rows = await DataFiles.ReadAsync(table.IO, file, schema, mapping, ct);
-            var deleted = await after.RowFilterAsync(file, seq, schema, ct);
+            var rows = await DataFiles.ReadAsync(table.IO, file, read, mapping, ct);
+            var deleted = await after.RowFilterAsync(file, seq, read, ct);
             for (var pos = 0; pos < rows.Count; pos++)
-                if (deleted?.Invoke(pos, rows[pos]) != true) changes.Add((rows[pos], ChangeType.Insert));
+                if (deleted?.Invoke(pos, rows[pos]) != true) changes.Add((rows[pos][..n], ChangeType.Insert));
         }
         return changes;
     }

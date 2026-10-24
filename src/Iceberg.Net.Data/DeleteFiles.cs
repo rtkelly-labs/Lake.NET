@@ -128,7 +128,7 @@ public sealed class DeleteIndex
         var m = table.Metadata;
         foreach (var manifest in manifests.Where(mf => mf.Content == ManifestContent.Deletes))
         {
-            var contents = ManifestCodec.ReadManifest(await table.IO.ReadAllAsync(manifest.ManifestPath, ct), m.SpecById(manifest.PartitionSpecId), m.CurrentSchema, manifest);
+            var contents = (await ManifestStore.ReadAsync(table.IO, manifest.ManifestPath, m.SpecById(manifest.PartitionSpecId), m.CurrentSchema, manifest, ct: ct));
             foreach (var e in contents.Entries.Where(e => e.Status != ManifestEntryStatus.Deleted))
             {
                 var entry = new DeleteEntry(e.DataFile, e.SequenceNumber ?? 0, manifest);
@@ -198,6 +198,32 @@ public sealed class DeleteIndex
     }
 
     public DeleteEntry? DeletionVectorFor(string dataFile) => _dvs.GetValueOrDefault(dataFile);
+
+    /// <summary>
+    /// <paramref name="projection"/> plus the equality-delete columns it lacks, appended so the projection's positions
+    /// are kept: read data files with it and pass it (and the rows read) to <c>RowFilterAsync</c>. A delete still
+    /// applies after its column is renamed, promoted or dropped, or when a time-travel read's schema predates a later
+    /// one: each missing column is taken from the newest table schema that has it (the widest type it was promoted
+    /// to, which reads older files too), so delete keys and data values are decoded by field ID with one type.
+    /// </summary>
+    public Schema WithEqualityColumns(Schema projection)
+    {
+        if (_equalityFiles.Count == 0) return projection;
+        var present = projection.Columns.Select(c => c.Id).ToHashSet();
+        var extra = new List<NestedField>();
+        foreach (var id in _equalityFiles.SelectMany(e => e.File.EqualityIds ?? []).Distinct().Order())
+        {
+            if (present.Contains(id)) continue;
+            // Optional: rows of files written without the column read as null, which is what the delete compares.
+            var field = _metadata.Schemas.OrderByDescending(s => s.SchemaId).Select(s => s.Columns.FirstOrDefault(c => c.Id == id)).FirstOrDefault(f => f is not null)
+                ?? throw new NotSupportedException($"Equality deletes on field {id}: it is not a top-level column of any table schema");
+            // A dropped column's name may since have been reused: names only matter to files without field IDs.
+            var name = projection.FindField(field.Name) is null && extra.All(e => e.Name != field.Name) ? field.Name : $"{field.Name}#{id}";
+            extra.Add(field with { Name = name, Required = false });
+            present.Add(id);
+        }
+        return extra.Count == 0 ? projection : new Schema(projection.SchemaId, [.. projection.Columns, .. extra], projection.IdentifierFieldIds);
+    }
 
     /// <summary>Positions deleted from <paramref name="dataFile"/>, or null when nothing applies.</summary>
     public async Task<RoaringPositionBitmap?> DeletedPositionsAsync(DataFile dataFile, long dataSequenceNumber, CancellationToken ct = default)

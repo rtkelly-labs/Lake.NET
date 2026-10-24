@@ -191,7 +191,7 @@ public static class MetadataTables
         foreach (var mf in await TableScan.ManifestsAsync(table, snapshot, ct))
         {
             var spec = m.SpecById(mf.PartitionSpecId);
-            foreach (var e in ManifestCodec.ReadManifest(await table.IO.ReadAllAsync(mf.ManifestPath, ct), spec, m.CurrentSchema, mf).Entries)
+            foreach (var e in (await ManifestStore.ReadAsync(table.IO, mf.ManifestPath, spec, m.CurrentSchema, mf, ct: ct)).Entries)
                 rows.Add(new EntriesRow((int)e.Status, e.SnapshotId, e.SequenceNumber, e.FileSequenceNumber, File(unified, spec, e.DataFile with { SpecId = mf.PartitionSpecId })));
         }
         return rows;
@@ -207,7 +207,7 @@ public static class MetadataTables
         foreach (var mf in await TableScan.ManifestsAsync(table, snapshot, ct))
         {
             var spec = m.SpecById(mf.PartitionSpecId);
-            foreach (var e in ManifestCodec.ReadManifest(await table.IO.ReadAllAsync(mf.ManifestPath, ct), spec, m.CurrentSchema, mf).Entries)
+            foreach (var e in (await ManifestStore.ReadAsync(table.IO, mf.ManifestPath, spec, m.CurrentSchema, mf, ct: ct)).Entries)
             {
                 if (e.Status == ManifestEntryStatus.Deleted) continue;
                 var f = e.DataFile;

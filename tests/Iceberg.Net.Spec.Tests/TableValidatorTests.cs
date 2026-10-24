@@ -126,4 +126,63 @@ public sealed class TableValidatorTests : IDisposable
         Assert.True(report.IsValid);
         Assert.False(report.Deep);
     }
+
+    // ---------- snapshot timestamps (v4: strictly increasing) ----------
+
+    private sealed class FixedClock(DateTimeOffset now) : TimeProvider
+    {
+        public override DateTimeOffset GetUtcNow() => now;
+    }
+
+    [Theory]
+    [InlineData(2)]
+    [InlineData(3)]
+    public async Task Snapshot_timestamps_strictly_increase_along_a_branch_whatever_the_clock_says(int formatVersion)
+    {
+        var (t, _) = await Healthy(formatVersion); // the first snapshot: the system clock
+        var first = t.Metadata.CurrentSnapshot!.TimestampMs;
+
+        // A clock that stands still, years behind the parent: every child is its parent + 1 ms.
+        var stale = new FixedClock(new DateTimeOffset(2020, 1, 1, 0, 0, 0, TimeSpan.Zero));
+        for (var i = 0; i < 3; i++)
+            await SnapshotProducer.Append(t).WithClock(stale).AddFiles(await TableWriter.WriteAsync(t, LocalTableTests.Rows(100 + i, 1))).CommitAsync();
+        Assert.Equal([first, first + 1, first + 2, first + 3], t.Metadata.Ancestors(t.Metadata.CurrentSnapshotId).Reverse().Select(s => s.TimestampMs));
+
+        // A clock ahead of the parent is used as is; on a branch, the parent is the branch head.
+        var ahead = new DateTimeOffset(2100, 1, 1, 0, 0, 0, TimeSpan.Zero);
+        await SnapshotProducer.Append(t).WithClock(new FixedClock(ahead)).AddFiles(await TableWriter.WriteAsync(t, LocalTableTests.Rows(200, 1))).ToBranch("b").CommitAsync();
+        await SnapshotProducer.Append(t).WithClock(new FixedClock(ahead)).AddFiles(await TableWriter.WriteAsync(t, LocalTableTests.Rows(201, 1))).ToBranch("b").CommitAsync();
+        var branch = t.Metadata.Ancestors(t.Metadata.Refs["b"].SnapshotId).Take(2).Select(s => s.TimestampMs).ToList();
+        Assert.Equal([ahead.ToUnixTimeMilliseconds() + 1, ahead.ToUnixTimeMilliseconds()], branch);
+        Assert.Equal(first + 3, t.Metadata.CurrentSnapshot!.TimestampMs); // main untouched
+
+        var report = await TableValidator.ValidateAsync(await _catalog.LoadTableAsync(t.Identifier), Deep);
+        Assert.True(report.IsValid, report.ToString());
+        Assert.DoesNotContain(report.Issues, i => i.Code == "META-TIMESTAMP-ORDER");
+    }
+
+    [Fact]
+    public async Task Non_increasing_snapshot_timestamps_are_an_error_only_on_v4_metadata()
+    {
+        var (t, _) = await Healthy(3);
+        await SnapshotProducer.Append(t).AddFiles(await TableWriter.WriteAsync(t, LocalTableTests.Rows(100, 1))).CommitAsync();
+        var m = t.Metadata;
+        // Another writer's history: the child stamped at its parent's millisecond (or before it, a skewed clock).
+        var parentTs = m.Snapshots[0].TimestampMs;
+        var skewed = m with { Snapshots = [m.Snapshots[0], m.Snapshots[1] with { TimestampMs = parentTs }] };
+
+        var v3 = await TableValidator.ValidateAsync(new Table(t.Catalog, t.Identifier, skewed, t.IO), new ValidationOptions { CheckFiles = false });
+        Assert.True(v3.IsValid, v3.ToString());
+        Assert.DoesNotContain(v3.Issues, i => i.Code == "META-TIMESTAMP-ORDER"); // not even a warning before v4
+
+        var v4 = await TableValidator.ValidateAsync(new Table(t.Catalog, t.Identifier, skewed with { FormatVersion = 4 }, t.IO), new ValidationOptions { CheckFiles = false });
+        var issue = Assert.Single(v4.Issues, i => i.Code == "META-TIMESTAMP-ORDER");
+        Assert.Equal(IssueSeverity.Error, issue.Severity);
+        Assert.False(v4.IsValid);
+
+        // The same history with increasing timestamps passes on v4.
+        var ordered = skewed with { FormatVersion = 4, Snapshots = [m.Snapshots[0], m.Snapshots[1] with { TimestampMs = parentTs + 1 }] };
+        Assert.DoesNotContain((await TableValidator.ValidateAsync(new Table(t.Catalog, t.Identifier, ordered, t.IO), new ValidationOptions { CheckFiles = false })).Issues,
+            i => i.Code == "META-TIMESTAMP-ORDER");
+    }
 }

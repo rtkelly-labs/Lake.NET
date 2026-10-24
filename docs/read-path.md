@@ -47,6 +47,14 @@ The scan decodes the union of three sets of top-level columns, resolved by field
 2. the columns the filter references (for a predicate on `a.b.c`, the whole top-level struct `a`);
 3. the equality-delete columns of the snapshot.
 
+An equality-delete column the read schema lacks is still decoded, because the delete still applies. This happens when the
+column was dropped after the delete, or when a time-travel snapshot's schema predates it. `DeleteIndex.WithEqualityColumns`
+appends it from the newest table schema that has it. Delete keys and data values are both decoded by field ID with that
+one type, so a rename or an `int` → `long` promotion between the delete and the read changes nothing. The same applies to
+UPDATE/MERGE/DELETE, compaction, the change feed, lineage reads and fingerprints. The appended columns are dropped before
+rows are returned. `ReadPathTests.Equality_deletes_apply_across_a_rename_and_a_type_promotion` and
+`…_still_apply_after_their_column_is_dropped` cover this; before the fix, reads after the drop threw.
+
 The filter is rebound by field ID to positions in that read schema. Columns the request does not ask for are dropped
 before rows are returned.
 
@@ -69,9 +77,24 @@ group, which `ScanMetrics.MaxBatchRows` reports and the tests assert while the s
 
 `ReadAsync`, `ReadAllAsync` and `DataFiles.ReadAsync` keep returning lists. They collect the streaming path.
 
-Known limit: the raw bytes of a data file are still fetched whole (`IFileIO.ReadAllAsync`). Range reads of only the
-needed column chunks would need column-chunk offsets, and ParquetSharp 25 does not expose `data_page_offset` or
-`dictionary_page_offset`.
+## Ranged reads
+
+A Parquet data file is read through `RangeReadStream` (in `Iceberg.Net.IO`), a seekable stream over
+`IFileIO.ReadRangeAsync` that fetches only the byte ranges the reader touches and keeps them:
+
+1. the last 64 KiB (parquet-cpp's footer read size), fetched before the footer is parsed;
+2. for each row group that survives row-group pruning, the column chunks of the projected leaf columns. parquet-cpp
+   reads a chunk with one call, so each chunk is one request.
+
+The file size comes from the manifest's `file_size_in_bytes` (`DataFileReadOptions.FileSize`, set by every read of a
+manifest's `DataFile`), so no `HEAD` is needed. A read by location alone (no size) fetches the file whole, which costs
+one request instead of a `HEAD` plus ranges. Two cases fetch the file in one request instead: a file of at
+most 1 MiB, and a read that decodes every leaf column with no row-group filter (the rest after the footer, two
+requests in all). ParquetSharp 25 does not expose `data_page_offset` or `dictionary_page_offset`, so chunk ranges
+cannot be planned ahead: a chunk not yet fetched is fetched when the reader asks for it, synchronously on the thread
+pool. `ReadPathTests.A_projected_read_downloads_only_the_footer_and_the_projected_column_chunks` checks the bytes with
+a counting `IFileIO`: one column of five reads under 30% of a 4 MB file, and pruning to one row group of four halves
+that again. Avro files are still fetched whole.
 
 ## Time travel semantics
 

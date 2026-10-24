@@ -20,6 +20,12 @@ public sealed record DataFileReadOptions
     public Expressions.Expression? Filter { get; init; }
     /// <summary>Receives row-group read/skip counts.</summary>
     public ScanMetrics? Metrics { get; init; }
+    /// <summary>
+    /// The file's size in bytes (a manifest's <c>file_size_in_bytes</c>). With it, a Parquet file is read in ranges
+    /// (footer, then the needed column chunks); without it, it is fetched whole, which costs one request rather than a
+    /// length lookup plus ranges. Reads of a manifest's <see cref="Manifests.DataFile"/> set it.
+    /// </summary>
+    public long? FileSize { get; init; }
 }
 
 /// <summary>
@@ -28,8 +34,12 @@ public sealed record DataFileReadOptions
 /// </summary>
 public static class DataFiles
 {
-    public static Task<List<object?[]>> ReadAsync(IFileIO io, Manifests.DataFile file, Schema projection, NameMapping? mapping = null, CancellationToken ct = default) =>
-        ReadAsync(io, file.FilePath, file.FileFormat, projection, mapping, ct);
+    public static async Task<List<object?[]>> ReadAsync(IFileIO io, Manifests.DataFile file, Schema projection, NameMapping? mapping = null, CancellationToken ct = default)
+    {
+        var rows = new List<object?[]>();
+        await foreach (var batch in ReadBatchesAsync(io, file, projection, mapping, null, ct)) rows.AddRange(batch.Rows);
+        return rows;
+    }
 
     public static async Task<List<object?[]>> ReadAsync(IFileIO io, string location, string format, Schema projection, NameMapping? mapping = null, CancellationToken ct = default)
     {
@@ -44,7 +54,8 @@ public static class DataFiles
     /// </summary>
     public static IAsyncEnumerable<DataFileBatch> ReadBatchesAsync(IFileIO io, Manifests.DataFile file, Schema projection, NameMapping? mapping = null,
         DataFileReadOptions? options = null, CancellationToken ct = default) =>
-        ReadBatchesAsync(io, file.FilePath, file.FileFormat, projection, mapping, options, ct);
+        ReadBatchesAsync(io, file.FilePath, file.FileFormat, projection, mapping,
+            (options ?? new DataFileReadOptions()) with { FileSize = options?.FileSize ?? (file.FileSizeInBytes > 0 ? file.FileSizeInBytes : null) }, ct);
 
     public static IAsyncEnumerable<DataFileBatch> ReadBatchesAsync(IFileIO io, string location, string format, Schema projection, NameMapping? mapping = null,
         DataFileReadOptions? options = null, CancellationToken ct = default) =>

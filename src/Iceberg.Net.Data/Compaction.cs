@@ -138,7 +138,7 @@ public static class Compaction
         var mapping = NameMapping.ForTable(table.Metadata.Properties);
         var v3 = table.Metadata.FormatVersion >= 3;
         var schema = table.Schema;
-        var projection = v3 ? RowLineage.WithLineage(schema) : schema;
+        var projection = deletes.WithEqualityColumns(v3 ? RowLineage.WithLineage(schema) : schema);
         var n = schema.Columns.Count;
         var removed = new List<string>();
         var added = new List<DataFile>();
@@ -150,11 +150,11 @@ public static class Compaction
             foreach (var task in group.Tasks)
             {
                 var fileRows = await DataFiles.ReadAsync(table.IO, task.File, projection, mapping, ct);
-                var isDeleted = deletes.IsEmpty ? null : await deletes.RowFilterAsync(task.File, task.DataSequenceNumber, schema, ct);
+                var isDeleted = deletes.IsEmpty ? null : await deletes.RowFilterAsync(task.File, task.DataSequenceNumber, projection, ct);
                 for (var pos = 0; pos < fileRows.Count; pos++)
                 {
+                    if (isDeleted?.Invoke(pos, fileRows[pos]) == true) continue;
                     var row = fileRows[pos][..n];
-                    if (isDeleted?.Invoke(pos, row) == true) continue;
                     groupRows.Add(row);
                     if (v3) lineage.Add(((long?)fileRows[pos][n] ?? (task.File.FirstRowId is { } f ? f + pos : null), (long?)fileRows[pos][n + 1] ?? task.DataSequenceNumber));
                 }

@@ -284,4 +284,59 @@ public sealed class SnapshotManagementTests : IDisposable
         await Assert.ThrowsAsync<ValidationException>(() => t.ManageSnapshots().CherryPick(staged2).CommitAsync());
         await Valid(t);
     }
+
+    [Theory]
+    [InlineData(2)]
+    [InlineData(3)]
+    public async Task Cherry_pick_replays_files_written_under_an_older_partition_spec(int formatVersion)
+    {
+        var t = await NewTable(formatVersion, partitioned: true); // spec 0: identity(p)
+        await Append(t, 0, 4);
+        var staged = await Staged(t, () => TableMutations.InsertAsync(t, Rows(10, 4))); // written under spec 0
+        var p0 = (await TableScan.PlanFilesAsync(t)).Where(x => (int)x.File.Partition[0]! == 0).Select(x => x.File.FilePath).ToHashSet();
+        var stagedOverwrite = await Staged(t, async () =>
+            await SnapshotProducer.Overwrite(t, f => p0.Contains(f.FilePath)).Set("replace-partitions", "true")
+                .AddFiles(await TableWriter.WriteAsync(t, [[100L, "x", 0]])).CommitAsync());
+
+        // The spec evolves (spec 1: bucket(id) instead of p) and main moves on under it before the picks.
+        await t.UpdateSpecAsync(u => u.RemoveField("p").AddField("id", Transforms.Transform.Bucket(4)));
+        t = await _catalog.LoadTableAsync(t.Identifier);
+        Assert.NotEqual(0, t.Metadata.DefaultSpecId);
+        await Append(t, 20, 2);
+
+        // A dynamic overwrite staged under spec 0: main's spec-1 append since its parent is in other partitions (partitions
+        // are compared with their spec), so it replays, and the p=0 rows it replaced (0, 2) stay replaced.
+        await t.ManageSnapshots().CherryPick(stagedOverwrite).CommitAsync();
+        Assert.Equal("true", t.Metadata.CurrentSnapshot!.Summary["replace-partitions"]);
+        Assert.Equal([1L, 3, 20, 21, 100], await Ids(t, SnapshotSelector.Current));
+        t = await Valid(t);
+
+        await t.ManageSnapshots().CherryPick(staged).CommitAsync();
+        var picked = t.Metadata.CurrentSnapshot!;
+        Assert.Equal(staged.ToString(System.Globalization.CultureInfo.InvariantCulture), picked.Summary["source-snapshot-id"]);
+        Assert.Equal([1L, 3, 10, 11, 12, 13, 20, 21, 100], await Ids(t, SnapshotSelector.Current));
+        // The replayed files keep spec 0 (and their spec-0 partition tuples), in a manifest of spec 0.
+        var added = (await TableScan.ManifestsAsync(t, picked)).Where(mf => mf.AddedSnapshotId == picked.SnapshotId).ToList();
+        Assert.Equal([0], added.Select(mf => mf.PartitionSpecId));
+        Assert.All((await TableScan.PlanFilesAsync(t)).Where(x => x.File.SpecId == 0), x => Assert.Single(x.File.Partition));
+        await Valid(t);
+    }
+
+    [Fact]
+    public async Task One_commit_may_add_files_of_several_partition_specs()
+    {
+        var t = await NewTable(2, partitioned: true);
+        var old = await TableWriter.WriteAsync(t, Rows(0, 2));
+        await t.UpdateSpecAsync(u => u.RemoveField("p"));
+        t = await _catalog.LoadTableAsync(t.Identifier);
+        var current = await TableWriter.WriteAsync(t, Rows(10, 2));
+        await SnapshotProducer.Append(t).AddFiles([.. old, .. current]).CommitAsync();
+        var manifests = await TableScan.ManifestsAsync(t, t.Metadata.CurrentSnapshot!);
+        Assert.Equal([t.Metadata.DefaultSpecId, 0], manifests.Select(mf => mf.PartitionSpecId));
+        Assert.Equal([0L, 1, 10, 11], await Ids(t, SnapshotSelector.Current));
+        await Valid(t);
+
+        var unknown = current[0] with { SpecId = 42 };
+        await Assert.ThrowsAsync<ValidationException>(() => SnapshotProducer.Append(t).AddFiles([unknown]).CommitAsync());
+    }
 }

@@ -32,8 +32,9 @@ public sealed record TableFingerprint(long Rows, ulong RowHash, IReadOnlyDiction
         var parts = new string[fields.Count];
         foreach (var task in await TableScan.PlanFilesAsync(table, snapshotId, null, ct))
         {
-            var fileRows = await DataFiles.ReadAsync(table.IO, task.File, schema, mapping, ct);
-            var isDeleted = deletes.IsEmpty ? null : await deletes.RowFilterAsync(task.File, task.DataSequenceNumber, schema, ct);
+            var read = deletes.WithEqualityColumns(schema); // the schema's columns first, so row[c] lines up with fields[c]
+            var fileRows = await DataFiles.ReadAsync(table.IO, task.File, read, mapping, ct);
+            var isDeleted = deletes.IsEmpty ? null : await deletes.RowFilterAsync(task.File, task.DataSequenceNumber, read, ct);
             for (var pos = 0; pos < fileRows.Count; pos++)
             {
                 var row = fileRows[pos];

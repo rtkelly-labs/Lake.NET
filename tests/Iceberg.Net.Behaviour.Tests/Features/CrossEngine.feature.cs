@@ -169,65 +169,65 @@ namespace Iceberg.Net.Behaviour.Tests.Features
 #line 8
     await testRunner.GivenAsync(string.Format("a format v{0} table keyed by \"id\"", version), ((string)(null)), ((global::Reqnroll.Table)(null)), "Given ");
 #line hidden
-                global::Reqnroll.Table table1 = new global::Reqnroll.Table(new string[] {
+                global::Reqnroll.Table table10 = new global::Reqnroll.Table(new string[] {
                             "id",
                             "name",
                             "region"});
-                table1.AddRow(new string[] {
+                table10.AddRow(new string[] {
                             "1",
                             "alice",
                             "eu"});
-                table1.AddRow(new string[] {
+                table10.AddRow(new string[] {
                             "2",
                             "bob",
                             "us"});
-                table1.AddRow(new string[] {
+                table10.AddRow(new string[] {
                             "3",
                             "carol",
                             "eu"});
-                table1.AddRow(new string[] {
+                table10.AddRow(new string[] {
                             "4",
                             "dave",
                             "us"});
 #line 9
-    await testRunner.AndAsync("the table contains:", ((string)(null)), table1, "And ");
+    await testRunner.AndAsync("the table contains:", ((string)(null)), table10, "And ");
 #line hidden
-                global::Reqnroll.Table table2 = new global::Reqnroll.Table(new string[] {
+                global::Reqnroll.Table table11 = new global::Reqnroll.Table(new string[] {
                             "id",
                             "name",
                             "region"});
-                table2.AddRow(new string[] {
+                table11.AddRow(new string[] {
                             "2",
                             "bobby",
                             "us"});
-                table2.AddRow(new string[] {
+                table11.AddRow(new string[] {
                             "5",
                             "eve",
                             "eu"});
 #line 15
-    await testRunner.WhenAsync(string.Format("I upsert with {0}:", mechanism), ((string)(null)), table2, "When ");
+    await testRunner.WhenAsync(string.Format("I upsert with {0}:", mechanism), ((string)(null)), table11, "When ");
 #line hidden
 #line 19
     await testRunner.AndAsync(string.Format("I delete keys 1 and 3 with {0}", mechanism), ((string)(null)), ((global::Reqnroll.Table)(null)), "And ");
 #line hidden
-                global::Reqnroll.Table table3 = new global::Reqnroll.Table(new string[] {
+                global::Reqnroll.Table table12 = new global::Reqnroll.Table(new string[] {
                             "id",
                             "name",
                             "region"});
-                table3.AddRow(new string[] {
+                table12.AddRow(new string[] {
                             "2",
                             "bobby",
                             "us"});
-                table3.AddRow(new string[] {
+                table12.AddRow(new string[] {
                             "4",
                             "dave",
                             "us"});
-                table3.AddRow(new string[] {
+                table12.AddRow(new string[] {
                             "5",
                             "eve",
                             "eu"});
 #line 20
-    await testRunner.ThenAsync("the table contains exactly:", ((string)(null)), table3, "Then ");
+    await testRunner.ThenAsync("the table contains exactly:", ((string)(null)), table12, "Then ");
 #line hidden
 #line 25
     await testRunner.AndAsync("Spark reads the same rows", ((string)(null)), ((global::Reqnroll.Table)(null)), "And ");
@@ -268,57 +268,57 @@ namespace Iceberg.Net.Behaviour.Tests.Features
 #line 37
     await testRunner.AndAsync(string.Format("a format v{0} table keyed by \"id\"", version), ((string)(null)), ((global::Reqnroll.Table)(null)), "And ");
 #line hidden
-                global::Reqnroll.Table table4 = new global::Reqnroll.Table(new string[] {
+                global::Reqnroll.Table table13 = new global::Reqnroll.Table(new string[] {
                             "id",
                             "name",
                             "region"});
-                table4.AddRow(new string[] {
+                table13.AddRow(new string[] {
                             "1",
                             "alice",
                             "eu"});
-                table4.AddRow(new string[] {
+                table13.AddRow(new string[] {
                             "2",
                             "bob",
                             "us"});
-                table4.AddRow(new string[] {
+                table13.AddRow(new string[] {
                             "3",
                             "carol",
                             "eu"});
 #line 38
-    await testRunner.AndAsync("the table contains:", ((string)(null)), table4, "And ");
+    await testRunner.AndAsync("the table contains:", ((string)(null)), table13, "And ");
 #line hidden
-                global::Reqnroll.Table table5 = new global::Reqnroll.Table(new string[] {
+                global::Reqnroll.Table table14 = new global::Reqnroll.Table(new string[] {
                             "id",
                             "name",
                             "region"});
-                table5.AddRow(new string[] {
+                table14.AddRow(new string[] {
                             "2",
                             "bobby",
                             "us"});
-                table5.AddRow(new string[] {
+                table14.AddRow(new string[] {
                             "4",
                             "dan",
                             "eu"});
 #line 43
-    await testRunner.WhenAsync(string.Format("I upsert with {0}:", mechanism), ((string)(null)), table5, "When ");
+    await testRunner.WhenAsync(string.Format("I upsert with {0}:", mechanism), ((string)(null)), table14, "When ");
 #line hidden
 #line 47
     await testRunner.AndAsync(string.Format("I delete keys 1 and 3 with {0}", mechanism), ((string)(null)), ((global::Reqnroll.Table)(null)), "And ");
 #line hidden
-                global::Reqnroll.Table table6 = new global::Reqnroll.Table(new string[] {
+                global::Reqnroll.Table table15 = new global::Reqnroll.Table(new string[] {
                             "id",
                             "name",
                             "region"});
-                table6.AddRow(new string[] {
+                table15.AddRow(new string[] {
                             "2",
                             "bobby",
                             "us"});
-                table6.AddRow(new string[] {
+                table15.AddRow(new string[] {
                             "4",
                             "dan",
                             "eu"});
 #line 48
-    await testRunner.ThenAsync("the table contains exactly:", ((string)(null)), table6, "Then ");
+    await testRunner.ThenAsync("the table contains exactly:", ((string)(null)), table15, "Then ");
 #line hidden
 #line 52
     await testRunner.AndAsync("Trino reads the same rows", ((string)(null)), ((global::Reqnroll.Table)(null)), "And ");

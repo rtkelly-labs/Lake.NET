@@ -36,8 +36,9 @@ public sealed class SnapshotProducer
     private readonly List<DataFile> _addedDeleteFiles = [];
     private int? _retries;
     private readonly Dictionary<string, string> _extraSummary = [];
-    private string? _writtenManifest;
-    private ManifestFile? _writtenManifestFile;
+    /// <summary>The manifests of added files, one per partition spec, written once and reused across retries.</summary>
+    private List<ManifestFile>? _writtenManifests;
+    private readonly HashSet<string> _writtenManifestPaths = new(StringComparer.Ordinal);
     /// <summary>Files written by failed attempts (deleted after a successful commit unless the winner references them).</summary>
     private readonly List<string> _staleArtifacts = [];
     /// <summary>Files written by the current attempt (kept if it commits).</summary>
@@ -135,7 +136,7 @@ public sealed class SnapshotProducer
             if (snapshot.ManifestList is null) continue;
             foreach (var manifest in (await TableScan.ManifestsAsync(_table, snapshot, ct)).Where(mf => mf.AddedSnapshotId == snapshot.SnapshotId))
             {
-                var entries = ManifestCodec.ReadManifest(await _table.IO.ReadAllAsync(manifest.ManifestPath, ct), m.SpecById(manifest.PartitionSpecId), m.CurrentSchema, manifest).Entries
+                var entries = (await ManifestStore.ReadAsync(_table.IO, manifest.ManifestPath, m.SpecById(manifest.PartitionSpecId), m.CurrentSchema, manifest, ct: ct)).Entries
                     .Where(e => e.Status == ManifestEntryStatus.Added);
                 if (manifest.Content == ManifestContent.Data)
                 {
@@ -250,6 +251,19 @@ public sealed class SnapshotProducer
     public SnapshotProducer WithRetries(int retries)
     {
         _retries = retries;
+        return this;
+    }
+
+    private TimeProvider _clock = TimeProvider.System;
+
+    /// <summary>
+    /// The clock snapshot timestamps are taken from (default: the system clock). Whatever it says, a snapshot's
+    /// <c>timestamp-ms</c> is strictly greater than its parent's on the same branch (Iceberg v4's rule; harmless on
+    /// v1–v3): <c>max(now, parent + 1)</c>, so a clock that stands still or runs behind still yields an ordered history.
+    /// </summary>
+    public SnapshotProducer WithClock(TimeProvider clock)
+    {
+        _clock = clock ?? throw new ArgumentNullException(nameof(clock));
         return this;
     }
 
@@ -434,7 +448,7 @@ public sealed class SnapshotProducer
                     continue;
                 }
                 var spec = m.SpecById(manifest.PartitionSpecId);
-                var entries = ManifestCodec.ReadManifest(await _table.IO.ReadAllAsync(manifest.ManifestPath, ct), spec, m.CurrentSchema, manifest).Entries
+                var entries = (await ManifestStore.ReadAsync(_table.IO, manifest.ManifestPath, spec, m.CurrentSchema, manifest, ct: ct)).Entries
                     .Where(e => e.Status != ManifestEntryStatus.Deleted)
                     .ToList();
                 var matched = entries.Where(e => _deleteWhere(e.DataFile)).ToList();
@@ -468,7 +482,7 @@ public sealed class SnapshotProducer
             foreach (var mf in bySpec)
             {
                 bytes += mf.ManifestLength;
-                entries.AddRange(ManifestCodec.ReadManifest(await _table.IO.ReadAllAsync(mf.ManifestPath, ct), spec, m.CurrentSchema, mf).Entries
+                entries.AddRange((await ManifestStore.ReadAsync(_table.IO, mf.ManifestPath, spec, m.CurrentSchema, mf, ct: ct)).Entries
                     .Where(e => e.Status != ManifestEntryStatus.Deleted)
                     .Select(e => e with { Status = ManifestEntryStatus.Existing }));
             }
@@ -494,17 +508,26 @@ public sealed class SnapshotProducer
             _attemptArtifacts.Add(path);
         }
 
-        // 2. One new manifest for added files, written once and reused across retries.
+        // 2. New manifests for added files, one per partition spec the files were written with (the default spec's
+        //    first), written once and reused across retries.
         if (_added.Count > 0)
         {
-            if (_writtenManifest is null)
+            if (_writtenManifests is null)
             {
-                _writtenManifest = $"{metaDir}/{commitUuid}-m-added.avro";
-                // Null snapshot ID and sequence numbers: inherited from the manifest list, so this file is valid for any attempt.
-                var entries = _added.Select(f => new ManifestEntry(ManifestEntryStatus.Added, null, null, null, f)).ToList();
-                _writtenManifestFile = await WriteManifestAsync(_writtenManifest, m.DefaultSpec, ManifestContent.Data, entries, snapshotId, sequenceNumber, ct);
+                var written = new List<ManifestFile>();
+                foreach (var group in _added.GroupBy(f => f.SpecId).OrderBy(g => g.Key == m.DefaultSpecId ? 0 : 1).ThenBy(g => g.Key))
+                {
+                    var spec = m.PartitionSpecs.FirstOrDefault(p => p.SpecId == group.Key)
+                        ?? throw new ValidationException($"Cannot add {group.First().FilePath}: partition spec {group.Key} is not a spec of the table");
+                    var path = group.Key == m.DefaultSpecId ? $"{metaDir}/{commitUuid}-m-added.avro" : $"{metaDir}/{commitUuid}-m-added-spec{group.Key}.avro";
+                    // Null snapshot ID and sequence numbers: inherited from the manifest list, so this file is valid for any attempt.
+                    var entries = group.Select(f => new ManifestEntry(ManifestEntryStatus.Added, null, null, null, f)).ToList();
+                    written.Add(await WriteManifestAsync(path, spec, ManifestContent.Data, entries, snapshotId, sequenceNumber, ct));
+                    _writtenManifestPaths.Add(path);
+                }
+                _writtenManifests = written;
             }
-            manifests.Insert(0, _writtenManifestFile! with { SequenceNumber = sequenceNumber, MinSequenceNumber = sequenceNumber, AddedSnapshotId = snapshotId });
+            manifests.InsertRange(0, _writtenManifests.Select(w => w with { SequenceNumber = sequenceNumber, MinSequenceNumber = sequenceNumber, AddedSnapshotId = snapshotId }));
         }
 
         // 2b. Merge-append: compact small data manifests carried forward unchanged (plus this commit's new one).
@@ -526,7 +549,7 @@ public sealed class SnapshotProducer
         }
 
         var listPath = $"{metaDir}/snap-{snapshotId}-1-{commitUuid}.avro";
-        await _table.IO.WriteAsync(listPath, ManifestCodec.WriteManifestList(m.FormatVersion, snapshotId, parent?.SnapshotId, sequenceNumber, manifests, firstRowId), overwrite: false, ct);
+        await ManifestStore.WriteListAsync(_table.IO, listPath, m.FormatVersion, snapshotId, parent?.SnapshotId, sequenceNumber, manifests, firstRowId, ct);
         _attemptArtifacts.Add(listPath);
 
         var deletesSomething = deletedFiles > 0 || deleteChange.Added.Count > 0;
@@ -543,7 +566,7 @@ public sealed class SnapshotProducer
             SnapshotId = snapshotId,
             ParentSnapshotId = parent?.SnapshotId,
             SequenceNumber = sequenceNumber,
-            TimestampMs = DateTimeOffset.UtcNow.ToUnixTimeMilliseconds(),
+            TimestampMs = Math.Max(_clock.GetUtcNow().ToUnixTimeMilliseconds(), parent is null ? long.MinValue : parent.TimestampMs + 1),
             ManifestList = listPath,
             SchemaId = m.CurrentSchemaId,
             Summary = Summary(operation, parent, deletedFiles, deletedRecords, deletedSize, deleteChange),
@@ -692,7 +715,7 @@ public sealed class SnapshotProducer
         var minCount = int.Parse(m.Property(ManifestMinCountToMerge, "100"), CultureInfo.InvariantCulture);
         var target = long.Parse(m.Property(ManifestTargetSizeBytes, "8388608"), CultureInfo.InvariantCulture);
         var carried = parentManifests.Select(p => p.ManifestPath).ToHashSet(StringComparer.Ordinal);
-        bool Mergeable(ManifestFile mf) => mf.Content == ManifestContent.Data && (carried.Contains(mf.ManifestPath) || mf.ManifestPath == _writtenManifest);
+        bool Mergeable(ManifestFile mf) => mf.Content == ManifestContent.Data && (carried.Contains(mf.ManifestPath) || _writtenManifestPaths.Contains(mf.ManifestPath));
 
         var result = new List<ManifestFile>();
         var mergeIndex = 0;
@@ -713,11 +736,11 @@ public sealed class SnapshotProducer
                 var entries = new List<ManifestEntry>();
                 foreach (var mf in bin)
                 {
-                    var read = ManifestCodec.ReadManifest(await _table.IO.ReadAllAsync(mf.ManifestPath, ct), spec, m.CurrentSchema, mf).Entries;
+                    var read = (await ManifestStore.ReadAsync(_table.IO, mf.ManifestPath, spec, m.CurrentSchema, mf, ct: ct)).Entries;
                     foreach (var e in read)
                     {
                         if (e.Status == ManifestEntryStatus.Deleted) continue;
-                        entries.Add(mf.ManifestPath == _writtenManifest
+                        entries.Add(_writtenManifestPaths.Contains(mf.ManifestPath)
                             ? e with { Status = ManifestEntryStatus.Added, SnapshotId = snapshotId, SequenceNumber = null, FileSequenceNumber = null }
                             : e with { Status = ManifestEntryStatus.Existing });
                     }
@@ -737,7 +760,7 @@ public sealed class SnapshotProducer
         if (removed.Count == 0) return manifest;
         var m = _table.Metadata;
         var spec = m.SpecById(manifest.PartitionSpecId);
-        var entries = ManifestCodec.ReadManifest(await _table.IO.ReadAllAsync(manifest.ManifestPath, ct), spec, m.CurrentSchema, manifest).Entries
+        var entries = (await ManifestStore.ReadAsync(_table.IO, manifest.ManifestPath, spec, m.CurrentSchema, manifest, ct: ct)).Entries
             .Where(e => e.Status != ManifestEntryStatus.Deleted).ToList();
         if (!entries.Any(e => removed.Contains((e.DataFile.FilePath, e.DataFile.ContentOffset)))) return manifest;
         var rewritten = entries.Select(e => removed.Contains((e.DataFile.FilePath, e.DataFile.ContentOffset))
@@ -750,14 +773,13 @@ public sealed class SnapshotProducer
     private async Task<ManifestFile> WriteManifestAsync(string path, PartitionSpec spec, ManifestContent content, IReadOnlyList<ManifestEntry> entries, long snapshotId, long sequenceNumber, CancellationToken ct)
     {
         var m = _table.Metadata;
-        var bytes = ManifestCodec.WriteManifest(m.FormatVersion, m.CurrentSchema, spec, content, entries);
-        await _table.IO.WriteAsync(path, bytes, overwrite: false, ct);
+        var length = await ManifestStore.WriteAsync(_table.IO, path, m.FormatVersion, m.CurrentSchema, spec, content, entries, ct);
         var partitionType = spec.PartitionType(m.CurrentSchema);
         var live = entries.Where(e => e.Status != ManifestEntryStatus.Deleted).ToList();
         return new ManifestFile
         {
             ManifestPath = path,
-            ManifestLength = bytes.Length,
+            ManifestLength = length,
             PartitionSpecId = spec.SpecId,
             Content = content,
             SequenceNumber = sequenceNumber,

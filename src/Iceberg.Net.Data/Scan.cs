@@ -242,7 +242,8 @@ public static partial class TableScan
         foreach (var eq in deletes.EqualityDeletes)
             foreach (var id in eq.File.EqualityIds ?? [])
                 if (schema.Columns.Any(c => c.Id == id)) needed.Add(id);
-        var read = new Schema(schema.SchemaId, schema.Columns.Where(c => needed.Contains(c.Id)), schema.IdentifierFieldIds.Where(needed.Contains));
+        // Plus equality-delete columns the read schema lacks (dropped since, or added after a time-travel snapshot).
+        var read = deletes.WithEqualityColumns(new Schema(schema.SchemaId, schema.Columns.Where(c => needed.Contains(c.Id)), schema.IdentifierFieldIds.Where(needed.Contains)));
         var readBound = Remap(bound, schema, read);
         var matches = readBound is AlwaysTrue ? null : RowEvaluator.Compile(readBound);
         var positions = outputs.Select(id => read.Columns.Select((c, i) => (c, i)).First(x => x.c.Id == id).i).ToArray();

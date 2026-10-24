@@ -512,4 +512,120 @@ public sealed class UpdateMergeTests : IDisposable
         Assert.Equal(after.Count, after.Values.Select(x => x.RowId).Distinct().Count());
         await Rows(t);
     }
+
+    // ------------------------------------------------------------------ nested struct fields
+
+    // address: struct<city optional, geo: struct<lat required, lon optional> optional, zip required>; tags: list<struct<k>>.
+    private static readonly Schema NestedSchema = new(0,
+    [
+        NestedField.Require(1, "id", PrimitiveType.Long),
+        NestedField.Optional(2, "address", new StructType([
+            NestedField.Optional(3, "city", PrimitiveType.String),
+            NestedField.Optional(4, "geo", new StructType([NestedField.Require(5, "lat", PrimitiveType.Double), NestedField.Optional(6, "lon", PrimitiveType.Double)])),
+            NestedField.Optional(7, "zip", PrimitiveType.Int),
+        ])),
+        NestedField.Optional(8, "tags", new ListType(9, new StructType([NestedField.Optional(10, "k", PrimitiveType.String)]), false)),
+        NestedField.Optional(11, "owner", new StructType([NestedField.Require(12, "name", PrimitiveType.String), NestedField.Optional(13, "age", PrimitiveType.Int)])),
+    ], identifierFieldIds: [1]);
+
+    private static object?[] Address(string? city, double? lat, int? zip) => [city, lat is null ? null : new object?[] { lat, null }, zip];
+
+    /// <summary>id 1..4; id 3 has no address, id 4 an address without geo; tags and owner null.</summary>
+    private async Task<Table> SeededNested(int formatVersion)
+    {
+        var t = await _catalog.CreateTableAsync(new CreateTableRequest(TableIdentifier.Of("db", $"t{_tables++}"), NestedSchema, FormatVersion: formatVersion));
+        await TableMutations.InsertAsync(t, [
+            [1L, Address("Leeds", 53.8, 1), null, null],
+            [2L, Address("York", 53.9, 2), null, null],
+            [3L, null, null, null],
+            [4L, Address("Hull", null, 4), null, null],
+        ]);
+        return t;
+    }
+
+    private async Task<Dictionary<long, object?[]>> NestedRows(Table t)
+    {
+        var fresh = await _catalog.LoadTableAsync(t.Identifier);
+        var report = await TableValidator.ValidateAsync(fresh, new ValidationOptions { Deep = true, AllSnapshots = true });
+        Assert.True(report.IsValid, report.ToString());
+        return (await TableScan.ReadAllAsync(fresh)).ToDictionary(r => (long)r[0]!);
+    }
+
+    [Theory]
+    [MemberData(nameof(Removal))]
+    public async Task Update_sets_a_nested_struct_field_by_path(int formatVersion, DeleteStrategy strategy)
+    {
+        var t = await SeededNested(formatVersion);
+        var r = await TableMutations.UpdateAsync(t, Expr.In("id", 1L, 4L), u => u
+            .Set("address.city", row => ((string?)((object?[])row[1]!)[0])!.ToUpperInvariant())
+            .Set("address.geo.lon", -1.5) // two levels down; id 4 has no geo, so it is created and needs its required lat
+            .Set("address.geo.lat", 1.0)
+            .Set("address.zip", 99L), strategy); // long → int, like a filter literal
+
+        Assert.Equal(2, r.RowsUpdated);
+        var rows = await NestedRows(t);
+        Assert.Equal(new object?[] { "LEEDS", new object?[] { 1.0, -1.5 }, 99 }, rows[1][1]);
+        Assert.Equal(new object?[] { "HULL", new object?[] { 1.0, -1.5 }, 99 }, rows[4][1]); // null geo materialised
+        Assert.Equal(new object?[] { "York", new object?[] { 53.9, null }, 2 }, rows[2][1]); // untouched
+        Assert.Null(rows[3][1]);
+    }
+
+    [Theory]
+    [InlineData(2)]
+    [InlineData(3)]
+    public async Task A_nested_assignment_sees_and_keeps_the_row_as_it_was(int formatVersion)
+    {
+        var t = await SeededNested(formatVersion);
+        // Two fields of one struct, the second computed from the first's old value; the whole-column read sees the old struct.
+        await TableMutations.UpdateAsync(t, Expr.Equal("id", 2L), u => u
+            .Set("address.zip", row => ((string)((object?[])row[1]!)[0]!).Length)
+            .Set("address.city", "Scarborough")
+            .Set("owner", row => new object?[] { ((object?[])row[1]!)[0], null }));
+        var rows = await NestedRows(t);
+        Assert.Equal(new object?[] { "Scarborough", new object?[] { 53.9, null }, 4 }, rows[2][1]);
+        Assert.Equal(new object?[] { "York", null }, rows[2][3]);
+    }
+
+    [Fact]
+    public async Task A_null_enclosing_struct_becomes_a_struct_of_nulls()
+    {
+        var t = await SeededNested(3);
+        await TableMutations.UpdateAsync(t, Expr.Equal("id", 3L), u => u.Set("address.zip", 7));
+        Assert.Equal(new object?[] { null, null, 7 }, (await NestedRows(t))[3][1]);
+
+        // owner is null and owner.name is required: setting only owner.age cannot build a valid struct.
+        var snapshots = (await _catalog.LoadTableAsync(t.Identifier)).Metadata.Snapshots.Count;
+        await Assert.ThrowsAsync<ArgumentException>(() => TableMutations.UpdateAsync(t, Expr.Equal("id", 1L), u => u.Set("owner.age", 40)));
+        await TableMutations.UpdateAsync(t, Expr.Equal("id", 1L), u => u.Set("owner.age", 40).Set("owner.name", "Ann"));
+        Assert.Equal(snapshots + 1, (await _catalog.LoadTableAsync(t.Identifier)).Metadata.Snapshots.Count);
+        Assert.Equal(new object?[] { "Ann", 40 }, (await NestedRows(t))[1][3]);
+    }
+
+    [Fact]
+    public async Task Nested_assignments_are_checked()
+    {
+        var t = await SeededNested(2);
+        Task Update(Action<RowUpdate> set) => TableMutations.UpdateAsync(t, Expr.Equal("id", 1L), set);
+        await Assert.ThrowsAsync<ArgumentException>(() => Update(u => u.Set("address.nope", 1)));
+        await Assert.ThrowsAsync<ArgumentException>(() => Update(u => u.Set("tags.element.k", "x"))); // inside a list
+        await Assert.ThrowsAsync<ArgumentException>(() => Update(u => u.Set("address", (object?)null).Set("address.city", "x"))); // struct and its field
+        await Assert.ThrowsAsync<ArgumentException>(() => Update(u => u.Set("address.geo.lat", (object?)null))); // required
+        await Assert.ThrowsAsync<ArgumentException>(() => Update(u => u.Set("address.zip", "seven")));
+        Assert.Single((await _catalog.LoadTableAsync(t.Identifier)).Metadata.Snapshots);
+    }
+
+    [Theory]
+    [MemberData(nameof(Removal))]
+    public async Task Merge_sets_a_nested_field_from_the_source(int formatVersion, DeleteStrategy strategy)
+    {
+        var t = await SeededNested(formatVersion);
+        object?[] Src(long id, string city) => [id, Address(city, null, null), null, null];
+        var r = await TableMutations.MergeAsync(t, [Src(2, "Ripon"), Src(5, "Selby")], ["id"], m => m
+            .WhenMatchedUpdate(u => u.Set("address.city", row => "was " + ((object?[])row[1]!)[0]))
+            .WhenNotMatchedInsert(), strategy);
+        Assert.Equal((1L, 1L), (r.RowsUpdated, r.RowsInserted));
+        var rows = await NestedRows(t);
+        Assert.Equal(new object?[] { "was York", new object?[] { 53.9, null }, 2 }, rows[2][1]);
+        Assert.Equal(Address("Selby", null, null), rows[5][1]);
+    }
 }

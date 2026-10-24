@@ -45,6 +45,10 @@ reflect the rollback. Every ref that the change set reads or changes is guarded 
 - A dynamic partition overwrite (`replace-partitions=true`, as Spark's `INSERT OVERWRITE` writes it) is replayed when
   its parent is an ancestor of main and no file was added to its partitions since.
 - Any other operation fails if it is not a fast-forward.
+- Files keep the partition spec they were written with. A snapshot staged before a spec change replays its files
+  under their old spec, and the producer writes one added-files manifest per spec. A dynamic overwrite's
+  replaced-partition check compares partitions together with their spec, so main's appends under the new spec do not
+  block it.
 - Picking an ancestor of main, or a snapshot that was already picked, fails.
 - A replay composes with concurrent appends.
 
@@ -118,9 +122,19 @@ A copy-on-write update reports the whole rewritten file: the unchanged rows appe
 `changes` table does. `RemoveCarryovers = true` cancels identical pairs within a snapshot, as `create_changelog_view`
 does by default. Like Spark, it also cancels a genuine delete and re-insert of an identical row.
 
-Spark cross-checks the feed for tables without delete files only, because Iceberg 1.12's changelog scan refuses delete
-files ("Delete files are currently not supported in changelog scans"). There the feed matches Spark exactly, including
-copy-on-write carry-overs. The L0 tests cover every delete strategy: replaying the feed reproduces each snapshot.
+Equality deletes on a column that was later dropped still apply to the feed's rows (see
+[read-path.md](read-path.md#column-projection)).
+
+**What Spark can and cannot check.** `SparkCrossEngineTests.Spark_reports_the_same_changes` compares the feed with
+Spark's `changes` table only for tables without delete files. There the feed matches exactly, including copy-on-write
+carry-overs. The feed for merge-on-read tables (v2 position delete files, v3 deletion vectors, equality deletes)
+**cannot be cross-checked with Spark**. Java's `BaseIncrementalChangelogScan` (Iceberg 1.12) throws
+`UnsupportedOperationException: Delete files are currently not supported in changelog scans` as soon as a snapshot in
+the range has delete manifests, so Spark has no answer to compare with. PyIceberg has no changelog scan either. The
+oracle for those cases is the L0 replay: `ChangeFeedTests.Replaying_the_feed_reproduces_every_snapshot` runs every
+delete strategy on v2 and v3, applies each snapshot's deletes and inserts to the previous state, and checks that the
+result equals a time-travel read of that snapshot. When Java's changelog scan supports delete files, the Spark fixture
+should add the merge-on-read tables to its changelog list.
 
 ## Compaction in parts, and delete-file rewrites
 
