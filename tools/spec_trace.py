@@ -73,15 +73,13 @@ NOT_IMPLEMENTED = {
     "appendix-g-geospatial-notes": "geometry/geography not implemented",
     "position-delete-files-with-row-data": "optional row column not written (deprecated upstream)",
     "partition-statistics-file": "partition statistics files not written",
+    # The REST server implements every other operation, including those the client has no method for
+    # (updateProperties, unregisterTable, reportMetrics); tests reach those over HTTP.
     **{
-        f"rest:{op}": "REST operation not implemented by RestCatalog"
+        f"rest:{op}": "REST operation not implemented (client or server)"
         for op in (
-            "updateproperties",
             "listfunctions",
             "loadfunction",
-            "unregistertable",
-            "loadcredentials",
-            "reportmetrics",
             "registerview",
         )
     },
