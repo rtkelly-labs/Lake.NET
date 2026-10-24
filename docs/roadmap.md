@@ -63,7 +63,10 @@ fetched whole.
 
 Closed since: atomic `SaveChanges` across tables. `TableMutations.StageMergeAsync` / `StageUpdateAsync` stage a
 mutation, and `StagedCommit.CommitAllAsync` commits several in one `CommitTransactionAsync`, re-planning all of them
-after a conflict ([update-merge.md](update-merge.md#staged-commits-across-tables)).
+after a conflict ([update-merge.md](update-merge.md#staged-commits-across-tables)). The REST server gained scan
+planning (PyIceberg and Spark plan through it), role authorization, STS credential vending and `Idempotency-Key` replay
+([rest-server.md](rest-server.md)). v4 preparation: a typed column-statistics model that pruning runs on, the
+`content_stats` layout, the `file` type and the Mumbling bitmap codec ([iceberg-v4.md](iceberg-v4.md)).
 
 ### Upstream changes to plan for (from the spec-drift check)
 
