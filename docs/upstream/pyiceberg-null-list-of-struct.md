@@ -1,6 +1,6 @@
-# PyIceberg: a null `list<struct>` reads as an empty list (draft issue)
+# PyIceberg: a null `list<struct>` reads as an empty list (proposed ticket)
 
-**Status:** drafted, not filed. Found by `ShadowCompareTests.Fingerprints_agree_with_pyiceberg_for_nested_types`
+**Status:** proposed ticket, not filed (see [README.md](README.md)). Found by `ShadowCompareTests.Fingerprints_agree_with_pyiceberg_for_nested_types`
 on PyIceberg 0.12.0 / pyarrow; Spark + Iceberg Java read the same files correctly
 (`SparkCrossEngineTests.Spark_reads_the_same_nested_values`), and so does pyarrow reading the Parquet file directly.
 

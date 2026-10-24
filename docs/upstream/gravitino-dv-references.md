@@ -1,6 +1,6 @@
-# Gravitino: scan planning sends deletion vectors to the wrong data files (draft issue)
+# Gravitino: scan planning sends deletion vectors to the wrong data files (proposed ticket)
 
-**Status:** drafted, not filed. Found by `ServerScanPlanningLiveTests` against `apache/gravitino-iceberg-rest:1.3.1`
+**Status:** proposed ticket, not filed (see [README.md](README.md)). Found by `ServerScanPlanningLiveTests` against `apache/gravitino-iceberg-rest:1.3.1`
 (iceberg-core 1.11.0 underneath). The same behaviour reproduces in Iceberg Java 1.10's `PlanTableScanResponse`
 serializer (`JavaMisreferencedDvTests`, fixture from the 1.10 REST image) and is gone in Iceberg 1.12.
 
