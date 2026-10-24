@@ -124,25 +124,9 @@ internal static class BoundsPruning
         return true;
     }
 
-    public static object? Decode(IcebergType type, byte[]? bytes)
-    {
-        if (bytes is null) return null;
-        try
-        {
-            return Conversions.FromBytes(type, bytes);
-        }
-        catch (Exception e) when (e is ArgumentException or FormatException or InvalidDataException or NotSupportedException)
-        {
-            return null; // undecodable bound: no information, never prune on it
-        }
-    }
+    public static object? Decode(IcebergType type, byte[]? bytes) =>
+        BoundSerialization.TryDecode(type, bytes) is var v && v is GeoPoint or VariantBound ? null : v;
 }
-
-/// <summary>
-/// Decoded column metrics of one unit of data (a Parquet row group): counts where known, bounds as physical Iceberg
-/// values of the column's type (null when absent). Null means "unknown", never "zero".
-/// </summary>
-public sealed record ColumnMetrics(long? ValueCount, long? NullCount, long? NanCount, object? Lower, object? Upper);
 
 /// <summary>Can a data or delete file contain rows matching a bound expression, judging by its column metrics?</summary>
 public sealed class MetricsEvaluator(Expression bound)
@@ -152,27 +136,23 @@ public sealed class MetricsEvaluator(Expression bound)
     public bool MightMatch(DataFile file) => file.RecordCount != 0 && Eval(_expr, p => FileMetrics(p, file));
 
     /// <summary>
-    /// The same inclusive test on already decoded metrics (Parquet row-group statistics), keyed by field ID:
-    /// <paramref name="metricsOf"/> gets a field ID and the type its values must be decoded as, and returns null for a
-    /// column without statistics, which never prunes.
+    /// The same inclusive test on typed statistics, keyed by field ID: <paramref name="statsOf"/> gets a field ID and
+    /// the type its bounds must be values of, and returns null for a column without statistics, which never prunes.
+    /// Parquet row-group statistics come this way; so could v4 <c>content_stats</c>.
     /// </summary>
-    public bool MightMatch(long recordCount, Func<int, IcebergType, ColumnMetrics?> metricsOf) =>
-        recordCount != 0 && Eval(_expr, p => metricsOf(p.FieldId, p.Type) ?? Unknown);
+    public bool MightMatch(long recordCount, Func<int, IcebergType, ColumnStats?> statsOf) =>
+        recordCount != 0 && Eval(_expr, p => statsOf(p.FieldId, p.Type) ?? Unknown(p.FieldId));
 
-    private static readonly ColumnMetrics Unknown = new(null, null, null, null, null);
+    /// <summary>The same inclusive test on a file's statistics, already typed (<see cref="ContentStats"/>).</summary>
+    public bool MightMatch(long recordCount, ContentStats stats) =>
+        recordCount != 0 && Eval(_expr, p => stats[p.FieldId] ?? Unknown(p.FieldId));
 
-    private static ColumnMetrics FileMetrics(BoundPredicate p, DataFile f)
-    {
-        static long? Count(IReadOnlyDictionary<int, long>? counts, int id) => counts is not null && counts.TryGetValue(id, out var n) ? n : null;
-        return new ColumnMetrics(
-            Count(f.ValueCounts, p.FieldId),
-            Count(f.NullValueCounts, p.FieldId),
-            Count(f.NanValueCounts, p.FieldId),
-            BoundsPruning.Decode(p.Type, f.LowerBounds?.GetValueOrDefault(p.FieldId)),
-            BoundsPruning.Decode(p.Type, f.UpperBounds?.GetValueOrDefault(p.FieldId)));
-    }
+    private static ColumnStats Unknown(int fieldId) => new() { FieldId = fieldId };
 
-    private static bool Eval(Expression e, Func<BoundPredicate, ColumnMetrics> metrics) => e switch
+    // The v1-v3 maps read through the typed model, decoded as the predicate's type (the read schema's).
+    private static ColumnStats FileMetrics(BoundPredicate p, DataFile f) => ColumnStats.FromMetricsMaps(f, p.FieldId, p.Type, keepRaw: false);
+
+    private static bool Eval(Expression e, Func<BoundPredicate, ColumnStats> metrics) => e switch
     {
         AlwaysTrue => true,
         AlwaysFalse => false,
@@ -182,9 +162,9 @@ public sealed class MetricsEvaluator(Expression bound)
         _ => throw new ArgumentException($"Expression is not bound: {e}"),
     };
 
-    private static bool Test(BoundPredicate p, ColumnMetrics m)
+    private static bool Test(BoundPredicate p, ColumnStats m)
     {
-        var (values, nulls, nans) = (m.ValueCount, m.NullCount, m.NanCount);
+        var (values, nulls, nans) = (m.ValueCount, m.NullValueCount, m.NanValueCount);
         var allNull = values is not null && nulls == values;
         switch (p.Op)
         {
@@ -194,7 +174,7 @@ public sealed class MetricsEvaluator(Expression bound)
             case Operation.NotNaN: return !(values is not null && nans == values);
         }
         var noComparable = values is not null && (nulls ?? 0) + (nans ?? 0) == values && (nulls is not null || nans is not null);
-        return BoundsPruning.MightMatch(p, m.Lower, m.Upper, noComparable);
+        return BoundsPruning.MightMatch(p, m.ComparableLower, m.ComparableUpper, noComparable);
     }
 }
 
