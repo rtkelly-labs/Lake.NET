@@ -29,6 +29,7 @@ public enum TypeId
     Struct,
     List,
     Map,
+    File,          // v4 (last, so earlier values keep their numbers)
 }
 
 public abstract record IcebergType(TypeId TypeId)
@@ -139,6 +140,49 @@ public sealed record GeographyType(string? Crs = null, string? Algorithm = null)
         (_, null) => $"geography({Crs})",
         _ => $"geography({Crs ?? "OGC:CRS84"}, {Algorithm})",
     };
+}
+
+/// <summary>
+/// The v4 <c>file</c> type (spec "File Type"): a byte range stored inline or referenced by URI, with six implicit
+/// sub-fields at fixed offsets from the field's own ID. They are not part of the schema JSON, but they reserve IDs:
+/// a <c>file</c> field with ID <c>n</c> owns <c>n</c> to <c>n + 6</c>, so <see cref="Schema.HighestFieldId"/> and
+/// <c>last-column-id</c> account for all seven. Not a primitive (no equality, ordering, transforms or identifier use)
+/// and not a struct (never interchangeable with one). Refused on tables below format v4, which this library does not
+/// write yet, so for now it only round-trips in schemas.
+/// </summary>
+public sealed record FileType : IcebergType
+{
+    public static readonly FileType Instance = new();
+
+    private FileType() : base(TypeId.File) { }
+
+    /// <summary>The field's own ID plus six sub-field IDs.</summary>
+    public const int ReservedIds = 7;
+
+    /// <summary>The implicit sub-fields: ID offset from the <c>file</c> field's ID, name and type.</summary>
+    public static IReadOnlyList<(int Offset, string Name, PrimitiveType Type)> SubFieldLayout { get; } =
+    [
+        (1, "uri", PrimitiveType.String),
+        (2, "offset", PrimitiveType.Long),
+        (3, "size", PrimitiveType.Long),
+        (4, "content_type", PrimitiveType.String),
+        (5, "checksum", PrimitiveType.String),
+        (6, "inline", PrimitiveType.Binary),
+    ];
+
+    /// <summary>
+    /// The sub-fields of a <c>file</c> field with ID <paramref name="fileFieldId"/>. All optional: the spec gives no
+    /// requiredness, and a value is either a reference (uri) or inline bytes.
+    /// </summary>
+    public static IReadOnlyList<NestedField> SubFields(int fileFieldId)
+    {
+        if (fileFieldId < 0 || fileFieldId > int.MaxValue - (ReservedIds - 1))
+            throw new ArgumentOutOfRangeException(nameof(fileFieldId), $"A file field needs {ReservedIds} consecutive field IDs");
+        return SubFieldLayout.Select(s => NestedField.Optional(fileFieldId + s.Offset, s.Name, s.Type)).ToList();
+    }
+
+    public override int MinFormatVersion => 4;
+    public override string ToString() => "file";
 }
 
 /// <summary>A struct field. Field IDs are the identity of a column across schema evolution.</summary>

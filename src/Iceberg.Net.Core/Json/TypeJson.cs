@@ -41,6 +41,7 @@ public static partial class TypeJson
     public static JsonNode ToJson(IcebergType type) => type switch
     {
         PrimitiveType p => JsonValue.Create(p.ToString())!,
+        FileType => JsonValue.Create("file")!,
         StructType s => StructToJson(s),
         ListType l => new JsonObject
         {
@@ -107,6 +108,7 @@ public static partial class TypeJson
                 "unknown" => PrimitiveType.Unknown,
                 "geometry" => new GeometryType(),
                 "geography" => new GeographyType(),
+                "file" => FileType.Instance,
                 _ => ParseParameterised(s),
             };
         }
