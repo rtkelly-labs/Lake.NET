@@ -25,7 +25,7 @@ No production-grade .NET Iceberg library exists today (see [docs/ports-and-engin
 | Reads | Streamed one Parquet row group at a time; only the footer and needed column chunks fetched; only projected columns decoded (by field ID); row groups skipped on footer statistics; time travel by snapshot, ref or instant, with the snapshot's own schema; metadata-only counts ([docs/read-path.md](docs/read-path.md)) |
 | Snapshot management | Branches and tags, rollback, cherry-pick, fast-forward, write-audit-publish branch writes, per-ref retention, metadata tables, change feed ([docs/snapshot-management.md](docs/snapshot-management.md)) |
 | Typed layer | `Iceberg.Net.Linq`: row mapping by field ID, schema from a model, a LINQ provider that pushes filters, projection and time travel into one scan (residual filters in memory, strict mode), typed insert/upsert/`ExecuteDelete`/`ExecuteUpdate`/MERGE ([docs/linq.md](docs/linq.md)) |
-| EF Core | `Iceberg.Net.EntityFrameworkCore`: a non-relational EF Core 8 provider over the typed layer, with pushdown, time travel, `ExecuteUpdate`/`ExecuteDelete` and `SaveChanges` (one snapshot per table, concurrency tokens) ([docs/efcore.md](docs/efcore.md)) |
+| EF Core | `Iceberg.Net.EntityFrameworkCore`: a non-relational EF Core 10 provider over the typed layer, with pushdown, time travel, `ExecuteUpdate`/`ExecuteDelete` and `SaveChanges` (one snapshot per table, concurrency tokens) ([docs/efcore.md](docs/efcore.md)) |
 | REST catalog server | `Iceberg.Net.RestServer`: an ASP.NET Core Iceberg REST catalog over a SQL or in-memory store, with bearer/OAuth auth and multi-table transactions; PyIceberg and Spark use it ([docs/rest-server.md](docs/rest-server.md)) |
 | Ecosystem | Traces and metrics (`Iceberg.Net` ActivitySource/Meter, [docs/telemetry.md](docs/telemetry.md)); Spark procedure SQL with EMR Serverless and Glue job runners, and Athena SQL with a query runner ([docs/spark-and-athena.md](docs/spark-and-athena.md)) |
 | Delete mechanisms | Copy-on-write, v2 position delete files, v3 deletion vectors (one per data file, merged), equality deletes; v2→v3 converter |
@@ -51,7 +51,7 @@ Iceberg.NET/
 │   ├── Iceberg.Net.Data      Parquet files, scans, deletes, snapshot producers, import, statistics
 │   ├── Iceberg.Net.Arrow     Arrow record batches in and out
 │   ├── Iceberg.Net.Linq      typed mapping, LINQ provider, typed writes
-│   ├── Iceberg.Net.EntityFrameworkCore  EF Core 8 provider over the typed layer
+│   ├── Iceberg.Net.EntityFrameworkCore  EF Core 10 provider over the typed layer
 │   ├── Iceberg.Net.RestServer           ASP.NET Core Iceberg REST catalog server
 │   ├── Iceberg.Net.Spark     Spark procedure SQL, EMR Serverless / Glue job runners
 │   └── Iceberg.Net.Athena    Athena SQL and query runner
@@ -90,7 +90,7 @@ await SnapshotProducer.Append(table).AddFiles(files).CommitAsync();   // optimis
 var all = await TableScan.ReadAllAsync(table);
 ```
 
-Requires the .NET 8 SDK (newer SDKs roll forward), Docker for emulation, and `uv` (or `ICEBERG_PYTHON`)
+Requires the .NET 10 SDK (pinned in `global.json`), Docker for emulation, and `uv` (or `ICEBERG_PYTHON`)
 for the PyIceberg oracle.
 
 ---
@@ -100,5 +100,5 @@ for the PyIceberg oracle.
 This project leverages AI-assisted software engineering and agentic workflows for rapid development, test scaffolding, and documentation.
 
 * **Human Accountability:** The maintainer reviews all architecture, code changes, and pull requests, assuming 100% responsibility for the correctness, stability, and security of all merged code.
-* **Automated Verification:** All features and contributions are validated by automated test suites (.NET 8 & .NET 9), strict type checking, and automated CI pipelines.
+* **Automated Verification:** All features and contributions are validated by automated test suites (.NET 10, plus the netstandard2.0 builds of Core and Avro), strict type checking, and automated CI pipelines.
 * **Community Policy:** For contributor guidelines regarding generative AI tooling, see [**`AI_POLICY.md`**](AI_POLICY.md).

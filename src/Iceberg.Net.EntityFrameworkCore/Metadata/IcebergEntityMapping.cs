@@ -145,8 +145,8 @@ internal abstract class IcebergEntityMapping
 
     public abstract Task<MutationResult> ExecuteDeleteAsync(IQueryable query, DeleteStrategy strategy, CancellationToken ct);
 
-    /// <summary>EF Core's <c>ExecuteUpdate</c> setters (<c>Microsoft.EntityFrameworkCore.Query.SetPropertyCalls&lt;T&gt;</c>) run as the LINQ layer's.</summary>
-    public abstract Task<MergeResult> ExecuteUpdateAsync(IQueryable query, LambdaExpression setters, DeleteStrategy strategy, CancellationToken ct);
+    /// <summary>EF Core's <c>ExecuteUpdate</c> setters (EF Core 10's array of <c>(property, value)</c> tuples) run as the LINQ layer's.</summary>
+    public abstract Task<MergeResult> ExecuteUpdateAsync(IQueryable query, NewArrayExpression setters, DeleteStrategy strategy, CancellationToken ct);
 
     /// <summary>A tracker for query results: identity resolution against entities the context already tracks, then attach.</summary>
     public abstract Func<object?, object?> Tracker(DbContext context);
@@ -191,7 +191,7 @@ internal sealed class IcebergEntityMapping<T> : IcebergEntityMapping where T : c
     public override Task<MutationResult> ExecuteDeleteAsync(IQueryable query, DeleteStrategy strategy, CancellationToken ct) =>
         ((IQueryable<T>)query).ExecuteDeleteAsync(strategy, ct);
 
-    public override Task<MergeResult> ExecuteUpdateAsync(IQueryable query, LambdaExpression setters, DeleteStrategy strategy, CancellationToken ct) =>
+    public override Task<MergeResult> ExecuteUpdateAsync(IQueryable query, NewArrayExpression setters, DeleteStrategy strategy, CancellationToken ct) =>
         ((IQueryable<T>)query).ExecuteUpdateAsync(SetterTranslator.Translate(setters), strategy, ct);
 
     public override Func<object?, object?> Tracker(DbContext context)
@@ -211,30 +211,33 @@ internal sealed class IcebergEntityMapping<T> : IcebergEntityMapping where T : c
         };
     }
 
-    /// <summary>Rewrites EF Core's setter lambda onto <see cref="LinqSetPropertyCalls.SetPropertyCalls{T}"/>: same calls, same arguments.</summary>
-    private sealed class SetterTranslator : ExpressionVisitor
+    /// <summary>
+    /// Rewrites EF Core 10's setters onto <see cref="LinqSetPropertyCalls.SetPropertyCalls{T}"/>. EF Core records each
+    /// <c>SetProperty</c> as <c>new Tuple&lt;Delegate, object&gt;(property, value)</c>, where the value is a lambda over
+    /// the entity or a plain expression boxed to <c>object</c>; each becomes the matching <c>SetProperty</c> call.
+    /// </summary>
+    private static class SetterTranslator
     {
-        private readonly ParameterExpression _from;
-        private readonly ParameterExpression _to = Expression.Parameter(typeof(LinqSetPropertyCalls.SetPropertyCalls<T>), "s");
-
-        private SetterTranslator(ParameterExpression from) => _from = from;
-
-        public static Expression<Func<LinqSetPropertyCalls.SetPropertyCalls<T>, LinqSetPropertyCalls.SetPropertyCalls<T>>> Translate(LambdaExpression setters)
+        public static Expression<Func<LinqSetPropertyCalls.SetPropertyCalls<T>, LinqSetPropertyCalls.SetPropertyCalls<T>>> Translate(NewArrayExpression setters)
         {
-            var t = new SetterTranslator(setters.Parameters[0]);
-            return Expression.Lambda<Func<LinqSetPropertyCalls.SetPropertyCalls<T>, LinqSetPropertyCalls.SetPropertyCalls<T>>>(t.Visit(setters.Body), t._to);
-        }
-
-        protected override Expression VisitParameter(ParameterExpression node) => node == _from ? _to : node;
-
-        protected override Expression VisitMethodCall(MethodCallExpression node)
-        {
-            if (node.Method.Name != "SetProperty" || node.Object?.Type != _from.Type) return base.VisitMethodCall(node);
-            var valueIsFunc = node.Method.GetGenericMethodDefinition().GetParameters()[1].ParameterType.IsGenericType;
-            var target = typeof(LinqSetPropertyCalls.SetPropertyCalls<T>).GetMethods()
-                .Single(m => m.Name == "SetProperty" && m.GetParameters()[1].ParameterType.IsGenericType == valueIsFunc)
-                .MakeGenericMethod(node.Method.GetGenericArguments());
-            return Expression.Call(Visit(node.Object), target, node.Arguments.Select(Visit)!);
+            var calls = Expression.Parameter(typeof(LinqSetPropertyCalls.SetPropertyCalls<T>), "s");
+            Expression body = calls;
+            foreach (var setter in setters.Expressions)
+            {
+                if (setter is not NewExpression { Arguments: [LambdaExpression property, var value] })
+                    throw new NotSupportedException($"Unexpected ExecuteUpdate setter {setter}");
+                var valueIsLambda = value is LambdaExpression;
+                if (!valueIsLambda)
+                {
+                    if (value is UnaryExpression { NodeType: ExpressionType.Convert } boxed && value.Type == typeof(object)) value = boxed.Operand;
+                    if (value.Type != property.ReturnType) value = Expression.Convert(value, property.ReturnType);
+                }
+                var target = typeof(LinqSetPropertyCalls.SetPropertyCalls<T>).GetMethods()
+                    .Single(m => m.Name == "SetProperty" && m.GetParameters()[1].ParameterType.IsGenericType == valueIsLambda)
+                    .MakeGenericMethod(property.ReturnType);
+                body = Expression.Call(body, target, property, value);
+            }
+            return Expression.Lambda<Func<LinqSetPropertyCalls.SetPropertyCalls<T>, LinqSetPropertyCalls.SetPropertyCalls<T>>>(body, calls);
         }
     }
 }

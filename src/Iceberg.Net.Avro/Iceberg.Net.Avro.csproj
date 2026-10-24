@@ -2,7 +2,7 @@
   <PropertyGroup>
     <!-- netstandard2.0 too, so .NET Framework 4.6.2+ services can read metadata and manifests -->
     <TargetFramework></TargetFramework>
-    <TargetFrameworks>net8.0;netstandard2.0</TargetFrameworks>
+    <TargetFrameworks>net10.0;netstandard2.0</TargetFrameworks>
     <RootNamespace>Iceberg.Net.Avro</RootNamespace>
     <Description>Iceberg manifest and manifest-list Avro encoding (format v1/v2/v3).</Description>
   </PropertyGroup>

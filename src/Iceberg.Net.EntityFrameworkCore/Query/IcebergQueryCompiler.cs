@@ -24,8 +24,15 @@ namespace Iceberg.Net.EntityFrameworkCore.Query;
 /// </summary>
 internal sealed class IcebergQueryCompiler(ICurrentDbContext current, IcebergSession session) : IQueryCompiler
 {
-    private static readonly MethodInfo ExecuteDeleteMethod = typeof(RelationalQueryableExtensions).GetMethod(nameof(RelationalQueryableExtensions.ExecuteDelete))!;
-    private static readonly MethodInfo ExecuteUpdateMethod = typeof(RelationalQueryableExtensions).GetMethod(nameof(RelationalQueryableExtensions.ExecuteUpdate))!;
+    // EF Core 10 moved ExecuteDelete/ExecuteUpdate into core. The query carries ExecuteDelete(source) and a private
+    // ExecuteUpdate(source, IReadOnlyList<ITuple> setters) overload; both are found the way EF Core finds them.
+    private static readonly MethodInfo ExecuteDeleteMethod = typeof(EntityFrameworkQueryableExtensions)
+        .GetMethods(BindingFlags.Public | BindingFlags.Static)
+        .Single(m => m.Name == nameof(EntityFrameworkQueryableExtensions.ExecuteDelete) && m.GetParameters().Length == 1);
+    private static readonly MethodInfo ExecuteUpdateMethod = typeof(EntityFrameworkQueryableExtensions)
+        .GetMethods(BindingFlags.NonPublic | BindingFlags.Static)
+        .Single(m => m.Name == nameof(EntityFrameworkQueryableExtensions.ExecuteUpdate)
+            && m.GetParameters()[1].ParameterType == typeof(IReadOnlyList<System.Runtime.CompilerServices.ITuple>));
     private static readonly HashSet<string> Strippable =
     [
         nameof(EntityFrameworkQueryableExtensions.AsNoTracking), nameof(EntityFrameworkQueryableExtensions.AsNoTrackingWithIdentityResolution),
@@ -65,6 +72,9 @@ internal sealed class IcebergQueryCompiler(ICurrentDbContext current, IcebergSes
 
     public Func<QueryContext, TResult> CreateCompiledAsyncQuery<TResult>(Expression query) =>
         throw new NotSupportedException("EF.CompileAsyncQuery is not supported by the Iceberg provider; Iceberg queries are planned per execution");
+
+    public Expression<Func<QueryContext, TResult>> PrecompileQuery<TResult>(Expression query, bool async) =>
+        throw new NotSupportedException("Precompiled queries are not supported by the Iceberg provider; Iceberg queries are planned per execution");
 
     // ---------- execution ----------
 
@@ -178,7 +188,7 @@ internal sealed class IcebergQueryCompiler(ICurrentDbContext current, IcebergSes
             else if (definition == ExecuteUpdateMethod)
             {
                 var source = root.Provider.CreateQuery(call.Arguments[0]);
-                var setters = (LambdaExpression)Unquote(call.Arguments[1]);
+                var setters = (NewArrayExpression)call.Arguments[1];
                 special = async c => checked((int)(await mapping.ExecuteUpdateAsync(source, setters, strategy, c)).RowsUpdated);
             }
             else if (definition == IcebergEntityFrameworkQueryableExtensions.ToIcebergQueryStringMethod)
