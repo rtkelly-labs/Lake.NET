@@ -207,7 +207,7 @@ public sealed class ScanPlanningTests
             Assert.True(JsonNode.DeepEquals(filter, task["residual-filter"]));
         }
 
-        // Case-insensitive names resolve; unknown names, unknown snapshots and incremental scans do not.
+        // Case-insensitive names resolve; unknown names, unknown snapshots and a start snapshot without an end do not.
         var (insensitive, _) = await ProtocolTests.SendAsync(http, HttpMethod.Post, $"{path}/plan",
             new JsonObject { ["filter"] = ExpressionJson.ToJson(Expr.Equal("REGION", "eu")), ["case-sensitive"] = false, ["select"] = new JsonArray("ID") });
         Assert.Equal(HttpStatusCode.OK, insensitive);
@@ -215,8 +215,8 @@ public sealed class ScanPlanningTests
             new JsonObject { ["filter"] = ExpressionJson.ToJson(Expr.Equal("REGION", "eu")) }));
         ProtocolTests.AssertError(HttpStatusCode.BadRequest, "BadRequestException", await ProtocolTests.SendAsync(http, HttpMethod.Post, $"{path}/plan",
             new JsonObject { ["snapshot-id"] = 42 }));
-        ProtocolTests.AssertError(HttpStatusCode.NotAcceptable, "UnsupportedOperationException", await ProtocolTests.SendAsync(http, HttpMethod.Post, $"{path}/plan",
-            new JsonObject { ["start-snapshot-id"] = table.Metadata.Snapshots[0].SnapshotId, ["end-snapshot-id"] = table.Metadata.CurrentSnapshotId }));
+        ProtocolTests.AssertError(HttpStatusCode.BadRequest, "BadRequestException", await ProtocolTests.SendAsync(http, HttpMethod.Post, $"{path}/plan",
+            new JsonObject { ["start-snapshot-id"] = table.Metadata.Snapshots[0].SnapshotId }));
         ProtocolTests.AssertError(HttpStatusCode.NotFound, "NoSuchTableException", await ProtocolTests.SendAsync(http, HttpMethod.Post, "/v1/namespaces/db/tables/missing/plan", new JsonObject()));
 
         // A table without snapshots plans to nothing.

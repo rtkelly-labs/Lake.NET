@@ -168,17 +168,26 @@ public sealed class ScanPlanner(CatalogService catalog, ScanPlanningOptions opti
         if (m.TableUuid != token.TableUuid) throw new NoSuchPlanTaskException($"The plan task is not for {id}");
         var snapshot = m.SnapshotById(token.SnapshotId) ?? throw new NoSuchPlanTaskException($"Snapshot {token.SnapshotId} of {id} no longer exists");
         var table = TableOf(loaded);
-        var manifests = await TableScan.ManifestsAsync(table, snapshot, ct);
+        IReadOnlyList<Snapshot>? appends = null;
+        IReadOnlyList<ManifestFile> manifests;
+        if (token.Incremental)
+        {
+            try { appends = TableScan.AppendSnapshots(m, token.StartSnapshotId, snapshot.SnapshotId); }
+            catch (ArgumentException e) { throw new NoSuchPlanTaskException($"The plan task's snapshots of {id} no longer exist: {e.Message}"); }
+            manifests = await TableScan.AppendManifestsAsync(table, appends, ct);
+        }
+        else manifests = await TableScan.ManifestsAsync(table, snapshot, ct);
         var byPath = manifests.ToDictionary(mf => mf.ManifestPath, StringComparer.Ordinal);
         var group = token.Manifests.Select(p => byPath.GetValueOrDefault(p) ?? throw new NoSuchPlanTaskException($"Manifest {p} is not in snapshot {snapshot.SnapshotId}")).ToList();
         var schema = token.UseSnapshotSchema ? TimeTravel.SchemaFor(m, snapshot) : m.CurrentSchema;
-        return await TasksAsync(table, snapshot, manifests, group, schema, token.Filter, token.StatsFields?.ToHashSet(), ct);
+        return appends is null
+            ? await TasksAsync(table, snapshot, manifests, group, schema, token.Filter, token.StatsFields?.ToHashSet(), ct)
+            : await AppendTasksAsync(table, appends, group, schema, token.Filter, token.StatsFields?.ToHashSet(), ct);
     }
 
     private async Task<JsonObject> PlanCoreAsync(LoadedTable loaded, PlanRequest request, CancellationToken ct)
     {
-        if (request.StartSnapshotId is not null || request.EndSnapshotId is not null)
-            throw new NotSupportedException("Incremental scans (start-snapshot-id / end-snapshot-id) are not supported by this server");
+        if (request.StartSnapshotId is not null || request.EndSnapshotId is not null) return await PlanIncrementalAsync(loaded, request, ct);
         var m = loaded.Metadata;
         var snapshot = request.SnapshotId is { } sid
             ? m.SnapshotById(sid) ?? throw new BadRequestException($"Unknown snapshot {sid}")
@@ -209,6 +218,64 @@ public sealed class ScanPlanner(CatalogService catalog, ScanPlanningOptions opti
         var tokens = groups.Select(g => (JsonNode)new PlanTaskToken(m.TableUuid, snapshot.SnapshotId, g.Select(mf => mf.ManifestPath).ToList(), filter,
             request.UseSnapshotSchema, statsFields).Encode()).ToArray();
         return new JsonObject { ["plan-tasks"] = new JsonArray(tokens) };
+    }
+
+    /// <summary>
+    /// An incremental scan (<c>start-snapshot-id</c> exclusive, <c>end-snapshot-id</c> inclusive), with Java's
+    /// <c>IncrementalAppendScan</c> semantics: the data files that the <c>append</c> snapshots between them added, read
+    /// from the manifests those snapshots wrote, pruned by the filter; overwrites and deletes in the range contribute
+    /// nothing, and no delete files are attached. <c>end-snapshot-id</c> without a start covers every ancestor;
+    /// a start without an end, a start that is not an ancestor of the end, or <c>snapshot-id</c> as well is a 400.
+    /// </summary>
+    private async Task<JsonObject> PlanIncrementalAsync(LoadedTable loaded, PlanRequest request, CancellationToken ct)
+    {
+        if (request.EndSnapshotId is not { } endId) throw new BadRequestException("end-snapshot-id is required when start-snapshot-id is given");
+        if (request.SnapshotId is not null) throw new BadRequestException("snapshot-id cannot be combined with start-snapshot-id / end-snapshot-id");
+        var m = loaded.Metadata;
+        var end = m.SnapshotById(endId) ?? throw new BadRequestException($"Unknown end snapshot {endId}");
+        IReadOnlyList<Snapshot> appends;
+        try { appends = TableScan.AppendSnapshots(m, request.StartSnapshotId, endId); }
+        catch (ArgumentException e) { throw new BadRequestException(e.Message); }
+
+        var schema = request.UseSnapshotSchema ? TimeTravel.SchemaFor(m, end) : m.CurrentSchema;
+        var names = new NameResolver(schema, request.CaseSensitive);
+        var filter = names.Resolve(request.Filter);
+        foreach (var column in request.Select ?? []) names.Field(column);
+        var statsFields = request.StatsFields?.Select(n => names.Field(n).Id).ToList();
+        var bound = Binder.Bind(schema, filter);
+
+        var table = TableOf(loaded);
+        var manifests = appends.Count == 0 ? [] : await TableScan.AppendManifestsAsync(table, appends, ct);
+        var evaluators = new Dictionary<int, ManifestEvaluator>();
+        var data = manifests.Where(mf =>
+        {
+            if (!evaluators.TryGetValue(mf.PartitionSpecId, out var eval))
+                evaluators[mf.PartitionSpecId] = eval = new ManifestEvaluator(Projections.Inclusive(m.SpecById(mf.PartitionSpecId), schema, bound));
+            return eval.MightMatch(mf.Partitions);
+        }).ToList();
+
+        var groups = Group(data, Math.Max(1, options.FilesPerPlanTask));
+        if (groups.Count <= 1)
+            return await AppendTasksAsync(table, appends, groups.FirstOrDefault() ?? [], schema, filter, statsFields?.ToHashSet(), ct);
+        var tokens = groups.Select(g => (JsonNode)new PlanTaskToken(m.TableUuid, endId, g.Select(mf => mf.ManifestPath).ToList(), filter,
+            request.UseSnapshotSchema, statsFields) { Incremental = true, StartSnapshotId = request.StartSnapshotId }.Encode()).ToArray();
+        return new JsonObject { ["plan-tasks"] = new JsonArray(tokens) };
+    }
+
+    private async Task<JsonObject> AppendTasksAsync(Table table, IReadOnlyList<Snapshot> appends, IReadOnlyList<ManifestFile> group, Schema schema,
+        Expression filter, ISet<int>? statsFields, CancellationToken ct)
+    {
+        var m = table.Metadata;
+        var plan = group.Count == 0 ? null : await TableScan.PlanAppendManifestsAsync(table, appends, group, schema, filter, ct);
+        var residual = filter is AlwaysTrue ? JsonValue.Create(true) : ExpressionJson.ToJson(filter);
+        var tasks = new JsonArray();
+        foreach (var task in plan?.Tasks ?? [])
+            tasks.Add(new JsonObject
+            {
+                ["data-file"] = ContentFileJson.ToJson(task.File, m.SpecById(task.File.SpecId), schema, statsFields ?? new HashSet<int>()),
+                ["residual-filter"] = residual.DeepClone(),
+            });
+        return new JsonObject { ["delete-files"] = new JsonArray(), ["file-scan-tasks"] = tasks };
     }
 
     /// <summary>Consecutive manifests whose data file counts add up to about <paramref name="filesPerGroup"/>.</summary>
@@ -304,6 +371,11 @@ public sealed class ScanPlanner(CatalogService catalog, ScanPlanningOptions opti
 internal sealed record PlanTaskToken(Guid TableUuid, long SnapshotId, IReadOnlyList<string> Manifests, Expression Filter, bool UseSnapshotSchema,
     IReadOnlyList<int>? StatsFields)
 {
+    /// <summary>An incremental append scan from <see cref="StartSnapshotId"/> (exclusive) to <see cref="SnapshotId"/>.</summary>
+    public bool Incremental { get; init; }
+
+    public long? StartSnapshotId { get; init; }
+
     public string Encode()
     {
         var o = new JsonObject
@@ -315,6 +387,11 @@ internal sealed record PlanTaskToken(Guid TableUuid, long SnapshotId, IReadOnlyL
             ["u"] = UseSnapshotSchema,
         };
         if (StatsFields is not null) o["sf"] = new JsonArray(StatsFields.Select(i => (JsonNode)i).ToArray());
+        if (Incremental)
+        {
+            o["i"] = true;
+            if (StartSnapshotId is { } start) o["st"] = start;
+        }
         return Convert.ToBase64String(Encoding.UTF8.GetBytes(o.ToJsonString())).TrimEnd('=').Replace('+', '-').Replace('/', '_');
     }
 
@@ -331,7 +408,11 @@ internal sealed record PlanTaskToken(Guid TableUuid, long SnapshotId, IReadOnlyL
                 o["m"]!.AsArray().Select(p => p!.GetValue<string>()).ToList(),
                 ExpressionJson.FromJson(o["f"]),
                 o["u"]?.GetValue<bool>() ?? false,
-                o["sf"]?.AsArray().Select(i => i!.GetValue<int>()).ToList());
+                o["sf"]?.AsArray().Select(i => i!.GetValue<int>()).ToList())
+            {
+                Incremental = o["i"]?.GetValue<bool>() ?? false,
+                StartSnapshotId = o["st"]?.GetValue<long>(),
+            };
         }
         catch (Exception e) when (e is FormatException or System.Text.Json.JsonException or NullReferenceException or InvalidOperationException
                                        or InvalidDataException or ArgumentException)

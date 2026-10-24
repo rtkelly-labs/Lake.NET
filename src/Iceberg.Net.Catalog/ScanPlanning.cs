@@ -12,10 +12,22 @@ namespace Iceberg.Net.Catalog;
 /// <param name="Select">Column names to project; default all.</param>
 public sealed record ScanPlanRequest(Expression? Filter = null, long? SnapshotId = null, IReadOnlyList<string>? Select = null, bool CaseSensitive = true)
 {
+    /// <summary>
+    /// An incremental append scan: the data files appended after this snapshot (exclusive) up to
+    /// <see cref="EndSnapshotId"/> (inclusive), as Java's <c>IncrementalAppendScan</c> plans them. Requires
+    /// <see cref="EndSnapshotId"/>; not combined with <see cref="SnapshotId"/>.
+    /// </summary>
+    public long? StartSnapshotId { get; init; }
+
+    /// <summary>The end (inclusive) of an incremental append scan; alone, it covers every append up to it.</summary>
+    public long? EndSnapshotId { get; init; }
+
     public JsonObject ToJson()
     {
         var o = new JsonObject { ["case-sensitive"] = CaseSensitive };
         if (SnapshotId is { } s) o["snapshot-id"] = s;
+        if (StartSnapshotId is { } start) o["start-snapshot-id"] = start;
+        if (EndSnapshotId is { } end) o["end-snapshot-id"] = end;
         if (Select is { } cols) o["select"] = new JsonArray(cols.Select(c => (JsonNode)c).ToArray());
         if (Filter is { } f and not AlwaysTrue) o["filter"] = ExpressionJson.ToJson(f);
         return o;

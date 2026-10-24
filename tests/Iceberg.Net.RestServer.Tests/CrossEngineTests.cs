@@ -269,21 +269,78 @@ public sealed class CrossEngineTests
         Assert.Equal(Ids(await TableScan.ReadAsync(v3, Expressions.Expr.Equal("region", "eu"))).Select(i => (int)i), SparkIds(steps[3]!));
     }
 
+    /// <summary>
+    /// Spark's batch incremental read (<c>start-snapshot-id</c> / <c>end-snapshot-id</c>: Java's
+    /// <c>IncrementalAppendScan</c>, which Iceberg 1.12 plans on the client even for a REST table) must return the rows
+    /// our server's incremental plan does, over a history of appends, a merge-on-read delete and a copy-on-write delete.
+    /// </summary>
+    [SkippableFact]
+    [Spec("rest: planTableScan")]
+    public async Task Spark_incremental_reads_match_server_incremental_plans()
+    {
+        Require.Spark();
+        Directory.CreateDirectory(SparkOracle.SharedRoot);
+        await using var host = await StartSecuredAsync(SparkOracle.SharedRoot);
+        using var catalog = await ConnectAsync(host);
+        await catalog.CreateNamespaceAsync(Namespace.Of("db"));
+        var t = await catalog.CreateTableAsync(new CreateTableRequest(TableIdentifier.Of("db", "inc"), ScanPlanningTests.Schema, ScanPlanningTests.Spec));
+        await SnapshotProducer.Append(t).AddFiles(await TableWriter.WriteAsync(t, ScanPlanningTests.Rows(0, 10))).CommitAsync();
+        await SnapshotProducer.Append(t).AddFiles(await TableWriter.WriteAsync(t, ScanPlanningTests.Rows(10, 10))).CommitAsync();
+        await TableMutations.DeleteWhereAsync(t, Expressions.Expr.In("id", 2L, 12L), DeleteStrategy.PositionDeletes);
+        await SnapshotProducer.Append(t).AddFiles(await TableWriter.WriteAsync(t, ScanPlanningTests.Rows(20, 10))).CommitAsync();
+        await TableMutations.DeleteWhereAsync(t, Expressions.Expr.Equal("id", 21L), DeleteStrategy.CopyOnWrite);
+        await SnapshotProducer.Append(t).AddFiles(await TableWriter.WriteAsync(t, ScanPlanningTests.Rows(30, 10))).CommitAsync();
+        var table = await catalog.LoadTableAsync(t.Identifier);
+        var history = table.Metadata.Ancestors(table.Metadata.CurrentSnapshotId).Reverse().Select(s => s.SnapshotId).ToList();
+
+        var ranges = new (int From, int To)[] { (0, 1), (0, 5), (1, 3), (2, 4), (3, 5), (1, 2) };
+        var steps = ranges.Select(r => (JsonNode)new JsonObject
+        {
+            ["read"] = "rest.db.inc",
+            ["options"] = new JsonObject { ["start-snapshot-id"] = history[r.From].ToString(), ["end-snapshot-id"] = history[r.To].ToString() },
+        }).ToArray();
+        var spark = await SparkAsync(host, host.Uri.ToString().TrimEnd('/'), steps);
+        for (var i = 0; i < ranges.Length; i++)
+        {
+            var plan = await catalog.PlanTableScanAsync(table, new ScanPlanRequest { StartSnapshotId = history[ranges[i].From], EndSnapshotId = history[ranges[i].To] });
+            var ours = Ids(await ServerSideScan.ReadAsync(table, plan)).Select(id => (int)id);
+            Assert.Equal(SparkIds(spark[i]!).Order(), ours);
+        }
+        Assert.NotEmpty(SparkIds(spark[1]!));
+    }
+
     private static IEnumerable<int> SparkIds(JsonNode step) => step["rows"]!.AsArray().Select(r => int.Parse(r!["id"]!.GetValue<string>()));
 
-    private static async Task<JsonArray> SparkAsync(KestrelHost host, string uri, params string[] steps)
+    private static Task<JsonArray> SparkAsync(KestrelHost host, string uri, params string[] steps) =>
+        SparkAsync(host, uri, steps.Select(s => (JsonNode)s).ToArray());
+
+    /// <summary>The Iceberg runtime jar (<c>ICEBERG_SPARK_JAR</c>, else the emulation cache).</summary>
+    private static string SparkJar =>
+        Environment.GetEnvironmentVariable("ICEBERG_SPARK_JAR") ?? Path.Combine(TestEnvironment.RepoDir(), "emulation", ".cache", SparkOracle.JarName);
+
+    /// <summary>Iceberg's AWS bundle (S3FileIO and the AWS SDK), next to the runtime jar; null when absent.</summary>
+    internal static string? AwsBundleJar => Path.Combine(Path.GetDirectoryName(SparkJar)!, "iceberg-aws-bundle-1.12.0.jar") is var p && File.Exists(p) ? p : null;
+
+    /// <param name="steps">SQL strings, or <c>{"read": table, "options": {...}}</c> DataFrame reads.</param>
+    /// <param name="catalog">Extra properties of the Spark catalog <c>rest</c>.</param>
+    /// <param name="awsBundle">Put Iceberg's AWS bundle on the classpath too (S3FileIO).</param>
+    private static async Task<JsonArray> SparkAsync(KestrelHost host, string uri, JsonNode[] steps, IReadOnlyDictionary<string, string>? catalog = null, bool awsBundle = false)
     {
         var stepsFile = Path.Combine(host.Root, $"steps-{Guid.NewGuid():N}.json");
-        await File.WriteAllTextAsync(stepsFile, new JsonArray(steps.Select(s => (JsonNode)s).ToArray()).ToJsonString());
-        var jar = Environment.GetEnvironmentVariable("ICEBERG_SPARK_JAR") ?? Path.Combine(TestEnvironment.RepoDir(), "emulation", ".cache", SparkOracle.JarName);
+        await File.WriteAllTextAsync(stepsFile, new JsonArray(steps.Select(s => s.DeepClone()).ToArray()).ToJsonString());
+        var catalogFile = Path.Combine(host.Root, $"catalog-{Guid.NewGuid():N}.json");
+        await File.WriteAllTextAsync(catalogFile, Json.MetadataJson.StringMap(catalog ?? new Dictionary<string, string>()).ToJsonString());
+        var jar = SparkJar;
+        var jars = $"/jars/{Path.GetFileName(jar)}";
+        if (awsBundle) jars += $",/jars/{Path.GetFileName(AwsBundleJar ?? throw new InvalidOperationException("iceberg-aws-bundle-1.12.0.jar is not next to the Spark jar"))}";
         var interop = Path.Combine(AppContext.BaseDirectory, "interop");
         var psi = new ProcessStartInfo("docker") { RedirectStandardOutput = true, RedirectStandardError = true };
         foreach (var a in new[]
         {
-            "run", "--rm", "--user", "root", "--network", "host", "-e", "SPARK_LOCAL_IP=127.0.0.1",
+            "run", "--rm", "--user", "root", "--network", "host", "-e", "SPARK_LOCAL_IP=127.0.0.1", "-e", "AWS_REGION=us-east-1",
             "-v", $"{Path.GetDirectoryName(jar)}:/jars:ro", "-v", $"{interop}:/client:ro", "-v", $"{SparkOracle.SharedRoot}:{SparkOracle.SharedRoot}",
-            SparkOracle.Image, "/opt/spark/bin/spark-submit", "--jars", $"/jars/{Path.GetFileName(jar)}", "/client/spark_rest_client.py",
-            uri, Credential, stepsFile,
+            SparkOracle.Image, "/opt/spark/bin/spark-submit", "--jars", jars, "/client/spark_rest_client.py",
+            uri, Credential, stepsFile, catalogFile,
         }) psi.ArgumentList.Add(a);
         using var p = Process.Start(psi)!;
         var stdout = p.StandardOutput.ReadToEndAsync();
