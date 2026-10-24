@@ -91,6 +91,17 @@ Glue endpoint for Lake Formation governance. Challenges:
 - Gravitino: federated REST across underlying catalogs; multi-level namespaces; some optional endpoints were
   historically unimplemented — rely on the `/v1/config` `endpoints` list, not assumptions.
 
+### This repository's REST server (`Iceberg.Net.RestServer`)
+
+- An ASP.NET Core server for the REST spec. It applies commits with the same `TableMetadataBuilder` the metastore
+  catalogs use, and moves pointers in an `ICatalogStore`: Java JdbcCatalog's tables in SQLite (V1 layout, so the same
+  database opens in `JdbcCatalog`, Java and PyIceberg), or in memory. Details: [rest-server.md](rest-server.md).
+- It is in the conformance matrix as `dotnet-rest`, hosted by the regression suite on moto, and passes the
+  conformance, view, soak and PyIceberg cross-engine suites. Its own tests also drive it from PyIceberg 0.12 and from
+  Spark 4.0.1 (Iceberg 1.12 `RESTCatalog`).
+- Not implemented: server-side scan planning, credential vending, remote signing and `Idempotency-Key`
+  deduplication.
+
 ### Hive Metastore
 
 - Thrift API with `metadata_location` table parameter and **explicit locks** (`lock`/`checkLock`/`unlock`) rather
