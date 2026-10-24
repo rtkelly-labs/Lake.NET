@@ -78,6 +78,12 @@ public sealed class ProtocolTests
         AssertError(HttpStatusCode.NotFound, "NoSuchViewException", await SendAsync(http, HttpMethod.Get, "/v1/namespaces/db/views/missing"));
         AssertError(HttpStatusCode.NotFound, "NoSuchTableException", await SendAsync(http, HttpMethod.Post, "/v1/namespaces/db/tables/missing",
             new JsonObject { ["requirements"] = new JsonArray(), ["updates"] = new JsonArray() }));
+        // A requirement against a missing table is still a 404, not a failed requirement.
+        AssertError(HttpStatusCode.NotFound, "NoSuchTableException", await SendAsync(http, HttpMethod.Post, "/v1/namespaces/db/tables/missing", new JsonObject
+        {
+            ["requirements"] = new JsonArray(new JsonObject { ["type"] = "assert-table-uuid", ["uuid"] = Guid.NewGuid().ToString() }),
+            ["updates"] = new JsonArray(),
+        }));
         AssertError(HttpStatusCode.NotFound, "NoSuchTableException", await SendAsync(http, HttpMethod.Delete, "/v1/namespaces/db/tables/missing"));
 
         Assert.Equal(HttpStatusCode.OK, (await SendAsync(http, HttpMethod.Post, "/v1/namespaces/db/tables", CreateBody("t"))).Status);

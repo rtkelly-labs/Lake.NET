@@ -2,6 +2,7 @@ using Microsoft.AspNetCore.Builder;
 using Microsoft.Extensions.Configuration;
 using Microsoft.Extensions.DependencyInjection;
 using Microsoft.Extensions.DependencyInjection.Extensions;
+using Microsoft.Extensions.Logging;
 using Iceberg.Net.IO;
 
 namespace Iceberg.Net.RestServer;
@@ -38,7 +39,10 @@ public static class RestServer
         });
         services.TryAddSingleton<IFileIO>(sp =>
             new ResolvingFileIO(() => new S3FileIO(S3FileIOOptions.FromProperties(sp.GetRequiredService<RestServerOptions>().FileIO))));
-        services.AddSingleton(sp => new CatalogService(sp.GetRequiredService<ICatalogStore>(), sp.GetRequiredService<IFileIO>(), sp.GetRequiredService<RestServerOptions>()));
+        services.AddSingleton(sp => new CatalogService(sp.GetRequiredService<ICatalogStore>(), sp.GetRequiredService<IFileIO>(), sp.GetRequiredService<RestServerOptions>())
+        {
+            Logger = sp.GetService<ILoggerFactory>()?.CreateLogger<CatalogService>(),
+        });
         services.AddIcebergAuth();
         return services;
     }

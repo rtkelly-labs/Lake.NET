@@ -1,4 +1,5 @@
 using System.Text;
+using Microsoft.Extensions.Logging;
 using Iceberg.Net.Catalog;
 using Iceberg.Net.IO;
 using Iceberg.Net.Json;
@@ -37,6 +38,7 @@ public sealed class CatalogService(ICatalogStore store, IFileIO io, RestServerOp
     public ICatalogStore Store { get; } = store;
     public IFileIO FileIO { get; } = io;
     public Func<long> Clock { get; init; } = () => DateTimeOffset.UtcNow.ToUnixTimeMilliseconds();
+    public ILogger? Logger { get; init; }
 
     // ---------- namespaces ----------
 
@@ -174,9 +176,17 @@ public sealed class CatalogService(ICatalogStore store, IFileIO io, RestServerOp
         if (!purge) return;
         // Entry first, files second: a crash in between leaves orphans, never a table pointing at missing files.
         var m = table.Metadata;
-        var files = await TableFiles.ReachableAsync(m, FileIO, m.Snapshots, ct);
-        files.UnionWith(m.MetadataLog.Select(l => l.MetadataFile).Append(table.MetadataLocation!));
-        await TableFiles.DeleteAllAsync(FileIO, files, ct);
+        try
+        {
+            var files = await TableFiles.ReachableAsync(m, FileIO, m.Snapshots, ct);
+            files.UnionWith(m.MetadataLog.Select(l => l.MetadataFile).Append(table.MetadataLocation!));
+            await TableFiles.DeleteAllAsync(FileIO, files, ct);
+        }
+        catch (Exception e) when (e is not OperationCanceledException)
+        {
+            // The table is dropped; what could not be found or deleted is left to orphan-file cleanup (as Java does).
+            Logger?.LogWarning(e, "Dropped {Table}, but purging its files failed", id);
+        }
     }
 
     public async Task RenameAsync(TableIdentifier from, TableIdentifier to, CatalogEntryKind kind, CancellationToken ct)
@@ -206,14 +216,15 @@ public sealed class CatalogService(ICatalogStore store, IFileIO io, RestServerOp
                 var id = commit.Identifier;
                 var currentLocation = await Store.GetAsync(id, CatalogEntryKind.Table, ct);
                 var current = currentLocation is null ? null : await ReadMetadataAsync(currentLocation, ct);
+                // Only a staged create (assert-create) may commit to a table that does not exist: anything else is a 404,
+                // not a failed requirement.
+                if (current is null && !commit.Requirements.Any(r => r is UpdateRequirement.AssertCreate)) throw await NotFoundAsync(id, "Table", ct);
                 foreach (var requirement in commit.Requirements) requirement.Validate(current);
 
                 TableMetadata updated;
                 bool changed;
                 if (current is null)
                 {
-                    // Only a staged create may commit to a table that does not exist yet.
-                    if (!commit.Requirements.Any(r => r is UpdateRequirement.AssertCreate)) throw await NotFoundAsync(id, "Table", ct);
                     await LoadNamespaceAsync(id.Namespace, ct);
                     if (await Store.KindAsync(id, ct) is not null) throw new CommitFailedException($"Requirement failed: {id} already exists");
                     updated = await BuildCreatedAsync(id, commit.Updates, ct);
