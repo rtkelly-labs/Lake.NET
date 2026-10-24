@@ -35,6 +35,30 @@ public sealed record RestCatalogOptions
     public int IdempotentRetries { get; init; } = 3;
     /// <summary>Delay before the first idempotent retry; doubled for each further attempt.</summary>
     public TimeSpan IdempotentRetryDelay { get; init; } = TimeSpan.FromMilliseconds(200);
+    /// <summary>
+    /// Send <see cref="Token"/> or <see cref="Credential"/> over plain <c>http://</c> to a host other than loopback. Off by
+    /// default: the token or client secret would cross the network in clear.
+    /// </summary>
+    public bool AllowInsecureCredentials { get; init; }
+    /// <summary>
+    /// Accept a <c>signer.uri</c> from the server on a different scheme, host or port than <see cref="Uri"/>. The catalog's
+    /// bearer token is sent to the signer, so by default only the catalog's own origin may sign.
+    /// </summary>
+    public bool AllowCrossHostSigner { get; init; }
+    /// <summary>
+    /// Use an <c>s3.endpoint</c> supplied by the server even though the client signs with its own AWS credentials (none
+    /// vended, no remote signing) and the endpoint is neither AWS nor loopback. Off by default: the client's signed
+    /// requests, with its access key ID and session token, would go to a host the server chose.
+    /// </summary>
+    public bool AllowServerStorageEndpoint { get; init; }
+
+    private bool PrintMembers(StringBuilder builder)
+    {
+        builder.Append($"Uri = {Uri}, Warehouse = {Warehouse}, Token = {(Token is null ? "null" : "***")}, ");
+        builder.Append($"Credential = {(Credential is null ? "null" : Credential.Contains(':') ? Credential[..Credential.IndexOf(':')] + ":***" : "***")}, ");
+        builder.Append($"Scope = {Scope}, OAuth2ServerUri = {OAuth2ServerUri}, AccessDelegation = {AccessDelegation}, Properties = [{Properties.Count}]");
+        return true;
+    }
 
     /// <summary>
     /// The AWS Glue Iceberg REST endpoint for <paramref name="warehouse"/> (an account ID, or
@@ -176,6 +200,11 @@ public sealed class RestCatalog : ICatalog, IViewCatalog
         _http = options.Handler is null ? new HttpClient() : new HttpClient(options.Handler);
         _http.BaseAddress = new Uri(options.Uri.ToString().TrimEnd('/') + "/");
         _token = options.Token;
+        if (options.Token is not null || options.Credential is not null)
+        {
+            RequireSecureForCredentials(_http.BaseAddress);
+            if (options.OAuth2ServerUri is { } tokenUri) RequireSecureForCredentials(tokenUri);
+        }
         FileIO = new LocalFileIO();
     }
 
@@ -201,6 +230,7 @@ public sealed class RestCatalog : ICatalog, IViewCatalog
         foreach (var (k, v) in _options.Properties) merged[k] = v;
         foreach (var (k, v) in MetadataJson.StringMapFrom(config?["overrides"])) merged[k] = v;
         Properties = merged;
+        if (_defaultIo) RequireTrustedStorageEndpoint(merged);
         Endpoints = config?["endpoints"]?.AsArray().Select(e => e!.GetValue<string>()).ToList() ?? [];
         IdempotencyKeyLifetime = config?["idempotency-key-lifetime"]?.GetValue<string>() is { } lifetime ? System.Xml.XmlConvert.ToTimeSpan(lifetime) : null;
         _prefix = merged.TryGetValue("prefix", out var p) && p.Length > 0 ? p.Trim('/') + "/" : "";
@@ -226,6 +256,30 @@ public sealed class RestCatalog : ICatalog, IViewCatalog
         var body = await resp.Content.ReadAsStringAsync(ct);
         if (!resp.IsSuccessStatusCode) throw new UnauthorizedAccessException($"OAuth2 token request failed ({(int)resp.StatusCode}): {body}");
         return JsonNode.Parse(body)!["access_token"]!.GetValue<string>();
+    }
+
+    private static bool SameOrigin(Uri a, Uri b) =>
+        string.Equals(a.Scheme, b.Scheme, StringComparison.OrdinalIgnoreCase) && string.Equals(a.Host, b.Host, StringComparison.OrdinalIgnoreCase) && a.Port == b.Port;
+
+    private void RequireSecureForCredentials(Uri target)
+    {
+        if (_options.AllowInsecureCredentials || target.Scheme == Uri.UriSchemeHttps || target.IsLoopback) return;
+        throw new InvalidOperationException($"Refusing to send catalog credentials over {target.Scheme}:// to {target.Host}; use https, or set RestCatalogOptions.AllowInsecureCredentials");
+    }
+
+    /// <summary>
+    /// Refuse a server-chosen <c>s3.endpoint</c> that the client would sign for with its own AWS credentials, unless it is
+    /// an AWS or loopback endpoint. With vended credentials or remote signing the server's own access is used instead.
+    /// </summary>
+    private void RequireTrustedStorageEndpoint(IReadOnlyDictionary<string, string> props)
+    {
+        if (_options.AllowServerStorageEndpoint || !props.TryGetValue("s3.endpoint", out var endpoint) || endpoint.Length == 0) return;
+        if (_options.Properties.TryGetValue("s3.endpoint", out var own) && own == endpoint) return; // the client's own choice
+        if (props.ContainsKey("s3.access-key-id") || props.GetValueOrDefault("s3.remote-signing-enabled") == "true") return;
+        if (Uri.TryCreate(endpoint, UriKind.Absolute, out var u)
+            && (u.IsLoopback || u.Host.EndsWith(".amazonaws.com", StringComparison.OrdinalIgnoreCase) || u.Host.EndsWith(".amazonaws.com.cn", StringComparison.OrdinalIgnoreCase)))
+            return;
+        throw new InvalidOperationException($"The server set s3.endpoint to {endpoint}, which would receive requests signed with this client's AWS credentials; set it in RestCatalogOptions.Properties, or set RestCatalogOptions.AllowServerStorageEndpoint");
     }
 
     /// <summary>Multi-level namespaces are joined with the 0x1F unit separator, then URL-encoded (spec).</summary>
@@ -421,6 +475,7 @@ public sealed class RestCatalog : ICatalog, IViewCatalog
             var props = new Dictionary<string, string>(Properties);
             foreach (var (k, v) in tableConfig) props[k] = v;
             if (creds is not null) foreach (var (k, v) in MetadataJson.StringMapFrom(creds["config"])) props[k] = v;
+            if (_defaultIo) RequireTrustedStorageEndpoint(props);
             // Remote signing: S3 requests are signed by the catalog. A custom FileIO factory gets the properties only,
             // and can call RemoteSigner itself.
             io = creds is null && _defaultIo && props.GetValueOrDefault("s3.remote-signing-enabled") == "true"
@@ -441,6 +496,9 @@ public sealed class RestCatalog : ICatalog, IViewCatalog
         var endpoint = tableProperties.GetValueOrDefault("signer.endpoint") is { Length: > 0 } e
             ? new Uri(new Uri((tableProperties.GetValueOrDefault("signer.uri") ?? _http.BaseAddress!.ToString()).TrimEnd('/') + "/"), e.TrimStart('/')).ToString()
             : $"{TablePath(id)}/sign";
+        var signer = new Uri(_http.BaseAddress!, endpoint);
+        if (!_options.AllowCrossHostSigner && !SameOrigin(signer, _http.BaseAddress!))
+            throw new InvalidOperationException($"The server's signer endpoint {signer.GetLeftPart(UriPartial.Authority)} is not the catalog's origin; set RestCatalogOptions.AllowCrossHostSigner to send it the catalog token");
         var region = tableProperties.GetValueOrDefault("client.region") ?? tableProperties.GetValueOrDefault("s3.region") ?? "eu-west-1";
         return async (request, ct) =>
         {
@@ -459,7 +517,10 @@ public sealed class RestCatalog : ICatalog, IViewCatalog
             if (request.Method == HttpMethod.Post && request.Content is not null && request.RequestUri.Query.Contains("delete", StringComparison.Ordinal))
                 body["body"] = await request.Content.ReadAsStringAsync(ct);
             var signed = await SendAsync(HttpMethod.Post, endpoint, body, ct) ?? throw new InvalidDataException("Empty remote signing response");
-            request.RequestUri = new Uri(signed["uri"]!.GetValue<string>());
+            var signedUri = new Uri(signed["uri"]!.GetValue<string>());
+            if (!SameOrigin(signedUri, request.RequestUri))
+                throw new InvalidDataException($"The signer moved the request from {request.RequestUri.Host} to {signedUri.Host}");
+            request.RequestUri = signedUri;
             foreach (var (k, v) in signed["headers"]!.AsObject())
             {
                 var values = v!.AsArray().Select(x => x!.GetValue<string>()).ToList();
