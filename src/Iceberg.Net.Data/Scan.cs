@@ -1,5 +1,6 @@
 using System.Runtime.CompilerServices;
 using Iceberg.Net.Catalog;
+using Iceberg.Net.Diagnostics;
 using Iceberg.Net.Expressions;
 using Iceberg.Net.Metadata;
 using Iceberg.Net.Types;
@@ -228,6 +229,7 @@ public static partial class TableScan
     private static async IAsyncEnumerable<IReadOnlyList<object?[]>> ScanAsync(Table table, Snapshot snapshot, Schema schema, IReadOnlyList<int>? outputIds,
         Expression filter, ScanMetrics? metrics, [EnumeratorCancellation] CancellationToken ct = default)
     {
+        using var telemetry = IcebergTelemetry.StartScan(table.Identifier.ToString(), snapshot.SnapshotId);
         var bound = Binder.Bind(schema, filter);
         var manifests = await ManifestsAsync(table, snapshot, ct);
         var plan = await PlanCoreAsync(table, snapshot, manifests, schema, bound, null, ct);
@@ -252,6 +254,7 @@ public static partial class TableScan
         var options = new DataFileReadOptions { Filter = bound, Metrics = metrics };
         foreach (var task in plan.Tasks)
         {
+            telemetry.FileOpened(task.File.FileSizeInBytes);
             var isDeleted = deletes.IsEmpty ? null : await deletes.RowFilterAsync(task.File, task.DataSequenceNumber, read, ct);
             await foreach (var batch in DataFiles.ReadBatchesAsync(table.IO, task.File, read, mapping, options, ct))
             {
@@ -266,6 +269,7 @@ public static partial class TableScan
                 }
                 metrics?.Deleted(deleted);
                 metrics?.Returned(kept.Count);
+                telemetry.Rows(kept.Count, deleted);
                 if (kept.Count > 0) yield return kept;
             }
         }

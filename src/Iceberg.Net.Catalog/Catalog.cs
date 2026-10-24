@@ -1,6 +1,7 @@
 using System.Globalization;
 using System.Text;
 using System.Text.RegularExpressions;
+using Iceberg.Net.Diagnostics;
 using Iceberg.Net.IO;
 using Iceberg.Net.Json;
 using Iceberg.Net.Metadata;
@@ -215,18 +216,20 @@ public abstract partial class MetastoreCatalog(string name, IFileIO io) : ICatal
 
     public async Task<Table> CreateTableAsync(CreateTableRequest r, CancellationToken ct = default)
     {
+        using var telemetry = IcebergTelemetry.StartCatalogCall(Name, GetType().Name, "create_table", r.Identifier.ToString());
         if (!await NamespaceExistsAsync(r.Identifier.Namespace, ct)) throw new NoSuchNamespaceException($"Namespace {r.Identifier.Namespace} does not exist");
         if (await CurrentMetadataLocationAsync(r.Identifier, ct) is not null) throw new AlreadyExistsException($"Table {r.Identifier} already exists");
         var location = r.Location ?? await DefaultTableLocationAsync(r.Identifier, ct);
         var fresh = TableMetadata.NewTable(r.Schema, r.Spec, r.SortOrder, location, r.Properties, r.FormatVersion, Clock, r.PreserveFieldIds);
         var metadata = await WriteAndSwapAsync(r.Identifier, null, loc => fresh with { MetadataFileLocation = loc }, ct);
-        return new Table(this, r.Identifier, metadata, FileIO);
+        return telemetry.Succeeded(new Table(this, r.Identifier, metadata, FileIO));
     }
 
     public async Task<Table> LoadTableAsync(TableIdentifier id, CancellationToken ct = default)
     {
+        using var telemetry = IcebergTelemetry.StartCatalogCall(Name, GetType().Name, "load_table", id.ToString());
         var location = await CurrentMetadataLocationAsync(id, ct) ?? throw new NoSuchTableException($"Table {id} does not exist");
-        return new Table(this, id, await ReadMetadataAsync(location, ct), FileIO);
+        return telemetry.Succeeded(new Table(this, id, await ReadMetadataAsync(location, ct), FileIO));
     }
 
     public async Task<bool> TableExistsAsync(TableIdentifier id, CancellationToken ct = default) => await CurrentMetadataLocationAsync(id, ct) is not null;
@@ -241,6 +244,7 @@ public abstract partial class MetastoreCatalog(string name, IFileIO io) : ICatal
 
     public async Task DropTableAsync(TableIdentifier id, bool purge = false, CancellationToken ct = default)
     {
+        using var telemetry = IcebergTelemetry.StartCatalogCall(Name, GetType().Name, "drop_table", id.ToString());
         var location = await CurrentMetadataLocationAsync(id, ct) ?? throw new NoSuchTableException($"Table {id} does not exist");
         var metadata = purge ? await ReadMetadataAsync(location, ct) : null;
         await RemoveTableEntryAsync(id, ct);
@@ -251,22 +255,25 @@ public abstract partial class MetastoreCatalog(string name, IFileIO io) : ICatal
             files.UnionWith(metadata.MetadataLog.Select(l => l.MetadataFile).Append(location));
             await TableFiles.DeleteAllAsync(FileIO, files, ct);
         }
+        telemetry.Succeeded();
     }
 
     public async Task<TableMetadata> CommitTableAsync(TableCommit commit, CancellationToken ct = default)
     {
+        using var telemetry = IcebergTelemetry.StartCatalogCall(Name, GetType().Name, "commit_table", commit.Identifier.ToString());
         var currentLocation = await CurrentMetadataLocationAsync(commit.Identifier, ct);
         var current = currentLocation is null ? null : await ReadMetadataAsync(currentLocation, ct);
         foreach (var req in commit.Requirements) req.Validate(current);
         if (current is null) throw new NoSuchTableException($"Table {commit.Identifier} does not exist");
 
         var builder = TableMetadataBuilder.From(current, Clock).ApplyAll(commit.Updates);
-        if (builder.Changes.Count == 0) return current;
-        return await WriteAndSwapAsync(commit.Identifier, current, builder.Build, ct);
+        if (builder.Changes.Count == 0) return telemetry.Succeeded(current);
+        return telemetry.Succeeded(await WriteAndSwapAsync(commit.Identifier, current, builder.Build, ct));
     }
 
     public async Task CommitTransactionAsync(IReadOnlyList<TableCommit> commits, CancellationToken ct = default)
     {
+        using var telemetry = IcebergTelemetry.StartCatalogCall(Name, GetType().Name, "commit_transaction");
         if (commits.Select(c => c.Identifier).Distinct().Count() != commits.Count) throw new ArgumentException("A transaction may change each table once");
         var swaps = new List<MetadataSwap>();
         try
@@ -285,8 +292,9 @@ public abstract partial class MetastoreCatalog(string name, IFileIO io) : ICatal
                 swaps.Add(new MetadataSwap(commit.Identifier, current.MetadataFileLocation!, newLocation, updated));
             }
             if (swaps.Count > 0) await SwapMetadataLocationsAsync(swaps, ct);
+            telemetry.Succeeded();
         }
-        catch (Exception e) when (e is CommitFailedException or NoSuchTableException or NotSupportedException or ArgumentException)
+        catch (Exception e) when (telemetry.FailedWith(e) || e is CommitFailedException or NoSuchTableException or NotSupportedException or ArgumentException)
         {
             // Nothing was swapped: the new metadata files are unreferenced.
             foreach (var swap in swaps) await TryDeleteAsync(swap.NewLocation, ct);
