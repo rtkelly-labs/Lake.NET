@@ -20,5 +20,6 @@
   <ItemGroup>
     <Using Include="Xunit" />
     <None Include="interop/*.py" CopyToOutputDirectory="PreserveNewest" />
+    <None Include="interop/*.java" CopyToOutputDirectory="PreserveNewest" />
   </ItemGroup>
 </Project>

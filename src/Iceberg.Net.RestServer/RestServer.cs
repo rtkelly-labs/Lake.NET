@@ -12,7 +12,9 @@ namespace Iceberg.Net.RestServer;
 /// the authorizer, the credential vendor, the server state store, the scan planner and the idempotency store;
 /// <see cref="Endpoints.MapIcebergRestCatalog"/> maps the routes. <see cref="Build"/> does both for a standalone server.
 /// An embedding application can register its own <see cref="ICatalogStore"/>, <see cref="IFileIO"/>,
-/// <see cref="IAuthorizer"/> or <see cref="IStorageCredentialVendor"/>; the last registration wins.
+/// <see cref="IAuthorizer"/> or <see cref="IStorageCredentialVendor"/>; the last registration wins. A registered
+/// <see cref="IGcpAccessTokenSource"/> (or <see cref="GcsDownscopedCredentialVendor"/>) turns GCS vending on next to the
+/// configured S3 and Azure vendors.
 /// </summary>
 public static class RestServer
 {
@@ -55,6 +57,10 @@ public static class RestServer
             var vendors = new List<IStorageCredentialVendor>();
             if (options.CredentialVending.Enabled) vendors.Add(new StsCredentialVendor(options.CredentialVending, options.FileIO));
             if (options.CredentialVending.Adls.Enabled) vendors.Add(new AdlsSasCredentialVendor(options.CredentialVending.Adls));
+            var gcpSource = sp.GetService<IGcpAccessTokenSource>();
+            if (sp.GetService<GcsDownscopedCredentialVendor>() is { } gcs) vendors.Add(gcs);
+            else if (options.CredentialVending.Gcs.Enabled || gcpSource is not null)
+                vendors.Add(new GcsDownscopedCredentialVendor(options.CredentialVending.Gcs, gcpSource ?? options.CredentialVending.Gcs.CreateTokenSource()));
             return vendors.Count switch { 0 => NoCredentialVendor.Instance, 1 => vendors[0], _ => new CompositeCredentialVendor(vendors) };
         });
         services.TryAddSingleton(sp =>

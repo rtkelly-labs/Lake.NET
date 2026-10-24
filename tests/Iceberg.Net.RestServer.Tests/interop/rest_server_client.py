@@ -13,6 +13,9 @@
     plan-read <uri> <credential> <namespace> <table> [<max id>]
         read with server-side scan planning (scan-planning-mode=server), optionally with "id < <max id>", and print
         the ids and the planned data and delete files
+    gcs-token <uri> <credential> <namespace> <table> <gcs service host>
+        load a gs:// table (vended credentials, PyIceberg's default) and ask its FileIO whether a file under it
+        exists, with GCS requests sent to <gcs service host>; print the FileIO and its gcs.oauth2.* properties
 
 <credential> is "client_id:client_secret" for the OAuth2 client-credentials endpoint, or "-" for none.
 Output is one JSON document on stdout.
@@ -156,6 +159,20 @@ def cmd_plan_read(
     }
 
 
+def cmd_gcs_token(
+    uri: str, credential: str, ns: str, name: str, service_host: str
+) -> dict[str, Any]:
+    cat = catalog(uri, credential, **{"gcs.service.host": service_host})
+    table = cat.load_table((ns, name))
+    exists = table.io.new_input(f"{table.location()}/metadata/probe.json").exists()
+    return {
+        "io": type(table.io).__name__,
+        "token": table.io.properties.get("gcs.oauth2.token"),
+        "expires_at": table.io.properties.get("gcs.oauth2.token-expires-at"),
+        "exists": exists,
+    }
+
+
 def main(argv: list[str]) -> None:
     cmd, *args = argv
     if cmd == "write":
@@ -174,6 +191,8 @@ def main(argv: list[str]) -> None:
         result = cmd_signed_append_read(*args[:4], int(args[4]), int(args[5]))
     elif cmd == "plan-read":
         result = cmd_plan_read(*args[:4], args[4] if len(args) > 4 else None)
+    elif cmd == "gcs-token":
+        result = cmd_gcs_token(*args[:5])
     elif cmd == "evolve":
         result = cmd_evolve(*args[:5])
     else:

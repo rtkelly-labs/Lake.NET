@@ -42,7 +42,7 @@ Phase G, piece by piece:
 | Spark Connect | ⬜ not planned (no .NET client) | [spark-and-athena.md](spark-and-athena.md#running-a-script-on-emr-serverless-or-glue) |
 | Athena SQL (CREATE TABLE … `table_type`=ICEBERG, OPTIMIZE, VACUUM, properties, time travel) and runner | 🟡 query SQL (SELECT, time travel by version and timestamp, quoting, the six metadata tables) run by Trino 478 on our tables; runner with the real SDK client against moto's Athena (polling, injected results, paging with shim 3, a stopped query). Athena-only statements (Hive DDL, OPTIMIZE, VACUUM, TBLPROPERTIES) are unit-tested only; their Trino dialect (`TrinoSql`) runs on Trino. Real Athena with the AWS run (#4) | `Iceberg.Net.Athena`, `AthenaSqlOnTrinoTests`, `AthenaRunnerEmulationTests` |
 | DuckDB oracle | ✅ reads our CoW, position-delete, equality-delete and DV tables; skips where the extension cannot load | `interop/duckdb_oracle.py`, `DuckDbCrossEngineTests` |
-| REST catalog server (ASP.NET Core, SQL/in-memory stores, bearer/OAuth, multi-table transactions, server-side and incremental scan planning, role grants, STS and Azure SAS credential vending, S3 remote signing, `Idempotency-Key` and plan IDs shared across instances) | ✅ our client, PyIceberg and Spark against it (both plan scans through it, and sign S3 requests through it on a moto that checks signatures); incremental plans against Spark's incremental reads; STS vending against moto's STS, SAS vending against Azurite | [rest-server.md](rest-server.md), `Iceberg.Net.RestServer` |
+| REST catalog server (ASP.NET Core, SQL/in-memory stores, bearer/OAuth, multi-table transactions, server-side and incremental scan planning, role grants, STS, Azure SAS and GCS downscoped-token credential vending, S3 remote signing, `Idempotency-Key` and plan IDs shared across instances) | ✅ our client, PyIceberg and Spark against it (both plan scans through it, and sign S3 requests through it on a moto that checks signatures); incremental plans against Spark's incremental reads; STS vending against moto's STS, SAS vending against Azurite, GCS token exchange against a scripted STS with PyIceberg and Iceberg Java sending the vended tokens | [rest-server.md](rest-server.md), `Iceberg.Net.RestServer` |
 
 Phase G progress: the REST catalog server is built ([rest-server.md](rest-server.md)). It runs as the `dotnet-rest`
 conformance kind and is checked against PyIceberg and Spark.
@@ -53,9 +53,11 @@ Gaps the phases left open:
   themselves (their images, IAM roles, EMRFS, Glue's `--conf` handling) and reporting its real outcome; Glue
   `UpdateJob` and `BatchStopJobRun` (moto 5.2.4 lacks both; faked-client tests only); Athena's own engine for its Hive
   DDL, `OPTIMIZE`, `VACUUM` and table properties, and Athena reading our tables / writing ones we read.
-- The REST server vends no GCS credentials (fake-gcs-server ignores authentication, so nothing could check them), its
-  ADLS directory SAS is checked against the Azure SDK only (Azurite has no hierarchical namespace), and it signs S3
-  only, for tables that exist (Spark's `DROP TABLE … PURGE` deletes files after the drop and cannot be signed).
+- The REST server's GCS tokens have not met Google: the exchange request follows Google's documented format and
+  PyIceberg and Iceberg Java use the tokens, but no real STS has issued one and no bucket has enforced its role or
+  prefix condition (fake-gcs-server ignores authentication; needs a GCP project). Its ADLS directory SAS is checked
+  against the Azure SDK only (Azurite has no hierarchical namespace), and it signs S3 only, for tables that exist
+  (Spark's `DROP TABLE … PURGE` deletes files after the drop and cannot be signed).
 - The change feed is Spark-checked only for tables without delete files (Java's changelog scan refuses them); our
   replay test covers the rest.
 
