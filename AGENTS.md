@@ -36,6 +36,7 @@ Self-contained C# port of Apache Iceberg. Keep it that way: no references to cod
 | Ecosystem (telemetry, Spark/Athena helpers, Spark + DuckDB oracles) | `ICEBERG_DUCKDB_PYTHON=<python with the interop duckdb group> dotnet test tests/Iceberg.Net.Ecosystem.Tests` |
 | BDD specification (Reqnroll) | `ICEBERG_PYTHON=<python with interop deps> dotnet test tests/Iceberg.Net.Behaviour.Tests` |
 | REST protocol (every operation; cross-server contract with `ICEBERG_TEST_TARGET=emulation`) | `dotnet test tests/Iceberg.Net.RestProtocol.Tests` |
+| REST catalog behaviour (Reqnroll; no Docker or Python) | `dotnet test tests/Iceberg.Net.RestCatalogBehaviour.Tests` |
 | Start emulators | `./emulation/up.sh` (moto + REST fixture); add `--spark --trino --polaris` for the other engines/catalogs |
 | Regression (emulation) | `ICEBERG_PYTHON=<python with interop deps> dotnet test tests/Iceberg.Net.Regression.Tests` |
 | Regenerate PyIceberg fixtures | `uv run --project interop python -I interop/pyiceberg_oracle.py fixtures tests/Iceberg.Net.Spec.Tests/fixtures/pyiceberg` |
