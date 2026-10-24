@@ -23,6 +23,20 @@ internal static class Corruption
         }
     }
 
+    /// <summary>Read a decompressing stream to the end, refusing output beyond <paramref name="maxBytes"/>.</summary>
+    public static byte[] ReadAtMost(Stream source, int maxBytes, string what)
+    {
+        using var ms = new MemoryStream();
+        var buffer = new byte[81920];
+        int n;
+        while ((n = source.Read(buffer, 0, buffer.Length)) > 0)
+        {
+            if (ms.Length + n > maxBytes) throw new InvalidDataException($"{what} decompresses to more than {maxBytes} bytes");
+            ms.Write(buffer, 0, n);
+        }
+        return ms.ToArray();
+    }
+
     public delegate T SpanDecoder<T>(ReadOnlySpan<byte> data);
 
     public static T Guard<T>(string what, ReadOnlySpan<byte> data, SpanDecoder<T> decode)

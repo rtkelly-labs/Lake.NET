@@ -103,8 +103,23 @@ FUZZ_STRICT=1 tools/fuzz.sh roaring 600            # also flag low-level excepti
 The harness (`tests/Iceberg.Net.Fuzz`) holds each decoder to the `Corruption` contract: a format error or
 success, nothing else. Crashes, hangs (10 s) and out-of-memory (4 GB) inputs are saved under
 `fuzz/<target>/findings/`; turn each into a `CorruptionTests` case when fixing it. The corpus is seeded from the
-committed fixtures and kept between runs in `fuzz/<target>/corpus` (git-ignored). CI runs every target for 15
-minutes weekly (`.github/workflows/iceberg-dotnet-fuzz.yml`).
+committed fixtures and kept between runs in `fuzz/<target>/corpus` (git-ignored). The fuzz workflow
+(`.github/workflows/fuzz.yml`) runs every target for 15 minutes when dispatched.
+
+### Size limits
+
+Random mutation rarely produces inputs whose fields agree with each other, such as a schema and a count, or a header
+and its runs. So the limits that stop a decoder allocating or looping on a claimed size have hand-built cases in
+`DecoderLimitTests`:
+
+| Limit | Value | Where |
+|---|---|---|
+| Avro block, compressed or inflated | 128 MiB (`AvroBinary.MaxBlockBytes`) | container and streamed data files |
+| Avro records per block | the block's bytes; 2^20 for a schema that encodes in zero bytes | `AvroBinary.CheckRecordCount` |
+| Avro `fixed` size | the bytes left | `AvroBinary.Read` |
+| Puffin zstd blob, decompressed | 256 MiB (`PuffinFile.MaxDecompressedBlobBytes`) | `PuffinFile.Contents.Payload` |
+| Deletion vector positions | the manifest entry's `record_count`; runs must match each container's declared cardinality | `DeleteFiles.ReadDeletionVectorAsync`, `RoaringPositionBitmap` |
+| Bound lengths | the type's width | `Conversions.FromBytes` |
 
 ## CI
 

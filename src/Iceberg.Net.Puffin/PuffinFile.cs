@@ -138,10 +138,21 @@ public static class PuffinFile
         _ => throw new NotSupportedException($"Puffin codec '{codec}' (supported: none, zstd)"),
     };
 
-    private static byte[] Decompress(string? codec, ReadOnlySpan<byte> data) => codec switch
+    /// <summary>The largest decompressed blob a reader accepts; a zstd frame cannot make it allocate more.</summary>
+    public const int MaxDecompressedBlobBytes = 256 * 1024 * 1024;
+
+    private static byte[] Decompress(string? codec, ReadOnlySpan<byte> data)
     {
-        null => data.ToArray(),
-        "zstd" => new ZstdSharp.Decompressor().Unwrap(data).ToArray(),
-        _ => throw new NotSupportedException($"Puffin codec '{codec}' (supported: none, zstd)"),
-    };
+        switch (codec)
+        {
+            case null: return data.ToArray();
+            case "zstd":
+            {
+                using var input = new MemoryStream(data.ToArray(), writable: false);
+                using var zstd = new ZstdSharp.DecompressionStream(input);
+                return Corruption.ReadAtMost(zstd, MaxDecompressedBlobBytes, "Puffin zstd blob");
+            }
+            default: throw new NotSupportedException($"Puffin codec '{codec}' (supported: none, zstd)");
+        }
+    }
 }

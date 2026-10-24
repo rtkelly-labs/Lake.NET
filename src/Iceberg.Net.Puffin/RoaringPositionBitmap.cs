@@ -61,9 +61,13 @@ public sealed class RoaringPositionBitmap
         return ms.ToArray();
     }
 
-    public static RoaringPositionBitmap Deserialize(ReadOnlySpan<byte> data) => Corruption.Guard("Roaring bitmap", data, DeserializeUnguarded);
+    public static RoaringPositionBitmap Deserialize(ReadOnlySpan<byte> data) => Deserialize(data, maxCardinality: null);
 
-    private static RoaringPositionBitmap DeserializeUnguarded(ReadOnlySpan<byte> data)
+    /// <summary>Deserialize, refusing a bitmap whose containers declare more than <paramref name="maxCardinality"/> positions.</summary>
+    public static RoaringPositionBitmap Deserialize(ReadOnlySpan<byte> data, long? maxCardinality) =>
+        Corruption.Guard("Roaring bitmap", data, d => DeserializeUnguarded(d, maxCardinality ?? long.MaxValue));
+
+    private static RoaringPositionBitmap DeserializeUnguarded(ReadOnlySpan<byte> data, long budget)
     {
         var result = new RoaringPositionBitmap();
         var count = BinaryPrimitives.ReadInt64LittleEndian(data);
@@ -77,7 +81,7 @@ public sealed class RoaringPositionBitmap
             if (key <= lastKey) throw new FormatException("Roaring64 keys must be strictly ascending");
             if (key > int.MaxValue) throw new FormatException($"Roaring64 key {key} exceeds the Java-compatible range");
             lastKey = key;
-            var (bm, consumed) = Bitmap32.Deserialize(data[pos..]);
+            var (bm, consumed) = Bitmap32.Deserialize(data[pos..], ref budget);
             pos += consumed;
             result._bitmaps[key] = bm;
         }
@@ -144,6 +148,13 @@ public sealed class RoaringPositionBitmap
 
         public static (Bitmap32 Bitmap, int Consumed) Deserialize(ReadOnlySpan<byte> data)
         {
+            var unlimited = long.MaxValue;
+            return Deserialize(data, ref unlimited);
+        }
+
+        /// <summary>Deserialize, charging each container's declared cardinality to <paramref name="budget"/> before building it.</summary>
+        public static (Bitmap32 Bitmap, int Consumed) Deserialize(ReadOnlySpan<byte> data, ref long budget)
+        {
             var cookie = BinaryPrimitives.ReadUInt32LittleEndian(data);
             int size, pos;
             byte[]? runFlags = null;
@@ -175,6 +186,10 @@ public sealed class RoaringPositionBitmap
                 pos += 4;
             }
             if (hasOffsets) pos += 4 * size;
+            long declared = 0;
+            foreach (var card in cards) declared += card;
+            if (declared > budget) throw new FormatException($"Roaring bitmap declares {declared} positions, more than the {budget} allowed");
+            budget -= declared;
 
             var bm = new Bitmap32();
             for (var i = 0; i < size; i++)
@@ -184,13 +199,22 @@ public sealed class RoaringPositionBitmap
                 {
                     var runs = BinaryPrimitives.ReadUInt16LittleEndian(data[pos..]);
                     pos += 2;
+                    // RoaringFormatSpec: runs are sorted, disjoint and inside the container, and together hold exactly the
+                    // cardinality the header declared, which bounds the work below by that declaration.
+                    var next = 0;
+                    var total = 0;
                     for (var r = 0; r < runs; r++)
                     {
                         var start = BinaryPrimitives.ReadUInt16LittleEndian(data[pos..]);
                         var length = BinaryPrimitives.ReadUInt16LittleEndian(data[(pos + 2)..]);
                         pos += 4;
+                        if (start < next || start + length > ushort.MaxValue) throw new FormatException($"Roaring run [{start}, +{length}] overlaps or overflows its container");
+                        total += length + 1;
+                        if (total > cards[i]) throw new FormatException($"Roaring run container holds more than its declared {cards[i]} values");
                         for (var v = 0; v <= length; v++) c.Add((ushort)(start + v));
+                        next = start + length + 1;
                     }
+                    if (total != cards[i]) throw new FormatException($"Roaring run container holds {total} values, not its declared {cards[i]}");
                 }
                 else if (cards[i] > ArrayMax)
                 {
@@ -202,6 +226,8 @@ public sealed class RoaringPositionBitmap
                     for (var v = 0; v < cards[i]; v++) c.Add(BinaryPrimitives.ReadUInt16LittleEndian(data[(pos + 2 * v)..]));
                     pos += 2 * cards[i];
                 }
+                // Whatever its kind, a container must hold exactly what its header declared (and was charged for).
+                if (c.Cardinality != cards[i]) throw new FormatException($"Roaring container {keys[i]} holds {c.Cardinality} values, not its declared {cards[i]}");
                 bm._containers[keys[i]] = c;
             }
             return (bm, pos);

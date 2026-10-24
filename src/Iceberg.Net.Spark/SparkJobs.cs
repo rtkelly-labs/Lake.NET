@@ -169,7 +169,9 @@ public sealed class SparkScriptStager(IFileIO io, string stagingPrefix)
 
     public async Task<string> StageDriverAsync(CancellationToken ct = default)
     {
-        if (!await io.ExistsAsync(DriverLocation, ct)) await io.WriteAsync(DriverLocation, Encoding.UTF8.GetBytes(DriverScript), overwrite: true, ct);
+        // Always written: the name is a public hash of the script, so an existing file proves nothing about its content,
+        // and the job runs whatever is there with its execution role.
+        await io.WriteAsync(DriverLocation, Encoding.UTF8.GetBytes(DriverScript), overwrite: true, ct);
         return DriverLocation;
     }
 

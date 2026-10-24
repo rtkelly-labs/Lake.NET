@@ -187,7 +187,7 @@ public static class AvroDataFiles
         var count = AvroBinary.ReadLong(s);
         var size = AvroBinary.ReadLong(s);
         var prefix = (int)s.Position;
-        if (count < 0 || size < 0 || size > remaining - prefix - SyncSize || size > int.MaxValue)
+        if (count < 0 || size < 0 || size > remaining - prefix - SyncSize || size > AvroBinary.MaxBlockBytes)
             throw new InvalidDataException($"Avro block of {size} bytes / {count} records out of range");
         return (count, size, prefix);
     }
@@ -198,9 +198,8 @@ public static class AvroDataFiles
     {
         if (!bytes.AsSpan(start + size, SyncSize).SequenceEqual(header.Sync)) throw new FormatException("Avro sync marker mismatch");
         var data = bytes.AsSpan(start, size).ToArray();
-        var block = header.Codec == "deflate" ? Inflate(data) : data;
-        // A record of an Iceberg schema takes at least one byte: a larger count is corrupt (and must not size a list).
-        if (count > block.Length && header.Record.Fields.Count > 0) throw new InvalidDataException($"Avro block count {count} exceeds its {block.Length} bytes");
+        var block = header.Codec == "deflate" ? AvroBinary.Inflate(data) : data;
+        AvroBinary.CheckRecordCount(count, block.Length, header.Record);
         using var bs = new MemoryStream(block);
         var rows = new List<object?[]>((int)Math.Min(count, 1 << 16));
         var fields = header.Record.Fields;
@@ -220,15 +219,6 @@ public static class AvroDataFiles
             rows.Add(row);
         }
         return rows;
-    }
-
-    private static byte[] Inflate(byte[] data)
-    {
-        using var input = new MemoryStream(data);
-        using var d = new System.IO.Compression.DeflateStream(input, System.IO.Compression.CompressionMode.Decompress);
-        using var ms = new MemoryStream();
-        d.CopyTo(ms);
-        return ms.ToArray();
     }
 
     /// <summary>Advance past one value of <paramref name="schema"/> without materialising it.</summary>

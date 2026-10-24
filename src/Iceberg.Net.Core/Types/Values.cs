@@ -73,12 +73,22 @@ public static class IcebergTime
     public static DateOnly DateFromDays(int days) => EpochDate.AddDays(days);
 
     public static long MicrosFromTime(TimeOnly time) => time.Ticks / 10;
-    public static TimeOnly TimeFromMicros(long micros) => new(micros * 10);
+    public static TimeOnly TimeFromMicros(long micros) =>
+        micros is < 0 or >= TimeSpan.TicksPerDay / 10
+            ? throw new ArgumentOutOfRangeException(nameof(micros), micros, "Outside a day")
+            : new(micros * 10);
 #endif
 
     public static long MicrosFromTimestamp(DateTime ts) => (ToUtc(ts).Ticks - Epoch.Ticks) / 10;
     public static long MicrosFromTimestamp(DateTimeOffset ts) => (ts.UtcTicks - Epoch.Ticks) / 10;
-    public static DateTime TimestampFromMicros(long micros) => Epoch.AddTicks(micros * 10);
+    /// <summary>A timestamp from epoch microseconds; values <see cref="DateTime"/> cannot hold are refused, never wrapped.</summary>
+    public static DateTime TimestampFromMicros(long micros) =>
+        micros < MinMicros || micros > MaxMicros
+            ? throw new ArgumentOutOfRangeException(nameof(micros), micros, "Outside the range a DateTime can represent")
+            : Epoch.AddTicks(micros * 10);
+
+    private static readonly long MinMicros = (DateTime.MinValue.Ticks - Epoch.Ticks) / 10;
+    private static readonly long MaxMicros = (DateTime.MaxValue.Ticks - Epoch.Ticks) / 10;
 
     /// <summary>.NET ticks are 100ns, so the last two nanosecond digits must be supplied separately.</summary>
     public static long NanosFromTimestamp(DateTime ts, int extraNanos = 0) => (ToUtc(ts).Ticks - Epoch.Ticks) * 100 + extraNanos;
