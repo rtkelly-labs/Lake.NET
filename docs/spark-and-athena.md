@@ -4,8 +4,8 @@ Phase G pieces for working *alongside* other engines: generate the SQL they need
 
 | Package | What it does | Verified by |
 |---|---|---|
-| `Iceberg.Net.Spark` | Spark SQL for Iceberg's stored procedures; a PySpark driver that runs a list of statements; EMR Serverless and AWS Glue job runners | exact-SQL unit tests; the Spark 4.0.1 + Iceberg 1.12 oracle image runs a generated script through the driver; runners against overridden SDK clients |
-| `Iceberg.Net.Athena` | Athena SQL for Iceberg DDL/DML (CREATE TABLE, OPTIMIZE, VACUUM, table properties, time travel) and a query runner | exact-SQL unit tests; runner against an overridden SDK client; real Athena only in the AWS-mode `AthenaTests` |
+| `Iceberg.Net.Spark` | Spark SQL for Iceberg's stored procedures; a PySpark driver that runs a list of statements; EMR Serverless and AWS Glue job runners | exact-SQL unit tests; the Spark 4.0.1 + Iceberg 1.12 oracle image runs a generated script through the driver; runners with the real SDK clients against moto, and the staged job run from moto S3 by Spark on a Glue table in moto (`ManagedSparkJobTests`) |
+| `Iceberg.Net.Athena` | Athena SQL for Iceberg DDL/DML (CREATE TABLE, OPTIMIZE, VACUUM, table properties, time travel), its Trino dialect (`TrinoSql`), and a query runner | exact-SQL unit tests; the query SQL run by Trino 478 on our tables (`AthenaSqlOnTrinoTests`); runner with the real SDK client against moto's Athena (`AthenaRunnerEmulationTests`); real Athena only in the AWS-mode `AthenaTests` |
 | `interop/duckdb_oracle.py` | DuckDB's `iceberg` extension as a reader of our tables | `DuckDbCrossEngineTests` (skips when the extension cannot load) |
 
 Tests: `dotnet test tests/Iceberg.Net.Ecosystem.Tests` (with `emulation/up.sh --spark` for the Spark oracle and
@@ -70,6 +70,25 @@ var run = await runner.RunAsync(script);   // submit, poll, throw SparkJobFailed
   `StartJobRun` with `--statements`.
 - `SparkCatalogConfig`: `Glue`, `Rest` (Polaris, S3 Tables / Glue REST endpoints) and `Hadoop` (tests), always with
   the Iceberg SQL extensions that `CALL` needs.
+- `EnsureJobAsync` creates the job, or updates it when its script is not the current driver or this runner's
+  arguments (`--datalake-formats`, `--conf`, `--job-language`) differ. Glue's `UpdateJob` overwrites the whole
+  definition, so every other setting of the existing job (role, workers, timeout, retries, connections, security
+  configuration, execution class, other arguments, …) is sent back unchanged.
+
+**What has run for real.** There is no AWS account in development, so the runners run against moto 5.2.4 with the
+real SDK clients (`ManagedSparkJobTests`, emulation target, `emulation/up.sh --spark`):
+
+| Step | EMR Serverless | Glue |
+|---|---|---|
+| Staging the driver and statements | to moto S3 through `S3FileIO`; read back byte for byte | same |
+| Job definition | — (the test creates the application) | `CreateJob` in moto; a second `EnsureJobAsync` makes no call (moto has no `UpdateJob`; the update path is a faked-client test) |
+| Submission | `StartJobRun`; moto records entry point, arguments, `sparkSubmitParameters`, log URI, tags | `StartJobRun` with `--statements` |
+| Polling | `GetJobRun` (moto: `SUCCESS` at once); `CancelJobRun` then `GetJobRun` reads `CANCELLED` | `GetJobRun` through `STARTING → RUNNING → SUCCEEDED` (moto's state manager, one step per two describes) |
+| Execution | `SparkJobServiceEmulator` reads the run back from moto and `spark-submit`s it in `apache/spark:4.0.1`: the driver and statements are fetched from moto S3 over `s3://`, the Glue catalog and S3FileIO talk to moto. `rewrite_data_files` + `expire_snapshots` on a table this library wrote; this library then reads one compacted file, one snapshot, the same rows, fsck clean | same, with Glue's argument handling: default arguments overlaid by the run's, `--conf` as Spark configuration, `--JOB_NAME`/`--JOB_RUN_ID`, and refusal without `--datalake-formats iceberg` |
+| Failure | a failing statement fails the job (non-zero exit after `[1/2]`, no results line) | — |
+
+Still only on AWS: the services executing runs themselves (EMR 7.x / Glue 5.0 images, IAM, EMRFS, Glue's own `--conf`
+parsing) and run states that reflect what Spark did; Glue `UpdateJob` / `BatchStopJobRun` against the service.
 
 **Spark Connect**: not implemented (experimental). Spark Connect speaks gRPC with Spark's protobuf plan messages;
 there is no maintained .NET client, and submitting `CALL` statements through it would need one. The SQL this package
@@ -106,8 +125,57 @@ var result = await athena.RunAsync(AthenaSql.Vacuum(t));
 - The runner polls `GetQueryExecution` with doubling backoff, reads every `GetQueryResults` page and drops the header
   row of SELECT results; failures raise `AthenaQueryFailedException` with Athena's reason.
 
-The regression suite's `AthenaTests` (AWS mode only) still use their own small client; they skip without an AWS
-target and are where Athena-written fixtures will come from.
+- A query's (statement type DML) first result row is the header and is dropped; DDL and UTILITY results (`SHOW`,
+  `DESCRIBE`) have no header, so their rows are kept as they are.
+
+The regression suite's `AthenaTests` (AWS mode only) run through `AthenaQueryRunner`, with DDL from `AthenaSql`; they
+skip without an AWS target and are where Athena-written fixtures will come from.
+
+### Athena's SQL on Trino, and the Trino dialect
+
+Athena engine v3 is Trino, so its stand-in here is Trino 478 (`emulation/up.sh --trino`, Iceberg
+catalog `iceberg` over the REST fixture and moto S3). `AthenaSqlOnTrinoTests` names tables
+`new AthenaTable(ns, name, Catalog: "iceberg")` and runs the generated SQL on tables this library writes:
+
+| Statement | On Trino 478 |
+|---|---|
+| `Select` (column lists, quoted hyphenated names, `String` literals with quotes, `Timestamp` literals in WHERE) | ✅ same rows as this library |
+| `AsOfVersion(snapshotId)` / `AsOf(instant)` (`FOR VERSION / TIMESTAMP AS OF`) | ✅ same rows as this library at that snapshot; the instant just before a commit gives the previous snapshot. Trino refuses an instant in the future |
+| `MetadataTable`: `$snapshots`, `$history`, `$files`, `$manifests`, `$partitions`, `$refs` | ✅ agree with our metadata (snapshot IDs, snapshot log, data files and record counts, manifests, partitions, `main`) |
+| `CreateTable`, `SetTableProperties`, `UnsetTableProperties` (Hive DDL, back-quotes, `TBLPROPERTIES`) | ❌ Athena only: Trino's parser refuses them (`SYNTAX_ERROR`) |
+| `Optimize` (`OPTIMIZE … REWRITE DATA USING BIN_PACK`), `Vacuum` | ❌ Athena only (`SYNTAX_ERROR`) |
+
+`TrinoSql` writes the Trino form of the Athena-only statements, all run in the same test class and checked by reading
+the table back:
+
+```csharp
+var t = new AthenaTable("analytics", "events", Catalog: "iceberg");
+TrinoSql.CreateTable(t, schema, spec, "s3://lake/analytics/events", formatVersion: 2);
+// CREATE TABLE "iceberg"."analytics"."events" ("id" bigint, …) WITH (format_version = 2,
+//   partitioning = ARRAY['day("event_ts")', 'bucket("id", 16)'], location = 's3://…')
+TrinoSql.Optimize(t, fileSizeThresholdBytes: 128L << 20);   // ALTER TABLE … EXECUTE optimize(file_size_threshold => '134217728B')
+TrinoSql.Vacuum(t, TimeSpan.FromDays(7));                   // EXECUTE expire_snapshots(…), then EXECUTE remove_orphan_files(…)
+```
+
+- Types: `timestamptz` → `timestamp(6) with time zone`, `uuid`, `time(6)` and nested `row(…)` / `array(…)` /
+  `map(…)` are creatable in Trino (unlike Athena); `fixed`, nanosecond timestamps and v3-only types are refused.
+  Trino folds names to lower case, so names with upper-case letters are refused. Trino makes every column optional
+  and assigns its own field IDs; names, types, docs, location and the partition spec come through (checked).
+- `optimize` takes a `WHERE` only on identity partition columns (Trino fails other predicates); Athena's
+  `OPTIMIZE … WHERE` is likewise meant for partition columns.
+- `expire_snapshots` / `remove_orphan_files` refuse a retention under 7 days unless the session lowers
+  `iceberg.expire_snapshots_min_retention` / `iceberg.remove_orphan_files_min_retention`; Athena's `VACUUM` reads
+  the `vacuum_*` table properties instead.
+
+### The runner against moto
+
+`AthenaRunnerEmulationTests` run `AthenaQueryRunner` with the real SDK client against moto's Athena, which records
+queries but executes nothing: results are queued through `/moto-api/static/athena/query-results` (with Athena's
+header row and NULL cells), and moto's state manager steps executions through `QUEUED → RUNNING → SUCCEEDED` (moto,
+like Athena, refuses `GetQueryResults` before `SUCCEEDED`). Checked: the query, workgroup, catalog/database and
+output location as moto received them; 2 500 rows read across three 1000-row pages (moto shim 3, see
+[emulation.md](emulation.md)); the CSV moto writes to the output location; `OPTIMIZE`/`VACUUM` finishing with no rows;
+a stopped query raising `AthenaQueryFailedException` with `CANCELLED`.
 
 ## DuckDB oracle
 

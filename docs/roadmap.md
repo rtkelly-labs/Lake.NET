@@ -38,9 +38,9 @@ Phase G, piece by piece:
 |---|---|---|
 | OpenTelemetry traces and metrics (scans, commits with attempts/retries/outcome, catalog calls) | ✅ | [telemetry.md](telemetry.md), `IcebergTelemetry`, `TelemetryTests` |
 | Spark procedure SQL (rewrite data / position deletes / manifests, expire, orphans, snapshot and WAP procedures, changelog view, …) | ✅ run through Spark 4 + Iceberg 1.12 | [spark-and-athena.md](spark-and-athena.md), `Iceberg.Net.Spark`, `SparkProcedureOracleTests` |
-| Job submission: EMR Serverless and Glue `StartJobRun` of a generated script | 🟡 against faked SDK clients; a real run needs AWS | `EmrServerlessSqlJobRunner`, `GlueSqlJobRunner` |
+| Job submission: EMR Serverless and Glue `StartJobRun` of a generated script | 🟡 real SDK clients against moto end to end (staging in moto S3, Glue `CreateJob`, `StartJobRun`, polling, EMR cancel), and the staged job then run by Spark 4 + Iceberg 1.12 the way the service would, on a Glue table in moto (`SparkJobServiceEmulator`); left for AWS: the service's own execution (EMR 7 / Glue 5 images, IAM, EMRFS) and run states that follow the outcome | `EmrServerlessSqlJobRunner`, `GlueSqlJobRunner`, `ManagedSparkJobTests` |
 | Spark Connect | ⬜ not planned (no .NET client) | [spark-and-athena.md](spark-and-athena.md#running-a-script-on-emr-serverless-or-glue) |
-| Athena SQL (CREATE TABLE … `table_type`=ICEBERG, OPTIMIZE, VACUUM, properties, time travel) and runner | 🟡 SQL unit-tested; real Athena with the AWS run (#4) | `Iceberg.Net.Athena` |
+| Athena SQL (CREATE TABLE … `table_type`=ICEBERG, OPTIMIZE, VACUUM, properties, time travel) and runner | 🟡 query SQL (SELECT, time travel by version and timestamp, quoting, the six metadata tables) run by Trino 478 on our tables; runner with the real SDK client against moto's Athena (polling, injected results, paging with shim 3, a stopped query). Athena-only statements (Hive DDL, OPTIMIZE, VACUUM, TBLPROPERTIES) are unit-tested only; their Trino dialect (`TrinoSql`) runs on Trino. Real Athena with the AWS run (#4) | `Iceberg.Net.Athena`, `AthenaSqlOnTrinoTests`, `AthenaRunnerEmulationTests` |
 | DuckDB oracle | ✅ reads our CoW, position-delete, equality-delete and DV tables; skips where the extension cannot load | `interop/duckdb_oracle.py`, `DuckDbCrossEngineTests` |
 | REST catalog server (ASP.NET Core, SQL/in-memory stores, bearer/OAuth, multi-table transactions, server-side scan planning, role grants, STS credential vending, `Idempotency-Key`) | ✅ our client, PyIceberg and Spark against it (both plan scans through it); vending against moto's STS | [rest-server.md](rest-server.md), `Iceberg.Net.RestServer` |
 
@@ -48,7 +48,11 @@ Phase G progress: the REST catalog server is built ([rest-server.md](rest-server
 conformance kind and is checked against PyIceberg and Spark.
 
 Gaps the phases left open:
-- The EMR Serverless, Glue and Athena runners are tested against faked SDK clients; a real run needs the AWS sandbox (#4).
+- The EMR Serverless, Glue and Athena runners run with the real SDK clients against moto, and the staged Spark job runs
+  in Spark against moto's Glue and S3; Athena's query SQL runs on Trino. Still AWS-only (#4): EMR/Glue executing a run
+  themselves (their images, IAM roles, EMRFS, Glue's `--conf` handling) and reporting its real outcome; Glue
+  `UpdateJob` and `BatchStopJobRun` (moto 5.2.4 lacks both; faked-client tests only); Athena's own engine for its Hive
+  DDL, `OPTIMIZE`, `VACUUM` and table properties, and Athena reading our tables / writing ones we read.
 - The REST server has no remote signing or incremental scan planning. Its idempotency keys and plan IDs are per
   process. Credential vending covers S3 through STS only.
 - The change feed is Spark-checked only for tables without delete files (Java's changelog scan refuses them); our
@@ -133,6 +137,8 @@ Each of these reproduced with the tests listed, and was fixed:
 | Gravitino (#11) | Its scan-planning responses (Iceberg 1.11 underneath) attribute deletion vectors that share a Puffin file to the wrong data files, so deleted rows reappear; the client now matches DVs to tasks by `referenced_data_file`, which every DV carries (`JavaMisreferencedDvTests`) |
 | Gravitino (#11) | PyIceberg 0.12 sends `Authorization: Bearer None` without a token, which Gravitino rejects; the oracle uses PyIceberg's noop auth manager |
 | netstandard2.0 tests | A `DateOnly` literal passed to the netstandard2.0 build (from a .NET 6+ app) was rejected; now recognised by type name |
+| Glue job runs against moto | `GlueSqlJobRunner.EnsureJobAsync` repointed an existing job with an `UpdateJob` carrying six fields; `UpdateJob` overwrites the whole definition, so the job's timeout, retries, connections, security configuration, execution class and other settings were reset. It now carries every setting over (no `MaxCapacity` next to a worker type, which Glue refuses) and also updates a job whose runner arguments changed |
+| Athena runner against moto | The header row was dropped from any result whose first row equalled the column names, including DDL/UTILITY results that have no header (`SHOW TABLES` listing a table named `tab_name`); now only for query results |
 
 ## Mutation testing
 
