@@ -29,9 +29,16 @@ public static class DeletionVector
         return result;
     }
 
-    public static RoaringPositionBitmap Decode(ReadOnlySpan<byte> blob) => Corruption.Guard("deletion vector", blob, DecodeUnguarded);
+    public static RoaringPositionBitmap Decode(ReadOnlySpan<byte> blob) => Decode(blob, maxCardinality: null);
 
-    private static RoaringPositionBitmap DecodeUnguarded(ReadOnlySpan<byte> blob)
+    /// <summary>
+    /// Decode a deletion vector, refusing one that holds more than <paramref name="maxCardinality"/> positions (the
+    /// manifest's <c>record_count</c> for it): the declared sizes are checked before any container is built.
+    /// </summary>
+    public static RoaringPositionBitmap Decode(ReadOnlySpan<byte> blob, long? maxCardinality) =>
+        Corruption.Guard("deletion vector", blob, b => DecodeUnguarded(b, maxCardinality));
+
+    private static RoaringPositionBitmap DecodeUnguarded(ReadOnlySpan<byte> blob, long? maxCardinality)
     {
         if (blob.Length < 12) throw new FormatException("Deletion vector is too short");
         var length = BinaryPrimitives.ReadInt32BigEndian(blob);
@@ -40,7 +47,7 @@ public static class DeletionVector
         var expected = BinaryPrimitives.ReadUInt32BigEndian(blob[(4 + length)..]);
         var actual = Crc32.Compute(blob.Slice(4, length));
         if (expected != actual) throw new FormatException($"Deletion vector CRC mismatch (expected {expected:x8}, computed {actual:x8})");
-        return RoaringPositionBitmap.Deserialize(blob.Slice(8, length - Magic.Length));
+        return RoaringPositionBitmap.Deserialize(blob.Slice(8, length - Magic.Length), maxCardinality);
     }
 
     public static PuffinBlob ToBlob(string referencedDataFile, RoaringPositionBitmap positions) => new(

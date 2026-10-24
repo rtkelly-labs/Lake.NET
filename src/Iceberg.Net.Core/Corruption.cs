@@ -15,6 +15,23 @@ public static class Corruption
     public static bool IsFormatError(Exception e) =>
         e is FormatException or InvalidDataException or EndOfStreamException or NotSupportedException or JsonException;
 
+    /// <summary>
+    /// Read a decompressing stream to the end, refusing output beyond <paramref name="maxBytes"/>: a decompression bomb,
+    /// or a block larger than any writer produces, is a format error rather than an allocation of whatever it claims.
+    /// </summary>
+    public static byte[] ReadAtMost(Stream source, int maxBytes, string what)
+    {
+        using var ms = new MemoryStream();
+        var buffer = new byte[81920];
+        int n;
+        while ((n = source.Read(buffer, 0, buffer.Length)) > 0)
+        {
+            if (ms.Length + n > maxBytes) throw new InvalidDataException($"{what} decompresses to more than {maxBytes} bytes");
+            ms.Write(buffer, 0, n);
+        }
+        return ms.ToArray();
+    }
+
     public static T Guard<T>(string what, Func<T> decode)
     {
         try

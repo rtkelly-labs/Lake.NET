@@ -12,6 +12,43 @@ namespace Iceberg.Net.Avro;
 /// </summary>
 public static class AvroBinary
 {
+    /// <summary>
+    /// The largest Avro block, compressed or inflated, that a reader accepts. Writers flush blocks of tens of kilobytes to
+    /// a few megabytes; a claim beyond this is corrupt or hostile and must not size an allocation.
+    /// </summary>
+    public const int MaxBlockBytes = 128 * 1024 * 1024;
+
+    /// <summary>Records allowed in one block of a schema that encodes in zero bytes (Iceberg never writes one).</summary>
+    public const int MaxZeroWidthRecords = 1 << 20;
+
+    /// <summary>Inflate a <c>deflate</c> block, refusing output beyond <see cref="MaxBlockBytes"/>.</summary>
+    public static byte[] Inflate(byte[] data)
+    {
+        using var input = new MemoryStream(data);
+        using var d = new DeflateStream(input, CompressionMode.Decompress);
+        return Corruption.ReadAtMost(d, MaxBlockBytes, "Avro deflate block");
+    }
+
+    /// <summary>
+    /// Refuse a block that claims more records than its bytes can hold. Every record of a schema with a non-empty
+    /// encoding takes at least one byte; a zero-width schema (<c>null</c>, records of nothing but those) is capped at
+    /// <see cref="MaxZeroWidthRecords"/>, so a count cannot spin through billions of empty reads.
+    /// </summary>
+    public static void CheckRecordCount(long count, int blockBytes, AvroSchema schema)
+    {
+        var limit = MinEncodedBytes(schema) > 0 ? blockBytes : MaxZeroWidthRecords;
+        if (count > limit) throw new InvalidDataException($"Avro block count {count} exceeds what its {blockBytes} bytes can hold");
+    }
+
+    /// <summary>The fewest bytes one value of <paramref name="schema"/> can encode to.</summary>
+    public static long MinEncodedBytes(AvroSchema schema) => schema switch
+    {
+        AvroPrimitive { Kind: AvroKind.Null } => 0,
+        AvroRecord r => r.Fields.Sum(f => MinEncodedBytes(f.Schema)),
+        AvroFixed f => f.Size,
+        _ => 1, // every other primitive, and arrays, maps and unions (a count or branch varint)
+    };
+
     public static void Write(Stream s, AvroSchema schema, object? value)
     {
         switch (schema)
@@ -158,6 +195,8 @@ public static class AvroBinary
             }
             case AvroFixed f:
             {
+                if (f.Size < 0 || (s.CanSeek && f.Size > s.Length - s.Position))
+                    throw new InvalidDataException($"Avro fixed of {f.Size} bytes exceeds the remaining {(s.CanSeek ? s.Length - s.Position : 0)}");
                 var b = new byte[f.Size];
                 s.ReadExactly(b);
                 return b;
@@ -307,7 +346,8 @@ public static class AvroContainer
         {
             var count = AvroBinary.ReadLong(s);
             var size = AvroBinary.ReadLong(s);
-            if (count < 0 || size < 0 || size > s.Length - s.Position) throw new InvalidDataException($"Avro block of {size} bytes / {count} records out of range");
+            if (count < 0 || size < 0 || size > s.Length - s.Position || size > AvroBinary.MaxBlockBytes)
+                throw new InvalidDataException($"Avro block of {size} bytes / {count} records out of range");
             var data = new byte[size];
             s.ReadExactly(data);
             s.ReadExactly(marker);
@@ -315,9 +355,10 @@ public static class AvroContainer
             var block = codec switch
             {
                 "null" => data,
-                "deflate" => Inflate(data),
+                "deflate" => AvroBinary.Inflate(data),
                 _ => throw new NotSupportedException($"Avro codec {codec} (only null and deflate are implemented; Iceberg defaults to deflate)"),
             };
+            AvroBinary.CheckRecordCount(count, block.Length, schema);
             using var bs = new MemoryStream(block);
             for (var i = 0; i < count; i++) records.Add(AvroBinary.Read(bs, schema));
         }
@@ -332,12 +373,4 @@ public static class AvroContainer
         return ms.ToArray();
     }
 
-    private static byte[] Inflate(byte[] data)
-    {
-        using var input = new MemoryStream(data);
-        using var d = new DeflateStream(input, CompressionMode.Decompress);
-        using var ms = new MemoryStream();
-        d.CopyTo(ms);
-        return ms.ToArray();
-    }
 }

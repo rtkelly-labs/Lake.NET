@@ -47,19 +47,26 @@ public static class Conversions
         }
     }
 
+    /// <summary>
+    /// Decode a single-value serialisation. The bytes come from manifests, so a length that does not fit the type is
+    /// an <see cref="InvalidDataException"/>, never an index or range exception.
+    /// </summary>
     public static object FromBytes(IcebergType type, ReadOnlySpan<byte> bytes) => type switch
     {
-        { TypeId: TypeId.Boolean } => bytes[0] != 0,
-        { TypeId: TypeId.Int or TypeId.Date } => BinaryPrimitives.ReadInt32LittleEndian(bytes),
+        { TypeId: TypeId.Boolean } => Sized(type, bytes, 1)[0] != 0,
+        { TypeId: TypeId.Int or TypeId.Date } => BinaryPrimitives.ReadInt32LittleEndian(Sized(type, bytes, 4)),
         // A v3 date->timestamp promotion can leave 4-byte bounds on a long column.
         { TypeId: TypeId.Long or TypeId.Time or TypeId.Timestamp or TypeId.TimestampTz or TypeId.TimestampNs or TypeId.TimestampTzNs } =>
-            bytes.Length == 4 ? (long)BinaryPrimitives.ReadInt32LittleEndian(bytes) : BinaryPrimitives.ReadInt64LittleEndian(bytes),
-        { TypeId: TypeId.Float } => Compat.ReadSingle(bytes),
-        { TypeId: TypeId.Double } => bytes.Length == 4 ? (double)Compat.ReadSingle(bytes) : Compat.ReadDouble(bytes),
+            bytes.Length == 4 ? (long)BinaryPrimitives.ReadInt32LittleEndian(bytes) : BinaryPrimitives.ReadInt64LittleEndian(Sized(type, bytes, 8)),
+        { TypeId: TypeId.Float } => Compat.ReadSingle(Sized(type, bytes, 4)),
+        { TypeId: TypeId.Double } => bytes.Length == 4 ? (double)Compat.ReadSingle(bytes) : Compat.ReadDouble(Sized(type, bytes, 8)),
         { TypeId: TypeId.String } => Encoding.UTF8.GetString(bytes.ToArray()),
-        { TypeId: TypeId.Uuid } => Compat.GuidFromBigEndian(bytes),
+        { TypeId: TypeId.Uuid } => Compat.GuidFromBigEndian(Sized(type, bytes, 16)),
         { TypeId: TypeId.Fixed or TypeId.Binary } => bytes.ToArray(),
         DecimalType d => new IcebergDecimal(Compat.SignedBigEndian(bytes), d.Scale),
         _ => throw new NotSupportedException($"Cannot deserialise bound for {type}"),
     };
+
+    private static ReadOnlySpan<byte> Sized(IcebergType type, ReadOnlySpan<byte> bytes, int length) =>
+        bytes.Length == length ? bytes : throw new InvalidDataException($"A {type} value takes {length} bytes, not {bytes.Length}");
 }

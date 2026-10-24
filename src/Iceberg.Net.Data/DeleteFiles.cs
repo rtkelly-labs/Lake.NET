@@ -360,7 +360,9 @@ public sealed class DeleteIndex
         var contents = await puffin;
         var blob = contents.Blobs.FirstOrDefault(b => b.Offset == dv.ContentOffset && b.Length == dv.ContentSizeInBytes)
             ?? throw new FormatException($"No blob at offset {dv.ContentOffset} in {dv.FilePath}");
-        return DeletionVector.Decode(contents.Payload(blob));
+        // The spec stores deletion vectors uncompressed; the writer enforces it and so does the reader.
+        if (blob.CompressionCodec is not null) throw new InvalidDataException($"Deletion vector in {dv.FilePath} is compressed ({blob.CompressionCodec})");
+        return DeletionVector.Decode(contents.Payload(blob), maxCardinality: dv.RecordCount);
     }
 
     private async Task<PuffinFile.Contents> LoadPuffinAsync(string location, CancellationToken ct) => PuffinFile.Read(await _io.ReadAllAsync(location, ct));

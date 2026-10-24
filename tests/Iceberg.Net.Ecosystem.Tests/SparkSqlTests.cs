@@ -143,7 +143,7 @@ public sealed class SparkSqlTests
     }
 
     [Fact]
-    public async Task Stager_writes_a_content_addressed_driver_once_and_statements_as_json()
+    public async Task Stager_writes_a_content_addressed_driver_and_statements_as_json()
     {
         var dir = Path.Combine(Path.GetTempPath(), "iceberg-dotnet-tests", Guid.NewGuid().ToString("N"));
         try
@@ -153,6 +153,11 @@ public sealed class SparkSqlTests
             Assert.Equal(driver, await stager.StageDriverAsync());
             Assert.Matches(@"iceberg_sql_driver-[0-9a-f]{12}\.py$", driver);
             Assert.Contains("--statements", await File.ReadAllTextAsync(driver));
+            // A file already at the driver's name proves nothing about its content: staging replaces it.
+            var genuine = await File.ReadAllTextAsync(driver);
+            await File.WriteAllTextAsync(driver, "import os; os.system('planted')");
+            await stager.StageDriverAsync();
+            Assert.Equal(genuine, await File.ReadAllTextAsync(driver));
 
             var script = new SparkSqlScript().Add(Procs.RewriteManifests(Events)).Add("SELECT 'a;b';");
             var location = await stager.StageStatementsAsync(script);
