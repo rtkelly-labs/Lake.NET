@@ -53,7 +53,7 @@ Clients point at the base URI:
 | `TableConfig` | empty | `config` returned with every loaded table, e.g. `s3.endpoint` and `s3.path-style-access`, so clients reach the same object store. Every authenticated client gets it; vended credentials are added per request (see [Credential vending](#credential-vending)) |
 | `FileIO` | empty | The server's own S3 settings (`s3.endpoint`, `s3.path-style-access`, `client.region`, `s3.access-key-id`, …). Local paths need none; otherwise the AWS SDK's default credential chain applies |
 | `Auth:*` | off | See [Authentication](#authentication) |
-| `Authorization:Grants:{principal}:{n}` | none (all allowed) | See [Authorization](#authorization) |
+| `Authorization:Grants:{principal}:{n}` | none | See [Authorization](#authorization). With authentication on, grants are required unless `Authorization:AllowAll=true` |
 | `ScanPlanning:*` | on | See [Server-side scan planning](#server-side-scan-planning) |
 | `CredentialVending:*` | off | See [Credential vending](#credential-vending) |
 | `RemoteSigning:*` | off | See [Remote signing](#remote-signing) |
@@ -130,11 +130,13 @@ endpoint except the token endpoint:
 | `Auth:Clients:{id}` = secret | OAuth2 clients for `POST /v1/oauth/tokens` (`credential = id:secret`) |
 | `Auth:SigningKey` | HMAC-SHA256 key, at least 32 bytes, for the tokens the server issues. If unset, the key is random per process, so tokens do not survive a restart and are not shared between instances |
 | `Auth:TokenLifetime` | Default `01:00:00` |
-| `Auth:Authority`, `Auth:Audience` | Also accept JWTs from an external OpenID Connect issuer (its keys come from discovery). `Auth:RequireHttpsMetadata=false` allows an `http://` authority |
+| `Auth:Authority`, `Auth:Audience` | Also accept JWTs from an external OpenID Connect issuer (its keys come from discovery). An authority needs an audience, or the server refuses to start (`Auth:AllowAnyAudience=true` accepts tokens for any audience knowingly). `Auth:RequireHttpsMetadata=false` allows an `http://` authority |
+| `Auth:MaxSessionLifetime` | Default `12:00:00`. Token exchange refreshes a session up to this long after its client-credentials grant, and never for a client that has since been removed |
 
 `/v1/oauth/tokens` is deprecated in the spec, but Spark, PyIceberg and this library still use it by default:
 
-- It implements the `client_credentials` grant, with the client ID and secret in the form or in HTTP Basic.
+- It implements the `client_credentials` grant, with the client ID and secret in the form or in HTTP Basic. The client
+  ID is required.
 - It implements token exchange of a token the server issued, which is how Java clients refresh.
 - Errors use the OAuth2 shape (`{"error": "invalid_client", …}`).
 
@@ -145,8 +147,9 @@ decided by [authorization](#authorization).
 
 Every endpoint asks an `IAuthorizer` before it touches the store, and a refusal is `403 ForbiddenException` in the
 `ErrorModel` shape. The check comes first, so a refused principal cannot learn whether a table exists. With no grants
-configured every principal may do everything (`AllowAllAuthorizer`). Configuring any grant switches on the static
-authorizer:
+configured, every principal may do everything (`AllowAllAuthorizer`): fine for an open server with authentication off,
+but with authentication on the server refuses to start unless `Authorization:AllowAll=true` says so. Configuring any
+grant switches on the static authorizer:
 
 ```
 Iceberg__Authorization__Grants__analyst__0=read:sales
@@ -391,6 +394,8 @@ Mutating requests (`POST`, `DELETE`) that carry an `Idempotency-Key` header are 
 - **Refused:** the same key with a different method, path or body is a 422. A key longer than 128 characters is a
   400.
 - **Not covered:** planning and signing routes are excluded (they change nothing), and so is the token endpoint.
+- **Not kept in full:** vended storage credentials are removed from a response before it is kept, so a replayed create
+  or register carries none (call `loadCredentials`); a response over 1 MiB is not kept.
 
 `/v1/config` advertises `idempotency-key-lifetime` (`Idempotency:Lifetime`, default `PT30M`); responses are kept that
 long plus a minute. Clients only retry mutations when it is advertised. This library's `RestCatalog` then resends a
@@ -402,6 +407,13 @@ that a load balancer sends to another instance is replayed there, and a duplicat
 another instance runs it (`SharedStateTests`, including a commit whose response is lost on one server and retried on
 the other). A claim whose request never finished, because its server went away mid-request, is treated like a 5xx
 after `Idempotency:PendingTimeout` (5 minutes): the next request with the key runs.
+
+## Limits and errors
+
+- Request bodies are capped at 16 MiB (`Endpoints.MaxRequestBodyBytes`).
+- A list returns at most 1,000 entries per page (`Endpoints.MaxPageSize`), also when no `pageSize` is asked for, with a
+  `next-page-token` for the rest.
+- A 500 answers `Internal server error (trace …)`; the cause is logged with that trace ID, never sent to the client.
 
 ## Endpoints
 

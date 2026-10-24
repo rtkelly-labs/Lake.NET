@@ -96,8 +96,9 @@ public sealed class IdempotencyStore(IdempotencyOptions options, IServerStateSto
         {
             await next();
             var status = http.Response.StatusCode;
-            if (status < 500)
-                stored = new StoredResponse(status, http.Response.ContentType, http.Response.Headers.ETag.ToString() is { Length: > 0 } e ? e : null, capture.ToArray());
+            if (status < 500 && capture.Length <= MaxStoredResponseBytes)
+                stored = new StoredResponse(status, http.Response.ContentType, http.Response.Headers.ETag.ToString() is { Length: > 0 } e ? e : null,
+                    WithoutCredentials(capture.ToArray(), http.Response.ContentType));
         }
         finally
         {
@@ -107,6 +108,29 @@ public sealed class IdempotencyStore(IdempotencyOptions options, IServerStateSto
             capture.Position = 0;
             await capture.CopyToAsync(original);
         }
+    }
+
+    /// <summary>A larger response is sent but not kept: the retention store holds small documents.</summary>
+    public const int MaxStoredResponseBytes = 1024 * 1024;
+
+    private static readonly string[] CredentialKeys = ["s3.access-key-id", "s3.secret-access-key", "s3.session-token", "gcs.oauth2.token", "adls.sas-token"];
+
+    /// <summary>
+    /// The response as it is kept for replay: without vended storage credentials, which must not sit in the retention
+    /// store. A replayed create or register carries no credentials; the client gets fresh ones from <c>loadCredentials</c>.
+    /// </summary>
+    private static byte[] WithoutCredentials(byte[] body, string? contentType)
+    {
+        if (body.Length == 0 || contentType is null || !contentType.StartsWith("application/json", StringComparison.OrdinalIgnoreCase)) return body;
+        System.Text.Json.Nodes.JsonNode? node;
+        try { node = System.Text.Json.Nodes.JsonNode.Parse(body); }
+        catch (System.Text.Json.JsonException) { return body; }
+        if (node is not System.Text.Json.Nodes.JsonObject json) return body;
+        var changed = json.Remove("storage-credentials");
+        if (json["config"] is System.Text.Json.Nodes.JsonObject config)
+            foreach (var key in config.Select(kv => kv.Key).Where(k => CredentialKeys.Any(c => k.StartsWith(c, StringComparison.Ordinal))).ToList())
+                changed |= config.Remove(key);
+        return changed ? System.Text.Encoding.UTF8.GetBytes(json.ToJsonString()) : body;
     }
 
     private static async Task WriteAsync(HttpContext http, StoredResponse stored)

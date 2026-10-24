@@ -37,34 +37,60 @@ public sealed class TokenService
     /// <summary>Whether <paramref name="id"/> / <paramref name="secret"/> are a configured client (compared in constant time).</summary>
     public bool ValidClient(string? id, string? secret)
     {
-        if (secret is null) return false;
-        // A credential without "id:" sends only the secret; match it against any client then.
-        foreach (var (clientId, clientSecret) in _options.Clients)
-            if ((id is null || id == clientId)
-                && CryptographicOperations.FixedTimeEquals(Encoding.UTF8.GetBytes(clientSecret), Encoding.UTF8.GetBytes(secret)))
-                return true;
-        return false;
+        // The client ID names whose secret to compare: a secret alone would be tried against every client.
+        if (secret is null || id is null || !_options.Clients.TryGetValue(id, out var clientSecret)) return false;
+        return CryptographicOperations.FixedTimeEquals(Encoding.UTF8.GetBytes(clientSecret), Encoding.UTF8.GetBytes(secret));
     }
 
-    public string Issue(string subject, string? scope) => new JsonWebTokenHandler().CreateToken(new SecurityTokenDescriptor
+    private const string SessionStartClaim = "iceberg_session_start";
+
+    public bool IsClient(string subject) => _options.Clients.ContainsKey(subject);
+
+    /// <summary>
+    /// Issue a token. <paramref name="sessionStart"/> is when the client-credentials grant that began this session
+    /// happened; token exchange carries it forward, and no token outlives <see cref="RestServerAuthOptions.MaxSessionLifetime"/> from it.
+    /// </summary>
+    public (string Token, TimeSpan ExpiresIn) Issue(string subject, string? scope, DateTimeOffset? sessionStart = null)
     {
-        Issuer = _options.Issuer,
-        Subject = new ClaimsIdentity([new Claim("sub", subject), new Claim("scope", scope ?? "catalog")]),
-        Expires = DateTime.UtcNow.Add(_options.TokenLifetime),
-        SigningCredentials = new SigningCredentials(SigningKey, SecurityAlgorithms.HmacSha256),
-    });
+        var start = sessionStart ?? DateTimeOffset.UtcNow;
+        var expires = DateTimeOffset.UtcNow.Add(_options.TokenLifetime);
+        var sessionEnd = start.Add(_options.MaxSessionLifetime);
+        if (expires > sessionEnd) expires = sessionEnd;
+        var token = new JsonWebTokenHandler().CreateToken(new SecurityTokenDescriptor
+        {
+            Issuer = _options.Issuer,
+            Subject = new ClaimsIdentity([
+                new Claim("sub", subject), new Claim("scope", scope ?? "catalog"),
+                new Claim(SessionStartClaim, start.ToUnixTimeSeconds().ToString(System.Globalization.CultureInfo.InvariantCulture), ClaimValueTypes.Integer64)]),
+            Expires = expires.UtcDateTime,
+            SigningCredentials = new SigningCredentials(SigningKey, SecurityAlgorithms.HmacSha256),
+        });
+        return (token, expires - DateTimeOffset.UtcNow);
+    }
+
+    /// <summary>When the session a token belongs to started, or null if the session has run its course.</summary>
+    public DateTimeOffset? LiveSessionStart(System.Security.Claims.ClaimsIdentity identity)
+    {
+        var start = identity.FindFirst(SessionStartClaim)?.Value is { } s && long.TryParse(s, out var seconds)
+            ? DateTimeOffset.FromUnixTimeSeconds(seconds) : DateTimeOffset.UtcNow;
+        return DateTimeOffset.UtcNow < start.Add(_options.MaxSessionLifetime) ? start : null;
+    }
 
     /// <summary>Validate a token this server issued (for the token-exchange refresh flow); returns its subject or null.</summary>
-    public async Task<string?> ValidateIssuedAsync(string token)
+    public async Task<(string Subject, DateTimeOffset? SessionStart)?> ValidateIssuedAsync(string token)
     {
-        if (IsStaticToken(token)) return "static";
+        // Same principal name as a request with the static token, so grants line up.
+        if (IsStaticToken(token)) return ("static-token", null);
         var result = await new JsonWebTokenHandler().ValidateTokenAsync(token, new TokenValidationParameters
         {
             ValidIssuer = _options.Issuer,
             IssuerSigningKey = SigningKey,
-            ValidateAudience = false,
+            ValidateAudience = false, // the server's own tokens carry no audience; issuer and key are its own
         });
-        return result.IsValid ? result.ClaimsIdentity.FindFirst("sub")?.Value ?? "unknown" : null;
+        if (!result.IsValid || result.ClaimsIdentity.FindFirst("sub")?.Value is not { } subject) return null;
+        // A removed client's tokens are not refreshed, and no session is refreshed past its lifetime.
+        if (!IsClient(subject) || LiveSessionStart(result.ClaimsIdentity) is not { } start) return null;
+        return (subject, start);
     }
 
     public TimeSpan Lifetime => _options.TokenLifetime;
@@ -144,27 +170,30 @@ public static class AuthSetup
         }
 
         string subject;
+        DateTimeOffset? sessionStart = null;
         switch (Field("grant_type"))
         {
             case "client_credentials":
+                if (id is null) return OAuthError(400, "invalid_request", "client_id is required");
                 if (!tokens.ValidClient(id, secret)) return OAuthError(401, "invalid_client", "Unknown client or wrong secret");
-                subject = id ?? "client";
+                subject = id;
                 break;
             case "urn:ietf:params:oauth:grant-type:token-exchange":
                 var subjectToken = Field("subject_token");
-                if (subjectToken is null || await tokens.ValidateIssuedAsync(subjectToken) is not { } sub)
-                    return OAuthError(401, "invalid_client", "The subject token is invalid or expired");
-                subject = sub;
+                if (subjectToken is null || await tokens.ValidateIssuedAsync(subjectToken) is not { } exchanged)
+                    return OAuthError(401, "invalid_client", "The subject token is invalid or expired, or its session has ended");
+                (subject, sessionStart) = exchanged;
                 break;
             case var other:
                 return OAuthError(400, "unsupported_grant_type", $"Unsupported grant_type '{other}'");
         }
 
+        var (accessToken, expiresIn) = tokens.Issue(subject, Field("scope"), sessionStart);
         return Results.Json(new JsonObject
         {
-            ["access_token"] = tokens.Issue(subject, Field("scope")),
+            ["access_token"] = accessToken,
             ["token_type"] = "bearer",
-            ["expires_in"] = (int)tokens.Lifetime.TotalSeconds,
+            ["expires_in"] = Math.Max(1, (int)expiresIn.TotalSeconds),
             ["issued_token_type"] = "urn:ietf:params:oauth:token-type:access_token",
         });
     }

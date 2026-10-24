@@ -87,6 +87,7 @@ public sealed class CrossEngineTests
     {
         o.Auth.Clients["spark"] = "spark-secret";
         o.Auth.SigningKey = "cross-engine-signing-key-of-at-least-32-bytes";
+        o.Authorization.AllowAll = true;
     }, under);
 
     private static Task<RestCatalog> ConnectAsync(KestrelHost host) =>
