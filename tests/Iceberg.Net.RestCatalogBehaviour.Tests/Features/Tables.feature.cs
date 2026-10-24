@@ -325,20 +325,20 @@ namespace Iceberg.Net.RestCatalogBehaviour.Tests.Features
 #line 34
     await testRunner.GivenAsync("the namespace \"archive\"", ((string)(null)), ((global::Reqnroll.Table)(null)), "Given ");
 #line hidden
-                global::Reqnroll.Table table29 = new global::Reqnroll.Table(new string[] {
+                global::Reqnroll.Table table1 = new global::Reqnroll.Table(new string[] {
                             "id",
                             "name",
                             "region"});
-                table29.AddRow(new string[] {
+                table1.AddRow(new string[] {
                             "1",
                             "a",
                             "eu"});
-                table29.AddRow(new string[] {
+                table1.AddRow(new string[] {
                             "2",
                             "b",
                             "us"});
 #line 35
-    await testRunner.AndAsync("the table \"sales.orders\" holding:", ((string)(null)), table29, "And ");
+    await testRunner.AndAsync("the table \"sales.orders\" holding:", ((string)(null)), table1, "And ");
 #line hidden
 #line 39
     await testRunner.WhenAsync(string.Format("I rename \"sales.orders\" to \"{0}\"", destination), ((string)(null)), ((global::Reqnroll.Table)(null)), "When ");
@@ -346,20 +346,20 @@ namespace Iceberg.Net.RestCatalogBehaviour.Tests.Features
 #line 40
     await testRunner.ThenAsync("the table \"sales.orders\" does not exist", ((string)(null)), ((global::Reqnroll.Table)(null)), "Then ");
 #line hidden
-                global::Reqnroll.Table table30 = new global::Reqnroll.Table(new string[] {
+                global::Reqnroll.Table table2 = new global::Reqnroll.Table(new string[] {
                             "id",
                             "name",
                             "region"});
-                table30.AddRow(new string[] {
+                table2.AddRow(new string[] {
                             "1",
                             "a",
                             "eu"});
-                table30.AddRow(new string[] {
+                table2.AddRow(new string[] {
                             "2",
                             "b",
                             "us"});
 #line 41
-    await testRunner.AndAsync(string.Format("the table \"{0}\" holds exactly:", destination), ((string)(null)), table30, "And ");
+    await testRunner.AndAsync(string.Format("the table \"{0}\" holds exactly:", destination), ((string)(null)), table2, "And ");
 #line hidden
             }
             await this.ScenarioCleanupAsync();
@@ -435,16 +435,16 @@ namespace Iceberg.Net.RestCatalogBehaviour.Tests.Features
 #line 5
   await this.FeatureBackgroundAsync();
 #line hidden
-                global::Reqnroll.Table table31 = new global::Reqnroll.Table(new string[] {
+                global::Reqnroll.Table table3 = new global::Reqnroll.Table(new string[] {
                             "id",
                             "name",
                             "region"});
-                table31.AddRow(new string[] {
+                table3.AddRow(new string[] {
                             "1",
                             "a",
                             "eu"});
 #line 60
-    await testRunner.GivenAsync("the table \"sales.orders\" holding:", ((string)(null)), table31, "Given ");
+    await testRunner.GivenAsync("the table \"sales.orders\" holding:", ((string)(null)), table3, "Given ");
 #line hidden
 #line 63
     await testRunner.WhenAsync("I drop the table \"sales.orders\"", ((string)(null)), ((global::Reqnroll.Table)(null)), "When ");
@@ -488,31 +488,31 @@ namespace Iceberg.Net.RestCatalogBehaviour.Tests.Features
 #line 5
   await this.FeatureBackgroundAsync();
 #line hidden
-                global::Reqnroll.Table table32 = new global::Reqnroll.Table(new string[] {
+                global::Reqnroll.Table table4 = new global::Reqnroll.Table(new string[] {
                             "id",
                             "name",
                             "region"});
-                table32.AddRow(new string[] {
+                table4.AddRow(new string[] {
                             "1",
                             "a",
                             "eu"});
-                table32.AddRow(new string[] {
+                table4.AddRow(new string[] {
                             "2",
                             "b",
                             "us"});
 #line 70
-    await testRunner.GivenAsync("the table \"sales.orders\" holding:", ((string)(null)), table32, "Given ");
+    await testRunner.GivenAsync("the table \"sales.orders\" holding:", ((string)(null)), table4, "Given ");
 #line hidden
-                global::Reqnroll.Table table33 = new global::Reqnroll.Table(new string[] {
+                global::Reqnroll.Table table5 = new global::Reqnroll.Table(new string[] {
                             "id",
                             "name",
                             "region"});
-                table33.AddRow(new string[] {
+                table5.AddRow(new string[] {
                             "3",
                             "c",
                             "eu"});
 #line 74
-    await testRunner.AndAsync("\"sales.orders\" also holds:", ((string)(null)), table33, "And ");
+    await testRunner.AndAsync("\"sales.orders\" also holds:", ((string)(null)), table5, "And ");
 #line hidden
 #line 77
     await testRunner.WhenAsync("I drop the table \"sales.orders\" with purge", ((string)(null)), ((global::Reqnroll.Table)(null)), "When ");
@@ -527,19 +527,21 @@ namespace Iceberg.Net.RestCatalogBehaviour.Tests.Features
             await this.ScenarioCleanupAsync();
         }
         
-        [global::Xunit.SkippableFactAttribute(DisplayName="An existing metadata file can be registered under a new name")]
+        [global::Xunit.SkippableFactAttribute(DisplayName="An unregistered table\'s metadata file can be registered under a new name")]
         [global::Xunit.TraitAttribute("FeatureTitle", "Tables")]
-        [global::Xunit.TraitAttribute("Description", "An existing metadata file can be registered under a new name")]
+        [global::Xunit.TraitAttribute("Description", "An unregistered table\'s metadata file can be registered under a new name")]
         [global::Xunit.TraitAttribute("Category", "spec:rest:registertable")]
+        [global::Xunit.TraitAttribute("Category", "spec:rest:unregistertable")]
         [global::Xunit.TraitAttribute("Category", "spec:rest:loadtable")]
-        public async global::System.Threading.Tasks.Task AnExistingMetadataFileCanBeRegisteredUnderANewName()
+        public async global::System.Threading.Tasks.Task AnUnregisteredTablesMetadataFileCanBeRegisteredUnderANewName()
         {
             string[] tagsOfScenario = new string[] {
                     "spec:rest:registertable",
+                    "spec:rest:unregistertable",
                     "spec:rest:loadtable"};
             global::System.Collections.Specialized.OrderedDictionary argumentsOfScenario = new global::System.Collections.Specialized.OrderedDictionary();
             string pickleIndex = "8";
-            global::Reqnroll.ScenarioInfo scenarioInfo = new global::Reqnroll.ScenarioInfo("An existing metadata file can be registered under a new name", null, tagsOfScenario, argumentsOfScenario, featureTags, pickleIndex);
+            global::Reqnroll.ScenarioInfo scenarioInfo = new global::Reqnroll.ScenarioInfo("An unregistered table\'s metadata file can be registered under a new name", null, tagsOfScenario, argumentsOfScenario, featureTags, pickleIndex);
             string[] tagsOfRule = ((string[])(null));
             global::Reqnroll.RuleInfo ruleInfo = null;
 #line 82
@@ -555,33 +557,33 @@ namespace Iceberg.Net.RestCatalogBehaviour.Tests.Features
 #line 5
   await this.FeatureBackgroundAsync();
 #line hidden
-                global::Reqnroll.Table table34 = new global::Reqnroll.Table(new string[] {
+                global::Reqnroll.Table table6 = new global::Reqnroll.Table(new string[] {
                             "id",
                             "name",
                             "region"});
-                table34.AddRow(new string[] {
+                table6.AddRow(new string[] {
                             "1",
                             "a",
                             "eu"});
 #line 83
-    await testRunner.GivenAsync("the table \"sales.orders\" holding:", ((string)(null)), table34, "Given ");
+    await testRunner.GivenAsync("the table \"sales.orders\" holding:", ((string)(null)), table6, "Given ");
 #line hidden
 #line 86
-    await testRunner.WhenAsync("I register the current metadata file of \"sales.orders\" as \"sales.orders_copy\"", ((string)(null)), ((global::Reqnroll.Table)(null)), "When ");
+    await testRunner.WhenAsync("I unregister \"sales.orders\"", ((string)(null)), ((global::Reqnroll.Table)(null)), "When ");
 #line hidden
-                global::Reqnroll.Table table35 = new global::Reqnroll.Table(new string[] {
+#line 87
+    await testRunner.AndAsync("I register the last metadata file of \"sales.orders\" as \"sales.orders_restored\"", ((string)(null)), ((global::Reqnroll.Table)(null)), "And ");
+#line hidden
+                global::Reqnroll.Table table7 = new global::Reqnroll.Table(new string[] {
                             "id",
                             "name",
                             "region"});
-                table35.AddRow(new string[] {
+                table7.AddRow(new string[] {
                             "1",
                             "a",
                             "eu"});
-#line 87
-    await testRunner.ThenAsync("the table \"sales.orders_copy\" holds exactly:", ((string)(null)), table35, "Then ");
-#line hidden
-#line 90
-    await testRunner.AndAsync("\"sales.orders_copy\" has the same metadata file as \"sales.orders\"", ((string)(null)), ((global::Reqnroll.Table)(null)), "And ");
+#line 88
+    await testRunner.ThenAsync("the table \"sales.orders_restored\" holds exactly:", ((string)(null)), table7, "Then ");
 #line hidden
             }
             await this.ScenarioCleanupAsync();
@@ -657,16 +659,16 @@ namespace Iceberg.Net.RestCatalogBehaviour.Tests.Features
 #line 5
   await this.FeatureBackgroundAsync();
 #line hidden
-                global::Reqnroll.Table table36 = new global::Reqnroll.Table(new string[] {
+                global::Reqnroll.Table table8 = new global::Reqnroll.Table(new string[] {
                             "id",
                             "name",
                             "region"});
-                table36.AddRow(new string[] {
+                table8.AddRow(new string[] {
                             "1",
                             "a",
                             "eu"});
 #line 100
-    await testRunner.GivenAsync("the table \"sales.orders\" holding:", ((string)(null)), table36, "Given ");
+    await testRunner.GivenAsync("the table \"sales.orders\" holding:", ((string)(null)), table8, "Given ");
 #line hidden
 #line 103
     await testRunner.WhenAsync("I unregister \"sales.orders\"", ((string)(null)), ((global::Reqnroll.Table)(null)), "When ");
@@ -683,16 +685,16 @@ namespace Iceberg.Net.RestCatalogBehaviour.Tests.Features
 #line 107
     await testRunner.WhenAsync("I register the last metadata file of \"sales.orders\" as \"sales.orders\"", ((string)(null)), ((global::Reqnroll.Table)(null)), "When ");
 #line hidden
-                global::Reqnroll.Table table37 = new global::Reqnroll.Table(new string[] {
+                global::Reqnroll.Table table9 = new global::Reqnroll.Table(new string[] {
                             "id",
                             "name",
                             "region"});
-                table37.AddRow(new string[] {
+                table9.AddRow(new string[] {
                             "1",
                             "a",
                             "eu"});
 #line 108
-    await testRunner.ThenAsync("the table \"sales.orders\" holds exactly:", ((string)(null)), table37, "Then ");
+    await testRunner.ThenAsync("the table \"sales.orders\" holds exactly:", ((string)(null)), table9, "Then ");
 #line hidden
             }
             await this.ScenarioCleanupAsync();
@@ -760,16 +762,16 @@ namespace Iceberg.Net.RestCatalogBehaviour.Tests.Features
 #line 5
   await this.FeatureBackgroundAsync();
 #line hidden
-                global::Reqnroll.Table table38 = new global::Reqnroll.Table(new string[] {
+                global::Reqnroll.Table table10 = new global::Reqnroll.Table(new string[] {
                             "id",
                             "name",
                             "region"});
-                table38.AddRow(new string[] {
+                table10.AddRow(new string[] {
                             "1",
                             "a",
                             "eu"});
 #line 119
-    await testRunner.GivenAsync("the table \"sales.orders\" holding:", ((string)(null)), table38, "Given ");
+    await testRunner.GivenAsync("the table \"sales.orders\" holding:", ((string)(null)), table10, "Given ");
 #line hidden
 #line 122
     await testRunner.WhenAsync("I try to create the table \"sales.orders\"", ((string)(null)), ((global::Reqnroll.Table)(null)), "When ");
@@ -777,16 +779,16 @@ namespace Iceberg.Net.RestCatalogBehaviour.Tests.Features
 #line 123
     await testRunner.ThenAsync("the attempt fails because it already exists", ((string)(null)), ((global::Reqnroll.Table)(null)), "Then ");
 #line hidden
-                global::Reqnroll.Table table39 = new global::Reqnroll.Table(new string[] {
+                global::Reqnroll.Table table11 = new global::Reqnroll.Table(new string[] {
                             "id",
                             "name",
                             "region"});
-                table39.AddRow(new string[] {
+                table11.AddRow(new string[] {
                             "1",
                             "a",
                             "eu"});
 #line 124
-    await testRunner.AndAsync("the table \"sales.orders\" holds exactly:", ((string)(null)), table39, "And ");
+    await testRunner.AndAsync("the table \"sales.orders\" holds exactly:", ((string)(null)), table11, "And ");
 #line hidden
             }
             await this.ScenarioCleanupAsync();
