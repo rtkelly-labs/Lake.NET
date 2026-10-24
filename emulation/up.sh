@@ -32,7 +32,15 @@ if [[ "$NESSIE" == 1 ]]; then
   fi
   echo "$NJAR_SHA512  .cache/$NJAR" | sha512sum -c --quiet
 fi
-docker compose "${PROFILES[@]}" up -d --wait
+# The setup containers are one-shot and nothing depends on them, so `up --wait` would fail whenever one exits
+# before the wait ends. Start everything else, then run each setup in the foreground so its exit code counts.
+SETUPS=()
+[[ " ${PROFILES[*]} " == *" polaris "* ]] && SETUPS+=(polaris-setup)
+[[ " ${PROFILES[*]} " == *" lakekeeper "* ]] && SETUPS+=(lakekeeper-setup)
+SCALE=()
+for s in "${SETUPS[@]}"; do SCALE+=(--scale "$s=0"); done
+docker compose "${PROFILES[@]}" up -d --wait "${SCALE[@]}"
+for s in "${SETUPS[@]}"; do docker compose "${PROFILES[@]}" run --rm --no-deps "$s"; done
 echo "moto (S3 + Glue):      http://localhost:5000"
 echo "Iceberg REST fixture:  http://localhost:8181"
 [[ " ${PROFILES[*]} " == *" trino "* ]] && echo "Trino:                 http://localhost:8080"

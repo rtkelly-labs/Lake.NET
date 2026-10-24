@@ -49,7 +49,11 @@ public static class SparkOracle
         [
             "run", "--rm", "--user", "root", "--network", "none", "--hostname", "localhost", "-e", "SPARK_LOCAL_IP=127.0.0.1",
             "-v", $"{Path.GetDirectoryName(Jar)}:/jars:ro", "-v", $"{interop}:/interop:ro", "-v", $"{SharedRoot}:{SharedRoot}",
-            Image, "/opt/spark/bin/spark-submit", "--jars", $"/jars/{Path.GetFileName(Jar)}", "/interop/spark_oracle.py",
+            // Spark runs as root, so what it writes under SharedRoot is root-owned and a non-root host (CI) can neither
+            // commit to those tables afterwards nor delete them. Open it up before the container exits, keeping Spark's exit code.
+            "-e", $"SHARED_ROOT={SharedRoot}",
+            Image, "sh", "-c", "\"$0\" \"$@\"; rc=$?; chmod -R a+rwX \"$SHARED_ROOT\"; exit $rc",
+            "/opt/spark/bin/spark-submit", "--jars", $"/jars/{Path.GetFileName(Jar)}", "/interop/spark_oracle.py",
             "read-tables", .. metadataLocations,
         ];
         var (code, stdout, stderr) = await Run("docker", args, TimeSpan.FromMinutes(10));

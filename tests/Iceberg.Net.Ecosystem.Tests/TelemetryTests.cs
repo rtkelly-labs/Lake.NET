@@ -50,6 +50,9 @@ public sealed class TelemetryTests : IDisposable
         _meters = new MeterListener
         {
             InstrumentPublished = (instrument, listener) => { if (instrument.Meter.Name == IcebergTelemetry.Name) listener.EnableMeasurementEvents(instrument); },
+            // The .NET 8 runtime only unsubscribes a disposed listener from its instruments when this is set, so without
+            // it measurements keep arriving after Dispose (fixed in .NET 9).
+            MeasurementsCompleted = (_, _) => { },
         };
         _meters.SetMeasurementEventCallback<long>((i, v, tags, _) => Record(i, v, tags));
         _meters.SetMeasurementEventCallback<double>((i, v, tags, _) => Record(i, v, tags));
