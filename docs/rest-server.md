@@ -389,7 +389,7 @@ after `Idempotency:PendingTimeout` (5 minutes): the next request with the key ru
 | loadTable | `GET …/tables/{t}` | `ETag` header; `If-None-Match` gets a 304; `snapshots=refs` returns only snapshots that a ref points at |
 | tableExists | `HEAD …/tables/{t}` | |
 | updateTable | `POST …/tables/{t}` | requirements and updates as above. With `assert-create` it commits a staged create: fresh metadata built from the create-shaped updates (schema, spec, order, location, format version, UUID), then every update applied on top |
-| dropTable | `DELETE …/tables/{t}?purgeRequested=` | With purge, the entry is removed first, then every reachable file is deleted: metadata files, manifest lists, manifests, data, deletes and statistics |
+| dropTable | `DELETE …/tables/{t}?purgeRequested=` | With purge, the entry is removed first, then every reachable file under the table's directories is deleted: metadata files, manifest lists, manifests, data, deletes and statistics (data and deletes only with `gc.enabled`) |
 | registerTable | `POST …/namespaces/{ns}/register` | `overwrite` supported |
 | unregisterTable | `POST …/tables/{t}/unregister` | Returns the last metadata; files are kept |
 | reportMetrics | `POST …/tables/{t}/metrics` | Accepted and discarded (204) |

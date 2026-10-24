@@ -89,8 +89,8 @@ Legend: ✅ implemented and tested · 🟡 partial · ⬜ not started · — not
 | Operation | Status | Tests |
 |---|---|---|
 | Snapshot expiry (retention policy) with file cleanup by reachability | ✅ files only expired snapshots referenced, after the commit; table defaults and per-ref `min-snapshots-to-keep` / `max-snapshot-age-ms` / `max-ref-age-ms` | `MaintenanceTests`, `ExpiryRetentionTests`, `ModelBasedTests`, `SparkCrossEngineTests` |
-| Drop with purge | ✅ every referenced file (metadata, manifests, data, deletes, statistics) | `MaintenanceTests` |
-| Orphan-file cleanup | ✅ listing (`ISupportsListing`) + age cutoff, URI forms normalised | `MaintenanceTests` |
+| Drop with purge | ✅ every referenced file under the table's directories (metadata, manifests, data, deletes, statistics); data kept when `gc.enabled=false` | `MaintenanceTests` |
+| Orphan-file cleanup | ✅ listing (`ISupportsListing`) + age cutoff (at least 24 h), URI forms normalised; refused on root locations and `gc.enabled=false` | `MaintenanceTests`, `TableLocationsTests` |
 | Rewrite data files (bin-pack) | ✅ deletes applied, v3 lineage kept, re-plan on any concurrent commit | `CompactionTests`, `SparkCrossEngineTests` |
 | Rewrite manifests | ✅ regroup by partition into target-sized manifests | `MergeAppendTests` |
 

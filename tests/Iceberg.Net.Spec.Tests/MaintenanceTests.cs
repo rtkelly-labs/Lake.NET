@@ -136,4 +136,110 @@ public sealed class MaintenanceTests : IDisposable
         Assert.Equal(11, (await TableScan.ReadAllAsync(t)).Count);
         await TableValidator.AssertValidAsync(t, new ValidationOptions { AllSnapshots = true, Deep = true });
     }
+
+    private static string Local(string f) => new Uri(f.StartsWith('/') ? "file://" + f : f).LocalPath;
+
+    /// <summary>Append a data file that lives outside the table's location, as tampered metadata or an in-place adoption would.</summary>
+    private async Task<string> AppendOutsideFileAsync(Table t, int from)
+    {
+        var written = await TableWriter.WriteAsync(t, Rows(from, 3));
+        var outside = Path.Combine(_warehouse, "elsewhere", $"{Guid.NewGuid():N}.parquet");
+        Directory.CreateDirectory(Path.GetDirectoryName(outside)!);
+        File.Move(Local(written[0].FilePath), outside);
+        await SnapshotProducer.Append(t).AddFiles([written[0] with { FilePath = outside }]).CommitAsync();
+        return outside;
+    }
+
+    [Fact]
+    public async Task Expiry_skips_files_outside_the_table_location()
+    {
+        var t = await _catalog.CreateTableAsync(new CreateTableRequest(TableIdentifier.Of("m", "outside_expiry"), Schema));
+        await TableMutations.InsertAsync(t, Rows(0, 3));
+        var outside = await AppendOutsideFileAsync(t, 100);
+        await SnapshotProducer.DeleteFiles(t, f => Local(f.FilePath) == outside).CommitAsync(); // the outside file leaves the table
+        await Maintenance.RewriteManifestsAsync(t); // live entries only: nothing retained references it any more
+
+        var result = await Maintenance.ExpireAsync(t, long.MaxValue, retainLast: 1);
+
+        Assert.True(File.Exists(outside));
+        Assert.Equal([outside], result.SkippedFiles.Select(Local));
+        Assert.DoesNotContain(result.DeletedFiles, f => Local(f) == outside);
+        Assert.NotEmpty(result.DeletedFiles); // files under the table still go
+        await TableValidator.AssertValidAsync(t, new ValidationOptions { AllSnapshots = true, Deep = true });
+    }
+
+    [Fact]
+    public async Task Purge_deletes_only_under_the_table_location()
+    {
+        var t = await _catalog.CreateTableAsync(new CreateTableRequest(TableIdentifier.Of("m", "outside_purge"), Schema));
+        await TableMutations.InsertAsync(t, Rows(0, 3));
+        var outside = await AppendOutsideFileAsync(t, 100);
+
+        await _catalog.DropTableAsync(t.Identifier, purge: true);
+
+        Assert.True(File.Exists(outside));
+        Assert.Empty(FilesUnder(t));
+    }
+
+    [Fact]
+    public async Task Without_gc_expiry_and_orphan_cleanup_refuse_and_purge_keeps_data_files()
+    {
+        var t = await _catalog.CreateTableAsync(new CreateTableRequest(TableIdentifier.Of("m", "no_gc"), Schema));
+        await TableMutations.InsertAsync(t, Rows(0, 3));
+        await TableMutations.UpsertAsync(t, Rows(0, 3, "b"), strategy: DeleteStrategy.CopyOnWrite);
+        await t.CommitAsync([], [new Metadata.MetadataUpdate.SetProperties(new Dictionary<string, string> { [TableLocations.GcEnabled] = "false" })]);
+
+        await Assert.ThrowsAsync<ValidationException>(() => Maintenance.ExpireAsync(t, long.MaxValue, retainLast: 1));
+        await Assert.ThrowsAsync<ValidationException>(() => Maintenance.DeleteOrphanFilesAsync(t, dryRun: true));
+
+        var dataFiles = FilesUnder(t).Where(f => f.EndsWith(".parquet", StringComparison.Ordinal)).ToList();
+        Assert.NotEmpty(dataFiles);
+        await _catalog.DropTableAsync(t.Identifier, purge: true);
+        Assert.Equal(dataFiles.Order(), FilesUnder(t).Order()); // data stays; manifests, manifest lists and metadata go
+    }
+
+    [Fact]
+    public async Task Expiry_through_a_stale_handle_deletes_nothing_once_another_writer_disables_gc()
+    {
+        var stale = await _catalog.CreateTableAsync(new CreateTableRequest(TableIdentifier.Of("m", "gc_race"), Schema));
+        await TableMutations.InsertAsync(stale, Rows(0, 3));
+        await TableMutations.UpsertAsync(stale, Rows(0, 3, "b"), strategy: DeleteStrategy.CopyOnWrite);
+        var other = await _catalog.LoadTableAsync(stale.Identifier);
+        await other.CommitAsync([], [new Metadata.MetadataUpdate.SetProperties(new Dictionary<string, string> { [TableLocations.GcEnabled] = "false" })]);
+        var before = FilesUnder(stale).ToHashSet();
+
+        // The commit asserts the UUID and refs, which still hold, so it lands; the committed metadata disables GC.
+        var result = await Maintenance.ExpireAsync(stale, long.MaxValue, retainLast: 1);
+
+        Assert.NotEmpty(result.Expired);
+        Assert.Empty(result.DeletedFiles);
+        Assert.Superset(before, FilesUnder(stale).ToHashSet()); // every file is still there
+    }
+
+    [Fact]
+    public async Task Orphan_cleanup_refuses_a_short_age_and_an_unsafe_location()
+    {
+        var t = await _catalog.CreateTableAsync(new CreateTableRequest(TableIdentifier.Of("m", "orphan_guard"), Schema));
+        await TableMutations.InsertAsync(t, Rows(0, 3));
+        await Assert.ThrowsAsync<ArgumentOutOfRangeException>(() => Maintenance.DeleteOrphanFilesAsync(t, TimeSpan.FromHours(1), dryRun: true));
+        // Keep metadata writes in the table while its location points somewhere unsafe.
+        await t.CommitAsync([], [new Metadata.MetadataUpdate.SetProperties(new Dictionary<string, string> { ["write.metadata.path"] = $"{t.Location}/metadata" })]);
+
+        foreach (var location in new[] { "/", "file:///", $"{t.Location}/..", "s3://bucket" })
+        {
+            await t.CommitAsync([], [new Metadata.MetadataUpdate.SetLocation(location)]);
+            await Assert.ThrowsAsync<ArgumentException>(() => Maintenance.DeleteOrphanFilesAsync(t, dryRun: true));
+        }
+    }
+
+    [Theory]
+    [InlineData("m", "../escape")]
+    [InlineData("m", "t/data")]
+    [InlineData("m", "..")]
+    [InlineData("a/b", "t")]
+    public async Task Names_that_would_reshape_a_storage_path_are_refused(string ns, string name)
+    {
+        if (!await _catalog.NamespaceExistsAsync(Namespace.Of(ns))) await _catalog.CreateNamespaceAsync(Namespace.Of(ns));
+        await Assert.ThrowsAsync<ArgumentException>(() => _catalog.CreateTableAsync(new CreateTableRequest(TableIdentifier.Of(ns, name), Schema)));
+    }
 }
