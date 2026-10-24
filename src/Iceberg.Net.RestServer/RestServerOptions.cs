@@ -90,7 +90,10 @@ public sealed class ScanPlanningOptions
     /// <summary>Plan in the background: <c>planTableScan</c> answers <c>submitted</c> and clients poll <c>plan/{plan-id}</c>.</summary>
     public bool Async { get; set; }
 
-    /// <summary>How long a plan's result stays available to <c>plan/{plan-id}</c> after it finished.</summary>
+    /// <summary>
+    /// How long a plan's result stays available to <c>plan/{plan-id}</c> after it finished. A plan still
+    /// <c>submitted</c> after this long (its server went away) is reported failed.
+    /// </summary>
     public TimeSpan PlanLifetime { get; set; } = TimeSpan.FromMinutes(10);
 }
 
@@ -131,6 +134,12 @@ public sealed class IdempotencyOptions
 
     /// <summary>Advertised as <c>idempotency-key-lifetime</c>; responses are kept at least this long (plus a minute's grace).</summary>
     public TimeSpan Lifetime { get; set; } = TimeSpan.FromMinutes(30);
+
+    /// <summary>
+    /// How long a duplicate waits for the first request with its key to finish. Past it the first is presumed lost (its
+    /// server went away mid-request) and, like a 5xx, not final: the duplicate runs instead.
+    /// </summary>
+    public TimeSpan PendingTimeout { get; set; } = TimeSpan.FromMinutes(5);
 }
 
 /// <summary>

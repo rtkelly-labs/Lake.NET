@@ -8,31 +8,19 @@ namespace Iceberg.Net.RestServer;
 /// (2xx, or a 4xx, which is deterministic) is kept for the advertised lifetime and replayed to every later request with
 /// the same key from the same principal, without running it again. A 5xx is not kept, so a retry runs again. A
 /// duplicate that arrives while the first is still running waits for it. Reusing a key for a different request
-/// (method, path or body) is a 422. Keys live in this process's memory, so several server instances behind one
-/// database do not share them.
+/// (method, path or body) is a 422. Claims and responses live in the <see cref="IServerStateStore"/> (the catalog's
+/// database), so every server instance over one database honours them. A claim whose request never finished (its
+/// server died) is taken over after <see cref="IdempotencyOptions.PendingTimeout"/>, like a 5xx.
 /// </summary>
-public sealed class IdempotencyStore(IdempotencyOptions options, Func<DateTimeOffset>? clock = null)
+public sealed class IdempotencyStore(IdempotencyOptions options, IServerStateStore state, Func<DateTimeOffset>? clock = null)
 {
-    private sealed record Stored(int Status, string? ContentType, string? ETag, byte[] Body);
-
-    private sealed class Entry(string fingerprint, DateTimeOffset created)
-    {
-        public string Fingerprint { get; } = fingerprint;
-        public DateTimeOffset Created { get; } = created;
-        public TaskCompletionSource<Stored?> Done { get; } = new(TaskCreationOptions.RunContinuationsAsynchronously);
-    }
-
-    private readonly Dictionary<(string Principal, string Key), Entry> _entries = [];
     private readonly Func<DateTimeOffset> _clock = clock ?? (() => DateTimeOffset.UtcNow);
-    private DateTimeOffset _lastSweep = DateTimeOffset.MinValue;
+    private long _lastSweepTicks;
 
     public const string Header = "Idempotency-Key";
 
-    /// <summary>Kept responses (for tests and metrics).</summary>
-    public int Count
-    {
-        get { lock (_entries) return _entries.Count; }
-    }
+    /// <summary>Kept claims and responses (for tests and metrics).</summary>
+    public async Task<int> CountAsync() => (await state.CountAsync()).Claims;
 
     private TimeSpan Retention => options.Lifetime + TimeSpan.FromMinutes(1);
 
@@ -59,69 +47,69 @@ public sealed class IdempotencyStore(IdempotencyOptions options, Func<DateTimeOf
         while ((read = await http.Request.Body.ReadAsync(buffer, http.RequestAborted)) > 0) hash.AppendData(buffer, 0, read);
         http.Request.Body.Position = 0;
         var fingerprint = Convert.ToHexString(hash.GetHashAndReset());
-        var id = (Principals.Name(http.User), key);
+        var principal = Principals.Name(http.User);
+        await SweepAsync();
 
+        var delay = TimeSpan.FromMilliseconds(10);
         while (true)
         {
-            Entry mine;
-            Entry? existing;
-            lock (_entries)
+            var now = Now();
+            var existing = await state.ClaimAsync(principal, key, fingerprint, now, now - Retention, http.RequestAborted);
+            if (existing is null)
             {
-                Sweep();
-                if (_entries.TryGetValue(id, out existing) && _clock() - existing.Created > Retention)
-                {
-                    _entries.Remove(id);
-                    existing = null;
-                }
-                mine = existing ?? (_entries[id] = new Entry(fingerprint, _clock()));
+                await RunAsync(http, next, principal, key, now);
+                return;
             }
-
-            if (existing is not null)
+            if (existing.Fingerprint != fingerprint)
             {
-                if (existing.Fingerprint != fingerprint)
-                {
-                    await ErrorModel.WriteAsync(http, 422, "UnprocessableEntityException", "This Idempotency-Key was already used for a different request");
-                    return;
-                }
-                var stored = await existing.Done.Task.WaitAsync(http.RequestAborted);
-                if (stored is null) continue; // the first attempt was not finalized (5xx): run this one
+                await ErrorModel.WriteAsync(http, 422, "UnprocessableEntityException", "This Idempotency-Key was already used for a different request");
+                return;
+            }
+            if (existing.Response is { } stored)
+            {
                 http.Response.Headers["Idempotent-Replayed"] = "true";
                 await WriteAsync(http, stored);
                 return;
             }
-
-            await RunAsync(http, next, id, mine);
-            return;
+            if (now - existing.Claimed > options.PendingTimeout)
+            {
+                // Its request never finished (the server running it went away): not final, so this one runs.
+                await state.ReleaseAsync(principal, key, existing.Claimed, http.RequestAborted);
+                continue;
+            }
+            // Still running, here or on another instance: wait for its outcome.
+            await Task.Delay(delay, http.RequestAborted);
+            delay = TimeSpan.FromTicks(Math.Min(delay.Ticks * 2, TimeSpan.FromMilliseconds(250).Ticks));
         }
     }
 
-    private async Task RunAsync(HttpContext http, Func<Task> next, (string, string) id, Entry entry)
+    // Stored with millisecond precision, so a claim's time compares equal after a round trip through SQL.
+    private DateTimeOffset Now() => DateTimeOffset.FromUnixTimeMilliseconds(_clock().ToUnixTimeMilliseconds());
+
+    private async Task RunAsync(HttpContext http, Func<Task> next, string principal, string key, DateTimeOffset claimed)
     {
         var original = http.Response.Body;
         using var capture = new MemoryStream();
         http.Response.Body = capture;
-        Stored? stored = null;
+        StoredResponse? stored = null;
         try
         {
             await next();
             var status = http.Response.StatusCode;
             if (status < 500)
-                stored = new Stored(status, http.Response.ContentType, http.Response.Headers.ETag.ToString() is { Length: > 0 } e ? e : null, capture.ToArray());
+                stored = new StoredResponse(status, http.Response.ContentType, http.Response.Headers.ETag.ToString() is { Length: > 0 } e ? e : null, capture.ToArray());
         }
         finally
         {
             http.Response.Body = original;
-            if (stored is null)
-            {
-                lock (_entries) _entries.Remove(id);
-            }
-            entry.Done.TrySetResult(stored);
+            if (stored is null) await state.ReleaseAsync(principal, key, claimed, CancellationToken.None);
+            else await state.CompleteAsync(principal, key, claimed, stored, CancellationToken.None);
             capture.Position = 0;
             await capture.CopyToAsync(original);
         }
     }
 
-    private static async Task WriteAsync(HttpContext http, Stored stored)
+    private static async Task WriteAsync(HttpContext http, StoredResponse stored)
     {
         http.Response.StatusCode = stored.Status;
         if (stored.ContentType is not null) http.Response.ContentType = stored.ContentType;
@@ -129,12 +117,12 @@ public sealed class IdempotencyStore(IdempotencyOptions options, Func<DateTimeOf
         if (stored.Body.Length > 0) await http.Response.Body.WriteAsync(stored.Body);
     }
 
-    private void Sweep()
+    /// <summary>At most once a minute per instance: drop claims older than the retention.</summary>
+    private async Task SweepAsync()
     {
         var now = _clock();
-        if (now - _lastSweep < TimeSpan.FromMinutes(1)) return;
-        _lastSweep = now;
-        foreach (var (k, _) in _entries.Where(kv => kv.Value.Done.Task.IsCompleted && now - kv.Value.Created > Retention).ToList())
-            _entries.Remove(k);
+        var last = Interlocked.Read(ref _lastSweepTicks);
+        if (now.UtcTicks - last < TimeSpan.TicksPerMinute || Interlocked.CompareExchange(ref _lastSweepTicks, now.UtcTicks, last) != last) return;
+        await state.ExpireAsync(now - Retention, DateTimeOffset.MinValue, DateTimeOffset.MinValue);
     }
 }

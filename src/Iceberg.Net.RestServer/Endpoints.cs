@@ -268,12 +268,12 @@ public static class Endpoints
                 return Json(await planner.PlanAsync(id, Parse(() => PlanRequest.Parse(body)), ct));
             });
 
-            v1.MapGet(Tbl + "/plan/{planId}", async (string @namespace, string table, string planId, HttpContext http, ScanPlanner planner) =>
-                Json(planner.Fetch(await AuthorizedAsync(http, CatalogPrivilege.Read, @namespace, table), planId)));
+            v1.MapGet(Tbl + "/plan/{planId}", async (string @namespace, string table, string planId, HttpContext http, ScanPlanner planner, CancellationToken ct) =>
+                Json(await planner.FetchAsync(await AuthorizedAsync(http, CatalogPrivilege.Read, @namespace, table), planId, ct)));
 
-            v1.MapDelete(Tbl + "/plan/{planId}", async (string @namespace, string table, string planId, HttpContext http, ScanPlanner planner) =>
+            v1.MapDelete(Tbl + "/plan/{planId}", async (string @namespace, string table, string planId, HttpContext http, ScanPlanner planner, CancellationToken ct) =>
             {
-                planner.Cancel(await AuthorizedAsync(http, CatalogPrivilege.Read, @namespace, table), planId);
+                await planner.CancelAsync(await AuthorizedAsync(http, CatalogPrivilege.Read, @namespace, table), planId, ct);
                 return Results.NoContent();
             });
 

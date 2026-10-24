@@ -16,9 +16,11 @@ namespace Iceberg.Net.RestServer;
 /// open the same database. Namespaces are stored dot-joined (as all three do), so a namespace level may not contain a
 /// dot. A namespace exists when it has a property row (an <c>exists=true</c> marker is written on create), a table, or a
 /// child namespace. Every pointer move is <c>UPDATE … WHERE metadata_location = @expected</c> inside one database
-/// transaction, and a create is an <c>INSERT</c> guarded by the primary key.
+/// transaction, and a create is an <c>INSERT</c> guarded by the primary key. The server's own state (idempotency keys,
+/// scan plans) lives in two more tables, <c>iceberg_rest_idempotency</c> and <c>iceberg_rest_plans</c>, which the other
+/// catalogs ignore.
 /// </summary>
-public sealed class SqlCatalogStore(Func<DbConnection> connect, string catalogName = "rest") : ICatalogStore
+public sealed partial class SqlCatalogStore(Func<DbConnection> connect, string catalogName = "rest") : ICatalogStore, IServerStateStore
 {
     private const string ExistsMarker = "exists";
 
@@ -51,6 +53,7 @@ public sealed class SqlCatalogStore(Func<DbConnection> connect, string catalogNa
               property_value VARCHAR(1000),
               PRIMARY KEY (catalog_name, namespace, property_key))
             """, [], ct);
+        await InitializeServerStateAsync(c, ct);
         try
         {
             await QueryAsync(c, "SELECT iceberg_type FROM iceberg_tables WHERE 1 = 0", [], ct);
@@ -277,7 +280,7 @@ public sealed class SqlCatalogStore(Func<DbConnection> connect, string catalogNa
         while (await r.ReadAsync(ct))
         {
             var row = new string?[r.FieldCount];
-            for (var i = 0; i < row.Length; i++) row[i] = r.IsDBNull(i) ? null : r.GetString(i);
+            for (var i = 0; i < row.Length; i++) row[i] = r.IsDBNull(i) ? null : Convert.ToString(r.GetValue(i), System.Globalization.CultureInfo.InvariantCulture);
             rows.Add(row);
         }
         return rows;

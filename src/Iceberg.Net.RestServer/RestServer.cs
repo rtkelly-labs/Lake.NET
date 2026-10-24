@@ -9,7 +9,7 @@ namespace Iceberg.Net.RestServer;
 
 /// <summary>
 /// Hosting: <see cref="AddIcebergRestCatalog"/> registers the options, store, FileIO, catalog service, authentication,
-/// the authorizer, the credential vendor, the scan planner and the idempotency store;
+/// the authorizer, the credential vendor, the server state store, the scan planner and the idempotency store;
 /// <see cref="Endpoints.MapIcebergRestCatalog"/> maps the routes. <see cref="Build"/> does both for a standalone server.
 /// An embedding application can register its own <see cref="ICatalogStore"/>, <see cref="IFileIO"/>,
 /// <see cref="IAuthorizer"/> or <see cref="IStorageCredentialVendor"/>; the last registration wins.
@@ -54,9 +54,11 @@ public static class RestServer
             var options = sp.GetRequiredService<RestServerOptions>();
             return options.CredentialVending.Enabled ? new StsCredentialVendor(options.CredentialVending, options.FileIO) : NoCredentialVendor.Instance;
         });
+        // Idempotency keys and plans live with the catalog when its store can keep them, so instances share them.
+        services.TryAddSingleton<IServerStateStore>(sp => sp.GetRequiredService<ICatalogStore>() as IServerStateStore ?? new InMemoryServerStateStore());
         services.TryAddSingleton(sp => new ScanPlanner(sp.GetRequiredService<CatalogService>(), sp.GetRequiredService<RestServerOptions>().ScanPlanning,
-            sp.GetService<ILoggerFactory>()?.CreateLogger<ScanPlanner>()));
-        services.TryAddSingleton(sp => new IdempotencyStore(sp.GetRequiredService<RestServerOptions>().Idempotency));
+            sp.GetRequiredService<IServerStateStore>(), sp.GetService<ILoggerFactory>()?.CreateLogger<ScanPlanner>()));
+        services.TryAddSingleton(sp => new IdempotencyStore(sp.GetRequiredService<RestServerOptions>().Idempotency, sp.GetRequiredService<IServerStateStore>()));
         services.AddIcebergAuth();
         return services;
     }

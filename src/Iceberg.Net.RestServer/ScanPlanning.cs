@@ -47,116 +47,127 @@ public sealed record PlanRequest(
 /// answered inline, several become plan tasks. A plan task is self-contained (table UUID, snapshot, manifest paths,
 /// filter), so any server instance can answer it and nothing is kept for it. Each task's residual is the request's
 /// filter (rows must still pass it), or <c>true</c> without one; data files carry only the requested
-/// <c>stats-fields</c> metrics, delete files all of theirs. Plans are kept in memory for <c>plan/{plan-id}</c> until
-/// <see cref="ScanPlanningOptions.PlanLifetime"/> after they finish.
+/// <c>stats-fields</c> metrics, delete files all of theirs. Plans are kept in the <see cref="IServerStateStore"/> for
+/// <c>plan/{plan-id}</c> until <see cref="ScanPlanningOptions.PlanLifetime"/> after they finish, so every instance over
+/// one database answers every plan ID. Incremental requests (<c>start-snapshot-id</c> / <c>end-snapshot-id</c>) are
+/// planned as Java's <c>IncrementalAppendScan</c>.
 /// </summary>
-public sealed class ScanPlanner(CatalogService catalog, ScanPlanningOptions options, ILogger? logger = null)
+public sealed class ScanPlanner(CatalogService catalog, ScanPlanningOptions options, IServerStateStore state, ILogger? logger = null)
 {
-    private sealed class PlanState(TableIdentifier table, CancellationTokenSource cancel)
-    {
-        public TableIdentifier Table { get; } = table;
-        public CancellationTokenSource Cancel { get; } = cancel;
-        public volatile string Status = "submitted";
-        public JsonObject? Result;
-        public string? Error;
-        public DateTimeOffset? Finished;
-    }
-
-    private readonly ConcurrentDictionary<string, PlanState> _plans = new(StringComparer.Ordinal);
+    /// <summary>Plans running in the background here, so a cancel can stop them (a cancel elsewhere just forgets the plan).</summary>
+    private readonly ConcurrentDictionary<string, CancellationTokenSource> _running = new(StringComparer.Ordinal);
 
     public Func<DateTimeOffset> Clock { get; init; } = () => DateTimeOffset.UtcNow;
 
-    /// <summary>Plans kept in memory (for tests).</summary>
-    public int PlansKept => _plans.Count;
-
     private long _plansStarted;
+    private long _lastSweepTicks;
 
     /// <summary><c>planTableScan</c> requests accepted since start.</summary>
     public long PlansStarted => Interlocked.Read(ref _plansStarted);
 
-    /// <summary><c>planTableScan</c>: a completed plan with its plan ID, or (with <see cref="ScanPlanningOptions.Async"/>) a submitted one.</summary>
+    // Millisecond precision, as the SQL store keeps it.
+    private DateTimeOffset Now() => DateTimeOffset.FromUnixTimeMilliseconds(Clock().ToUnixTimeMilliseconds());
+
+    /// <summary>
+    /// <c>planTableScan</c>: a completed plan with its plan ID, or (with <see cref="ScanPlanningOptions.Async"/>) a
+    /// submitted one. Either is recorded in the <see cref="IServerStateStore"/>, so any instance answers its plan ID.
+    /// </summary>
     public async Task<JsonObject> PlanAsync(TableIdentifier id, PlanRequest request, CancellationToken ct)
     {
-        Expire();
+        await ExpireAsync();
         var loaded = await catalog.LoadTableAsync(id, ct);
         Interlocked.Increment(ref _plansStarted);
         var planId = Guid.NewGuid().ToString();
         if (options.Async)
         {
-            var state = new PlanState(id, new CancellationTokenSource());
-            _plans[planId] = state;
+            var cancel = new CancellationTokenSource();
+            _running[planId] = cancel;
+            await state.AddPlanAsync(new PlanRecord(planId, id, "submitted", null, null, Now(), null), ct);
             _ = Task.Run(async () =>
             {
                 try
                 {
-                    var result = await PlanCoreAsync(loaded, request, state.Cancel.Token);
-                    state.Result = result;
-                    state.Status = "completed";
+                    var result = await PlanCoreAsync(loaded, request, cancel.Token);
+                    await state.FinishPlanAsync(planId, "completed", result.ToJsonString(), null, Now());
                 }
-                catch (OperationCanceledException) when (state.Cancel.IsCancellationRequested)
+                catch (OperationCanceledException) when (cancel.IsCancellationRequested)
                 {
-                    state.Status = "cancelled";
+                    // Cancelled: the plan was forgotten already.
                 }
                 catch (Exception e)
                 {
                     logger?.LogWarning(e, "Scan planning {PlanId} for {Table} failed", planId, id);
-                    state.Error = e.Message;
-                    state.Status = "failed";
+                    await state.FinishPlanAsync(planId, "failed", null, e.Message, Now());
                 }
                 finally
                 {
-                    state.Finished = Clock();
+                    _running.TryRemove(planId, out _);
+                    cancel.Dispose();
                 }
             }, CancellationToken.None);
             return new JsonObject { ["status"] = "submitted", ["plan-id"] = planId };
         }
 
         var completed = await PlanCoreAsync(loaded, request, ct);
-        _plans[planId] = new PlanState(id, new CancellationTokenSource()) { Status = "completed", Result = completed, Finished = Clock() };
+        var now = Now();
+        await state.AddPlanAsync(new PlanRecord(planId, id, "completed", completed.ToJsonString(), null, now, now), ct);
         var response = new JsonObject { ["status"] = "completed", ["plan-id"] = planId };
         foreach (var (k, v) in completed) response[k] = v?.DeepClone();
         return response;
     }
 
     /// <summary><c>fetchPlanningResult</c>.</summary>
-    public JsonObject Fetch(TableIdentifier id, string planId)
+    public async Task<JsonObject> FetchAsync(TableIdentifier id, string planId, CancellationToken ct = default)
     {
-        Expire();
-        var state = Find(id, planId);
-        switch (state.Status)
+        await ExpireAsync();
+        var plan = await FindAsync(id, planId, ct);
+        switch (plan.Status)
         {
             case "completed":
                 var response = new JsonObject { ["status"] = "completed" };
-                foreach (var (k, v) in state.Result!) response[k] = v?.DeepClone();
+                foreach (var (k, v) in JsonNode.Parse(plan.Result ?? "{}")!.AsObject().ToList())
+                    response[k] = v?.DeepClone();
                 return response;
+            case "submitted" when Now() - plan.Created > options.PlanLifetime:
+                return Failed($"Scan planning {planId} did not finish within {options.PlanLifetime}; the server planning it may have stopped");
             case "failed":
-                return new JsonObject
-                {
-                    ["status"] = "failed",
-                    ["error"] = new JsonObject { ["message"] = state.Error ?? "Scan planning failed", ["type"] = "ScanPlanningException", ["code"] = 500 },
-                };
+                return Failed(plan.Error ?? "Scan planning failed");
             case var s:
                 return new JsonObject { ["status"] = s };
         }
+
+        static JsonObject Failed(string message) => new()
+        {
+            ["status"] = "failed",
+            ["error"] = new JsonObject { ["message"] = message, ["type"] = "ScanPlanningException", ["code"] = 500 },
+        };
     }
 
-    /// <summary><c>cancelPlanning</c>: stops a running plan and forgets the plan either way.</summary>
-    public void Cancel(TableIdentifier id, string planId)
+    /// <summary><c>cancelPlanning</c>: stops a plan running here and forgets the plan either way.</summary>
+    public async Task CancelAsync(TableIdentifier id, string planId, CancellationToken ct = default)
     {
-        var state = Find(id, planId);
-        state.Cancel.Cancel();
-        _plans.TryRemove(planId, out _);
+        await FindAsync(id, planId, ct);
+        await state.DeletePlanAsync(planId, ct);
+        if (_running.TryGetValue(planId, out var cancel))
+        {
+            try { cancel.Cancel(); }
+            catch (ObjectDisposedException) { /* it just finished */ }
+        }
     }
 
-    private PlanState Find(TableIdentifier id, string planId) =>
-        _plans.TryGetValue(planId, out var state) && state.Table.Equals(id) ? state : throw new NoSuchPlanIdException($"No plan {planId} for {id}");
+    private async Task<PlanRecord> FindAsync(TableIdentifier id, string planId, CancellationToken ct) =>
+        await state.LoadPlanAsync(planId, ct) is { } plan && plan.Table.Equals(id)
+        && (plan.Finished is not { } done || Now() - done <= options.PlanLifetime)
+            ? plan
+            : throw new NoSuchPlanIdException($"No plan {planId} for {id}");
 
-    private void Expire()
+    /// <summary>At most once a minute per instance: forget plans past their lifetime.</summary>
+    private async Task ExpireAsync()
     {
         var now = Clock();
-        foreach (var (planId, state) in _plans)
-            if (state.Finished is { } done && now - done > options.PlanLifetime)
-                _plans.TryRemove(planId, out _);
+        var last = Interlocked.Read(ref _lastSweepTicks);
+        if (now.UtcTicks - last < TimeSpan.TicksPerMinute || Interlocked.CompareExchange(ref _lastSweepTicks, now.UtcTicks, last) != last) return;
+        await state.ExpireAsync(DateTimeOffset.MinValue, now - options.PlanLifetime, now - 2 * options.PlanLifetime);
     }
 
     /// <summary><c>fetchScanTasks</c>: the file scan tasks of one plan task.</summary>
