@@ -25,7 +25,7 @@ public sealed class ProtocolTests
         return (resp.StatusCode, text.Length == 0 ? null : JsonNode.Parse(text));
     }
 
-    private static void AssertError(HttpStatusCode expected, string type, (HttpStatusCode Status, JsonNode? Body) actual)
+    internal static void AssertError(HttpStatusCode expected, string type, (HttpStatusCode Status, JsonNode? Body) actual)
     {
         Assert.Equal(expected, actual.Status);
         var error = actual.Body!["error"]!;

@@ -18,6 +18,7 @@ public sealed class KestrelHost : IAsyncDisposable
     private readonly WebApplication _app;
     public string Root { get; }
     public Uri Uri { get; }
+    public IServiceProvider Services => _app.Services;
 
     private KestrelHost(WebApplication app, string root, Uri uri)
     {

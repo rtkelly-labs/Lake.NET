@@ -70,6 +70,15 @@ public static partial class TableScan
         return await PlanCoreAsync(table, snapshot, await ManifestsAsync(table, snapshot, ct), schema, Binder.Bind(schema, filter), fileFilter, ct);
     }
 
+    /// <summary>
+    /// Plan the live data files of some of <paramref name="snapshot"/>'s manifests (non-data manifests are ignored), with
+    /// <paramref name="filter"/> bound to <paramref name="schema"/>: the same pruning as a whole-snapshot plan. Server-side
+    /// scan planning uses it to split a big scan into one unit of work per group of manifests.
+    /// </summary>
+    public static Task<ScanPlan> PlanManifestsAsync(Table table, Snapshot snapshot, IReadOnlyList<ManifestFile> manifests, Schema schema, Expression filter,
+        CancellationToken ct = default) =>
+        PlanCoreAsync(table, snapshot, manifests, schema, Binder.Bind(schema, filter), null, ct);
+
     /// <param name="schema">The schema <paramref name="bound"/> was bound to; partition specs and manifests are read with it.</param>
     private static async Task<ScanPlan> PlanCoreAsync(Table table, Snapshot snapshot, IReadOnlyList<ManifestFile> manifests, Schema schema, Expression bound,
         Func<DataFile, bool>? fileFilter, CancellationToken ct)

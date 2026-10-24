@@ -8,10 +8,11 @@ using Iceberg.Net.IO;
 namespace Iceberg.Net.RestServer;
 
 /// <summary>
-/// Hosting: <see cref="AddIcebergRestCatalog"/> registers the options, store, FileIO, catalog service and auth;
+/// Hosting: <see cref="AddIcebergRestCatalog"/> registers the options, store, FileIO, catalog service, authentication,
+/// the authorizer, the credential vendor, the scan planner and the idempotency store;
 /// <see cref="Endpoints.MapIcebergRestCatalog"/> maps the routes. <see cref="Build"/> does both for a standalone server.
-/// An embedding application can register its own <see cref="ICatalogStore"/> or <see cref="IFileIO"/>; the last
-/// registration wins.
+/// An embedding application can register its own <see cref="ICatalogStore"/>, <see cref="IFileIO"/>,
+/// <see cref="IAuthorizer"/> or <see cref="IStorageCredentialVendor"/>; the last registration wins.
 /// </summary>
 public static class RestServer
 {
@@ -43,6 +44,19 @@ public static class RestServer
         {
             Logger = sp.GetService<ILoggerFactory>()?.CreateLogger<CatalogService>(),
         });
+        services.TryAddSingleton<IAuthorizer>(sp =>
+        {
+            var options = sp.GetRequiredService<RestServerOptions>().Authorization;
+            return options.Enabled ? new StaticAuthorizer(options) : new AllowAllAuthorizer();
+        });
+        services.TryAddSingleton<IStorageCredentialVendor>(sp =>
+        {
+            var options = sp.GetRequiredService<RestServerOptions>();
+            return options.CredentialVending.Enabled ? new StsCredentialVendor(options.CredentialVending, options.FileIO) : NoCredentialVendor.Instance;
+        });
+        services.TryAddSingleton(sp => new ScanPlanner(sp.GetRequiredService<CatalogService>(), sp.GetRequiredService<RestServerOptions>().ScanPlanning,
+            sp.GetService<ILoggerFactory>()?.CreateLogger<ScanPlanner>()));
+        services.TryAddSingleton(sp => new IdempotencyStore(sp.GetRequiredService<RestServerOptions>().Idempotency));
         services.AddIcebergAuth();
         return services;
     }

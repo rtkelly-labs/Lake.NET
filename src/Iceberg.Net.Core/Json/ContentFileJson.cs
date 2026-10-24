@@ -15,6 +15,63 @@ namespace Iceberg.Net.Json;
 /// </summary>
 public static class ContentFileJson
 {
+    /// <summary>
+    /// The spec form of <paramref name="file"/>: <c>content</c> as <c>data</c> / <c>position-deletes</c> /
+    /// <c>equality-deletes</c>, <c>partition</c> as an array in spec order (single-value form, typed by
+    /// <paramref name="spec"/> over <paramref name="schema"/>), lower-case <c>file-format</c>, metric maps as
+    /// <c>{"keys","values"}</c> and bounds as hex. <paramref name="statsFields"/> limits the column metrics written
+    /// (null: all; empty: none), as servers trim data-file stats to the <c>stats-fields</c> a planning request asks for.
+    /// </summary>
+    public static JsonObject ToJson(DataFile file, PartitionSpec spec, Schema schema, ISet<int>? statsFields = null)
+    {
+        var o = new JsonObject
+        {
+            ["spec-id"] = file.SpecId,
+            ["content"] = file.Content switch
+            {
+                FileContent.Data => "data",
+                FileContent.PositionDeletes => "position-deletes",
+                FileContent.EqualityDeletes => "equality-deletes",
+                var c => throw new ArgumentException($"Unknown content {c}"),
+            },
+            ["file-path"] = file.FilePath,
+            ["file-format"] = file.FileFormat.ToLowerInvariant(),
+        };
+        var partitionType = spec.PartitionType(schema);
+        if (file.Partition.Count != spec.Fields.Count)
+            throw new ArgumentException($"{file.FilePath} has {file.Partition.Count} partition values; spec {spec.SpecId} has {spec.Fields.Count} fields");
+        o["partition"] = new JsonArray(file.Partition.Select((v, i) => SingleValueJson.ToJson(partitionType.Fields[i].Type, v)).ToArray());
+        o["file-size-in-bytes"] = file.FileSizeInBytes;
+        o["record-count"] = file.RecordCount;
+        Put(o, "column-sizes", file.ColumnSizes, statsFields, v => JsonValue.Create(v));
+        Put(o, "value-counts", file.ValueCounts, statsFields, v => JsonValue.Create(v));
+        Put(o, "null-value-counts", file.NullValueCounts, statsFields, v => JsonValue.Create(v));
+        Put(o, "nan-value-counts", file.NanValueCounts, statsFields, v => JsonValue.Create(v));
+        Put(o, "lower-bounds", file.LowerBounds, statsFields, v => JsonValue.Create(Compat.ToHex(v)));
+        Put(o, "upper-bounds", file.UpperBounds, statsFields, v => JsonValue.Create(Compat.ToHex(v)));
+        if (file.KeyMetadata is { } key) o["key-metadata"] = Compat.ToHex(key);
+        if (file.SplitOffsets is { } splits) o["split-offsets"] = new JsonArray(splits.Select(x => (JsonNode)x).ToArray());
+        if (file.EqualityIds is { } eq) o["equality-ids"] = new JsonArray(eq.Select(x => (JsonNode)x).ToArray());
+        if (file.SortOrderId is { } sort) o["sort-order-id"] = sort;
+        if (file.FirstRowId is { } first) o["first-row-id"] = first;
+        if (file.ReferencedDataFile is { } referenced) o["referenced-data-file"] = referenced;
+        if (file.ContentOffset is { } offset) o["content-offset"] = offset;
+        if (file.ContentSizeInBytes is { } size) o["content-size-in-bytes"] = size;
+        return o;
+    }
+
+    private static void Put<T>(JsonObject o, string key, IReadOnlyDictionary<int, T>? map, ISet<int>? only, Func<T, JsonNode?> value)
+    {
+        if (map is null) return;
+        var keys = map.Keys.Where(k => only is null || only.Contains(k)).OrderBy(k => k).ToList();
+        if (keys.Count == 0) return;
+        o[key] = new JsonObject
+        {
+            ["keys"] = new JsonArray(keys.Select(k => (JsonNode)k).ToArray()),
+            ["values"] = new JsonArray(keys.Select(k => value(map[k])).ToArray()),
+        };
+    }
+
     public static DataFile FromJson(JsonNode node, Func<int, PartitionSpec> specs, Schema schema) =>
         Corruption.Guard("content file JSON", () => Parse(node.AsObject(), specs, schema));
 

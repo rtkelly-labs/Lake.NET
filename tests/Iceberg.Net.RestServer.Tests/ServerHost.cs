@@ -32,7 +32,9 @@ public sealed class ServerHost : IAsyncDisposable
     /// <param name="settings">Extra configuration, keys relative to the <c>Iceberg</c> section (e.g. <c>Auth:Tokens:0</c>).</param>
     /// <param name="sharedStore">A store instance to use instead of building one (two servers over one store).</param>
     /// <param name="root">A directory to reuse (two servers over one SQLite file and warehouse).</param>
-    public static ServerHost Start(string store = "memory", IReadOnlyDictionary<string, string>? settings = null, ICatalogStore? sharedStore = null, string? root = null)
+    /// <param name="services">Extra service registrations (e.g. an <see cref="IAuthorizer"/>), made after the server's own.</param>
+    public static ServerHost Start(string store = "memory", IReadOnlyDictionary<string, string>? settings = null, ICatalogStore? sharedStore = null, string? root = null,
+        Action<IServiceCollection>? services = null)
     {
         var owns = root is null;
         root ??= Path.Combine(Path.GetTempPath(), "iceberg-restserver-tests", Guid.NewGuid().ToString("N"));
@@ -49,6 +51,7 @@ public sealed class ServerHost : IAsyncDisposable
             b.UseEnvironment("Development");
             b.ConfigureAppConfiguration((_, c) => c.AddInMemoryCollection(config));
             if (sharedStore is not null) b.ConfigureTestServices(s => s.AddSingleton(sharedStore));
+            if (services is not null) b.ConfigureTestServices(services);
         });
         _ = factory.Server; // start now, so a bad configuration fails here
         return new ServerHost(root, factory, owns);
@@ -56,15 +59,18 @@ public sealed class ServerHost : IAsyncDisposable
 
     public HttpClient Http() => Factory.CreateClient();
 
-    public Task<RestCatalog> ConnectAsync(string? token = null, string? credential = null, string name = "dotnet-rest") =>
+    public Task<RestCatalog> ConnectAsync(string? token = null, string? credential = null, string name = "dotnet-rest", string? accessDelegation = null,
+        Func<IReadOnlyDictionary<string, string>, IFileIO>? io = null, Func<HttpMessageHandler, HttpMessageHandler>? wrap = null) =>
         RestCatalog.ConnectAsync(new RestCatalogOptions
         {
             Uri = new Uri("http://localhost/"),
-            Handler = Factory.Server.CreateHandler(),
+            Handler = wrap is null ? Factory.Server.CreateHandler() : wrap(Factory.Server.CreateHandler()),
             Token = token,
             Credential = credential,
-            AccessDelegation = null,
-        }, _ => new LocalFileIO(), name);
+            AccessDelegation = accessDelegation,
+        }, io ?? (_ => new LocalFileIO()), name);
+
+    public T Service<T>() where T : notnull => Factory.Services.GetRequiredService<T>();
 
     public async ValueTask DisposeAsync()
     {
