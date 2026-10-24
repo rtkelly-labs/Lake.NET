@@ -45,6 +45,10 @@ reflect the rollback. Every ref that the change set reads or changes is guarded 
 - A dynamic partition overwrite (`replace-partitions=true`, as Spark's `INSERT OVERWRITE` writes it) is replayed when
   its parent is an ancestor of main and no file was added to its partitions since.
 - Any other operation fails if it is not a fast-forward.
+- Files keep the partition spec they were written with. A snapshot staged before a spec change replays its files
+  under their old spec, and the producer writes one added-files manifest per spec. A dynamic overwrite's
+  replaced-partition check compares partitions together with their spec, so main's appends under the new spec do not
+  block it.
 - Picking an ancestor of main, or a snapshot that was already picked, fails.
 - A replay composes with concurrent appends.
 

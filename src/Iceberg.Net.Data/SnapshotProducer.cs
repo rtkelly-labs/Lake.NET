@@ -36,8 +36,9 @@ public sealed class SnapshotProducer
     private readonly List<DataFile> _addedDeleteFiles = [];
     private int? _retries;
     private readonly Dictionary<string, string> _extraSummary = [];
-    private string? _writtenManifest;
-    private ManifestFile? _writtenManifestFile;
+    /// <summary>The manifests of added files, one per partition spec, written once and reused across retries.</summary>
+    private List<ManifestFile>? _writtenManifests;
+    private readonly HashSet<string> _writtenManifestPaths = new(StringComparer.Ordinal);
     /// <summary>Files written by failed attempts (deleted after a successful commit unless the winner references them).</summary>
     private readonly List<string> _staleArtifacts = [];
     /// <summary>Files written by the current attempt (kept if it commits).</summary>
@@ -494,17 +495,26 @@ public sealed class SnapshotProducer
             _attemptArtifacts.Add(path);
         }
 
-        // 2. One new manifest for added files, written once and reused across retries.
+        // 2. New manifests for added files, one per partition spec the files were written with (the default spec's
+        //    first), written once and reused across retries.
         if (_added.Count > 0)
         {
-            if (_writtenManifest is null)
+            if (_writtenManifests is null)
             {
-                _writtenManifest = $"{metaDir}/{commitUuid}-m-added.avro";
-                // Null snapshot ID and sequence numbers: inherited from the manifest list, so this file is valid for any attempt.
-                var entries = _added.Select(f => new ManifestEntry(ManifestEntryStatus.Added, null, null, null, f)).ToList();
-                _writtenManifestFile = await WriteManifestAsync(_writtenManifest, m.DefaultSpec, ManifestContent.Data, entries, snapshotId, sequenceNumber, ct);
+                var written = new List<ManifestFile>();
+                foreach (var group in _added.GroupBy(f => f.SpecId).OrderBy(g => g.Key == m.DefaultSpecId ? 0 : 1).ThenBy(g => g.Key))
+                {
+                    var spec = m.PartitionSpecs.FirstOrDefault(p => p.SpecId == group.Key)
+                        ?? throw new ValidationException($"Cannot add {group.First().FilePath}: partition spec {group.Key} is not a spec of the table");
+                    var path = group.Key == m.DefaultSpecId ? $"{metaDir}/{commitUuid}-m-added.avro" : $"{metaDir}/{commitUuid}-m-added-spec{group.Key}.avro";
+                    // Null snapshot ID and sequence numbers: inherited from the manifest list, so this file is valid for any attempt.
+                    var entries = group.Select(f => new ManifestEntry(ManifestEntryStatus.Added, null, null, null, f)).ToList();
+                    written.Add(await WriteManifestAsync(path, spec, ManifestContent.Data, entries, snapshotId, sequenceNumber, ct));
+                    _writtenManifestPaths.Add(path);
+                }
+                _writtenManifests = written;
             }
-            manifests.Insert(0, _writtenManifestFile! with { SequenceNumber = sequenceNumber, MinSequenceNumber = sequenceNumber, AddedSnapshotId = snapshotId });
+            manifests.InsertRange(0, _writtenManifests.Select(w => w with { SequenceNumber = sequenceNumber, MinSequenceNumber = sequenceNumber, AddedSnapshotId = snapshotId }));
         }
 
         // 2b. Merge-append: compact small data manifests carried forward unchanged (plus this commit's new one).
@@ -692,7 +702,7 @@ public sealed class SnapshotProducer
         var minCount = int.Parse(m.Property(ManifestMinCountToMerge, "100"), CultureInfo.InvariantCulture);
         var target = long.Parse(m.Property(ManifestTargetSizeBytes, "8388608"), CultureInfo.InvariantCulture);
         var carried = parentManifests.Select(p => p.ManifestPath).ToHashSet(StringComparer.Ordinal);
-        bool Mergeable(ManifestFile mf) => mf.Content == ManifestContent.Data && (carried.Contains(mf.ManifestPath) || mf.ManifestPath == _writtenManifest);
+        bool Mergeable(ManifestFile mf) => mf.Content == ManifestContent.Data && (carried.Contains(mf.ManifestPath) || _writtenManifestPaths.Contains(mf.ManifestPath));
 
         var result = new List<ManifestFile>();
         var mergeIndex = 0;
@@ -717,7 +727,7 @@ public sealed class SnapshotProducer
                     foreach (var e in read)
                     {
                         if (e.Status == ManifestEntryStatus.Deleted) continue;
-                        entries.Add(mf.ManifestPath == _writtenManifest
+                        entries.Add(_writtenManifestPaths.Contains(mf.ManifestPath)
                             ? e with { Status = ManifestEntryStatus.Added, SnapshotId = snapshotId, SequenceNumber = null, FileSequenceNumber = null }
                             : e with { Status = ManifestEntryStatus.Existing });
                     }
