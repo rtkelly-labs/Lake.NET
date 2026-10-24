@@ -639,7 +639,7 @@ public sealed class SnapshotProducer
             {
                 foreach (var pd in index.All.Where(e => !e.IsDeletionVector))
                 {
-                    foreach (var (dataPath, positions) in await index.PositionDeletesAsync(pd.File.FilePath))
+                    foreach (var (dataPath, positions) in await index.PositionDeletesAsync(pd.File))
                     {
                         // Dangling deletes (data file already removed) or deletes older than the data file are dropped.
                         if (!live.TryGetValue(dataPath, out var task) || pd.DataSequenceNumber < task.DataSequenceNumber) continue;

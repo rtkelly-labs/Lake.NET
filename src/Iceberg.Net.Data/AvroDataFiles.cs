@@ -22,8 +22,9 @@ public sealed record DataFileReadOptions
     public ScanMetrics? Metrics { get; init; }
     /// <summary>
     /// The file's size in bytes (a manifest's <c>file_size_in_bytes</c>). With it, a Parquet file is read in ranges
-    /// (footer, then the needed column chunks); without it, it is fetched whole, which costs one request rather than a
-    /// length lookup plus ranges. Reads of a manifest's <see cref="Manifests.DataFile"/> set it.
+    /// (footer, then the needed column chunks) and an Avro file is streamed front to back in chunks; without it, the
+    /// file is fetched whole, which costs one request rather than a length lookup plus ranges. Reads of a manifest's
+    /// <see cref="Manifests.DataFile"/> set it.
     /// </summary>
     public long? FileSize { get; init; }
 }
@@ -87,13 +88,41 @@ public static class AvroDataFiles
 
     /// <summary>
     /// Stream an Avro data file one container block at a time. Top-level fields outside the projection are skipped
-    /// without being materialised (Avro is row-oriented, so their bytes are still scanned).
+    /// without being materialised (Avro is row-oriented, so their bytes are still scanned). With
+    /// <see cref="DataFileReadOptions.FileSize"/> the file is fetched front to back in chunks through a
+    /// <see cref="SequentialRangeReader"/> (one chunk in flight ahead of decoding), so only a chunk plus the current
+    /// block is held, and a reader that stops early fetches only the blocks it reached; without it, the file is fetched
+    /// whole in one request.
     /// </summary>
     public static async IAsyncEnumerable<DataFileBatch> ReadBatchesAsync(IFileIO io, string location, Schema projection, NameMapping? mapping = null,
         DataFileReadOptions? options = null, [EnumeratorCancellation] CancellationToken ct = default)
     {
-        var bytes = await io.ReadAllAsync(location, ct);
-        var header = Corruption.Guard("Avro data file", () => ReadHeader(bytes, location));
+        byte[]? whole = null;
+        SequentialRangeReader? reader = null;
+        if (options?.FileSize is { } size) reader = new SequentialRangeReader(io, location, size, ct) { ChunkSize = ReadChunkBytes };
+        else whole = await io.ReadAllAsync(location, ct);
+        await using var _ = reader;
+        var length = reader?.Length ?? whole!.Length;
+        async ValueTask<(byte[] Buffer, int Index, int Available)> Ensure(long offset, long count) =>
+            reader is not null
+                ? await reader.EnsureAsync(offset, (int)Math.Min(count, int.MaxValue), ct)
+                : (whole!, (int)Math.Min(offset, whole!.Length), whole!.Length - (int)Math.Min(offset, whole!.Length));
+
+        // The header (magic, metadata map, sync) has no length prefix: widen the window until it parses, or the whole
+        // file is there (then its error stands).
+        Header? header = null;
+        for (long want = HeaderProbeBytes; header is null; want *= 2)
+        {
+            var (buffer, index, available) = await Ensure(0, want);
+            var complete = available >= length;
+            try
+            {
+                header = Corruption.Guard("Avro data file", () => ReadHeader(buffer, index, available, location));
+            }
+            catch (Exception e) when (!complete && Corruption.IsFormatError(e) && e is not NotSupportedException)
+            {
+            }
+        }
         var record = header.Record;
         var hasIds = record.Fields.Any(f => f.FieldId is not null);
         var columns = projection.Columns.Select(f =>
@@ -109,30 +138,39 @@ public static class AvroDataFiles
             if (columns[c].Index >= 0) target[columns[c].Index] = c;
         var defaults = columns.Select(c => c.Index < 0 ? Defaults.ToValue(c.Field.Type, c.Field.InitialDefault) : null).ToArray();
 
-        var position = header.DataStart;
+        long position = header.DataStart;
         long rowPosition = 0;
-        while (position < bytes.Length)
+        while (position < length)
         {
             ct.ThrowIfCancellationRequested();
-            var (rows, next) = Corruption.Guard("Avro data file", () => ReadBlock(bytes, position, header, columns, target, defaults));
-            position = next;
+            // Record count and byte size: two varints of at most 10 bytes each.
+            var (buffer, index, available) = await Ensure(position, 20);
+            var (count, blockSize, prefix) = Corruption.Guard("Avro data file", () => ReadBlockPrefix(buffer, index, available, length - position));
+            (buffer, index, available) = await Ensure(position, prefix + blockSize + SyncSize);
+            var rows = Corruption.Guard("Avro data file", () => ReadBlock(buffer, index + prefix, (int)blockSize, count, header, columns, target, defaults));
+            position += prefix + blockSize + SyncSize;
             options?.Metrics?.RowGroupRead(rows.Count);
             yield return new DataFileBatch(rowPosition, rows);
             rowPosition += rows.Count;
         }
     }
 
+    /// <summary>Bytes per ranged request when an Avro data file is streamed (and the most held ahead of decoding).</summary>
+    internal const int ReadChunkBytes = 1024 * 1024;
+    private const int HeaderProbeBytes = 64 * 1024;
+    private const int SyncSize = 16;
+
     private sealed record Header(AvroRecord Record, string Codec, byte[] Sync, int DataStart);
 
-    private static Header ReadHeader(byte[] bytes, string location)
+    private static Header ReadHeader(byte[] bytes, int index, int available, string location)
     {
-        using var s = new MemoryStream(bytes);
+        using var s = new MemoryStream(bytes, index, available, writable: false);
         var magic = new byte[4];
         s.ReadExactly(magic);
         if (!magic.AsSpan().SequenceEqual(Magic)) throw new FormatException("Not an Avro object container file");
         var rawMeta = (Dictionary<string, object?>)AvroBinary.Read(s, new AvroMap(AvroSchema.Bytes))!;
         var meta = rawMeta.ToDictionary(kv => kv.Key, kv => System.Text.Encoding.UTF8.GetString((byte[])kv.Value!));
-        var sync = new byte[16];
+        var sync = new byte[SyncSize];
         s.ReadExactly(sync);
         var schema = AvroSchemaJson.Parse(meta.TryGetValue("avro.schema", out var json) ? json : throw new InvalidDataException("Avro file has no avro.schema"));
         var record = schema as AvroRecord ?? throw new InvalidDataException($"Avro data file {location} does not hold records");
@@ -142,19 +180,24 @@ public static class AvroDataFiles
         return new Header(record, codec, sync, checked((int)s.Position));
     }
 
-    private static (List<object?[]> Rows, int Next) ReadBlock(byte[] bytes, int start, Header header, List<(NestedField Field, int Index)> columns,
-        int[] target, object?[] defaults)
+    /// <summary>A block's record count and byte size, and how many bytes they took; the size is checked against what is left of the file.</summary>
+    private static (long Count, long Size, int Prefix) ReadBlockPrefix(byte[] bytes, int index, int available, long remaining)
     {
-        using var s = new MemoryStream(bytes);
-        s.Position = start;
+        using var s = new MemoryStream(bytes, index, available, writable: false);
         var count = AvroBinary.ReadLong(s);
         var size = AvroBinary.ReadLong(s);
-        if (count < 0 || size < 0 || size > s.Length - s.Position) throw new InvalidDataException($"Avro block of {size} bytes / {count} records out of range");
-        var data = new byte[size];
-        s.ReadExactly(data);
-        var marker = new byte[16];
-        s.ReadExactly(marker);
-        if (!marker.AsSpan().SequenceEqual(header.Sync)) throw new FormatException("Avro sync marker mismatch");
+        var prefix = (int)s.Position;
+        if (count < 0 || size < 0 || size > remaining - prefix - SyncSize || size > int.MaxValue)
+            throw new InvalidDataException($"Avro block of {size} bytes / {count} records out of range");
+        return (count, size, prefix);
+    }
+
+    /// <summary>Decode one block whose data is <c>bytes[start..start + size)</c>, followed by its sync marker.</summary>
+    private static List<object?[]> ReadBlock(byte[] bytes, int start, int size, long count, Header header, List<(NestedField Field, int Index)> columns,
+        int[] target, object?[] defaults)
+    {
+        if (!bytes.AsSpan(start + size, SyncSize).SequenceEqual(header.Sync)) throw new FormatException("Avro sync marker mismatch");
+        var data = bytes.AsSpan(start, size).ToArray();
         var block = header.Codec == "deflate" ? Inflate(data) : data;
         // A record of an Iceberg schema takes at least one byte: a larger count is corrupt (and must not size a list).
         if (count > block.Length && header.Record.Fields.Count > 0) throw new InvalidDataException($"Avro block count {count} exceeds its {block.Length} bytes");
@@ -176,7 +219,7 @@ public static class AvroDataFiles
             }
             rows.Add(row);
         }
-        return (rows, checked((int)s.Position));
+        return rows;
     }
 
     private static byte[] Inflate(byte[] data)

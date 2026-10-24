@@ -219,7 +219,7 @@ public static class Compaction
         var compact = true;
         foreach (var pd in positionFiles)
         {
-            var references = await index.PositionDeletesAsync(pd.File.FilePath, pd.File.FileFormat);
+            var references = await index.PositionDeletesAsync(pd.File);
             if (references.Count != 1) compact = false;
             foreach (var (dataPath, positions) in references)
             {

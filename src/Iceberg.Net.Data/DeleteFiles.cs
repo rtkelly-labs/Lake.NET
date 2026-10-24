@@ -33,10 +33,19 @@ public static class PositionDeleteFiles
     public static async Task<IReadOnlyDictionary<string, RoaringPositionBitmap>> ReadAsync(IFileIO io, string location, CancellationToken ct = default) =>
         await ReadAsync(io, location, "PARQUET", ct);
 
-    public static async Task<IReadOnlyDictionary<string, RoaringPositionBitmap>> ReadAsync(IFileIO io, string location, string format, CancellationToken ct = default)
+    public static Task<IReadOnlyDictionary<string, RoaringPositionBitmap>> ReadAsync(IFileIO io, string location, string format, CancellationToken ct = default) =>
+        ReadAsync(io, location, format, null, ct);
+
+    /// <summary>A manifest's position delete file: its <c>file_size_in_bytes</c> lets it be read in ranges (Parquet) or streamed (Avro).</summary>
+    public static Task<IReadOnlyDictionary<string, RoaringPositionBitmap>> ReadAsync(IFileIO io, DataFile file, CancellationToken ct = default) =>
+        ReadAsync(io, file.FilePath, file.FileFormat, file.FileSizeInBytes > 0 ? file.FileSizeInBytes : null, ct);
+
+    private static async Task<IReadOnlyDictionary<string, RoaringPositionBitmap>> ReadAsync(IFileIO io, string location, string format, long? size, CancellationToken ct)
     {
         var result = new Dictionary<string, RoaringPositionBitmap>(StringComparer.Ordinal);
-        foreach (var row in await DataFiles.ReadAsync(io, location, format, Schema, null, ct))
+        var rows = new List<object?[]>();
+        await foreach (var batch in DataFiles.ReadBatchesAsync(io, location, format, Schema, null, new DataFileReadOptions { FileSize = size }, ct)) rows.AddRange(batch.Rows);
+        foreach (var row in rows)
         {
             var path = (string)row[0]!;
             if (!result.TryGetValue(path, out var bm)) result[path] = bm = new RoaringPositionBitmap();
@@ -172,7 +181,7 @@ public sealed class DeleteIndex
             if (d.ReferencedDataFile is { } r && r != dataFile.FilePath) continue;
             RoaringPositionBitmap? bm;
             if (d.FileFormat == "PUFFIN") bm = await ReadDeletionVectorAsync(d, ct);
-            else (await PositionDeletesAsync(d.FilePath, d.FileFormat)).TryGetValue(dataFile.FilePath, out bm);
+            else (await PositionDeletesAsync(d)).TryGetValue(dataFile.FilePath, out bm);
             if (bm is not null) (positions ??= new RoaringPositionBitmap()).Or(bm);
         }
         var equality = await EqualityFiltersAsync(applicable.Where(d => d.Content == FileContent.EqualityDeletes), projection);
@@ -236,7 +245,7 @@ public sealed class DeleteIndex
         {
             if (pd.DataSequenceNumber < dataSequenceNumber) continue;
             if (pd.File.ReferencedDataFile is { } r && r != dataFile.FilePath) continue;
-            var byFile = await PositionDeletesAsync(pd.File.FilePath, pd.File.FileFormat);
+            var byFile = await PositionDeletesAsync(pd.File);
             if (!byFile.TryGetValue(dataFile.FilePath, out var bm)) continue;
             (result ??= new RoaringPositionBitmap()).Or(bm);
         }
@@ -288,6 +297,17 @@ public sealed class DeleteIndex
         {
             if (!_positionCache.TryGetValue(location, out var task))
                 _positionCache[location] = task = PositionDeleteFiles.ReadAsync(_io, location, format);
+            return task;
+        }
+    }
+
+    /// <summary>The same for a manifest's delete file, read with its recorded size (ranged Parquet, streamed Avro).</summary>
+    public Task<IReadOnlyDictionary<string, RoaringPositionBitmap>> PositionDeletesAsync(DataFile deleteFile)
+    {
+        lock (_positionCache)
+        {
+            if (!_positionCache.TryGetValue(deleteFile.FilePath, out var task))
+                _positionCache[deleteFile.FilePath] = task = PositionDeleteFiles.ReadAsync(_io, deleteFile);
             return task;
         }
     }

@@ -122,6 +122,40 @@ public sealed class CorruptionTests(ITestOutputHelper output)
             Fuzz($"manifest {Path.GetFileName(path)}", File.ReadAllBytes(path), b => ManifestCodec.ReadManifest(b, metadata.DefaultSpec, metadata.CurrentSchema));
     }
 
+    /// <summary>An Avro data file decoded whole (by location) and streamed in ranges (with its size), as scans read it.</summary>
+    [Spec("Avro")]
+    [Theory]
+    [InlineData(false)]
+    [InlineData(true)]
+    public void Avro_data_file(bool streamed)
+    {
+        var dir = Path.Combine(Fixtures, "spark", "ref", "avro_v2");
+        var schema = MetadataJson.Read(File.ReadAllText(Path.Combine(dir, "metadata", "v4.metadata.json"))).CurrentSchema;
+        var sample = Directory.GetFiles(Path.Combine(dir, "data"), "*.avro", SearchOption.AllDirectories)
+            .Where(f => !f.EndsWith("-deletes.avro", StringComparison.Ordinal)).OrderBy(f => new FileInfo(f).Length).Last();
+        Fuzz($"avro data file ({(streamed ? "streamed" : "whole")})", File.ReadAllBytes(sample), b =>
+        {
+            var options = new Data.DataFileReadOptions { FileSize = streamed ? b.Length : null };
+            var batches = Data.DataFiles.ReadBatchesAsync(new BytesFileIO(b), "mem://sample.avro", "AVRO", schema, null, options).GetAsyncEnumerator();
+            try { while (batches.MoveNextAsync().AsTask().GetAwaiter().GetResult()) { } }
+            finally { batches.DisposeAsync().AsTask().GetAwaiter().GetResult(); }
+        });
+    }
+
+    /// <summary>One object held in memory.</summary>
+    private sealed class BytesFileIO(byte[] bytes) : IO.IFileIO
+    {
+        public Task<byte[]> ReadAllAsync(string location, CancellationToken ct = default) => Task.FromResult(bytes);
+        public Task<Stream> OpenReadAsync(string location, CancellationToken ct = default) => Task.FromResult<Stream>(new MemoryStream(bytes, false));
+        public Task<byte[]> ReadRangeAsync(string location, long offset, int length, CancellationToken ct = default) =>
+            Task.FromResult(bytes.AsSpan((int)offset, length).ToArray());
+        public Task<long> LengthAsync(string location, CancellationToken ct = default) => Task.FromResult((long)bytes.Length);
+        public Task<bool> ExistsAsync(string location, CancellationToken ct = default) => Task.FromResult(true);
+        public Task WriteAsync(string location, ReadOnlyMemory<byte> content, bool overwrite = false, CancellationToken ct = default) => throw new NotSupportedException();
+        public Task DeleteAsync(string location, CancellationToken ct = default) => throw new NotSupportedException();
+        public void Dispose() { }
+    }
+
     [Spec("puffin: File structure")]
     [Spec("puffin: Footer structure")]
     [Fact]

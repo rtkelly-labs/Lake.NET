@@ -37,7 +37,8 @@ anything doubtful counts as unknown and is never used to prune:
 - uuid, decimals stored as fixed or binary, and INT96 get no bounds, because writers order them differently. NaN
   counts are not in Parquet statistics, and NaN bounds are ignored.
 
-Avro files have no per-block statistics, so every Avro block is read.
+Avro files have no per-block statistics, so every Avro block is read (they are streamed, see [Avro: streaming, not
+skipping](#avro-streaming-not-skipping)).
 
 ## Column projection
 
@@ -94,7 +95,30 @@ requests in all). ParquetSharp 25 does not expose `data_page_offset` or `diction
 cannot be planned ahead: a chunk not yet fetched is fetched when the reader asks for it, synchronously on the thread
 pool. `ReadPathTests.A_projected_read_downloads_only_the_footer_and_the_projected_column_chunks` checks the bytes with
 a counting `IFileIO`: one column of five reads under 30% of a 4 MB file, and pruning to one row group of four halves
-that again. Avro files are still fetched whole.
+that again.
+
+### Avro: streaming, not skipping
+
+An Avro data or delete file is a sequence of container blocks, each holding whole rows. Ranges cannot save bytes the
+way they do for Parquet: a projection still has to scan every column's bytes (the decoder skips unprojected fields but
+must walk them), and blocks carry no statistics, so a filter cannot skip one. What ranges do buy is **streaming**:
+
+- With the size known (`DataFileReadOptions.FileSize`, set for every manifest `DataFile`, and for position delete files
+  read through `DeleteIndex.PositionDeletesAsync(DataFile)`), the file is read front to back by `SequentialRangeReader`
+  (in `Iceberg.Net.IO`): 1 MiB `ReadRangeAsync` requests, with **one chunk in flight ahead** of the block being
+  decoded. Every byte is fetched once, and each block is decoded and yielded as soon as its bytes are there.
+- **Memory** is bounded by the unconsumed part of a chunk, the chunk ahead and the current block, instead of the
+  whole file (the old path held the file's bytes until the last block was decoded).
+- **Latency**: the first batch is available after the first 1 MiB, and fetching overlaps decoding.
+- **Early stop**: a reader that stops (a `Take`, a `LIMIT`, a cancelled scan) has fetched only the chunks it reached
+  plus the one ahead, which is cancelled when the enumerator is disposed.
+- The header has no length prefix: it is parsed from the first 64 KiB, widened until it parses (or the whole file is
+  there, and its error stands). Block sizes are checked against what is left of the file before they size a read.
+- Without a size (a read by location) the file is fetched whole, in one request, as before.
+
+`ReadPathTests.An_avro_read_streams_in_chunks_and_an_early_stop_fetches_only_the_first_ones` checks this with a counting
+`IFileIO` on a 6 MB file: a full read takes ⌈size / 1 MiB⌉ requests and exactly the file's bytes; a read stopped after
+the first block takes at most two requests (2 MiB). `CorruptionTests.Avro_data_file` fuzzes both paths.
 
 ## Time travel semantics
 
