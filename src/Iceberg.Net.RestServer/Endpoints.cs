@@ -57,6 +57,9 @@ public static class Endpoints
         "POST /v1/{prefix}/namespaces/{namespace}/tables/{table}/tasks",
     ];
 
+    /// <summary>The remote signing route, advertised when remote signing is on.</summary>
+    public const string Sign = "POST /v1/{prefix}/namespaces/{namespace}/tables/{table}/sign";
+
     /// <summary>The credentials route, advertised when credentials are vended.</summary>
     public const string Credentials = "GET /v1/{prefix}/namespaces/{namespace}/tables/{table}/credentials";
 
@@ -66,6 +69,7 @@ public static class Endpoints
         var logger = app.Services.GetRequiredService<ILoggerFactory>().CreateLogger("Iceberg.Net.RestServer");
         var vendor = app.Services.GetRequiredService<IStorageCredentialVendor>();
         var vending = vendor is not NoCredentialVendor;
+        var signer = options.RemoteSigning.Enabled ? app.Services.GetRequiredService<S3RequestSigner>() : null;
         // Create the store's tables before the first request.
         app.Services.GetRequiredService<ICatalogStore>().InitializeAsync().GetAwaiter().GetResult();
 
@@ -105,7 +109,7 @@ public static class Endpoints
         {
             var overrides = new Dictionary<string, string>(options.Overrides);
             if (options.Prefix is { Length: > 0 } prefix) overrides["prefix"] = prefix;
-            var endpoints = Advertised.Concat(options.ScanPlanning.Enabled ? Planning : []).Concat(vending ? [Credentials] : []);
+            var endpoints = Advertised.Concat(options.ScanPlanning.Enabled ? Planning : []).Concat(vending ? [Credentials] : []).Concat(signer is not null ? [Sign] : []);
             var config = new JsonObject
             {
                 ["defaults"] = MetadataJson.StringMap(options.Defaults),
@@ -200,7 +204,7 @@ public static class Endpoints
                 body["stage-create"]?.GetValue<bool>() ?? false));
             await req.HttpContext.RequireAsync(CatalogPrivilege.Write, ns, spec.Name);
             var table = await svc.CreateTableAsync(ns, spec, ct);
-            return await TableResultAsync(req, table, options, vendor);
+            return await TableResultAsync(req, table, options, vendor, signer);
         });
 
         v1.MapPost(Ns + "/register", async (string @namespace, HttpRequest req, CatalogService svc, CancellationToken ct) =>
@@ -210,7 +214,7 @@ public static class Endpoints
                 body["name"]!.GetValue<string>(), body["metadata-location"]!.GetValue<string>(), body["overwrite"]?.GetValue<bool>() ?? false));
             var ns = ParseNamespace(@namespace);
             await req.HttpContext.RequireAsync(overwrite ? CatalogPrivilege.Admin : CatalogPrivilege.Write, ns, name);
-            return await TableResultAsync(req, await svc.RegisterTableAsync(ns, name, location, overwrite, ct), options, vendor);
+            return await TableResultAsync(req, await svc.RegisterTableAsync(ns, name, location, overwrite, ct), options, vendor, signer);
         });
 
         v1.MapGet(Tbl, async (string @namespace, string table, HttpRequest req, CatalogService svc, CancellationToken ct) =>
@@ -226,7 +230,7 @@ public static class Endpoints
                 var referenced = loaded.Metadata.Refs.Values.Select(r => r.SnapshotId).ToHashSet();
                 loaded = loaded with { Metadata = loaded.Metadata with { Snapshots = loaded.Metadata.Snapshots.Where(sn => referenced.Contains(sn.SnapshotId)).ToList() } };
             }
-            return await TableResultAsync(req, loaded, options, vendor, etag);
+            return await TableResultAsync(req, loaded, options, vendor, signer, etag);
         });
 
         v1.MapMethods(Tbl, ["HEAD"], async (string @namespace, string table, HttpContext http, CatalogService svc, CancellationToken ct) =>
@@ -239,7 +243,7 @@ public static class Endpoints
             if (body["identifier"] is { } given && !ParseIdentifier(given).Equals(id))
                 throw new BadRequestException($"The body's identifier {ParseIdentifier(given)} does not match the path's {id}");
             var committed = await svc.CommitTableAsync(ParseCommit(id, body), ct);
-            return await TableResultAsync(req, committed, options, vendor, includeConfig: false);
+            return await TableResultAsync(req, committed, options, vendor, signer, includeConfig: false);
         });
 
         v1.MapDelete(Tbl, async (string @namespace, string table, HttpRequest req, CatalogService svc, CancellationToken ct) =>
@@ -251,7 +255,7 @@ public static class Endpoints
 
         v1.MapPost(Tbl + "/unregister", async (string @namespace, string table, HttpRequest req, CatalogService svc, CancellationToken ct) =>
             await TableResultAsync(req, await svc.UnregisterTableAsync(await AuthorizedAsync(req.HttpContext, CatalogPrivilege.Admin, @namespace, table), ct), options, vendor,
-                includeConfig: false));
+                signer, includeConfig: false));
 
         // Metrics reports (scan/commit) are accepted and discarded, as the spec allows.
         v1.MapPost(Tbl + "/metrics", async (string @namespace, string table, HttpContext http, CatalogService svc, CancellationToken ct) =>
@@ -294,6 +298,21 @@ public static class Endpoints
                 var write = await http.AllowsAsync(CatalogPrivilege.Write, id.Namespace, id.Name);
                 var credentials = await vendor.VendAsync(id, loaded.Metadata.Location, write, ct);
                 return Json(new JsonObject { ["storage-credentials"] = new JsonArray(credentials.Select(c => (JsonNode)c.ToJson()).ToArray()) });
+            });
+        }
+
+        if (signer is not null)
+        {
+            v1.MapPost(Tbl + "/sign", async (string @namespace, string table, HttpRequest req, CatalogService svc, CancellationToken ct) =>
+            {
+                var id = await AuthorizedAsync(req.HttpContext, CatalogPrivilege.Read, @namespace, table);
+                var body = await BodyAsync(req, ct);
+                var request = Parse(() => RemoteSignRequest.Parse(body));
+                var loaded = await svc.LoadTableAsync(id, ct);
+                if (request.Writes) await req.HttpContext.RequireAsync(CatalogPrivilege.Write, id.Namespace, id.Name);
+                var (result, cacheControl) = await signer.SignAsync(request, S3RequestSigner.TablePrefixes(loaded.Metadata), ct);
+                req.HttpContext.Response.Headers.CacheControl = cacheControl;
+                return Json(result);
             });
         }
 
@@ -476,9 +495,10 @@ public static class Endpoints
     /// <c>scan-planning-mode</c> when configured, plus vended credentials when the client asked for them
     /// (<c>X-Iceberg-Access-Delegation: vended-credentials</c>) and a vendor is configured: those also go in
     /// <c>storage-credentials</c>, scoped to the table's location, writable if the principal may write the table.
+    /// Otherwise, when the client asked for <c>remote-signing</c> and the server signs, the remote signing settings.
     /// </summary>
     private static async Task<IResult> TableResultAsync(HttpRequest req, LoadedTable t, RestServerOptions options, IStorageCredentialVendor vendor,
-        string? etag = null, bool includeConfig = true)
+        S3RequestSigner? signer, string? etag = null, bool includeConfig = true)
     {
         var body = new JsonObject
         {
@@ -489,17 +509,22 @@ public static class Endpoints
         {
             var config = new Dictionary<string, string>(options.TableConfig);
             if (options.ScanPlanning.Enabled && options.ScanPlanning.Mode is { Length: > 0 } mode) config["scan-planning-mode"] = mode;
-            if (vendor is not NoCredentialVendor && WantsVendedCredentials(req))
+            var vended = false;
+            if (vendor is not NoCredentialVendor && Wants(req, "vended-credentials"))
             {
                 var write = await req.HttpContext.AllowsAsync(CatalogPrivilege.Write, t.Id.Namespace, t.Id.Name);
                 var credentials = await vendor.VendAsync(t.Id, t.Metadata.Location, write, req.HttpContext.RequestAborted);
                 if (credentials.Count > 0)
                 {
+                    vended = true;
                     body["storage-credentials"] = new JsonArray(credentials.Select(c => (JsonNode)c.ToJson()).ToArray());
                     // Clients that predate storage-credentials read the keys from config; the longest prefix is the table's own.
                     foreach (var (k, v) in credentials.OrderByDescending(c => c.Prefix.Length).First().Config) config[k] = v;
                 }
             }
+            // Remote signing when asked for and no credentials were vended instead, for tables on S3.
+            if (!vended && signer is not null && Wants(req, "remote-signing") && StsCredentialVendor.S3Location(t.Metadata.Location) is not null)
+                foreach (var (k, v) in signer.TableConfig(options.Prefix, t.Id)) config[k] = v;
             body["config"] = MetadataJson.StringMap(config);
         }
         etag ??= t.MetadataLocation is null ? null : ETag(t.MetadataLocation, "all");
@@ -514,8 +539,8 @@ public static class Endpoints
         ["config"] = MetadataJson.StringMap(options.TableConfig),
     });
 
-    private static bool WantsVendedCredentials(HttpRequest req) =>
-        req.Headers["X-Iceberg-Access-Delegation"].SelectMany(v => (v ?? "").Split(',')).Any(v => v.Trim().Equals("vended-credentials", StringComparison.OrdinalIgnoreCase));
+    private static bool Wants(HttpRequest req, string mechanism) =>
+        req.Headers["X-Iceberg-Access-Delegation"].SelectMany(v => (v ?? "").Split(',')).Any(v => v.Trim().Equals(mechanism, StringComparison.OrdinalIgnoreCase));
 
     private static IResult Json(JsonNode body) => Results.Content(body.ToJsonString(), "application/json");
 }

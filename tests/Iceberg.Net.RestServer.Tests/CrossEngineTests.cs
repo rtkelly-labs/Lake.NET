@@ -309,6 +309,97 @@ public sealed class CrossEngineTests
         Assert.NotEmpty(SparkIds(spark[1]!));
     }
 
+    /// <summary>
+    /// Spark 4 / Iceberg 1.12 asking for <c>remote-signing</c>, with no AWS credentials at all: its S3FileIO
+    /// (<c>S3V4RestSignerClient</c>) has the server sign every request for the table's objects on a moto that checks
+    /// signatures (<see cref="AuthenticatingMoto"/>). Spark creates,
+    /// inserts, deletes (merge-on-read) and reads; our client, also signing remotely, reads that and appends; Spark reads
+    /// our append.
+    /// </summary>
+    [SkippableFact]
+    [Trait("Category", "Emulation")]
+    [Spec("rest: signRequest")]
+    public async Task Spark_signs_s3_requests_through_the_server()
+    {
+        Require.Spark();
+        Skip.If(AuthenticatingMoto.SkipReason is not null, AuthenticatingMoto.SkipReason);
+        Skip.If(AwsBundleJar is null, "iceberg-aws-bundle-1.12.0.jar is not next to the Spark jar");
+        Directory.CreateDirectory(SparkOracle.SharedRoot);
+        await using var moto = await AuthenticatingMoto.StartAsync();
+        var settings = RemoteSigningTests.MotoSettings(moto);
+        await using var host = await KestrelHost.StartAsync(o =>
+        {
+            o.Auth.Clients["spark"] = "spark-secret";
+            o.Auth.SigningKey = "cross-engine-signing-key-of-at-least-32-bytes";
+            o.Warehouse = settings["Warehouse"];
+            o.RemoteSigning.Enabled = true;
+            foreach (var (k, v) in settings.Where(kv => kv.Key.StartsWith("FileIO:", StringComparison.Ordinal))) o.FileIO[k["FileIO:".Length..]] = v;
+            foreach (var (k, v) in settings.Where(kv => kv.Key.StartsWith("TableConfig:", StringComparison.Ordinal))) o.TableConfig[k["TableConfig:".Length..]] = v;
+        }, SparkOracle.SharedRoot);
+        var uri = host.Uri.ToString().TrimEnd('/');
+        var catalogProps = new Dictionary<string, string> { ["header.X-Iceberg-Access-Delegation"] = "remote-signing" };
+
+        var first = await SparkAsync(host, uri, new JsonNode[]
+        {
+            "CREATE NAMESPACE IF NOT EXISTS rest.signed",
+            "CREATE TABLE rest.signed.events (id BIGINT, name STRING, region STRING) USING iceberg PARTITIONED BY (region) "
+                + "TBLPROPERTIES ('format-version'='2', 'write.delete.mode'='merge-on-read')",
+            "INSERT INTO rest.signed.events VALUES " + string.Join(", ", Enumerable.Range(0, 10).Select(i => $"({i}, 's-{i}', '{(i % 2 == 0 ? "eu" : "us")}')")),
+            "DELETE FROM rest.signed.events WHERE id = 3",
+            "SELECT id FROM rest.signed.events ORDER BY id",
+        }, catalogProps, awsBundle: true);
+        Assert.Equal(Enumerable.Range(0, 10).Where(i => i != 3), SparkIds(first[^1]!));
+
+        using var catalog = await RestCatalog.ConnectAsync(new RestCatalogOptions { Uri = host.Uri, Credential = Credential, AccessDelegation = "remote-signing" });
+        var events = await catalog.LoadTableAsync(TableIdentifier.Of("signed", "events"));
+        Assert.StartsWith("s3://", events.Location);
+        Assert.Equal(Enumerable.Range(0, 10).Where(i => i != 3).Select(i => (long)i), Ids(await TableScan.ReadAllAsync(events)));
+        var rows = Enumerable.Range(10, 5).Select(i => new object?[] { (long)i, $"net-{i}", i % 2 == 0 ? "eu" : "us" }).ToList();
+        await SnapshotProducer.Append(events).AddFiles(await TableWriter.WriteAsync(events, rows)).CommitAsync();
+
+        var second = await SparkAsync(host, uri, new JsonNode[] { "SELECT id FROM rest.signed.events ORDER BY id" }, catalogProps, awsBundle: true);
+        Assert.Equal(Enumerable.Range(0, 15).Where(i => i != 3), SparkIds(second[0]!));
+        // Not Spark's DROP TABLE … PURGE: it drops the table first and then deletes the files itself, and the server
+        // cannot sign for a table that no longer exists. The server purges with its own credentials instead.
+        await catalog.DropTableAsync(events.Identifier, purge: true);
+    }
+
+    /// <summary>
+    /// PyIceberg 0.12 asking for <c>remote-signing</c>: the table config switches it to its fsspec FileIO with the
+    /// <c>S3V4RestSigner</c>, which has the server sign each request (on a moto that checks signatures). It appends to
+    /// and reads a table we created; we read its append.
+    /// </summary>
+    [SkippableFact]
+    [Trait("Category", "Emulation")]
+    [Spec("rest: signRequest")]
+    public async Task PyIceberg_signs_s3_requests_through_the_server()
+    {
+        Skip.If(Python is null, "ICEBERG_PYTHON is not set (an interpreter with interop/pyproject.toml installed)");
+        Skip.If(AuthenticatingMoto.SkipReason is not null, AuthenticatingMoto.SkipReason);
+        await using var moto = await AuthenticatingMoto.StartAsync();
+        var settings = RemoteSigningTests.MotoSettings(moto);
+        await using var host = await KestrelHost.StartAsync(o =>
+        {
+            o.Auth.Clients["spark"] = "spark-secret";
+            o.Auth.SigningKey = "cross-engine-signing-key-of-at-least-32-bytes";
+            o.Warehouse = settings["Warehouse"];
+            o.RemoteSigning.Enabled = true;
+            foreach (var (k, v) in settings.Where(kv => kv.Key.StartsWith("FileIO:", StringComparison.Ordinal))) o.FileIO[k["FileIO:".Length..]] = v;
+            foreach (var (k, v) in settings.Where(kv => kv.Key.StartsWith("TableConfig:", StringComparison.Ordinal))) o.TableConfig[k["TableConfig:".Length..]] = v;
+        });
+        using var catalog = await RestCatalog.ConnectAsync(new RestCatalogOptions { Uri = host.Uri, Credential = Credential, AccessDelegation = "remote-signing" });
+        await catalog.CreateNamespaceAsync(Namespace.Of("py"));
+        var t = await catalog.CreateTableAsync(new CreateTableRequest(TableIdentifier.Of("py", "signed"), ScanPlanningTests.Schema, ScanPlanningTests.Spec));
+        await SnapshotProducer.Append(t).AddFiles(await TableWriter.WriteAsync(t, ScanPlanningTests.Rows(0, 6))).CommitAsync();
+
+        var read = await PyIcebergAsync("signed-append-read", host.Uri.ToString().TrimEnd('/'), Credential, "py", "signed", "6", "4");
+        Assert.Equal("FsspecFileIO", read["io"]!.GetValue<string>());
+        Assert.Equal("S3V4RestSigner", read["signer"]!.GetValue<string>());
+        Assert.Equal(Enumerable.Range(0, 10), read["ids"]!.AsArray().Select(i => i!.GetValue<int>()));
+        Assert.Equal(Enumerable.Range(0, 10).Select(i => (long)i), Ids(await TableScan.ReadAllAsync(await catalog.LoadTableAsync(t.Identifier))));
+        await catalog.DropTableAsync(t.Identifier, purge: true);
+    }
+
     private static IEnumerable<int> SparkIds(JsonNode step) => step["rows"]!.AsArray().Select(r => int.Parse(r!["id"]!.GetValue<string>()));
 
     private static Task<JsonArray> SparkAsync(KestrelHost host, string uri, params string[] steps) =>
@@ -349,7 +440,14 @@ public sealed class CrossEngineTests
         var output = await stdout;
         var marker = output.LastIndexOf("@@ORACLE@@", StringComparison.Ordinal);
         if (p.ExitCode != 0 || marker < 0)
-            throw new InvalidOperationException($"Spark failed ({p.ExitCode}): {string.Join('\n', (await stderr).Split('\n').TakeLast(40))}");
+        {
+            // The errors, then the end of the log (Spark's shutdown chatter follows a failure).
+            if (Environment.GetEnvironmentVariable("ICEBERG_SPARK_LOG") is { Length: > 0 } log) await File.WriteAllTextAsync(log, output + "\n----\n" + await stderr);
+            var lines = (await stderr).Split('\n');
+            var errors = lines.Where(l => l.Contains("Exception", StringComparison.Ordinal) || l.Contains("Error", StringComparison.Ordinal)
+                || l.TrimStart().StartsWith("Caused by", StringComparison.Ordinal)).Take(30);
+            throw new InvalidOperationException($"Spark failed ({p.ExitCode}): {string.Join('\n', errors)}\n...\n{string.Join('\n', lines.TakeLast(15))}");
+        }
         return JsonNode.Parse(output[(marker + "@@ORACLE@@".Length)..])!.AsArray();
     }
 }

@@ -24,12 +24,12 @@ public sealed class IdempotencyStore(IdempotencyOptions options, IServerStateSto
 
     private TimeSpan Retention => options.Lifetime + TimeSpan.FromMinutes(1);
 
-    /// <summary>Whether this request takes part: a mutation with the header, other than planning (which changes nothing).</summary>
+    /// <summary>Whether this request takes part: a mutation with the header, other than planning and signing (which change nothing).</summary>
     public static bool Applies(HttpRequest req) =>
         (HttpMethods.IsPost(req.Method) || HttpMethods.IsDelete(req.Method) || HttpMethods.IsPut(req.Method))
         && req.Headers.ContainsKey(Header)
         && !req.Path.StartsWithSegments("/v1/oauth")
-        && !(req.Path.Value is { } p && (p.EndsWith("/plan", StringComparison.Ordinal) || p.EndsWith("/tasks", StringComparison.Ordinal) || p.Contains("/plan/", StringComparison.Ordinal)));
+        && !(req.Path.Value is { } p && (p.EndsWith("/plan", StringComparison.Ordinal) || p.EndsWith("/tasks", StringComparison.Ordinal) || p.EndsWith("/sign", StringComparison.Ordinal) || p.Contains("/plan/", StringComparison.Ordinal)));
 
     public async Task InvokeAsync(HttpContext http, Func<Task> next)
     {

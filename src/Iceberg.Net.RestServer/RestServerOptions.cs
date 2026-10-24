@@ -52,8 +52,31 @@ public sealed class RestServerOptions
     /// <summary>Storage credentials vended with loaded tables (STS AssumeRole). Off while no <c>RoleArn</c> is configured.</summary>
     public CredentialVendingOptions CredentialVending { get; set; } = new();
 
+    /// <summary>S3 remote signing (<c>…/tables/{table}/sign</c>) for clients that ask for <c>remote-signing</c>. Off by default.</summary>
+    public RemoteSigningOptions RemoteSigning { get; set; } = new();
+
     /// <summary><c>Idempotency-Key</c> deduplication of mutating requests.</summary>
     public IdempotencyOptions Idempotency { get; set; } = new();
+}
+
+/// <summary>
+/// S3 remote signing: the server signs clients' S3 requests for a table's objects with its own credentials, so clients
+/// hold none. Offered to clients that send <c>X-Iceberg-Access-Delegation: remote-signing</c> (and get no vended
+/// credentials instead).
+/// </summary>
+public sealed class RemoteSigningOptions
+{
+    public bool Enabled { get; set; }
+
+    /// <summary>The region requests are signed for (and returned as <c>client.region</c>). Default: the FileIO's <c>client.region</c>, else the client's.</summary>
+    public string? Region { get; set; }
+
+    /// <summary>The credentials requests are signed with. Default: the FileIO's <c>s3.*</c> keys, else the AWS SDK's default chain.</summary>
+    public string? AccessKeyId { get; set; }
+
+    public string? SecretAccessKey { get; set; }
+
+    public string? SessionToken { get; set; }
 }
 
 /// <summary>

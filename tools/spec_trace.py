@@ -81,7 +81,6 @@ NOT_IMPLEMENTED = {
             "loadfunction",
             "unregistertable",
             "loadcredentials",
-            "signrequest",
             "reportmetrics",
             "registerview",
         )

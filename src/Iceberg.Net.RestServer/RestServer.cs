@@ -54,6 +54,11 @@ public static class RestServer
             var options = sp.GetRequiredService<RestServerOptions>();
             return options.CredentialVending.Enabled ? new StsCredentialVendor(options.CredentialVending, options.FileIO) : NoCredentialVendor.Instance;
         });
+        services.TryAddSingleton(sp =>
+        {
+            var options = sp.GetRequiredService<RestServerOptions>();
+            return new S3RequestSigner(options.RemoteSigning, options.FileIO);
+        });
         // Idempotency keys and plans live with the catalog when its store can keep them, so instances share them.
         services.TryAddSingleton<IServerStateStore>(sp => sp.GetRequiredService<ICatalogStore>() as IServerStateStore ?? new InMemoryServerStateStore());
         services.TryAddSingleton(sp => new ScanPlanner(sp.GetRequiredService<CatalogService>(), sp.GetRequiredService<RestServerOptions>().ScanPlanning,

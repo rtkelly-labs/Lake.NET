@@ -125,6 +125,12 @@ public sealed record S3FileIOOptions
     public bool RetryQuota { get; init; }
     /// <summary>Test hook: the HTTP handler under the SDK (e.g. to inject throttling responses).</summary>
     public HttpMessageHandler? HttpHandler { get; init; }
+    /// <summary>
+    /// Remote signing (<c>s3.remote-signing-enabled</c>): the client holds no credentials; each S3 request leaves the SDK
+    /// unsigned, with <c>x-amz-content-sha256: UNSIGNED-PAYLOAD</c>, and this signs it in place (setting its headers, and
+    /// URI if need be) before it is sent. <c>RestCatalog</c> supplies one that calls the catalog's signer endpoint.
+    /// </summary>
+    public Func<HttpRequestMessage, CancellationToken, Task>? RequestSigner { get; init; }
 
     /// <summary>Build from Iceberg catalog properties (e.g. a REST <c>config</c> response or vended credentials).</summary>
     public static S3FileIOOptions FromProperties(IReadOnlyDictionary<string, string> p) => new()
@@ -179,13 +185,21 @@ public sealed class S3FileIO : IFileIO, ISupportsListing
             MaxErrorRetry = options.MaxRetries,
             ThrottleRetries = options.RetryQuota,
         };
-        if (options.HttpHandler is { } handler) config.HttpClientFactory = new HandlerClientFactory(handler);
+        if (options.RequestSigner is { } signer)
+        {
+            config.HttpClientFactory = new HandlerClientFactory(new RemoteSigningHandler(signer, options.HttpHandler ?? new HttpClientHandler()));
+            // Checksum trailers would need aws-chunked uploads, which a remote signer cannot sign for an unknown body.
+            config.RequestChecksumCalculation = Amazon.Runtime.RequestChecksumCalculation.WHEN_REQUIRED;
+            config.ResponseChecksumValidation = Amazon.Runtime.ResponseChecksumValidation.WHEN_REQUIRED;
+        }
+        else if (options.HttpHandler is { } handler) config.HttpClientFactory = new HandlerClientFactory(handler);
         if (options.Endpoint is not null)
         {
             config.ServiceURL = options.Endpoint;
             config.AuthenticationRegion = options.Region;
         }
-        _s3 = options.AccessKeyId is null
+        _s3 = options.RequestSigner is not null ? new AmazonS3Client(new AnonymousAWSCredentials(), config)
+            : options.AccessKeyId is null
             ? new AmazonS3Client(config)
             : new AmazonS3Client(options.SessionToken is null
                 ? new BasicAWSCredentials(options.AccessKeyId, options.SecretAccessKey)
@@ -198,6 +212,18 @@ public sealed class S3FileIO : IFileIO, ISupportsListing
     private sealed class HandlerClientFactory(HttpMessageHandler handler) : Amazon.Runtime.HttpClientFactory
     {
         public override HttpClient CreateHttpClient(Amazon.Runtime.IClientConfig clientConfig) => new(handler, disposeHandler: false);
+    }
+
+    /// <summary>Under the SDK (which signs nothing, having anonymous credentials): drop any signing headers, then let the remote signer sign.</summary>
+    private sealed class RemoteSigningHandler(Func<HttpRequestMessage, CancellationToken, Task> signer, HttpMessageHandler inner) : DelegatingHandler(inner)
+    {
+        protected override async Task<HttpResponseMessage> SendAsync(HttpRequestMessage request, CancellationToken ct)
+        {
+            foreach (var h in new[] { "Authorization", "X-Amz-Date", "X-Amz-Security-Token", "X-Amz-Content-SHA256" }) request.Headers.Remove(h);
+            request.Headers.TryAddWithoutValidation("x-amz-content-sha256", "UNSIGNED-PAYLOAD");
+            await signer(request, ct);
+            return await base.SendAsync(request, ct);
+        }
     }
 
     public static (string Bucket, string Key) Parse(string location)
