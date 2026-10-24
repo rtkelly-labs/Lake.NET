@@ -8,5 +8,6 @@
   </ItemGroup>
   <ItemGroup>
     <InternalsVisibleTo Include="Iceberg.Net.Linq.Tests" />
+    <InternalsVisibleTo Include="Iceberg.Net.EntityFrameworkCore" />
   </ItemGroup>
 </Project>

@@ -1,0 +1,18 @@
+<Project Sdk="Microsoft.NET.Sdk">
+  <PropertyGroup>
+    <RootNamespace>Iceberg.Net.EntityFrameworkCore</RootNamespace>
+    <Description>An EF Core database provider for Apache Iceberg tables, built on Iceberg.Net.Linq: DbSet queries with predicate pushdown, time travel, ExecuteUpdate/ExecuteDelete and SaveChanges as one snapshot per table.</Description>
+    <!-- EF1001: the provider replaces EF Core's IQueryCompiler (an internal service) to hand queries to the Iceberg LINQ provider. -->
+    <NoWarn>$(NoWarn);EF1001</NoWarn>
+  </PropertyGroup>
+  <ItemGroup>
+    <PackageReference Include="Microsoft.EntityFrameworkCore" />
+    <PackageReference Include="Microsoft.EntityFrameworkCore.Relational" />
+  </ItemGroup>
+  <ItemGroup>
+    <ProjectReference Include="../Iceberg.Net.Linq/Iceberg.Net.Linq.csproj" />
+  </ItemGroup>
+  <ItemGroup>
+    <InternalsVisibleTo Include="Iceberg.Net.EntityFrameworkCore.Tests" />
+  </ItemGroup>
+</Project>
