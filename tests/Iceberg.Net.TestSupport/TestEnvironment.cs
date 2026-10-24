@@ -131,8 +131,15 @@ public sealed class TestEnvironment
         ? new Dictionary<string, string> { ["client.region"] = Region }
         : new Dictionary<string, string> { ["s3.endpoint"] = S3Endpoint, ["s3.path-style-access"] = "true", ["client.region"] = Region };
 
+    /// <summary>
+    /// Catalog kinds a test assembly hosts itself, e.g. "dotnet-rest" (this repository's REST server, started by the
+    /// regression suite). They store data in the same S3 as the other kinds, so they skip with <see cref="SkipReason"/>.
+    /// </summary>
+    public static readonly System.Collections.Concurrent.ConcurrentDictionary<string, Func<Task<ICatalog>>> HostedCatalogs = new();
+
     public async Task<ICatalog> CatalogAsync(string kind) => kind switch
     {
+        _ when HostedCatalogs.TryGetValue(kind, out var connect) => await connect(),
         "glue" => GlueCatalog.Create(new S3FileIO(S3Options), new GlueCatalogOptions { Endpoint = GlueEndpoint, Region = Region, Warehouse = Warehouse.TrimEnd('/') + "/glue" }),
         "rest" when GlueRestWarehouse is not null && RestUri is null => await RestCatalog.ConnectAsync(RestCatalogOptions.ForGlue(Region, GlueRestWarehouse)),
         "rest" => await RestCatalog.ConnectAsync(new RestCatalogOptions { Uri = RestUri!, Properties = S3Properties },

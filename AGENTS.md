@@ -8,6 +8,7 @@ Self-contained C# port of Apache Iceberg. Keep it that way: no references to cod
 | What is planned, and how correctness is verified | [docs/roadmap.md](docs/roadmap.md) (delivery milestones + the 13 verification paths) |
 | How commits, retries and metadata state work | [docs/state-management.md](docs/state-management.md), [docs/architecture.md](docs/architecture.md) |
 | Adding or changing a catalog | [docs/catalogs.md](docs/catalogs.md) — every catalog must pass `CatalogConformanceTests` |
+| Running or changing the REST catalog server | [docs/rest-server.md](docs/rest-server.md) — tests in `tests/Iceberg.Net.RestServer.Tests`; it is also the `dotnet-rest` conformance kind |
 | Running tests (spec / emulation / AWS) | [docs/regression-suite.md](docs/regression-suite.md) |
 | Emulator gaps and shims | [docs/emulation.md](docs/emulation.md) |
 | Insert / upsert / group replacement / delete strategies | [docs/write-modes.md](docs/write-modes.md) — behaviour changes start as a scenario in `tests/Iceberg.Net.Behaviour.Tests/Features` |

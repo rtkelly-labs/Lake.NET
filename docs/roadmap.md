@@ -32,6 +32,9 @@ shape.
 | **F. EF Core provider** | Non-relational provider over phase E: model, queries, `ExecuteUpdate`/`ExecuteDelete`, `SaveChanges` | ✅ [efcore.md](efcore.md) (`SaveChanges` is atomic per table, not across tables) |
 | **G. Ecosystem** | DuckDB oracle, OpenTelemetry, Spark procedure helpers and job submission, Athena helpers, a REST catalog server | ⬜ |
 
+Phase G progress: the REST catalog server is built ([rest-server.md](rest-server.md)). It runs as the `dotnet-rest`
+conformance kind and is checked against PyIceberg and Spark.
+
 Gaps the phases left open:
 - UPDATE can't assign nested struct fields.
 - Column chunks are fetched whole: projection decodes less but still downloads the whole file.

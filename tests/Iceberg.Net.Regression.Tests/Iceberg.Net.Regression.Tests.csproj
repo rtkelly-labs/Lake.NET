@@ -17,6 +17,8 @@
     <ProjectReference Include="../../src/Iceberg.Net.Data/Iceberg.Net.Data.csproj" />
     <ProjectReference Include="../../src/Iceberg.Net.Arrow/Iceberg.Net.Arrow.csproj" />
     <ProjectReference Include="../Iceberg.Net.TestSupport/Iceberg.Net.TestSupport.csproj" />
+    <!-- The "dotnet-rest" catalog kind: this repository's REST catalog server, hosted by the suite (DotnetRestServer.cs). -->
+    <ProjectReference Include="../../src/Iceberg.Net.RestServer/Iceberg.Net.RestServer.csproj" />
   </ItemGroup>
   <ItemGroup>
     <Using Include="Xunit" />
