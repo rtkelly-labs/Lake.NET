@@ -28,7 +28,7 @@ Self-contained C# port of Apache Iceberg. Keep it that way: no references to cod
 
 | What | Command |
 |---|---|
-| Build | `dotnet build` |
+| Build | `dotnet build` (the solution is `Iceberg.Net.slnx`; add a project with `dotnet sln Iceberg.Net.slnx add <csproj>`) |
 | Everything (L0, typed, EF, BDD, REST server, ecosystem, regression) | `./run-tests.sh emulation` |
 | L0 spec tests | `dotnet test tests/Iceberg.Net.Spec.Tests` |
 | Typed layer (LINQ) | `dotnet test tests/Iceberg.Net.Linq.Tests` |

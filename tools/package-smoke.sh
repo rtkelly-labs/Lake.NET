@@ -7,7 +7,7 @@ cd "$(dirname "$0")/.."
 out="${1:-$(mktemp -d)}"
 work="$(mktemp -d)"
 trap 'rm -rf "$work"' EXIT
-dotnet pack Iceberg.Net.sln -c Release -o "$out" --nologo -v quiet
+dotnet pack Iceberg.Net.slnx -c Release -o "$out" --nologo -v quiet
 # The consumers restore into their own cache: every pack is version 0.1.0-preview, so the machine-wide cache could
 # hand back an older build of the same version.
 export NUGET_PACKAGES="$work/packages"
@@ -76,7 +76,9 @@ dotnet run --project "$work/typed" --nologo --source "$out" --source https://api
 
 # Core and Avro also ship netstandard2.0 (for .NET Framework 4.6.2+): a netstandard2.0 library must build against them.
 for pkg in Iceberg.Net.Core Iceberg.Net.Avro; do
-  unzip -l "$out/$pkg".0.1.0-*[0-9a-z].nupkg | grep -q "lib/netstandard2.0/$pkg.dll" || { echo "$pkg has no netstandard2.0 build" >&2; exit 1; }
+  # Listed first: under pipefail, grep -q closing the pipe early would fail unzip with SIGPIPE.
+  listing="$(unzip -l "$out/$pkg".0.1.0-*[0-9a-z].nupkg)"
+  grep -q "lib/netstandard2.0/$pkg.dll" <<<"$listing" || { echo "$pkg has no netstandard2.0 build" >&2; exit 1; }
 done
 mkdir -p "$work/legacy"
 cat > "$work/legacy/legacy.csproj" <<'XML'

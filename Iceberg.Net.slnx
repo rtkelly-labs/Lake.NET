@@ -1,0 +1,37 @@
+<Solution>
+  <Configurations>
+    <Platform Name="Any CPU" />
+    <Platform Name="x64" />
+    <Platform Name="x86" />
+  </Configurations>
+  <Folder Name="/src/">
+    <Project Path="src/Iceberg.Net.Arrow/Iceberg.Net.Arrow.csproj" />
+    <Project Path="src/Iceberg.Net.Athena/Iceberg.Net.Athena.csproj" />
+    <Project Path="src/Iceberg.Net.Avro/Iceberg.Net.Avro.csproj" />
+    <Project Path="src/Iceberg.Net.Catalog/Iceberg.Net.Catalog.csproj" />
+    <Project Path="src/Iceberg.Net.Core/Iceberg.Net.Core.csproj" />
+    <Project Path="src/Iceberg.Net.Data/Iceberg.Net.Data.csproj" />
+    <Project Path="src/Iceberg.Net.EntityFrameworkCore/Iceberg.Net.EntityFrameworkCore.csproj" />
+    <Project Path="src/Iceberg.Net.IO/Iceberg.Net.IO.csproj" />
+    <Project Path="src/Iceberg.Net.Linq/Iceberg.Net.Linq.csproj" />
+    <Project Path="src/Iceberg.Net.Puffin/Iceberg.Net.Puffin.csproj" />
+    <Project Path="src/Iceberg.Net.RestServer/Iceberg.Net.RestServer.csproj" />
+    <Project Path="src/Iceberg.Net.Spark/Iceberg.Net.Spark.csproj" />
+  </Folder>
+  <Folder Name="/tests/">
+    <Project Path="tests/Iceberg.Net.Behaviour.Tests/Iceberg.Net.Behaviour.Tests.csproj" />
+    <Project Path="tests/Iceberg.Net.Ecosystem.Tests/Iceberg.Net.Ecosystem.Tests.csproj" />
+    <Project Path="tests/Iceberg.Net.EntityFrameworkCore.Tests/Iceberg.Net.EntityFrameworkCore.Tests.csproj" />
+    <Project Path="tests/Iceberg.Net.Fuzz/Iceberg.Net.Fuzz.csproj" />
+    <Project Path="tests/Iceberg.Net.Linq.Tests/Iceberg.Net.Linq.Tests.csproj" />
+    <Project Path="tests/Iceberg.Net.NetStandard.Tests/Iceberg.Net.NetStandard.Tests.csproj" />
+    <Project Path="tests/Iceberg.Net.Regression.Tests/Iceberg.Net.Regression.Tests.csproj" />
+    <Project Path="tests/Iceberg.Net.RestProtocol.Tests/Iceberg.Net.RestProtocol.Tests.csproj" />
+    <Project Path="tests/Iceberg.Net.RestServer.Tests/Iceberg.Net.RestServer.Tests.csproj" />
+    <Project Path="tests/Iceberg.Net.Spec.Tests/Iceberg.Net.Spec.Tests.csproj" />
+    <Project Path="tests/Iceberg.Net.TestSupport/Iceberg.Net.TestSupport.csproj" />
+  </Folder>
+  <Folder Name="/tools/">
+    <Project Path="tools/ShadowCompare/ShadowCompare.csproj" />
+  </Folder>
+</Solution>
