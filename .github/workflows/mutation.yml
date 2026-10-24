@@ -19,6 +19,9 @@ jobs:
         config: [stryker-puffin, stryker-core, stryker-metadata, stryker-deletes]
     steps:
       - uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0 # v7.0.0
+      - uses: actions/setup-dotnet@a98b56852c35b8e3190ac28c8c2271da59106c68 # v6
+        with:
+          global-json-file: global.json
       - run: dotnet tool restore
       - name: Mutation run
         working-directory: mutation

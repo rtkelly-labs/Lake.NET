@@ -22,6 +22,9 @@ jobs:
         target: [metadata, view-metadata, manifest-list, manifest, puffin, deletion-vector, roaring, theta]
     steps:
       - uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0 # v7.0.0
+      - uses: actions/setup-dotnet@a98b56852c35b8e3190ac28c8c2271da59106c68 # v6
+        with:
+          global-json-file: global.json
       - name: libFuzzer runtime
         run: sudo apt-get update -q && sudo apt-get install -y -q clang libclang-rt-18-dev
       - name: Fuzz ${{ matrix.target }}

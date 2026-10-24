@@ -1,6 +1,6 @@
 # EF Core provider (`Iceberg.Net.EntityFrameworkCore`)
 
-A non-relational EF Core 8 provider (the major matches the repository's `net8.0` target), in the same family as the
+A non-relational EF Core 10 provider (the major matches the repository's `net10.0` target), in the same family as the
 Cosmos provider. It is built on [`Iceberg.Net.Linq`](linq.md): EF Core supplies the model, the change tracker
 and the familiar API. The LINQ layer runs every query and bulk write, and `TableMutations` commits every change.
 

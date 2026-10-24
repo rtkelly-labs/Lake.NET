@@ -103,7 +103,7 @@ internal sealed class IcebergModelValidator(ModelValidatorDependencies dependenc
                 throw new InvalidOperationException($"{name}: relationships and navigations are not supported by the Iceberg provider (one table per query; join in memory)");
             if (et.GetComplexProperties().Any())
                 throw new InvalidOperationException($"{name}: complex types are not supported by the Iceberg provider");
-            if (et.GetQueryFilter() is not null)
+            if (et.GetDeclaredQueryFilters().Count > 0)
                 throw new InvalidOperationException($"{name}: global query filters are not supported by the Iceberg provider");
             foreach (var p in et.GetProperties())
             {

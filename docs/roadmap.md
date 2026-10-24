@@ -188,7 +188,7 @@ moment: when M1 starts and it needs NuGet publishing.
 
 ## Open questions
 
-1. **Package boundary for non-.NET 8 consumers.** Some consumer services are `net472`. `Core` and `Avro` now also
+1. **Package boundary for non-.NET 10 consumers.** Some consumer services are `net472`. `Core` and `Avro` now also
    build for `netstandard2.0` (metadata, manifests, expressions, transforms on .NET Framework 4.6.2+), with
    PolySharp and a small `Compat`/`Polyfills` layer; `DateOnly`/`TimeOnly` overloads exist only on .NET 6+. Going
    further (Data, Catalog: writing tables from net472) needs ParquetSharp's `net471` build and the AWS SDK's

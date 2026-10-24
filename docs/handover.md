@@ -23,7 +23,7 @@ The README's ["What works now"](../README.md#what-works-now-m0) table is the sum
 | C | Read path: projection, streaming, row-group pruning, ranged reads (Parquet chunks, Avro streaming), time travel with the snapshot's schema | [read-path.md](read-path.md) |
 | D | Snapshot management: branches, tags, rollback, cherry-pick (also across partition specs), WAP, retention, metadata tables, change feed | [snapshot-management.md](snapshot-management.md) |
 | E | Typed layer: row mapping by field ID, `AsQueryable<T>()`, typed writes | [linq.md](linq.md) |
-| F | EF Core 8 provider, with `SaveChanges` atomic across tables on catalogs with multi-table transactions | [efcore.md](efcore.md) |
+| F | EF Core 10 provider, with `SaveChanges` atomic across tables on catalogs with multi-table transactions | [efcore.md](efcore.md) |
 | G | REST catalog server; telemetry; Spark procedure SQL and EMR Serverless / Glue runners; Athena SQL and runner; DuckDB oracle | [rest-server.md](rest-server.md), [telemetry.md](telemetry.md), [spark-and-athena.md](spark-and-athena.md) |
 | v4 prep | Strictly increasing snapshot timestamps, manifest abstraction, typed column statistics, `content_stats` layout, `file` type, Mumbling bitmap | [iceberg-v4.md](iceberg-v4.md) |
 
