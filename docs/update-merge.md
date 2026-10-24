@@ -29,7 +29,12 @@ Rows are `object?[]` aligned to the current schema's top-level columns, as for i
 - Files are planned with pruning by the filter (partition summaries, partitions, column metrics); only those are read.
   Existing deletes are applied first, so a row already deleted is never resurrected.
 - Every assignment is evaluated against the row **as it was** before the update (`SET a = b, b = a` swaps).
-  Assigned columns must be top-level columns of the table and may be assigned once. Values are converted the way
+  A target is a top-level column or a field nested in structs, by its dotted path (`u.Set("address.city", "York")`);
+  each may be assigned once, and a struct and a field inside it cannot both be assigned. A field inside a list or map
+  cannot be targeted (assign the whole column). A nested assignment copies the structs it passes through and keeps
+  their other fields; when an enclosing struct is null it becomes a struct whose other fields are null (Spark's
+  nested assignment does the same), so leaving one of its required fields unassigned is an `ArgumentException`.
+  The same targets work in MERGE's `WhenMatchedUpdate(u => …)`. Values are converted the way
   filter literals are (`int` → `long`, `DateOnly` → days, `DateTime` → micros, decimals rescaled without loss);
   `null` into a required column, an unknown column or a value of the wrong type is an `ArgumentException`, raised
   before anything is written.

@@ -5,7 +5,10 @@ using Iceberg.Net.Types;
 
 namespace Iceberg.Net.Data;
 
-/// <summary>Column assignments for an update: a constant, or a value computed from the row being updated.</summary>
+/// <summary>
+/// Column assignments for an update: a constant, or a value computed from the row being updated. A column is a
+/// top-level column or a field nested in structs, by its dotted path (<c>address.city</c>).
+/// </summary>
 public sealed class RowUpdate
 {
     private readonly List<(string Column, Func<object?[], object?> Value)> _assignments = [];
@@ -270,14 +273,18 @@ public static partial class TableMutations
         return rewritten;
     }
 
-    /// <summary>Compiled column assignments: each value is checked against its column's type before anything is written.</summary>
+    /// <summary>
+    /// Compiled column assignments: each value is checked against its column's type before anything is written. A
+    /// target is a top-level column or, by its dotted path (<c>address.city</c>), a field nested in structs; lists and
+    /// maps are assigned whole.
+    /// </summary>
     private sealed class Assignments
     {
         private readonly Schema _schema;
-        private readonly (int Column, NestedField Field, Func<object?[], object?>? Value)[] _set;
+        private readonly (int[] Path, NestedField Field, Func<object?[], object?>? Value)[] _set;
         private readonly Func<object?[], object?[], object?[]>? _row;
 
-        private Assignments(Schema schema, (int, NestedField, Func<object?[], object?>?)[] set, Func<object?[], object?[], object?[]>? row)
+        private Assignments(Schema schema, (int[], NestedField, Func<object?[], object?>?)[] set, Func<object?[], object?[], object?[]>? row)
         {
             _schema = schema;
             _set = set;
@@ -288,28 +295,72 @@ public static partial class TableMutations
         {
             var update = new RowUpdate();
             configure(update);
-            var columns = schema.Columns.ToList();
             var seen = new HashSet<int>();
             var set = update.Assignments.Select(a =>
             {
-                var field = schema.FindField(a.Column) is { } f && columns.Contains(f)
-                    ? f : throw new ArgumentException($"Cannot assign '{a.Column}': not a top-level column of the table");
+                var field = schema.FindField(a.Column)
+                    ?? throw new ArgumentException($"Cannot assign '{a.Column}': not a column of the table");
+                var path = schema.StructPath(field.Id)?.ToArray()
+                    ?? throw new ArgumentException($"Cannot assign '{a.Column}': it is inside a list or map; assign the enclosing column instead");
                 if (!seen.Add(field.Id)) throw new ArgumentException($"Column '{a.Column}' is assigned more than once");
-                return (columns.IndexOf(field), field, (Func<object?[], object?>?)a.Value);
+                return (path, field, (Func<object?[], object?>?)a.Value);
             }).ToArray();
             if (set.Length == 0) throw new ArgumentException("An update needs at least one assignment");
+            // A struct and a field inside it: which value would win is ambiguous (Spark rejects it too).
+            foreach (var (path, field, _) in set)
+                foreach (var (other, otherField, _) in set)
+                    if (other.Length < path.Length && path.AsSpan(0, other.Length).SequenceEqual(other))
+                        throw new ArgumentException($"Cannot assign both '{schema.FindColumnName(otherField.Id)}' and its field '{schema.FindColumnName(field.Id)}'");
             return new Assignments(schema, set, null);
         }
 
         public static Assignments FullRow(Schema schema, Func<object?[], object?[], object?[]> row) => new(schema, [], row);
 
-        /// <summary>The updated row: assignments evaluated against the row as it was (<paramref name="source"/> for MERGE).</summary>
+        /// <summary>
+        /// The updated row: assignments evaluated against the row as it was (<paramref name="source"/> for MERGE). A
+        /// nested assignment copies each enclosing struct it passes through (the old row is never mutated); a null
+        /// enclosing struct becomes a struct whose other fields are null, as Spark's nested assignment does, so one
+        /// of its required fields left unassigned is an <see cref="ArgumentException"/>.
+        /// </summary>
         public object?[] Apply(object?[] target, object?[]? source)
         {
             if (_row is not null) return ConformRow(_schema, _row(target, source!), "updated row");
             var result = (object?[])target.Clone();
-            // Set(column, null) binds to the computed overload with a null delegate: treat it as the constant null.
-            foreach (var (column, field, value) in _set) result[column] = Conform(field, value?.Invoke(target));
+            HashSet<object?[]>? copied = null;
+            List<(StructType Type, object?[] Value, string Name)>? created = null;
+            foreach (var (path, field, value) in _set)
+            {
+                // Set(column, null) binds to the computed overload with a null delegate: treat it as the constant null.
+                var conformed = Conform(field, value?.Invoke(target));
+                var container = result;
+                IReadOnlyList<NestedField> fields = _schema.Columns;
+                for (var k = 0; k < path.Length - 1; k++)
+                {
+                    var structField = fields[path[k]];
+                    var type = (StructType)structField.Type;
+                    copied ??= new HashSet<object?[]>(ReferenceEqualityComparer.Instance);
+                    var child = container[path[k]] as object?[];
+                    if (child is null)
+                    {
+                        child = new object?[type.Fields.Count];
+                        (created ??= []).Add((type, child, structField.Name));
+                        copied.Add(child);
+                    }
+                    else if (!copied.Contains(child))
+                    {
+                        child = (object?[])child.Clone();
+                        copied.Add(child);
+                    }
+                    container[path[k]] = child;
+                    container = child;
+                    fields = type.Fields;
+                }
+                container[path[^1]] = conformed;
+            }
+            foreach (var (type, value, name) in created ?? [])
+                for (var i = 0; i < type.Fields.Count; i++)
+                    if (type.Fields[i].Required && value[i] is null)
+                        throw new ArgumentException($"Struct '{name}' is null in the row being updated, and its required field '{type.Fields[i].Name}' is not assigned");
             return result;
         }
 
