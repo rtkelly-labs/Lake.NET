@@ -187,13 +187,21 @@ public sealed class AzureCredentialVendingTests
                 "azurite-blob", "--blobHost", "0.0.0.0", "--skipApiVersionCheck");
             if (code != 0) throw new InvalidOperationException($"docker run {Image} failed: {output}");
             var azurite = new Azurite(name, $"http://127.0.0.1:{port}/{Account}");
-            using var http = new HttpClient();
-            for (var i = 0; ; i++)
+            try
             {
-                try { using var _ = await http.GetAsync(azurite.Endpoint); break; }
-                catch (HttpRequestException) when (i < 100) { await Task.Delay(100); }
+                using var http = new HttpClient();
+                for (var i = 0; ; i++)
+                {
+                    try { using var _ = await http.GetAsync(azurite.Endpoint); break; }
+                    catch (HttpRequestException) when (i < 100) { await Task.Delay(100); }
+                }
+                return azurite;
             }
-            return azurite;
+            catch
+            {
+                await azurite.DisposeAsync();
+                throw;
+            }
         }
 
         /// <summary>Create a container with Shared Key authorization (what the vendor's key is for).</summary>

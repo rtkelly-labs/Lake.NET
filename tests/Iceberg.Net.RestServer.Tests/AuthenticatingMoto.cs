@@ -56,7 +56,19 @@ public sealed class AuthenticatingMoto : IAsyncDisposable
         var name = $"iceberg-moto-auth-{Guid.NewGuid():N}"[..32];
         var (code, output) = await Run("docker", "run", "-d", "--rm", "--name", name, "-p", $"127.0.0.1:{port}:5000", "-e", "INITIAL_NO_AUTH_ACTION_COUNT=3", Image);
         if (code != 0) throw new InvalidOperationException($"docker run {Image} failed: {output}");
-        var endpoint = $"http://127.0.0.1:{port}";
+        try
+        {
+            return await BootstrapAsync(name, $"http://127.0.0.1:{port}");
+        }
+        catch
+        {
+            await Run("docker", "rm", "-f", name);
+            throw;
+        }
+    }
+
+    private static async Task<AuthenticatingMoto> BootstrapAsync(string name, string endpoint)
+    {
         using var http = new HttpClient { BaseAddress = new Uri(endpoint) };
         for (var i = 0; ; i++)
         {
