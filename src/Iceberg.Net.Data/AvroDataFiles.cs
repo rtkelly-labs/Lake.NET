@@ -20,6 +20,11 @@ public sealed record DataFileReadOptions
     public Expressions.Expression? Filter { get; init; }
     /// <summary>Receives row-group read/skip counts.</summary>
     public ScanMetrics? Metrics { get; init; }
+    /// <summary>
+    /// The file's size in bytes (a manifest's <c>file_size_in_bytes</c>), so a Parquet file can be read in ranges
+    /// without first asking storage for its length.
+    /// </summary>
+    public long? FileSize { get; init; }
 }
 
 /// <summary>
@@ -44,7 +49,8 @@ public static class DataFiles
     /// </summary>
     public static IAsyncEnumerable<DataFileBatch> ReadBatchesAsync(IFileIO io, Manifests.DataFile file, Schema projection, NameMapping? mapping = null,
         DataFileReadOptions? options = null, CancellationToken ct = default) =>
-        ReadBatchesAsync(io, file.FilePath, file.FileFormat, projection, mapping, options, ct);
+        ReadBatchesAsync(io, file.FilePath, file.FileFormat, projection, mapping,
+            (options ?? new DataFileReadOptions()) with { FileSize = options?.FileSize ?? (file.FileSizeInBytes > 0 ? file.FileSizeInBytes : null) }, ct);
 
     public static IAsyncEnumerable<DataFileBatch> ReadBatchesAsync(IFileIO io, string location, string format, Schema projection, NameMapping? mapping = null,
         DataFileReadOptions? options = null, CancellationToken ct = default) =>

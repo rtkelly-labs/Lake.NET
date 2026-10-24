@@ -306,6 +306,12 @@ public static class ParquetFiles
         return rows;
     }
 
+    /// <summary>Files up to this size are fetched whole: one request costs about as much as several small ones.</summary>
+    internal const long WholeFileBelow = 1 << 20;
+
+    /// <summary>What a Parquet reader reads first to find the footer (parquet-cpp's default footer read size).</summary>
+    internal const long FooterPrefetch = 64 * 1024;
+
     /// <summary>
     /// Stream a data file one row group at a time, decoding only the leaf columns of <paramref name="projection"/>'s
     /// top-level columns. With <see cref="DataFileReadOptions.Filter"/>, row groups whose footer statistics rule the
@@ -314,12 +320,17 @@ public static class ParquetFiles
     public static async IAsyncEnumerable<DataFileBatch> ReadBatchesAsync(IFileIO io, string location, Schema projection, NameMapping? mapping,
         DataFileReadOptions? options, [EnumeratorCancellation] CancellationToken ct = default)
     {
-        var bytes = await io.ReadAllAsync(location, ct);
-        using var input = new ManagedRandomAccessFile(new MemoryStream(bytes));
+        // Ranged reads: the footer first, then only the column chunks of the projected columns in row groups that
+        // are read. A small file, or one whose every column is read, is fetched in one request.
+        var length = options?.FileSize ?? await io.LengthAsync(location, ct);
+        var source = new RangeReadStream(io, location, length, ct);
+        await source.PrefetchAsync(length <= WholeFileBelow ? 0 : length - FooterPrefetch, length, ct);
+        using var input = new ManagedRandomAccessFile(source);
         using var reader = new ParquetFileReader(input);
         using var meta = reader.FileMetaData;
         var layout = FileLayout.Of(meta, projection, mapping);
         var evaluator = options?.Filter is { } filter && filter is not AlwaysTrue ? new MetricsEvaluator(filter) : null;
+        if (evaluator is null && layout.LeafCount == meta.NumColumns) await source.PrefetchAsync(0, length, ct);
         var metrics = options?.Metrics;
         var groups = meta.NumRowGroups;
         long position = 0;
@@ -378,6 +389,13 @@ public static class ParquetFiles
         /// <summary>Field ID → leaf column index, for leaves outside lists and maps (one value per row).</summary>
         public required Dictionary<int, int> StatsLeaves { get; init; }
         public required SchemaDescriptor Descriptor { get; init; }
+        /// <summary>How many distinct leaf columns of the file the projection decodes.</summary>
+        public int LeafCount => Sources.SelectMany(s => s switch
+        {
+            ColumnSource.Leaf l => [l.Column],
+            ColumnSource.Nested n => n.Tree.Leaves.Select(x => x.Column),
+            _ => [],
+        }).Distinct().Count();
 
         public static FileLayout Of(FileMetaData meta, Schema projection, NameMapping? mapping)
         {

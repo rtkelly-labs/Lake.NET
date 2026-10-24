@@ -2,6 +2,7 @@ using Iceberg.Net.Arrow;
 using Iceberg.Net.Catalog;
 using Iceberg.Net.Data;
 using Iceberg.Net.Expressions;
+using Iceberg.Net.IO;
 using Iceberg.Net.Manifests;
 using Iceberg.Net.Partitioning;
 using Iceberg.Net.Types;
@@ -454,5 +455,131 @@ public sealed class ReadPathTests : IDisposable
         Assert.True(metrics.RowGroupsRead > 0); // deletes force the scan path
         Assert.Equal(40, (await Read(t, new ScanRequest())).Count);
         Assert.Equal(30, await TableScan.CountAsync(t, new ScanRequest { Snapshot = SnapshotSelector.Id(s1) })); // before the delete
+    }
+
+    // ---------- ranged reads ----------
+
+    /// <summary>Counts what is downloaded: whole-object reads and ranged reads.</summary>
+    private sealed class CountingFileIO(IFileIO inner) : IFileIO
+    {
+        public long BytesRead, RangeRequests, WholeReads;
+        public async Task<byte[]> ReadAllAsync(string location, CancellationToken ct = default)
+        {
+            var b = await inner.ReadAllAsync(location, ct);
+            Interlocked.Add(ref BytesRead, b.Length);
+            Interlocked.Increment(ref WholeReads);
+            return b;
+        }
+        public Task<Stream> OpenReadAsync(string location, CancellationToken ct = default) => throw new InvalidOperationException("unmetered stream");
+        public async Task<byte[]> ReadRangeAsync(string location, long offset, int length, CancellationToken ct = default)
+        {
+            var b = await inner.ReadRangeAsync(location, offset, length, ct);
+            Interlocked.Add(ref BytesRead, b.Length);
+            Interlocked.Increment(ref RangeRequests);
+            return b;
+        }
+        public Task<long> LengthAsync(string location, CancellationToken ct = default) => inner.LengthAsync(location, ct);
+        public Task<bool> ExistsAsync(string location, CancellationToken ct = default) => inner.ExistsAsync(location, ct);
+        public Task WriteAsync(string location, ReadOnlyMemory<byte> content, bool overwrite = false, CancellationToken ct = default) => inner.WriteAsync(location, content, overwrite, ct);
+        public Task DeleteAsync(string location, CancellationToken ct = default) => inner.DeleteAsync(location, ct);
+        public void Dispose() { }
+    }
+
+    private static readonly Schema WideSchema = new(0,
+    [
+        NestedField.Require(1, "id", PrimitiveType.Long),
+        NestedField.Optional(2, "a", PrimitiveType.Long),
+        NestedField.Optional(3, "b", PrimitiveType.Long),
+        NestedField.Optional(4, "s", new StructType([NestedField.Optional(5, "x", PrimitiveType.Long), NestedField.Optional(6, "y", PrimitiveType.Long)])),
+    ]);
+
+    /// <summary>A ~4 MB file: 100k rows of incompressible longs in 4 row groups, ids ascending.</summary>
+    private async Task<DataFile> WideFile(IFileIO io)
+    {
+        var random = new Random(7);
+        var rows = Enumerable.Range(0, 100_000).Select(i => new object?[] { (long)i, random.NextInt64(), random.NextInt64(), new object?[] { random.NextInt64(), random.NextInt64() } }).ToList();
+        var location = Path.Combine(_warehouse, "wide", $"{Guid.NewGuid():N}.parquet");
+        var file = await ParquetFiles.WriteAsync(io, location, WideSchema, 0, [], rows, new ParquetWriteOptions { RowGroupRows = 25_000 });
+        Assert.True(file.FileSizeInBytes > 3_000_000, $"{file.FileSizeInBytes}");
+        return file;
+    }
+
+    private static async Task<List<object?[]>> ReadFile(IFileIO io, DataFile file, Schema projection, Expression? filter = null)
+    {
+        var rows = new List<object?[]>();
+        var options = new DataFileReadOptions { Filter = filter is null ? null : Binder.Bind(WideSchema, filter) };
+        await foreach (var batch in DataFiles.ReadBatchesAsync(io, file, projection, null, options)) rows.AddRange(batch.Rows);
+        return rows;
+    }
+
+    [Fact]
+    public async Task A_projected_read_downloads_only_the_footer_and_the_projected_column_chunks()
+    {
+        var local = new LocalFileIO();
+        var file = await WideFile(local);
+        var all = await ParquetFiles.ReadAsync(local, file.FilePath, WideSchema); // oracle: the whole file
+
+        // One of four equal-width leaf columns (s has two): about a fifth of the file, never the whole of it.
+        var io = new CountingFileIO(local);
+        var projection = new Schema(0, [WideSchema.Columns[2]]);
+        var rows = await ReadFile(io, file, projection);
+        Assert.Equal(all.Select(r => r[2]), rows.Select(r => r[0]));
+        Assert.Equal(0, io.WholeReads);
+        Assert.True(io.BytesRead < file.FileSizeInBytes * 0.3, $"read {io.BytesRead} of {file.FileSizeInBytes} bytes");
+        Assert.True(io.RangeRequests <= 1 + 4, $"{io.RangeRequests} requests"); // footer + one chunk per row group
+
+        // Row-group pruning skips the chunks of groups the filter rules out: one group of four.
+        var pruned = new CountingFileIO(local);
+        var some = await ReadFile(pruned, file, projection, Expr.And(Expr.GreaterThanOrEqual("id", 30_000L), Expr.LessThan("id", 40_000L)));
+        Assert.Equal(25_000, some.Count);
+        Assert.Equal(all.Skip(25_000).Take(25_000).Select(r => r[2]), some.Select(r => r[0]));
+        Assert.True(pruned.BytesRead < io.BytesRead / 2, $"pruned read {pruned.BytesRead}, unpruned {io.BytesRead}");
+
+        // A nested column reads its own leaves only.
+        var nested = new CountingFileIO(local);
+        var structRows = await ReadFile(nested, file, new Schema(0, [WideSchema.Columns[3]]));
+        Assert.Equal(Canonical(all.Select(r => new[] { r[3] })), Canonical(structRows));
+        Assert.True(nested.BytesRead < file.FileSizeInBytes * 0.6, $"read {nested.BytesRead} of {file.FileSizeInBytes} bytes");
+    }
+
+    [Fact]
+    public async Task A_read_of_every_column_or_of_a_small_file_is_one_request_after_the_footer()
+    {
+        var local = new LocalFileIO();
+        var file = await WideFile(local);
+        var io = new CountingFileIO(local);
+        Assert.Equal(Canonical(await ParquetFiles.ReadAsync(local, file.FilePath, WideSchema)), Canonical(await ReadFile(io, file, WideSchema)));
+        Assert.Equal(2, io.RangeRequests); // the footer, then the rest in one request
+        Assert.Equal(file.FileSizeInBytes, io.BytesRead);
+
+        var small = await ParquetFiles.WriteAsync(local, Path.Combine(_warehouse, "wide", "small.parquet"), WideSchema, 0, [], [[1L, 2L, 3L, null]]);
+        var once = new CountingFileIO(local);
+        Assert.Single(await ReadFile(once, small, new Schema(0, [WideSchema.Columns[0]])));
+        Assert.Equal((1L, small.FileSizeInBytes), (once.RangeRequests, once.BytesRead));
+    }
+
+    [Fact]
+    public async Task A_ranged_stream_serves_reads_across_fetched_ranges()
+    {
+        var local = new LocalFileIO();
+        var path = Path.Combine(_warehouse, "bytes.bin");
+        var content = Enumerable.Range(0, 100_000).Select(i => (byte)(i * 31)).ToArray();
+        await local.WriteAsync(path, content);
+        var io = new CountingFileIO(local);
+        await using var s = new RangeReadStream(io, path, content.Length) { MinimumFetch = 1000 };
+        await s.PrefetchAsync(50_000, 10_000);
+        await s.PrefetchAsync(55_000, 10_000); // only 60 000..65 000 is new
+        Assert.Equal((2L, 15_000L), (io.RangeRequests, io.BytesRead));
+
+        s.Position = 45_000; // 45 000..50 000 is fetched on demand, then 50 000..65 000 comes from the cache, then 65 000..70 000
+        var buffer = new byte[25_000];
+        s.ReadExactly(buffer);
+        Assert.Equal(content[45_000..70_000], buffer);
+        Assert.Equal((4L, 25_000L), (io.RangeRequests, io.BytesRead));
+
+        s.Seek(-10, SeekOrigin.End);
+        Assert.Equal(10, s.Read(new byte[100])); // short read at the end
+        Assert.Equal(0, s.Read(new byte[100]));
+        Assert.Equal((5L, 25_010L), (io.RangeRequests, io.BytesRead)); // the tail fetch: MinimumFetch clamped to the end
     }
 }
