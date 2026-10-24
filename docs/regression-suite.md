@@ -22,8 +22,8 @@ a failure instead. Every test is linked to the spec section it verifies ([spec-t
 | **BDD** | `Iceberg.Net.Behaviour.Tests` (Reqnroll) | PyIceberg oracle for the cross-engine steps | Gherkin specification of write modes × delete mechanisms × format versions, concurrency and conversion; deep fsck after every scenario |
 | **L3 AWS-only** | `AthenaTests` | AWS + Athena workgroup | Athena reads our tables (counts, sums, partition pruning on our transforms); we read Athena-written tables including its position deletes |
 
-Current results (emulation, everything up): **L0 210/210**, **L1+L2 117/119** (2 Athena tests skip without AWS),
-**BDD 39/39**.
+Current results (emulation, everything up): see the test inventory in [handover.md](handover.md#test-inventory).
+The regression suite passes 256 with 3 skipped (2 Athena tests need AWS; Nessie has no v3).
 
 ## Environment variables
 

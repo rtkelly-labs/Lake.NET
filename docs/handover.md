@@ -83,14 +83,91 @@ These cost time during the build-out, and may not apply on a normal workstation 
   the order.
 - The full list is in [roadmap.md](roadmap.md), under "Gaps the phases left open".
 
-## Suggested next steps
+## Handover actions
 
-1. **Open the pull request** and let CI run. Fix anything CI's fresh environment catches, such as image versions or
-   timing.
-2. **Review the public API** before a first package release. Things to look at:
-   - `TableMutations`, `StagedCommit`, `ScanRequest`;
-   - the EF Core options;
-   - the REST server's configuration keys.
-3. **Run the AWS sandbox** (roadmap action #4). That covers Athena, Glue and S3 Tables, plus a real EMR Serverless job
-   from `Iceberg.Net.Spark`.
-4. **Decide on the upstream tickets**, and file those you want.
+The list is in order. Each action says who has to do it and how you know it's done. Tick the boxes in this file as
+they're done.
+
+### 1. Get CI to run the branch
+- **Who:** anyone with push access.
+- **How:**
+  1. Open a pull request from `ccr-cb295622-bcczx3` to `main`. Changes outside `iceberg-dotnet/` are only
+     `.github/workflows/iceberg-dotnet*.yml`.
+  2. The `iceberg-dotnet` workflow runs every suite in the [test inventory](#test-inventory) against fresh emulators.
+- **Watch for:** image tags pulled for the first time, timing-sensitive tests, and the `duckdb` dependency group.
+  None of these have been through GitHub's runners yet.
+- **Done when:** the workflow is green on the pull request's head.
+- [ ] Done
+
+### 2. Review the code
+- **Who:** the team.
+- **How:** it is big, so review it phase by phase. Each phase is one merge commit, listed by
+  `git log --merges main..ccr-cb295622-bcczx3`.
+- **The public API to settle before a first package:**
+  - `TableMutations` (including the staged `Stage*Async` methods and `StagedCommit`);
+  - `ScanRequest` / `TableScan`;
+  - `SnapshotManagement`, the LINQ entry points, the EF Core options builder;
+  - the REST server's configuration keys ([rest-server.md](rest-server.md#configuration-iceberg-section)).
+- **Done when:** the pull request is approved and merged.
+- [ ] Done
+
+### 3. Configure the AWS sandbox
+- **Who:** someone with AWS admin rights. This is roadmap action #4.
+- **How:**
+  1. Create an OIDC role trusted by this repository. It needs S3 on a regression prefix, Glue on `regr_*` databases,
+     and one Athena engine v3 workgroup.
+  2. Set the repository variables listed at the top of `.github/workflows/iceberg-dotnet-aws.yml`:
+     - `ICEBERG_AWS_ROLE_ARN`, `ICEBERG_AWS_WAREHOUSE`, `ICEBERG_ATHENA_WORKGROUP`;
+     - optionally `ICEBERG_ATHENA_OUTPUT` and `ICEBERG_GLUE_REST_WAREHOUSE`.
+  3. Add an S3 lifecycle rule on the prefix that expires objects after 3 days.
+- **Why it matters:** the workflow is nightly and only runs from `main`, so it starts after action 2. Until then,
+  trigger it by hand (`workflow_dispatch`).
+- **It covers:** the L3 Athena tests, real Glue, the Glue Iceberg REST endpoint, and the Athena runner in
+  `Iceberg.Net.Athena`.
+- **Done when:** a nightly run is green with no Athena skips.
+- [ ] Done
+
+### 4. Run a real EMR Serverless or Glue job
+- **Who:** someone with the sandbox from action 3.
+- **How:**
+  1. Generate a maintenance script with `IcebergProcedures` (for example `rewrite_data_files` on a regression table).
+  2. Submit it with `EmrServerlessSqlJobRunner` or `GlueSqlJobRunner`, following
+     [spark-and-athena.md](spark-and-athena.md).
+  3. Check the table afterwards with `TableValidator`.
+- **Done when:** the job succeeds and the validator reports no errors. Then note the result in
+  [roadmap.md](roadmap.md).
+- [ ] Done
+
+### 5. Choose shadow tables
+- **Who:** the data platform owners.
+- **How:** pick the production tables to shadow-read nightly (reads only), and set `ICEBERG_SHADOW_TABLES` to them
+  as `glue_db.table` names separated by spaces.
+- **Done when:** the shadow job in the AWS workflow reports agreement.
+- [ ] Done
+
+### 6. Decide on the upstream tickets
+- **Who:** the team.
+- **How:** the tickets are in [upstream/README.md](upstream/README.md), with filing steps. Filing is public, so it's
+  the team's decision. Then update each page's status line.
+- **Done when:** each ticket is filed or explicitly dropped.
+- [ ] Done
+
+### 7. Bump Parquet.SourceGenerator
+- **Who:** the maintainer of that project.
+- **How:** release a version carrying #712 (field IDs, local timestamps, INT32 dates), then raise the test pin from
+  0.0.3 ([parquet-sourcegenerator.md](parquet-sourcegenerator.md)).
+- **Done when:** the import tests run against the release.
+- [ ] Done
+
+### 8. Decide where the project lives
+- **Who:** the team.
+- **How:** decide whether `iceberg-dotnet/` moves to its own repository before NuGet publishing (roadmap,
+  "Breaking out"). The folder is self-contained, so it's a move, not a refactor.
+- **Done when:** decided and recorded in [roadmap.md](roadmap.md).
+- [ ] Done
+
+### 9. Tidy the local checkout
+- **Who:** the owner of the working copy.
+- **How:** the `.github/copilot-instructions.md` typechange (symlink → file) predates this work, and the owner chose
+  to leave it. Either restore it (`git checkout -- .github/copilot-instructions.md`) or commit it deliberately.
+- [ ] Done

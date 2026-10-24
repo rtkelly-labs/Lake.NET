@@ -162,7 +162,7 @@ Runs weekly in `.github/workflows/iceberg-dotnet-mutation.yml` (Puffin, and Core
    cleanup (`DropTable(purge)` deletes every reachable file).
 3. **Shadow tables**: choose the production tables to shadow-read nightly (`ICEBERG_SHADOW_TABLES`). The tool only
    reads.
-4. **Upstream issues**: Parquet.Net group field IDs ([drafted](upstream/parquet-net-group-field-ids.md), patch
+4. **Upstream issues** (proposed tickets, none filed: [upstream/README.md](upstream/README.md)): Parquet.Net group field IDs ([drafted](upstream/parquet-net-group-field-ids.md), patch
    verified), PyIceberg reading a null `list<struct>` as empty ([drafted](upstream/pyiceberg-null-list-of-struct.md)), Gravitino
    misattributing deletion vectors in scan plans ([drafted](upstream/gravitino-dv-references.md))
    (the Parquet.SourceGenerator Iceberg columns, field IDs, local timestamps and INT32 dates, were merged as
