@@ -27,7 +27,8 @@ internal static class AwsServiceClients
 
     public static AmazonEMRServerlessClient EmrServerless() => new(Configure(new AmazonEMRServerlessConfig()));
     public static AmazonGlueClient Glue() => new(Configure(new AmazonGlueConfig()));
-    public static AmazonAthenaClient Athena() => new(Configure(new AmazonAthenaConfig()));
+    public static AmazonAthenaConfig AthenaConfig() => Configure(new AmazonAthenaConfig());
+    public static AmazonAthenaClient Athena() => new(AthenaConfig());
 }
 
 /// <summary>

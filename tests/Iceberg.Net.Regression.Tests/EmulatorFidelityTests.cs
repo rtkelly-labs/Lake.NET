@@ -1,5 +1,7 @@
 using Amazon.Glue;
 using Amazon.Glue.Model;
+using Iceberg.Net.Athena;
+using Ath = Amazon.Athena.Model;
 using Iceberg.Net.IO;
 
 namespace Iceberg.Net.Regression.Tests;
@@ -12,6 +14,7 @@ namespace Iceberg.Net.Regression.Tests;
 [Spec("File System Operations")]
 [Spec("Metastore Tables")]
 [Trait("Category", "Regression")]
+[Collection(MotoServiceStateCollection.Name)] // the Athena case uses moto's process-wide result queue
 public sealed class EmulatorFidelityTests
 {
     private static string Location(string name) => $"{TestEnvironment.Current.Warehouse.TrimEnd('/')}/fidelity/{TestEnvironment.Current.RunId}/{name}";
@@ -75,5 +78,48 @@ public sealed class EmulatorFidelityTests
             await glue.DeleteTableAsync(new DeleteTableRequest { DatabaseName = db, Name = "t" });
             await glue.DeleteDatabaseAsync(new DeleteDatabaseRequest { Name = db });
         }
+    }
+
+    /// <summary>
+    /// Athena returns GetQueryResults in pages of at most 1000 rows (a SELECT's header row counting as one) with a
+    /// NextToken, and refuses a larger MaxResults. moto returns everything at once without the shim.
+    /// </summary>
+    [SkippableFact]
+    public async Task Athena_get_query_results_pages_at_1000_rows()
+    {
+        var env = TestEnvironment.Current;
+        using var athena = AwsServiceClients.Athena();
+        string id;
+        if (env.Target == Target.Emulation)
+        {
+            Require.Target();
+            Skip.IfNot((await MotoApi.ShimsAsync()).Contains("athena-get-query-results-paging"),
+                $"moto at {env.S3Endpoint} was started before emulation/moto_server.py had the Athena paging shim: restart it (emulation/up.sh)");
+            await MotoApi.QueueAthenaResultAsync(["x"], Enumerable.Range(1, 2500).Select(i => (IReadOnlyList<string?>)[i.ToString(System.Globalization.CultureInfo.InvariantCulture)]));
+            id = (await athena.StartQueryExecutionAsync(new Ath.StartQueryExecutionRequest { QueryString = "SELECT x FROM UNNEST(sequence(1, 2500)) AS t(x)", WorkGroup = "primary" })).QueryExecutionId;
+        }
+        else
+        {
+            Require.Athena();
+            var runner = new AthenaQueryRunner(athena, new AthenaQueryOptions { WorkGroup = env.AthenaWorkGroup, OutputLocation = env.AthenaOutput });
+            id = await runner.StartAsync("SELECT x FROM UNNEST(sequence(1, 2500)) AS t(x)");
+            await runner.WaitAsync(id);
+        }
+
+        var pages = new List<Ath.GetQueryResultsResponse>();
+        string? token = null;
+        do
+        {
+            var page = await athena.GetQueryResultsAsync(new Ath.GetQueryResultsRequest { QueryExecutionId = id, NextToken = token });
+            pages.Add(page);
+            token = page.NextToken;
+        } while (token is not null);
+
+        Assert.Equal([1000, 1000, 501], pages.Select(p => p.ResultSet.Rows.Count)); // 2500 rows + the header
+        Assert.Equal("x", pages[0].ResultSet.Rows[0].Data[0].VarCharValue);
+        Assert.Equal("2500", pages[2].ResultSet.Rows[^1].Data[0].VarCharValue);
+        var tooMany = pages[0].ResultSet.Rows.Count + 1; // not a constant: the SDK's analyzer refuses MaxResults = 1001 at compile time
+        await Assert.ThrowsAsync<Ath.InvalidRequestException>(() =>
+            athena.GetQueryResultsAsync(new Ath.GetQueryResultsRequest { QueryExecutionId = id, MaxResults = tooMany }));
     }
 }

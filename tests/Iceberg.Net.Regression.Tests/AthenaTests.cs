@@ -1,5 +1,4 @@
-using Amazon.Athena;
-using Amazon.Athena.Model;
+using Iceberg.Net.Athena;
 using Iceberg.Net.Catalog;
 using Iceberg.Net.Data;
 
@@ -14,26 +13,13 @@ namespace Iceberg.Net.Regression.Tests;
 [Trait("Category", "Aws")]
 public sealed class AthenaTests
 {
+    /// <summary>Run <paramref name="sql"/> through this library's <see cref="AthenaQueryRunner"/>; the rows without the header.</summary>
     private static async Task<List<List<string?>>> QueryAsync(string sql)
     {
         var env = TestEnvironment.Current;
-        using var athena = new AmazonAthenaClient(Amazon.RegionEndpoint.GetBySystemName(env.Region));
-        var start = await athena.StartQueryExecutionAsync(new StartQueryExecutionRequest
-        {
-            QueryString = sql,
-            WorkGroup = env.AthenaWorkGroup,
-            ResultConfiguration = env.AthenaOutput is null ? null : new ResultConfiguration { OutputLocation = env.AthenaOutput },
-        });
-        while (true)
-        {
-            var status = (await athena.GetQueryExecutionAsync(new GetQueryExecutionRequest { QueryExecutionId = start.QueryExecutionId })).QueryExecution.Status;
-            if (status.State == QueryExecutionState.SUCCEEDED) break;
-            if (status.State == QueryExecutionState.FAILED || status.State == QueryExecutionState.CANCELLED)
-                throw new InvalidOperationException($"Athena query {status.State}: {status.StateChangeReason}\n{sql}");
-            await Task.Delay(1000);
-        }
-        var results = await athena.GetQueryResultsAsync(new GetQueryResultsRequest { QueryExecutionId = start.QueryExecutionId });
-        return results.ResultSet.Rows.Skip(1).Select(r => r.Data.Select(d => (string?)d.VarCharValue).ToList()).ToList();
+        using var athena = AwsServiceClients.Athena();
+        var runner = new AthenaQueryRunner(athena, new AthenaQueryOptions { WorkGroup = env.AthenaWorkGroup, OutputLocation = env.AthenaOutput });
+        return (await runner.RunAsync(sql)).Rows.Select(r => r.ToList()).ToList();
     }
 
     [SkippableFact]
@@ -73,9 +59,12 @@ public sealed class AthenaTests
         var ns = env.NewNamespace("athena_write");
         await catalog.CreateNamespaceAsync(Namespace.Of(ns));
         var location = $"{env.Warehouse.TrimEnd('/')}/athena/{ns}/t";
+        var athenaTable = new AthenaTable(ns, "t");
         try
         {
-            await QueryAsync($"CREATE TABLE \"{ns}\".t (id bigint, name string) LOCATION '{location}' TBLPROPERTIES ('table_type'='ICEBERG')");
+            // DDL in Athena's Hive dialect (back-quotes), as AthenaSql writes it.
+            await QueryAsync(AthenaSql.CreateTable(athenaTable, new Types.Schema(0,
+                [Types.NestedField.Optional(1, "id", Types.PrimitiveType.Long), Types.NestedField.Optional(2, "name", Types.PrimitiveType.String)]), location));
             await QueryAsync($"INSERT INTO \"{ns}\".t VALUES (1, 'a'), (2, 'b'), (3, NULL)");
             await QueryAsync($"DELETE FROM \"{ns}\".t WHERE id = 2"); // Athena writes positional delete files (merge-on-read)
 
@@ -102,7 +91,7 @@ public sealed class AthenaTests
         }
         finally
         {
-            await QueryAsync($"DROP TABLE IF EXISTS \"{ns}\".t");
+            await QueryAsync($"DROP TABLE IF EXISTS {athenaTable.Ddl}");
             await catalog.DropNamespaceAsync(Namespace.Of(ns));
         }
     }

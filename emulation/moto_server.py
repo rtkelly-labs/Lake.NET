@@ -11,9 +11,11 @@ Run: python -I emulation/moto_server.py [--port 5000]
 from __future__ import annotations
 
 import argparse
+import json
 import threading
 from typing import Any
 
+from moto.athena.responses import AthenaResponse
 from moto.core.exceptions import JsonRESTError
 from moto.glue.models import GlueBackend
 from moto.glue.responses import GlueResponse
@@ -68,13 +70,57 @@ def _create_table_locked(self: GlueBackend, *args: Any, **kwargs: Any) -> Any:
 GlueBackend.create_table = _create_table_locked  # type: ignore[method-assign]
 
 
+# Shim 3: Athena GetQueryResults pages. Real Athena returns at most MaxResults rows (default and maximum 1000,
+# the header row of a SELECT counting as one) and a NextToken for the rest; moto returns every row at once, so a
+# client that ignores NextToken would pass in emulation and silently drop rows on AWS.
+_ATHENA_PAGE = 1000
+_original_get_query_results = AthenaResponse.get_query_results
+
+
+def _get_query_results_paged(self: AthenaResponse) -> Any:
+    max_results = int(self._get_param("MaxResults") or _ATHENA_PAGE)
+    if not 1 <= max_results <= _ATHENA_PAGE:
+        return self.error(f"MaxResults must be between 1 and {_ATHENA_PAGE}", 400)
+    token = self._get_param("NextToken")
+    start = int(token) if token else 0
+    body = json.loads(_original_get_query_results(self))
+    rows = body["ResultSet"]["Rows"]
+    body["ResultSet"]["Rows"] = rows[start : start + max_results]
+    if start + max_results < len(rows):
+        body["NextToken"] = str(start + max_results)
+    return json.dumps(body)
+
+
+AthenaResponse.get_query_results = _get_query_results_paged  # type: ignore[method-assign]
+
+# Which shims this process applies, served at /__shims so tests can tell a stale emulator (started before a shim
+# was added) from a missing AWS guarantee.
+SHIMS = [
+    "glue-update-table-version-id",
+    "glue-create-table-atomic",
+    "athena-get-query-results-paging",
+]
+
+
+def with_shim_listing(app: Any) -> Any:
+    def wrapped(environ: dict[str, Any], start_response: Any) -> Any:
+        if environ.get("PATH_INFO") == "/__shims":
+            start_response("200 OK", [("Content-Type", "application/json")])
+            return [json.dumps(SHIMS).encode()]
+        return app(environ, start_response)
+
+    return wrapped
+
+
 def main() -> None:
     parser = argparse.ArgumentParser()
     parser.add_argument("--host", default="0.0.0.0")  # noqa: S104 - emulator, local/CI only
     parser.add_argument("--port", type=int, default=5000)
     args = parser.parse_args()
     app = DomainDispatcherApplication(create_backend_app)
-    run_simple(args.host, args.port, app, threaded=True, use_reloader=False)
+    run_simple(
+        args.host, args.port, with_shim_listing(app), threaded=True, use_reloader=False
+    )
 
 
 if __name__ == "__main__":
