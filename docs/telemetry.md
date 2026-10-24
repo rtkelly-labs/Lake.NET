@@ -2,7 +2,7 @@
 
 Scans, commits and catalog calls emit OpenTelemetry-compatible **traces** and **metrics** through the BCL's
 `System.Diagnostics.ActivitySource` and `System.Diagnostics.Metrics.Meter`, both named **`Iceberg.Net`**. The
-library takes no OpenTelemetry dependency: on .NET 8 these types are in the box, and the netstandard2.0 build of Core
+library takes no OpenTelemetry dependency: on .NET 10 these types are in the box, and the netstandard2.0 build of Core
 references `System.Diagnostics.DiagnosticSource` 8.0. Nothing is recorded, and almost nothing allocated, until a
 listener subscribes.
 

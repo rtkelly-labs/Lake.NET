@@ -14,7 +14,7 @@ export NUGET_PACKAGES="$work/packages"
 mkdir -p "$work/app"
 cat > "$work/app/app.csproj" <<'XML'
 <Project Sdk="Microsoft.NET.Sdk">
-  <PropertyGroup><OutputType>Exe</OutputType><TargetFramework>net8.0</TargetFramework><Nullable>enable</Nullable><ImplicitUsings>enable</ImplicitUsings></PropertyGroup>
+  <PropertyGroup><OutputType>Exe</OutputType><TargetFramework>net10.0</TargetFramework><Nullable>enable</Nullable><ImplicitUsings>enable</ImplicitUsings></PropertyGroup>
   <ItemGroup><PackageReference Include="Iceberg.Net.Data" Version="0.1.0-*" /></ItemGroup>
 </Project>
 XML
@@ -46,7 +46,7 @@ dotnet run --project "$work/app" --nologo --source "$out" --source https://api.n
 mkdir -p "$work/higher"
 cat > "$work/higher/higher.csproj" <<'XML'
 <Project Sdk="Microsoft.NET.Sdk">
-  <PropertyGroup><OutputType>Exe</OutputType><TargetFramework>net8.0</TargetFramework><Nullable>enable</Nullable><ImplicitUsings>enable</ImplicitUsings></PropertyGroup>
+  <PropertyGroup><OutputType>Exe</OutputType><TargetFramework>net10.0</TargetFramework><Nullable>enable</Nullable><ImplicitUsings>enable</ImplicitUsings></PropertyGroup>
   <ItemGroup>
     <PackageReference Include="Iceberg.Net.EntityFrameworkCore" Version="0.1.0-*" />
     <PackageReference Include="Iceberg.Net.Spark" Version="0.1.0-*" />
