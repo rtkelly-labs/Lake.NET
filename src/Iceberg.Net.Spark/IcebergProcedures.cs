@@ -6,6 +6,14 @@ namespace Iceberg.Net.Spark;
 /// </summary>
 public sealed record SparkProcedureCall(string Catalog, string Procedure, IReadOnlyList<KeyValuePair<string, object?>> Arguments)
 {
+    /// <summary>Argument names are inserted as written, so only Spark's plain identifier form is accepted.</summary>
+    public IReadOnlyList<KeyValuePair<string, object?>> Arguments { get; } = Arguments.All(a => IsArgumentName(a.Key))
+        ? Arguments
+        : throw new ArgumentException($"Procedure argument names must be letters, digits and underscores: {string.Join(", ", Arguments.Select(a => a.Key).Where(k => !IsArgumentName(k)))}", nameof(Arguments));
+
+    private static bool IsArgumentName(string name) =>
+        name.Length > 0 && (char.IsAsciiLetter(name[0]) || name[0] == '_') && name.All(c => char.IsAsciiLetterOrDigit(c) || c == '_');
+
     public string ToSql() =>
         $"CALL {SparkSql.Identifier(Catalog)}.system.{SparkSql.Identifier(Procedure)}(" +
         string.Join(", ", Arguments.Where(a => a.Value is not null && a.Value is not IEmpty { IsEmpty: true })

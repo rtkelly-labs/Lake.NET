@@ -132,6 +132,14 @@ public sealed record S3FileIOOptions
     /// </summary>
     public Func<HttpRequestMessage, CancellationToken, Task>? RequestSigner { get; init; }
 
+    private bool PrintMembers(System.Text.StringBuilder builder)
+    {
+        builder.Append($"Endpoint = {Endpoint}, PathStyleAccess = {PathStyleAccess}, Region = {Region}, AccessKeyId = {AccessKeyId}, ");
+        builder.Append($"SecretAccessKey = {(SecretAccessKey is null ? "null" : "***")}, SessionToken = {(SessionToken is null ? "null" : "***")}, ");
+        builder.Append($"MaxRetries = {MaxRetries}, RetryQuota = {RetryQuota}, RequestSigner = {(RequestSigner is null ? "null" : "set")}");
+        return true;
+    }
+
     /// <summary>Build from Iceberg catalog properties (e.g. a REST <c>config</c> response or vended credentials).</summary>
     public static S3FileIOOptions FromProperties(IReadOnlyDictionary<string, string> p) => new()
     {

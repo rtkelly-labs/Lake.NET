@@ -142,6 +142,13 @@ public sealed class SparkSqlTests
         Assert.Throws<ArgumentException>(() => conf.Set("spark.app.name", "has space").ToSparkSubmitParameters());
     }
 
+    [Theory]
+    [InlineData("table) ; DROP TABLE t; --")]
+    [InlineData("a b")]
+    [InlineData("")]
+    public void Procedure_argument_names_must_be_plain_identifiers(string name) =>
+        Assert.Throws<ArgumentException>(() => new SparkProcedureCall("glue", "expire_snapshots", [new(name, 1)]));
+
     [Fact]
     public async Task Stager_writes_a_content_addressed_driver_and_statements_as_json()
     {

@@ -38,7 +38,9 @@ Quoting rules (`SparkSql`):
 - Timestamps are written as `TIMESTAMP '… Z'`, so the session time zone cannot shift `older_than`.
 - Maps are `map('k', 'v', …)` in key order; empty option maps and null arguments are left out, so Iceberg's defaults
   apply.
-- A `where` / `sort_order` text is SQL the caller writes (it is passed as a literal and parsed by Iceberg).
+- A `where` / `sort_order` text is SQL the caller writes (it is passed as a literal and parsed by Iceberg). Spark
+  evaluates it as an expression, so it is trusted input: never build it from user text. Argument names given to
+  `Call` must be plain identifiers.
 
 Things the oracle run taught: `remove_orphan_files` refuses an `older_than` under 24 hours; Java's changelog scan
 refuses snapshots with delete files, so `create_changelog_view` works only over append/overwrite history.

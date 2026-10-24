@@ -143,4 +143,5 @@ Glue endpoint for Lake Formation governance. Challenges:
 | Multi-table transactions | `ICatalog.SupportsMultiTableTransactions`: in-memory (one lock), JDBC (one database transaction), REST when the server advertises `/transactions/commit` (absent list ⇒ assumed); Glue no. `StagedCommit.CommitAllAsync` and EF Core's `SaveChanges` use it |
 | Idempotency | `Idempotency-Key` (spec 1.11+) — safe retries after timeouts on servers that support it |
 | Credentials lifetime | Vended credentials expire mid-job; long writers must refresh |
+| Credential exposure | The REST client sends a token or OAuth credential only over https or to loopback (`AllowInsecureCredentials` to override); a `signer.uri` must be the catalog's own origin (`AllowCrossHostSigner`); a server-set `s3.endpoint` is refused when the client would sign for it with its own AWS credentials, unless it is AWS or loopback (`AllowServerStorageEndpoint`). Option records redact secrets in `ToString()` |
 | Governance | Lake Formation / Unity / Polaris RBAC may make a table visible but not writable — map 403 to a clear error |
