@@ -86,7 +86,7 @@ jobs:
           global-json-file: global.json
 
       - name: Build (Release)
-        run: dotnet build Iceberg.Net.sln -c Release -p:Version="$VERSION" --nologo
+        run: dotnet build Iceberg.Net.slnx -c Release -p:Version="$VERSION" --nologo
 
       # The emulator, cross-engine and REST suites run in CI on this commit (checked by verify-ci); these are the fast
       # tiers over the exact Release build that is packed.
@@ -98,7 +98,7 @@ jobs:
           done
 
       - name: Pack
-        run: dotnet pack Iceberg.Net.sln -c Release --no-build -p:Version="$VERSION" -o "$RUNNER_TEMP/nupkg" --nologo
+        run: dotnet pack Iceberg.Net.slnx -c Release --no-build -p:Version="$VERSION" -o "$RUNNER_TEMP/nupkg" --nologo
 
       # Consumes the packages from a local feed (and checks exactly the released set is packed).
       - name: Package smoke test
