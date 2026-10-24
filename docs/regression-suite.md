@@ -95,7 +95,7 @@ libFuzzer for long unattended runs, one decoder at a time:
 ```bash
 sudo apt-get install clang libclang-rt-18-dev     # libFuzzer runtime
 tools/fuzz.sh manifest 600                         # metadata view-metadata manifest-list manifest puffin
-                                                   # deletion-vector roaring theta
+                                                   # deletion-vector roaring mumbling theta
 FUZZ_STRICT=1 tools/fuzz.sh roaring 600            # also flag low-level exceptions a Corruption.Guard converted
 ```
 

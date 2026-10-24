@@ -150,6 +150,14 @@ public sealed class CorruptionTests(ITestOutputHelper output)
         Fuzz("roaring", bm.Serialize(), b => RoaringPositionBitmap.Deserialize(b));
     }
 
+    /// <summary>Mumbling bitmaps (v4 manifest deletion vectors; format/mumbling-spec.md, not yet in the pinned spec).</summary>
+    [Fact]
+    public void Mumbling_bitmap()
+    {
+        var bm = MumblingBitmap.Of(new[] { 0, 1, 2, 300, 70_000, MumblingBitmap.MaxPosition }.Concat(Enumerable.Range(1_000, 600)));
+        Fuzz("mumbling", bm.Serialize(), b => MumblingBitmap.Deserialize(b));
+    }
+
     [Spec("puffin: apache-datasketches-theta-v1 blob type")]
     [Theory]
     [InlineData("theta-exact3.bin")]

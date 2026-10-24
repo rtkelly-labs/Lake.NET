@@ -113,6 +113,8 @@ public static class TypeUtil
         void Visit(NestedField f)
         {
             if (!index.TryAdd(f.Id, f)) throw new ArgumentException($"Duplicate field id {f.Id}");
+            if (f.Type is FileType)
+                foreach (var sub in FileType.SubFields(f.Id)) Visit(sub); // implicit, but their IDs are taken
             VisitType(f.Type);
         }
         void VisitType(IcebergType t)
@@ -132,27 +134,26 @@ public static class TypeUtil
     public static Dictionary<string, int> IndexByName(StructType root)
     {
         var index = new Dictionary<string, int>();
+        void Add(string name, int id, IcebergType t)
+        {
+            index[name] = id;
+            if (t is FileType)
+                foreach (var sub in FileType.SubFields(id)) index[name + "." + sub.Name] = sub.Id;
+            VisitType(t, name + ".");
+        }
         void VisitType(IcebergType t, string prefix)
         {
             switch (t)
             {
                 case StructType s:
-                    foreach (var f in s.Fields)
-                    {
-                        var name = prefix + f.Name;
-                        index[name] = f.Id;
-                        VisitType(f.Type, name + ".");
-                    }
+                    foreach (var f in s.Fields) Add(prefix + f.Name, f.Id, f.Type);
                     break;
                 case ListType l:
-                    index[prefix + "element"] = l.ElementId;
-                    VisitType(l.ElementType, prefix + "element.");
+                    Add(prefix + "element", l.ElementId, l.ElementType);
                     break;
                 case MapType m:
-                    index[prefix + "key"] = m.KeyId;
-                    VisitType(m.KeyType, prefix + "key.");
-                    index[prefix + "value"] = m.ValueId;
-                    VisitType(m.ValueType, prefix + "value.");
+                    Add(prefix + "key", m.KeyId, m.KeyType);
+                    Add(prefix + "value", m.ValueId, m.ValueType);
                     break;
             }
         }
@@ -185,9 +186,18 @@ public static class TypeUtil
     public static Schema AssignFreshIds(Schema schema, Func<int> nextId, int schemaId = 0)
     {
         var mapping = new Dictionary<int, int>();
+        // A file field takes its own ID and the next six (its implicit sub-fields).
+        int Next(IcebergType t)
+        {
+            var id = nextId();
+            if (t is FileType)
+                for (var i = 1; i < FileType.ReservedIds; i++)
+                    if (nextId() != id + i) throw new ArgumentException("A file field needs consecutive field IDs");
+            return id;
+        }
         StructType ReassignStruct(StructType s)
         {
-            var ids = s.Fields.Select(f => mapping[f.Id] = nextId()).ToList();
+            var ids = s.Fields.Select(f => mapping[f.Id] = Next(f.Type)).ToList();
             return new StructType(s.Fields.Select((f, i) => f with { Id = ids[i], Type = Reassign(f.Type) }));
         }
         IcebergType Reassign(IcebergType t) => t switch
@@ -199,13 +209,13 @@ public static class TypeUtil
         };
         ListType ReassignList(ListType l)
         {
-            var id = mapping[l.ElementId] = nextId();
+            var id = mapping[l.ElementId] = Next(l.ElementType);
             return l with { ElementId = id, ElementType = Reassign(l.ElementType) };
         }
         MapType ReassignMap(MapType m)
         {
-            var k = mapping[m.KeyId] = nextId();
-            var v = mapping[m.ValueId] = nextId();
+            var k = mapping[m.KeyId] = Next(m.KeyType);
+            var v = mapping[m.ValueId] = Next(m.ValueType);
             return m with { KeyId = k, ValueId = v, KeyType = Reassign(m.KeyType), ValueType = Reassign(m.ValueType) };
         }
         var root = ReassignStruct(schema.Struct);

@@ -464,8 +464,8 @@ public static class ParquetFiles
         }
 
         /// <summary>A row group's statistics for one field, or null when the file has none usable for it.</summary>
-        public ColumnMetrics? StatisticsFor(RowGroupMetaData group, int fieldId, IcebergType type, long rows) =>
-            StatsLeaves.TryGetValue(fieldId, out var leaf) ? RowGroupStatistics.For(group, Descriptor.Column(leaf), leaf, type, rows) : null;
+        public ColumnStats? StatisticsFor(RowGroupMetaData group, int fieldId, IcebergType type, long rows) =>
+            StatsLeaves.TryGetValue(fieldId, out var leaf) ? RowGroupStatistics.For(group, Descriptor.Column(leaf), leaf, fieldId, type, rows) : null;
     }
 
     private static object?[] ReadColumn(ColumnReader col, IcebergType type, int n) => type.TypeId switch
@@ -524,7 +524,7 @@ public static class ParquetFiles
 }
 
 /// <summary>
-/// Parquet row-group footer statistics as Iceberg <see cref="ColumnMetrics"/>, converted exactly as the reader converts
+/// Parquet row-group footer statistics as typed Iceberg <see cref="ColumnStats"/>, converted exactly as the reader converts
 /// values (promoted int → long and float → double, unscaled decimals), so pruning agrees with reading. Statistics are
 /// optional and partly untrustworthy across writers, so anything doubtful becomes "unknown" (never prunes):
 /// <list type="bullet">
@@ -541,7 +541,7 @@ internal static class RowGroupStatistics
 {
     private static readonly System.Text.UTF8Encoding StrictUtf8 = new(encoderShouldEmitUTF8Identifier: false, throwOnInvalidBytes: true);
 
-    public static ColumnMetrics? For(RowGroupMetaData group, ColumnDescriptor descr, int leaf, IcebergType type, long rows)
+    public static ColumnStats? For(RowGroupMetaData group, ColumnDescriptor descr, int leaf, int fieldId, IcebergType type, long rows)
     {
         using var chunk = group.GetColumnChunkMetaData(leaf);
         if (!chunk.IsStatsSet) return null;
@@ -562,7 +562,8 @@ internal static class RowGroupStatistics
                 lower = upper = null;
             }
         }
-        return new ColumnMetrics(rows, nulls, null, lower, upper);
+        // Footer min/max may be truncated or loose (writers differ), so tightness is unknown.
+        return new ColumnStats { FieldId = fieldId, Type = type, ValueCount = rows, NullValueCount = nulls, LowerBound = lower, UpperBound = upper };
     }
 
     /// <summary>Whether the file's ordering for this column is the one Iceberg compares values with.</summary>

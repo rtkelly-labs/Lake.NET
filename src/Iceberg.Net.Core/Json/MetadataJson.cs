@@ -77,6 +77,10 @@ public static class MetadataJson
         var schemas = n["schemas"] is JsonArray sa
             ? sa.Select(s => TypeJson.SchemaFromJson(s!)).ToList()
             : [TypeJson.SchemaFromJson(n["schema"]!)];
+        // Types newer than the format (the v4 file type) are refused; older readers tolerated v3 types in v2
+        // metadata, so the check starts at v4 types.
+        if (schemas.FirstOrDefault(s => s.MinFormatVersion >= 4 && s.MinFormatVersion > formatVersion) is { } tooNew)
+            throw new InvalidDataException($"Schema {tooNew.SchemaId} needs format v{tooNew.MinFormatVersion}; the metadata is v{formatVersion}");
         var currentSchemaId = n["current-schema-id"]?.GetValue<int>() ?? schemas[0].SchemaId;
 
         var specs = n["partition-specs"] is JsonArray pa

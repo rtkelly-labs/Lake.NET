@@ -35,7 +35,7 @@ public sealed class SchemaUpdate
     public SchemaUpdate AddColumn(string name, IcebergType type, string? doc = null)
     {
         EnsureFree(name);
-        _columns.Add(new NestedField(++_lastColumnId, name, FreshIds(type), false, doc));
+        _columns.Add(new NestedField(NextId(type), name, FreshIds(type), false, doc));
         return this;
     }
 
@@ -47,7 +47,7 @@ public sealed class SchemaUpdate
         {
             if (f.Type is not StructType s) throw new ArgumentException($"'{parent}' is not a struct");
             if (s.Fields.Any(x => x.Name == name)) throw new ArgumentException($"Field '{parent}.{name}' already exists");
-            var id = ++_lastColumnId;
+            var id = NextId(type);
             return f with { Type = new StructType([.. s.Fields, new NestedField(id, name, FreshIds(type), false, doc)]) };
         });
         return this;
@@ -66,7 +66,7 @@ public sealed class SchemaUpdate
             throw new InvalidOperationException("Column default values need format v3");
         // Stored in metadata as the JSON single-value form (spec Appendix D).
         var json = initialDefault is null ? null : Json.SingleValueJson.ToJson(type, type is PrimitiveType ? Expressions.Literals.Convert(type, initialDefault, name) : initialDefault);
-        _columns.Add(new NestedField(++_lastColumnId, name, FreshIds(type), true, doc, json, json?.DeepClone()));
+        _columns.Add(new NestedField(NextId(type), name, FreshIds(type), true, doc, json, json?.DeepClone()));
         return this;
     }
 
@@ -261,9 +261,17 @@ public sealed class SchemaUpdate
     /// <summary>Nested types carry field IDs of their own; give them fresh ones.</summary>
     private IcebergType FreshIds(IcebergType type) => type switch
     {
-        StructType s => new StructType(s.Fields.Select(f => f with { Id = ++_lastColumnId, Type = FreshIds(f.Type) }).ToList()),
-        ListType l => new ListType(++_lastColumnId, FreshIds(l.ElementType), l.ElementRequired),
-        MapType m => new MapType(++_lastColumnId, FreshIds(m.KeyType), ++_lastColumnId, FreshIds(m.ValueType), m.ValueRequired),
+        StructType s => new StructType(s.Fields.Select(f => f with { Id = NextId(f.Type), Type = FreshIds(f.Type) }).ToList()),
+        ListType l => new ListType(NextId(l.ElementType), FreshIds(l.ElementType), l.ElementRequired),
+        MapType m => new MapType(NextId(m.KeyType), FreshIds(m.KeyType), NextId(m.ValueType), FreshIds(m.ValueType), m.ValueRequired),
         _ => type,
     };
+
+    /// <summary>The next column ID; a <c>file</c> field also takes the six after it for its implicit sub-fields.</summary>
+    private int NextId(IcebergType type)
+    {
+        var id = ++_lastColumnId;
+        if (type is FileType) _lastColumnId += FileType.ReservedIds - 1;
+        return id;
+    }
 }
