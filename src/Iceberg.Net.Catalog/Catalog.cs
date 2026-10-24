@@ -30,6 +30,11 @@ public class AlreadyExistsException(string message) : Exception(message);
 /// <summary>A commit request: preconditions plus changes, the same shape as REST <c>CommitTableRequest</c>.</summary>
 public sealed record TableCommit(TableIdentifier Identifier, IReadOnlyList<UpdateRequirement> Requirements, IReadOnlyList<MetadataUpdate> Updates);
 
+/// <param name="PreserveFieldIds">
+/// Keep the schema's field IDs instead of assigning fresh ones. Catalogs that build the metadata here (Glue, SQL,
+/// in-memory) honour it. A REST server builds the metadata itself and may reassign IDs, as Java's does, so callers
+/// should still resolve columns by name against the returned table.
+/// </param>
 public sealed record CreateTableRequest(
     TableIdentifier Identifier,
     Schema Schema,
@@ -37,7 +42,8 @@ public sealed record CreateTableRequest(
     SortOrder? SortOrder = null,
     string? Location = null,
     IReadOnlyDictionary<string, string>? Properties = null,
-    int FormatVersion = TableMetadata.DefaultFormatVersion);
+    int FormatVersion = TableMetadata.DefaultFormatVersion,
+    bool PreserveFieldIds = false);
 
 public interface ICatalog : IDisposable
 {
@@ -212,7 +218,7 @@ public abstract partial class MetastoreCatalog(string name, IFileIO io) : ICatal
         if (!await NamespaceExistsAsync(r.Identifier.Namespace, ct)) throw new NoSuchNamespaceException($"Namespace {r.Identifier.Namespace} does not exist");
         if (await CurrentMetadataLocationAsync(r.Identifier, ct) is not null) throw new AlreadyExistsException($"Table {r.Identifier} already exists");
         var location = r.Location ?? await DefaultTableLocationAsync(r.Identifier, ct);
-        var fresh = TableMetadata.NewTable(r.Schema, r.Spec, r.SortOrder, location, r.Properties, r.FormatVersion, Clock);
+        var fresh = TableMetadata.NewTable(r.Schema, r.Spec, r.SortOrder, location, r.Properties, r.FormatVersion, Clock, r.PreserveFieldIds);
         var metadata = await WriteAndSwapAsync(r.Identifier, null, loc => fresh with { MetadataFileLocation = loc }, ct);
         return new Table(this, r.Identifier, metadata, FileIO);
     }

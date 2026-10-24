@@ -70,7 +70,9 @@ public sealed record TableMetadata
 
     /// <summary>
     /// Metadata for a new table. Field IDs, partition field IDs and spec/order IDs are freshly assigned,
-    /// as Java and PyIceberg do, so callers can pass schemas with placeholder IDs.
+    /// as Java and PyIceberg do, so callers can pass schemas with placeholder IDs. With
+    /// <paramref name="preserveFieldIds"/> the schema's own field IDs are kept, for callers (a typed model, a copied
+    /// table) that already hold IDs they depend on.
     /// </summary>
     public static TableMetadata NewTable(
         Schema schema,
@@ -79,11 +81,17 @@ public sealed record TableMetadata
         string location,
         IReadOnlyDictionary<string, string>? properties = null,
         int formatVersion = DefaultFormatVersion,
-        Func<long>? clock = null)
+        Func<long>? clock = null,
+        bool preserveFieldIds = false)
     {
         if (formatVersion is < 1 or > SupportedFormatVersion) throw new ArgumentOutOfRangeException(nameof(formatVersion));
         var lastId = 0;
         var fresh = TypeUtil.AssignFreshIds(schema, () => ++lastId);
+        if (preserveFieldIds)
+        {
+            fresh = new Schema(fresh.SchemaId, schema.Columns, schema.IdentifierFieldIds);
+            lastId = schema.HighestFieldId;
+        }
         if (fresh.MinFormatVersion > formatVersion)
             throw new ArgumentException($"Schema needs format version {fresh.MinFormatVersion} but table is v{formatVersion}");
 

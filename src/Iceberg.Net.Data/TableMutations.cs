@@ -101,6 +101,22 @@ public static partial class TableMutations
         return RunAsync(table, [], new Matcher(null, null, row => matches(row), filter), resolved, ct);
     }
 
+    /// <summary>
+    /// Delete rows matching a filter expression and a row-level refinement. The filter prunes files by partition and
+    /// metrics as in the <see cref="Expression"/> overload; a row is deleted only when it matches the filter and
+    /// <paramref name="refine"/> returns true. Use this when only part of a predicate can be expressed as an
+    /// <see cref="Expression"/> (a LINQ residual, say): pass the expressible part as the filter.
+    /// </summary>
+    public static Task<MutationResult> DeleteWhereAsync(Table table, Expression filter, Func<object?[], bool> refine,
+        DeleteStrategy strategy = DeleteStrategy.Default, CancellationToken ct = default)
+    {
+        var resolved = Resolve(table, strategy, DeleteModeProperty);
+        if (resolved == DeleteStrategy.EqualityDeletes)
+            throw new ArgumentException("Equality deletes delete by key; use DeleteByKeysAsync, or CopyOnWrite/PositionDeletes for predicates");
+        var matches = RowEvaluator.Compile(Binder.Bind(table.Schema, filter));
+        return RunAsync(table, [], new Matcher(null, null, row => matches(row) && refine(row), filter), resolved, ct);
+    }
+
     public static DeleteStrategy Resolve(Table table, DeleteStrategy strategy, string modeProperty) => strategy != DeleteStrategy.Default
         ? strategy
         : table.Metadata.Property(modeProperty, "copy-on-write") == "merge-on-read" ? DeleteStrategy.PositionDeletes : DeleteStrategy.CopyOnWrite;
