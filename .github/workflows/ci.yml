@@ -1,0 +1,121 @@
+name: ci
+
+# AWS-mode runs are manual (workflow_dispatch) because they
+# need credentials and cost money; see docs/regression-suite.md.
+on:
+  pull_request:
+  push:
+    branches: [main]
+  workflow_dispatch:
+
+concurrency:
+  group: ${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: ${{ github.event_name == 'pull_request' }}
+
+jobs:
+  test:
+    name: test
+    runs-on: ubuntu-latest
+    timeout-minutes: 40
+    permissions:
+      contents: read
+    steps:
+      - uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0 # v7.0.0
+
+      - uses: astral-sh/setup-uv@e58605a9b6da7c637471fab8847a5e5a6b8df081 # v5
+        with:
+          enable-cache: true
+
+      # ubuntu-latest ships the .NET 8 SDK; global.json rolls forward to any newer major.
+      - name: L0 spec tests
+        run: dotnet test tests/Iceberg.Net.Spec.Tests --nologo
+
+      - name: L0 spec tests against the netstandard2.0 builds of Core and Avro
+        run: dotnet test tests/Iceberg.Net.NetStandard.Tests --nologo
+
+      - name: Typed layer (LINQ provider, row mapping, typed writes)
+        run: dotnet test tests/Iceberg.Net.Linq.Tests --nologo
+
+      - name: EF Core provider (queries, SaveChanges, concurrency, ExecuteUpdate/Delete)
+        run: dotnet test tests/Iceberg.Net.EntityFrameworkCore.Tests --nologo
+
+      - name: Pack the libraries and smoke-test the packages
+        run: ./tools/package-smoke.sh "$RUNNER_TEMP/nupkg"
+
+      - uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
+        with:
+          name: iceberg-dotnet-packages
+          path: ${{ runner.temp }}/nupkg/*.nupkg
+          retention-days: 14
+
+      - name: Spec traceability matrix is current
+        run: |
+          python3 tools/spec_trace.py matrix --check
+          git diff --exit-code docs/spec-traceability.md || { echo "::error::run python tools/spec_trace.py matrix and commit docs/spec-traceability.md"; exit 1; }
+
+      - name: Start emulators (moto, REST fixture, Polaris, Trino) and fetch the Spark oracle
+        run: ./emulation/up.sh --spark --trino --polaris --gravitino --nessie --lakekeeper
+
+      - name: Install PyIceberg oracle
+        run: uv sync --project interop
+
+      # Phase G: telemetry listeners, Spark procedure SQL (run end to end in the Spark oracle image), the EMR
+      # Serverless / Glue / Athena clients against faked SDKs, and DuckDB's iceberg extension as an oracle (it is
+      # downloaded from extensions.duckdb.org here, so a load failure fails the step instead of skipping).
+      - name: Ecosystem (telemetry, Spark/Athena helpers, DuckDB oracle)
+        env:
+          ICEBERG_PYTHON: ${{ github.workspace }}/interop/.venv/bin/python
+          ICEBERG_DUCKDB_REQUIRED: "1"
+        run: |
+          uv sync --project interop --group duckdb
+          dotnet test tests/Iceberg.Net.Ecosystem.Tests --nologo
+
+      - name: BDD specification (Reqnroll)
+        env:
+          ICEBERG_PYTHON: ${{ github.workspace }}/interop/.venv/bin/python
+        run: dotnet test tests/Iceberg.Net.Behaviour.Tests --nologo
+
+      - name: REST catalog server (in-process, PyIceberg and Spark against it)
+        env:
+          ICEBERG_PYTHON: ${{ github.workspace }}/interop/.venv/bin/python
+        run: dotnet test tests/Iceberg.Net.RestServer.Tests --nologo
+
+      - name: L1/L2 regression (emulation)
+        env:
+          ICEBERG_TEST_TARGET: emulation
+          ICEBERG_REQUIRE_TARGET: "1"
+          ICEBERG_PYTHON: ${{ github.workspace }}/interop/.venv/bin/python
+        run: dotnet test tests/Iceberg.Net.Regression.Tests --nologo --logger "console;verbosity=normal"
+
+      - name: Emulator logs on failure
+        if: failure()
+        run: docker compose -f emulation/docker-compose.yml --profile trino --profile polaris --profile gravitino --profile nessie --profile lakekeeper logs --tail 200
+
+  # The one required check. Branch protection matches on this name, so it stays `ci` whatever
+  # the jobs above are called or however they are split.
+  ci:
+    name: ci
+    runs-on: ubuntu-latest
+    needs: [test]
+    # `always()`, so this reports a verdict when a job fails rather than being skipped: a skipped
+    # required check is indistinguishable from one still running, and blocks the PR either way.
+    if: always()
+    timeout-minutes: 5
+    permissions: {}
+    steps:
+      - name: Report the verdict of every job
+        env:
+          TEST: ${{ needs.test.result }}
+        run: |
+          set -uo pipefail
+          failed=0
+          for job in TEST; do
+            result="${!job}"
+            if [ "${result}" = "success" ]; then
+              echo "✅ ${job}: ${result}"
+            else
+              echo "::error::${job} did not succeed (${result})"
+              failed=1
+            fi
+          done
+          exit "${failed}"

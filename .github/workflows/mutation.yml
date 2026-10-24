@@ -1,0 +1,31 @@
+name: mutation
+
+# Weekly Stryker.NET runs (see docs/roadmap.md, "Mutation testing"). Too slow for
+# PR CI. Each job uploads the HTML/JSON report; record notable score changes in the roadmap's mutation table.
+# The break threshold in each config is 0, so a run fails only if Stryker itself fails.
+on:
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  stryker:
+    runs-on: ubuntu-latest
+    timeout-minutes: 180
+    strategy:
+      fail-fast: false
+      matrix:
+        config: [stryker-puffin, stryker-core, stryker-metadata, stryker-deletes]
+    steps:
+      - uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0 # v7.0.0
+      - run: dotnet tool restore
+      - name: Mutation run
+        working-directory: mutation
+        run: dotnet stryker --config-file ${{ matrix.config }}.json --output "$RUNNER_TEMP/${{ matrix.config }}"
+      - uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
+        if: always()
+        with:
+          name: ${{ matrix.config }}-report
+          path: ${{ runner.temp }}/${{ matrix.config }}/reports
+          if-no-files-found: ignore

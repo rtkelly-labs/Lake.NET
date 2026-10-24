@@ -1,0 +1,53 @@
+name: upkeep
+
+# Weekly early warning (see docs/roadmap.md, "Verification"):
+#   spec-drift   the Iceberg table/Puffin specs and REST OpenAPI on apache/iceberg main vs the sections pinned in
+#                docs/spec/sections.json; fails, listing changed sections and the tests that cover them.
+#   emulators    the regression suite against the :latest moto, REST fixture, Polaris and Trino images (not the pins),
+#                so emulator behaviour changes (good or bad) surface before anyone bumps a pin.
+# Neither touches the repository or opens issues: a red run is the signal.
+on:
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  spec-drift:
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0 # v7.0.0
+      - name: Compare upstream spec with the pinned snapshot
+        run: python3 tools/spec_trace.py drift --ref main
+
+  emulators-latest:
+    runs-on: ubuntu-latest
+    timeout-minutes: 40
+    env:
+      MOTO_TAG: latest
+      REST_FIXTURE_TAG: latest
+      TRINO_TAG: latest
+      POLARIS_TAG: latest
+      GRAVITINO_TAG: latest
+      LAKEKEEPER_IMAGE: quay.io/lakekeeper/catalog:latest
+    steps:
+      - uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0 # v7.0.0
+      - uses: astral-sh/setup-uv@e58605a9b6da7c637471fab8847a5e5a6b8df081 # v5
+        with:
+          enable-cache: true
+      - name: Start latest emulators
+        run: |
+          docker compose -f emulation/docker-compose.yml --profile trino --profile polaris --profile gravitino --profile nessie --profile lakekeeper pull
+          ./emulation/up.sh --spark --trino --polaris --gravitino --nessie --lakekeeper
+          docker compose -f emulation/docker-compose.yml --profile trino --profile polaris --profile gravitino --profile nessie --profile lakekeeper images
+      - run: uv sync --project interop
+      - name: Regression suite against latest emulators
+        env:
+          ICEBERG_TEST_TARGET: emulation
+          ICEBERG_REQUIRE_TARGET: "1"
+          ICEBERG_PYTHON: ${{ github.workspace }}/interop/.venv/bin/python
+        run: dotnet test tests/Iceberg.Net.Regression.Tests --nologo --logger "console;verbosity=normal"
+      - name: Emulator logs on failure
+        if: failure()
+        run: docker compose -f emulation/docker-compose.yml --profile trino --profile polaris --profile gravitino --profile nessie --profile lakekeeper logs --tail 200

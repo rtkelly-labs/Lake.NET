@@ -1,0 +1,76 @@
+name: aws
+
+# Nightly L2 run against real AWS (S3 + Glue + Athena), plus the shadow comparison of a
+# production table read by .NET vs Athena. Dormant until configured: every job is skipped while the
+# ICEBERG_AWS_ROLE_ARN repository variable is unset. Setup (one-off, needs AWS access) is in
+# docs/regression-suite.md, "AWS mode".
+#
+# Repository variables:
+#   ICEBERG_AWS_ROLE_ARN       OIDC role with S3 (warehouse prefix), Glue (regr_* databases) and Athena access
+#   ICEBERG_AWS_WAREHOUSE      s3://bucket/prefix for throwaway regression tables
+#   ICEBERG_ATHENA_WORKGROUP   Athena engine v3 workgroup
+#   ICEBERG_ATHENA_OUTPUT      optional s3:// query result location
+#   ICEBERG_GLUE_REST_WAREHOUSE optional AWS account ID: run the REST catalog tests against the Glue Iceberg REST endpoint (SigV4)
+#   ICEBERG_SHADOW_TABLES      optional, space-separated glue_db.table list for the shadow comparison
+on:
+  workflow_dispatch:
+
+permissions:
+  contents: read
+  id-token: write
+
+concurrency:
+  group: iceberg-dotnet-aws
+  cancel-in-progress: false
+
+jobs:
+  regression:
+    if: vars.ICEBERG_AWS_ROLE_ARN != ''
+    runs-on: ubuntu-latest
+    timeout-minutes: 60
+    env:
+      AWS_REGION: eu-west-1
+      ICEBERG_TEST_TARGET: aws
+      ICEBERG_REQUIRE_TARGET: "1"
+      ICEBERG_WAREHOUSE: ${{ vars.ICEBERG_AWS_WAREHOUSE }}
+      ICEBERG_ATHENA_WORKGROUP: ${{ vars.ICEBERG_ATHENA_WORKGROUP }}
+      ICEBERG_ATHENA_OUTPUT: ${{ vars.ICEBERG_ATHENA_OUTPUT }}
+      ICEBERG_GLUE_REST_WAREHOUSE: ${{ vars.ICEBERG_GLUE_REST_WAREHOUSE }}
+    steps:
+      - uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0 # v7.0.0
+      - uses: aws-actions/configure-aws-credentials@ff717079ee2060e4bcee96c4779b553acc87447c # v4
+        with:
+          role-to-assume: ${{ vars.ICEBERG_AWS_ROLE_ARN }}
+          aws-region: eu-west-1
+      - uses: astral-sh/setup-uv@e58605a9b6da7c637471fab8847a5e5a6b8df081 # v5
+        with:
+          enable-cache: true
+      - run: uv sync --project interop
+      - name: L2 regression (AWS)
+        env:
+          ICEBERG_PYTHON: ${{ github.workspace }}/interop/.venv/bin/python
+        run: dotnet test tests/Iceberg.Net.Regression.Tests --nologo --logger "console;verbosity=normal"
+
+  shadow:
+    if: vars.ICEBERG_AWS_ROLE_ARN != '' && vars.ICEBERG_SHADOW_TABLES != ''
+    runs-on: ubuntu-latest
+    timeout-minutes: 60
+    steps:
+      - uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0 # v7.0.0
+      - uses: aws-actions/configure-aws-credentials@ff717079ee2060e4bcee96c4779b553acc87447c # v4
+        with:
+          role-to-assume: ${{ vars.ICEBERG_AWS_ROLE_ARN }}
+          aws-region: eu-west-1
+      - uses: astral-sh/setup-uv@e58605a9b6da7c637471fab8847a5e5a6b8df081 # v5
+        with:
+          enable-cache: true
+      - run: uv sync --project interop
+      - name: Shadow-read production tables (.NET vs PyIceberg over Glue)
+        env:
+          AWS_REGION: eu-west-1
+          ICEBERG_PYTHON: ${{ github.workspace }}/interop/.venv/bin/python
+        run: |
+          for t in ${{ vars.ICEBERG_SHADOW_TABLES }}; do
+            dotnet run --project tools/ShadowCompare -- --catalog glue --table "$t" --reference pyiceberg --report "$RUNNER_TEMP/shadow-${t}.md"
+            cat "$RUNNER_TEMP/shadow-${t}.md" >> "$GITHUB_STEP_SUMMARY"
+          done
