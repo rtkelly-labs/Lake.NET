@@ -39,6 +39,12 @@ public sealed class CrossServerContractTests
         return new Target(await TestEnvironment.Current.CatalogAsync(kind), null);
     }
 
+    /// <summary>
+    /// Known server difference: Nessie's namespaces are implicit (a path prefix in its commit tree), so listing the tables
+    /// of one that was never created is an empty list, not a 404. Every other server answers NoSuchNamespace.
+    /// </summary>
+    private static bool ListingAMissingNamespaceFails(string kind) => kind != "nessie";
+
     private static Namespace NewNamespace() => Namespace.Of($"contract_{Guid.NewGuid():N}"[..20]);
 
     private static async Task CleanUpAsync(ICatalog catalog, Namespace ns)
@@ -67,7 +73,9 @@ public sealed class CrossServerContractTests
         try
         {
             await Assert.ThrowsAsync<NoSuchTableException>(() => target.Catalog.LoadTableAsync(new TableIdentifier(ns, "missing")));
-            await Assert.ThrowsAsync<NoSuchNamespaceException>(() => target.Catalog.ListTablesAsync(Namespace.Of($"{ns.Levels[0]}_absent")));
+            var absent = Namespace.Of($"{ns.Levels[0]}_absent");
+            if (ListingAMissingNamespaceFails(kind)) await Assert.ThrowsAsync<NoSuchNamespaceException>(() => target.Catalog.ListTablesAsync(absent));
+            else Assert.Empty(await target.Catalog.ListTablesAsync(absent));
             Assert.False(await target.Catalog.TableExistsAsync(new TableIdentifier(ns, "missing")));
         }
         finally
