@@ -1,0 +1,16 @@
+<Project Sdk="Microsoft.NET.Sdk">
+  <PropertyGroup>
+    <RootNamespace>Iceberg.Net.Spark</RootNamespace>
+    <Description>Spark SQL for Iceberg's stored procedures (rewrite_data_files, expire_snapshots, remove_orphan_files, …) with escaped identifiers and literals, and EMR Serverless / AWS Glue job submission that runs a generated script.</Description>
+    <PackageTags>$(PackageTags);spark;emr-serverless;glue-etl</PackageTags>
+  </PropertyGroup>
+  <ItemGroup>
+    <PackageReference Include="AWSSDK.EMRServerless" />
+    <PackageReference Include="AWSSDK.Glue" />
+    <ProjectReference Include="../Iceberg.Net.Catalog/Iceberg.Net.Catalog.csproj" />
+  </ItemGroup>
+  <ItemGroup>
+    <!-- The PySpark driver the job runners stage next to the statements (also run by the Spark oracle tests). -->
+    <EmbeddedResource Include="Scripts/iceberg_sql_driver.py" LogicalName="Iceberg.Net.Spark.iceberg_sql_driver.py" />
+  </ItemGroup>
+</Project>
