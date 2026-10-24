@@ -15,6 +15,8 @@ Self-contained C# port of Apache Iceberg. Keep it that way: no references to cod
 | Scans, pruning, projection, time travel | [docs/read-path.md](docs/read-path.md) — `ScanRequest` / `TableScan.ReadRowsAsync` is the one read entry point |
 | Branches, tags, rollback, expiry retention, metadata tables, change feed | [docs/snapshot-management.md](docs/snapshot-management.md) |
 | Typed queries / LINQ / model mapping | [docs/linq.md](docs/linq.md) — translation changes need a case in `QueryTranslationTests`' predicate matrix (oracle: LINQ to Objects) |
+| Traces and metrics (OpenTelemetry) | [docs/telemetry.md](docs/telemetry.md) — instrumentation goes through `IcebergTelemetry`, one line per call site |
+| Spark procedures, EMR Serverless / Glue jobs, Athena SQL, DuckDB oracle | [docs/spark-and-athena.md](docs/spark-and-athena.md) |
 | Following Iceberg v4 | [docs/iceberg-v4.md](docs/iceberg-v4.md) |
 | Deletes, deletion vectors, Puffin, statistics | [docs/puffin.md](docs/puffin.md) |
 | Adopting files from other Parquet writers (Parquet.SourceGenerator) | [docs/parquet-sourcegenerator.md](docs/parquet-sourcegenerator.md) |
@@ -26,6 +28,7 @@ Self-contained C# port of Apache Iceberg. Keep it that way: no references to cod
 | Build | `dotnet build` |
 | L0 spec tests | `dotnet test tests/Iceberg.Net.Spec.Tests` |
 | Typed layer (LINQ) | `dotnet test tests/Iceberg.Net.Linq.Tests` |
+| Ecosystem (telemetry, Spark/Athena helpers, Spark + DuckDB oracles) | `ICEBERG_DUCKDB_PYTHON=<python with the interop duckdb group> dotnet test tests/Iceberg.Net.Ecosystem.Tests` |
 | BDD specification (Reqnroll) | `ICEBERG_PYTHON=<python with interop deps> dotnet test tests/Iceberg.Net.Behaviour.Tests` |
 | Start emulators | `./emulation/up.sh` (moto + REST fixture); add `--spark --trino --polaris` for the other engines/catalogs |
 | Regression (emulation) | `ICEBERG_PYTHON=<python with interop deps> dotnet test tests/Iceberg.Net.Regression.Tests` |

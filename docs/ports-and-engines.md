@@ -41,7 +41,7 @@ is silent on *operational* behaviour:
 | Distribution | `write.distribution-mode` none/hash/range; Iceberg asks for `hash` | Writers should cluster by partition before writing to avoid one-file-per-row-group explosions — `TableWriter` groups by partition tuple |
 | `expire_snapshots` | `older_than` default now − 5 days, `retain_last` 1, refs always kept | Mirrored in `Maintenance.ExpireSnapshotsAsync` |
 | `rewrite_data_files` | bin-pack default, target 512 MB, `use-starting-sequence-number=true` | When we compact, commit with the *starting* sequence number so concurrent deletes still apply |
-| `rewrite_manifests`, `remove_orphan_files`, `rewrite_position_delete_files` | | Maintenance roadmap; Athena `OPTIMIZE`/`VACUUM` cover Glue tables meanwhile |
+| `rewrite_manifests`, `remove_orphan_files`, `rewrite_position_delete_files` | | Done natively too; `Iceberg.Net.Spark` generates the procedure calls (and submits them to EMR Serverless/Glue) and `Iceberg.Net.Athena` the `OPTIMIZE`/`VACUUM` statements, for tables maintained by those engines ([spark-and-athena.md](spark-and-athena.md)) |
 | Snapshot procedures | `rollback_to_snapshot`, `cherrypick_snapshot`, `fast_forward`, WAP `publish_changes` | All expressible as `set-snapshot-ref` updates on our state machine |
 | Migration | `add_files`, `register_table`, `migrate`, `snapshot` | `RegisterTableAsync` done; `add_files` (adopt existing Parquet) is cheap to add and useful for backfills |
 
@@ -55,7 +55,7 @@ It is not in the emulation stack yet because of image size; see [regression-suit
 | **Athena** (Trino-based, engine v3) | **Our production reader.** Iceberg v2 only — rejects v3 tables. Writes position deletes for DELETE/UPDATE/MERGE (MoR). `OPTIMIZE`/`VACUUM` for maintenance. Reads Glue `metadata_location`. ⇒ default to v2; MoR read support is required before we can read tables Athena has mutated (`AthenaTests` pins the current refusal) |
 | **Trino** (484) | v1/v2 supported, v3 experimental; v3 row-level ops use DVs; commit retries default 4 |
 | **Flink** (Iceberg 1.12: Flink 2.1–2.3) | Streaming upserts via equality deletes; `ConvertEqualityDeletes` turns them into DVs (because v4 bans new equality deletes) |
-| **DuckDB** `iceberg` | MoR-only writes (position deletes on v2, DVs on v3), row lineage on v3; CI-tests against REST fixture, Polaris, Nessie, Lakekeeper, Gravitino — the same matrix we should grow into |
+| **DuckDB** `iceberg` | MoR-only writes (position deletes on v2, DVs on v3), row lineage on v3; CI-tests against REST fixture, Polaris, Nessie, Lakekeeper, Gravitino — the same matrix we should grow into. Now one of our oracles: DuckDB 1.5.5 reads our tables under every delete mechanism ([spark-and-athena.md](spark-and-athena.md#duckdb-oracle)) |
 | **Snowflake** | v3 GA (2026-05); external engines can read v3 via Horizon IRC but cannot write v3 yet |
 
 ## Strategy this implies

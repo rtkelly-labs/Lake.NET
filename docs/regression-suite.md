@@ -38,6 +38,7 @@ Current results (emulation, everything up): **L0 210/210**, **L1+L2 117/119** (2
 | `ICEBERG_POLARIS_URI` | `http://localhost:8182/api/catalog` | — | Polaris (emulation only) |
 | `ICEBERG_TRINO_URI` | `http://localhost:8080` | — | Trino (emulation only) |
 | `ICEBERG_SPARK` / `ICEBERG_SPARK_IMAGE` / `ICEBERG_SPARK_JAR` | on / `apache/spark:4.0.1` / `emulation/.cache/…jar` | — | Spark oracle; `ICEBERG_SPARK=0` disables it, `ICEBERG_SPARK_KEEP=1` keeps its tables for debugging |
+| `ICEBERG_DUCKDB_PYTHON` / `ICEBERG_DUCKDB` / `ICEBERG_DUCKDB_REQUIRED` | `ICEBERG_PYTHON` / on / off | — | DuckDB oracle (`Iceberg.Net.Ecosystem.Tests`): the Python with the interop `duckdb` group; `ICEBERG_DUCKDB=0` disables it; `ICEBERG_DUCKDB_REQUIRED=1` (CI) fails instead of skipping when the extension cannot load ([spark-and-athena.md](spark-and-athena.md#duckdb-oracle)) |
 | `ICEBERG_WAREHOUSE` | `s3://iceberg-regression/warehouse` | **required** `s3://bucket/prefix` | where test tables live (Glue tables under `/glue`) |
 | `ICEBERG_ATHENA_WORKGROUP` | — | e.g. `primary` | enables L3 |
 | `ICEBERG_ATHENA_OUTPUT` | — | optional `s3://…` | Athena result location if the workgroup has none |

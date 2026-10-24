@@ -30,7 +30,19 @@ shape.
 | **D. Snapshot management** | Branches/tags, rollback, cherry-pick, fast-forward, branch writes (WAP), per-ref retention, metadata tables, change feed, partial-progress compaction, position-delete rewrite | ✅ [snapshot-management.md](snapshot-management.md) |
 | **E. Typed layer** | `Iceberg.Net.Linq`: mapping by field ID, LINQ provider, typed writes in EF Core's bulk shape | ✅ [linq.md](linq.md) |
 | **F. EF Core provider** | Non-relational provider over phase E: model, queries, `ExecuteUpdate`/`ExecuteDelete`, `SaveChanges` | ⬜ |
-| **G. Ecosystem** | DuckDB oracle, OpenTelemetry, Spark procedure helpers and job submission, Athena helpers, a REST catalog server | ⬜ |
+| **G. Ecosystem** | DuckDB oracle, OpenTelemetry, Spark procedure helpers and job submission, Athena helpers, a REST catalog server | 🟡 see below |
+
+Phase G, piece by piece:
+
+| Piece | State | Where |
+|---|---|---|
+| OpenTelemetry traces and metrics (scans, commits with attempts/retries/outcome, catalog calls) | ✅ | [telemetry.md](telemetry.md), `IcebergTelemetry`, `TelemetryTests` |
+| Spark procedure SQL (rewrite data / position deletes / manifests, expire, orphans, snapshot and WAP procedures, changelog view, …) | ✅ run through Spark 4 + Iceberg 1.12 | [spark-and-athena.md](spark-and-athena.md), `Iceberg.Net.Spark`, `SparkProcedureOracleTests` |
+| Job submission: EMR Serverless and Glue `StartJobRun` of a generated script | 🟡 against faked SDK clients; a real run needs AWS | `EmrServerlessSqlJobRunner`, `GlueSqlJobRunner` |
+| Spark Connect | ⬜ not planned (no .NET client) | [spark-and-athena.md](spark-and-athena.md#running-a-script-on-emr-serverless-or-glue) |
+| Athena SQL (CREATE TABLE … `table_type`=ICEBERG, OPTIMIZE, VACUUM, properties, time travel) and runner | 🟡 SQL unit-tested; real Athena with the AWS run (#4) | `Iceberg.Net.Athena` |
+| DuckDB oracle | ✅ reads our CoW, position-delete, equality-delete and DV tables; skips where the extension cannot load | `interop/duckdb_oracle.py`, `DuckDbCrossEngineTests` |
+| REST catalog server | separate stream | — |
 
 Gaps the phases left open:
 - UPDATE can't assign nested struct fields.
