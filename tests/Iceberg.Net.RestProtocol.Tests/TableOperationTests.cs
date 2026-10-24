@@ -134,16 +134,20 @@ public sealed class TableOperationTests : ServerTest
     }
 
     [Spec("rest: registerTable")]
+    [Spec("rest: unregisterTable")]
     [Fact]
-    public async Task Register_adopts_an_existing_metadata_file_and_refuses_a_taken_name()
+    public async Task Register_adopts_an_unregistered_tables_metadata_and_refuses_a_taken_name()
     {
         var created = await CreateTableAsync("sales", "orders");
         var location = created["metadata-location"]!.GetValue<string>();
-        var r = await Api.PostAsync($"v1/namespaces/{Ns("sales")}/register", new JsonObject { ["name"] = "orders_copy", ["metadata-location"] = location });
+        await CreateTableAsync("sales", "taken");
+        // A table's files belong to one name at a time: free them first.
+        Assert.Equal(200, (await Api.PostAsync(T("orders") + "/unregister", null)).Code);
+        (await Api.PostAsync($"v1/namespaces/{Ns("sales")}/register", new JsonObject { ["name"] = "taken", ["metadata-location"] = location }))
+            .AssertError(409, "AlreadyExistsException");
+        var r = await Api.PostAsync($"v1/namespaces/{Ns("sales")}/register", new JsonObject { ["name"] = "orders_restored", ["metadata-location"] = location });
         Assert.Equal(200, r.Code);
         Assert.Equal(location, r.Body!["metadata-location"]!.GetValue<string>());
-        (await Api.PostAsync($"v1/namespaces/{Ns("sales")}/register", new JsonObject { ["name"] = "orders", ["metadata-location"] = location }))
-            .AssertError(409, "AlreadyExistsException");
         (await Api.PostAsync($"v1/namespaces/{Ns("missing")}/register", new JsonObject { ["name"] = "x", ["metadata-location"] = location }))
             .AssertError(404, "NoSuchNamespaceException");
     }
