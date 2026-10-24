@@ -48,12 +48,17 @@ Phase G progress: the REST catalog server is built ([rest-server.md](rest-server
 conformance kind and is checked against PyIceberg and Spark.
 
 Gaps the phases left open:
-- UPDATE can't assign nested struct fields.
-- Column chunks are fetched whole: projection decodes less but still downloads the whole file.
-- Delete files are decoded with the current schema.
-- Cherry-pick replay needs the default partition spec.
-- The change feed is Spark-checked only for tables without delete files (Java's changelog scan refuses them).
 - `SaveChanges` across tables is not atomic, because `MergeAsync` cannot stage a commit for `CommitTransactionAsync`.
+- The EMR Serverless, Glue and Athena runners are tested against faked SDK clients; a real run needs the AWS sandbox (#4).
+- Nested UPDATE and cherry-pick across partition specs are not yet Spark-checked.
+- Avro data files are still fetched whole (ranged reads cover Parquet).
+- The REST server has no scan planning, credential vending, remote signing or authorization roles.
+- The change feed is Spark-checked only for tables without delete files (Java's changelog scan refuses them); our
+  replay test covers the rest.
+
+Closed in the second build-out: nested UPDATE, ranged Parquet reads, delete files after a schema change, cherry-pick
+across partition specs, strictly increasing snapshot timestamps, the manifest abstraction, and the three LINQ gaps
+(pruned residual deletes, kept field IDs, time-travel pushdown on renamed columns).
 
 ### Upstream changes to plan for (from the spec-drift check)
 
