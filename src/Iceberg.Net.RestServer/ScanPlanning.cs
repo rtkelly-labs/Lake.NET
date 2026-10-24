@@ -69,11 +69,17 @@ public sealed class ScanPlanner(CatalogService catalog, ScanPlanningOptions opti
     /// <summary>Plans kept in memory (for tests).</summary>
     public int PlansKept => _plans.Count;
 
+    private long _plansStarted;
+
+    /// <summary><c>planTableScan</c> requests accepted since start.</summary>
+    public long PlansStarted => Interlocked.Read(ref _plansStarted);
+
     /// <summary><c>planTableScan</c>: a completed plan with its plan ID, or (with <see cref="ScanPlanningOptions.Async"/>) a submitted one.</summary>
     public async Task<JsonObject> PlanAsync(TableIdentifier id, PlanRequest request, CancellationToken ct)
     {
         Expire();
         var loaded = await catalog.LoadTableAsync(id, ct);
+        Interlocked.Increment(ref _plansStarted);
         var planId = Guid.NewGuid().ToString();
         if (options.Async)
         {

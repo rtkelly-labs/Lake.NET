@@ -7,6 +7,9 @@
         print the ids, row count, snapshot count and schema column names
     evolve <uri> <credential> <namespace> <table> <column>
         add an optional string column
+    plan-read <uri> <credential> <namespace> <table> [<max id>]
+        read with server-side scan planning (scan-planning-mode=server), optionally with "id < <max id>", and print
+        the ids and the planned data and delete files
 
 <credential> is "client_id:client_secret" for the OAuth2 client-credentials endpoint, or "-" for none.
 Output is one JSON document on stdout.
@@ -38,8 +41,8 @@ SPEC = PartitionSpec(
 )
 
 
-def catalog(uri: str, credential: str) -> Catalog:
-    props = {"type": "rest", "uri": uri}
+def catalog(uri: str, credential: str, **extra: str) -> Catalog:
+    props = {"type": "rest", "uri": uri, **extra}
     if credential != "-":
         props["credential"] = credential
         props["scope"] = "catalog"
@@ -110,6 +113,22 @@ def cmd_evolve(
     return describe(cat, (ns, name))
 
 
+def cmd_plan_read(
+    uri: str, credential: str, ns: str, name: str, max_id: str | None
+) -> dict[str, Any]:
+    cat = catalog(uri, credential, **{"scan-planning-mode": "server"})
+    table = cat.load_table((ns, name))
+    scan = table.scan(row_filter=f"id < {int(max_id)}" if max_id else "True")
+    tasks = list(scan.plan_files())
+    arrow = scan.to_arrow()
+    return {
+        "server_side": cat.supports_server_side_planning(),
+        "ids": sorted(arrow.column("id").to_pylist()),
+        "data_files": len(tasks),
+        "delete_files": sorted({d.file_path for t in tasks for d in t.delete_files}),
+    }
+
+
 def main(argv: list[str]) -> None:
     cmd, *args = argv
     if cmd == "write":
@@ -124,6 +143,8 @@ def main(argv: list[str]) -> None:
         )
     elif cmd == "read":
         result = cmd_read(*args[:4])
+    elif cmd == "plan-read":
+        result = cmd_plan_read(*args[:4], args[4] if len(args) > 4 else None)
     elif cmd == "evolve":
         result = cmd_evolve(*args[:5])
     else:
