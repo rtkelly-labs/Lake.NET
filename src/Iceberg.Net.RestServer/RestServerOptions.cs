@@ -107,6 +107,12 @@ public sealed class RestServerAuthorizationOptions
 {
     public Dictionary<string, List<string>> Grants { get; set; } = [];
 
+    /// <summary>
+    /// With authentication on and no grants, let every authenticated principal do everything. Without this, that
+    /// configuration refuses to start: an unconfigured grant table must not silently mean "admin for all".
+    /// </summary>
+    public bool AllowAll { get; set; }
+
     public bool Enabled => Grants.Count > 0;
 }
 
@@ -271,8 +277,20 @@ public sealed class RestServerAuthOptions
     /// <summary>An external OpenID Connect issuer whose JWTs are also accepted (keys from its discovery document).</summary>
     public string? Authority { get; set; }
 
-    /// <summary>The audience external JWTs must carry; unchecked when unset.</summary>
+    /// <summary>
+    /// The audience external JWTs must carry. Required with an <see cref="Authority"/>: without it, a token the IdP issued
+    /// for any other application would be accepted. Set <see cref="AllowAnyAudience"/> to accept that knowingly.
+    /// </summary>
     public string? Audience { get; set; }
+
+    /// <summary>Accept external JWTs whatever their audience (an <see cref="Authority"/> with no <see cref="Audience"/>).</summary>
+    public bool AllowAnyAudience { get; set; }
+
+    /// <summary>
+    /// How long a session may be kept alive by token exchange: a refreshed token never outlives this, counted from the
+    /// client-credentials grant that started it.
+    /// </summary>
+    public TimeSpan MaxSessionLifetime { get; set; } = TimeSpan.FromHours(12);
 
     /// <summary>Allow an <c>http://</c> <see cref="Authority"/> (tests, local IdPs).</summary>
     public bool RequireHttpsMetadata { get; set; } = true;

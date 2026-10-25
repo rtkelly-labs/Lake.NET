@@ -12,6 +12,7 @@ public sealed class AuthTests
         ["Auth:Tokens:0"] = "static-secret-token",
         ["Auth:Clients:alice"] = "alice-secret",
         ["Auth:SigningKey"] = "a-test-signing-key-that-is-at-least-32-bytes",
+        ["Authorization:AllowAll"] = "true", // authentication only: authorization is AuthorizationTests'
     };
 
     [Fact]

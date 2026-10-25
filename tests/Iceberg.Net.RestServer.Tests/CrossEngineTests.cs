@@ -87,6 +87,7 @@ public sealed class CrossEngineTests
     {
         o.Auth.Clients["spark"] = "spark-secret";
         o.Auth.SigningKey = "cross-engine-signing-key-of-at-least-32-bytes";
+        o.Authorization.AllowAll = true;
     }, under);
 
     private static Task<RestCatalog> ConnectAsync(KestrelHost host) =>
@@ -170,6 +171,7 @@ public sealed class CrossEngineTests
         {
             o.Auth.Clients["spark"] = "spark-secret";
             o.Auth.SigningKey = "cross-engine-signing-key-of-at-least-32-bytes";
+            o.Authorization.AllowAll = true;
             o.ScanPlanning.FilesPerPlanTask = 3;
         });
         using var catalog = await ConnectAsync(host);
@@ -252,6 +254,7 @@ public sealed class CrossEngineTests
         {
             o.Auth.Clients["spark"] = "spark-secret";
             o.Auth.SigningKey = "cross-engine-signing-key-of-at-least-32-bytes";
+            o.Authorization.AllowAll = true;
             o.ScanPlanning.Mode = "server";
             o.ScanPlanning.FilesPerPlanTask = 3;
         }, SparkOracle.SharedRoot);
@@ -336,6 +339,7 @@ public sealed class CrossEngineTests
         {
             o.Auth.Clients["spark"] = "spark-secret";
             o.Auth.SigningKey = "cross-engine-signing-key-of-at-least-32-bytes";
+            o.Authorization.AllowAll = true;
             o.Warehouse = settings["Warehouse"];
             o.RemoteSigning.Enabled = true;
             foreach (var (k, v) in settings.Where(kv => kv.Key.StartsWith("FileIO:", StringComparison.Ordinal))) o.FileIO[k["FileIO:".Length..]] = v;
@@ -387,6 +391,7 @@ public sealed class CrossEngineTests
         {
             o.Auth.Clients["spark"] = "spark-secret";
             o.Auth.SigningKey = "cross-engine-signing-key-of-at-least-32-bytes";
+            o.Authorization.AllowAll = true;
             o.Warehouse = settings["Warehouse"];
             o.RemoteSigning.Enabled = true;
             foreach (var (k, v) in settings.Where(kv => kv.Key.StartsWith("FileIO:", StringComparison.Ordinal))) o.FileIO[k["FileIO:".Length..]] = v;

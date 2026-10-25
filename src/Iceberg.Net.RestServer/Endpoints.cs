@@ -16,6 +16,12 @@ namespace Iceberg.Net.RestServer;
 public static class Endpoints
 {
     private const string Ns = "/namespaces/{namespace}";
+
+    /// <summary>The largest request body accepted.</summary>
+    public const long MaxRequestBodyBytes = 16 * 1024 * 1024;
+
+    /// <summary>The largest page a list returns, and the page size when the client asks for none.</summary>
+    public const int MaxPageSize = 1000;
     private const string Tbl = Ns + "/tables/{table}";
     private const string Vw = Ns + "/views/{view}";
 
@@ -63,9 +69,19 @@ public static class Endpoints
     /// <summary>The credentials route, advertised when credentials are vended.</summary>
     public const string Credentials = "GET /v1/{prefix}/namespaces/{namespace}/tables/{table}/credentials";
 
+    /// <summary>Configurations that would quietly widen access are refused at start-up (docs/rest-server.md, Authentication).</summary>
+    private static void ValidateSecurity(RestServerOptions options)
+    {
+        if (options.Auth.Authority is not null && options.Auth.Audience is null && !options.Auth.AllowAnyAudience)
+            throw new InvalidOperationException("Iceberg:Auth:Authority is set without Iceberg:Auth:Audience: tokens issued for any application would be accepted. Set the audience, or Iceberg:Auth:AllowAnyAudience=true.");
+        if (options.Auth.Enabled && !options.Authorization.Enabled && !options.Authorization.AllowAll)
+            throw new InvalidOperationException("Authentication is on but no Iceberg:Authorization:Grants are configured, which would make every authenticated principal an admin. Configure grants, or set Iceberg:Authorization:AllowAll=true.");
+    }
+
     public static void MapIcebergRestCatalog(this WebApplication app)
     {
         var options = app.Services.GetRequiredService<RestServerOptions>();
+        ValidateSecurity(options);
         var logger = app.Services.GetRequiredService<ILoggerFactory>().CreateLogger("Iceberg.Net.RestServer");
         var vendor = app.Services.GetRequiredService<IStorageCredentialVendor>();
         var vending = vendor is not NoCredentialVendor;
@@ -90,9 +106,23 @@ public static class Endpoints
             catch (Exception e) when (!ctx.Response.HasStarted)
             {
                 var (status, type) = ErrorModel.Classify(e);
-                if (status >= 500) logger.LogError(e, "{Method} {Path} failed", ctx.Request.Method, ctx.Request.Path);
-                await ErrorModel.WriteAsync(ctx, status, type, e.Message);
+                if (status >= 500)
+                {
+                    // The path is the client's: no line breaks reach the log. The details stay in the log, not the response.
+                    var path = ctx.Request.Path.ToString().Replace('\r', ' ').Replace('\n', ' ');
+                    logger.LogError(e, "{Method} {Path} failed ({TraceId})", ctx.Request.Method, path, ctx.TraceIdentifier);
+                    await ErrorModel.WriteAsync(ctx, status, type, $"Internal server error (trace {ctx.TraceIdentifier})");
+                }
+                else await ErrorModel.WriteAsync(ctx, status, type, e.Message);
             }
+        });
+
+        // Requests are JSON documents of kilobytes; nothing a client sends needs more than this.
+        app.Use((ctx, next) =>
+        {
+            if (ctx.Features.Get<Microsoft.AspNetCore.Http.Features.IHttpMaxRequestBodySizeFeature>() is { IsReadOnly: false } limit)
+                limit.MaxRequestBodySize = MaxRequestBodyBytes;
+            return next(ctx);
         });
 
         app.MapPost("/v1/oauth/tokens", AuthSetup.TokenAsync).AllowAnonymous();
@@ -403,8 +433,8 @@ public static class Endpoints
     }
 
     /// <summary>
-    /// Keyset paging over an ordinally sorted list: the token is the last key returned. Without <c>pageSize</c>
-    /// everything comes back in one page.
+    /// Keyset paging over an ordinally sorted list: the token is the last key returned. Pages hold at most
+    /// <see cref="MaxPageSize"/> entries, which is also the size without <c>pageSize</c>.
     /// </summary>
     private static (IReadOnlyList<T> Page, string? Next) Page<T>(IReadOnlyList<T> sorted, Func<T, string> key, HttpRequest req)
     {
@@ -417,8 +447,8 @@ public static class Endpoints
             rest = sorted.Where(x => string.CompareOrdinal(key(x), after) > 0);
         }
         var size = req.Query["pageSize"].ToString() is { Length: > 0 } s
-            ? int.TryParse(s, out var n) && n > 0 ? n : throw new BadRequestException("pageSize must be a positive integer")
-            : int.MaxValue;
+            ? int.TryParse(s, out var n) && n > 0 ? Math.Min(n, MaxPageSize) : throw new BadRequestException("pageSize must be a positive integer")
+            : MaxPageSize;
         var remaining = rest.ToList();
         var page = remaining.Take(size).ToList();
         var next = remaining.Count > page.Count ? Convert.ToBase64String(Encoding.UTF8.GetBytes(key(page[^1]))) : null;
