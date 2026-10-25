@@ -26,6 +26,8 @@
     <PackageVersion Include="Microsoft.EntityFrameworkCore.Relational" Version="10.0.13" />
     <!-- REST catalog server (src/Iceberg.Net.RestServer): bearer/JWT auth; tests host it with WebApplicationFactory -->
     <PackageVersion Include="Microsoft.AspNetCore.Authentication.JwtBearer" Version="10.0.13" />
+    <!-- The REST server's own OpenAPI document (/openapi/v1.json), diffed against the reference spec in tests -->
+    <PackageVersion Include="Microsoft.AspNetCore.OpenApi" Version="10.0.13" />
     <PackageVersion Include="Microsoft.AspNetCore.Mvc.Testing" Version="10.0.13" />
     <!-- Iceberg.Net.Spark: running generated Iceberg procedure scripts on EMR Serverless -->
     <PackageVersion Include="AWSSDK.EMRServerless" Version="4.0.101.4" />

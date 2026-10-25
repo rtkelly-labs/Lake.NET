@@ -453,6 +453,20 @@ Errors always have the `{"error": {"message", "type", "code"}}` shape:
 | 422 | `UnprocessableEntityException` |
 | 500 | anything else, logged |
 
+## OpenAPI document
+
+The server describes itself at `GET /openapi/v1.json` (no authentication, like the spec it follows). Paths, methods and
+path parameters come from the routes; each operation's `operationId`, the query and header parameters its handler
+reads, and the statuses it can answer with come from one table, `OpenApiOperations.ByRoute`. Change a route or a handler's
+inputs or errors, and update that table in the same change.
+
+`OpenApiConformanceTests` diffs the document against the reference spec at the pinned ref
+(`docs/spec/open-api/rest-catalog-open-api.json`, the same ref as `docs/spec/sections.json`): every operation, route,
+success status, functional error (400, 401, 403, 404, 406, 409, 422; 419, 503 and 5XX are not compared) and query or
+header parameter must match. The reviewed differences, each with its reason, are in `docs/spec/openapi-deviations.json`;
+an entry whose difference has gone away fails the test too. When the pinned ref moves, refresh the copy with
+`uv run --with pyyaml --no-project python -I tools/openapi_reference.py`.
+
 ## Not implemented
 
 - Remote signing for anything but S3, the spec's newer `remote-signing-config` field (Iceberg 1.12 works without it),

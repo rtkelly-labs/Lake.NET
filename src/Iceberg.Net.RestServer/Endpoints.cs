@@ -3,6 +3,7 @@ using System.Text;
 using System.Text.Json.Nodes;
 using Microsoft.AspNetCore.Builder;
 using Microsoft.AspNetCore.Http;
+using Microsoft.AspNetCore.Mvc;
 using Microsoft.AspNetCore.Routing;
 using Microsoft.Extensions.DependencyInjection;
 using Microsoft.Extensions.Logging;
@@ -126,6 +127,8 @@ public static class Endpoints
         });
 
         app.MapPost("/v1/oauth/tokens", AuthSetup.TokenAsync).AllowAnonymous();
+        // The server's own description of these routes (OpenApiOperations), public like the spec it follows.
+        app.MapOpenApi("/openapi/{documentName}.json").AllowAnonymous();
 
         var config = app.MapGroup("/v1/config");
         var v1 = app.MapGroup(options.Prefix is { Length: > 0 } p ? $"/v1/{Uri.EscapeDataString(p)}" : "/v1");
@@ -302,10 +305,10 @@ public static class Endpoints
                 return Json(await planner.PlanAsync(id, Parse(() => PlanRequest.Parse(body)), ct));
             });
 
-            v1.MapGet(Tbl + "/plan/{planId}", async (string @namespace, string table, string planId, HttpContext http, ScanPlanner planner, CancellationToken ct) =>
+            v1.MapGet(Tbl + "/plan/{plan-id}", async (string @namespace, string table, [FromRoute(Name = "plan-id")] string planId, HttpContext http, ScanPlanner planner, CancellationToken ct) =>
                 Json(await planner.FetchAsync(await AuthorizedAsync(http, CatalogPrivilege.Read, @namespace, table), planId, ct)));
 
-            v1.MapDelete(Tbl + "/plan/{planId}", async (string @namespace, string table, string planId, HttpContext http, ScanPlanner planner, CancellationToken ct) =>
+            v1.MapDelete(Tbl + "/plan/{plan-id}", async (string @namespace, string table, [FromRoute(Name = "plan-id")] string planId, HttpContext http, ScanPlanner planner, CancellationToken ct) =>
             {
                 await planner.CancelAsync(await AuthorizedAsync(http, CatalogPrivilege.Read, @namespace, table), planId, ct);
                 return Results.NoContent();
