@@ -163,13 +163,15 @@ public sealed class ProtocolTests
     [Fact]
     public async Task Tables_get_the_namespace_location_when_it_has_one()
     {
-        await using var host = ServerHost.Start();
+        var root = Path.Combine(Path.GetTempPath(), "iceberg-restserver-tests", Guid.NewGuid().ToString("N"));
+        var custom = Path.Combine(root, "elsewhere");
+        // A namespace location outside the warehouse must be under an allowed root.
+        await using var host = ServerHost.Start(root: root, settings: new Dictionary<string, string> { ["Locations:Allowed:0"] = custom });
         using var catalog = await host.ConnectAsync();
-        var custom = Path.Combine(host.Root, "elsewhere");
-        await catalog.CreateNamespaceAsync(Namespace.Of("db"), new Dictionary<string, string> { ["location"] = custom });
+        await catalog.CreateNamespaceAsync(Namespace.Of("db"), new Dictionary<string, string> { ["location"] = $"{custom}/db" });
         var t = await catalog.CreateTableAsync(new CreateTableRequest(TableIdentifier.Of("db", "t"), Schema));
-        Assert.Equal($"{custom}/t", t.Location);
-        var explicitLocation = Path.Combine(host.Root, "explicit");
+        Assert.Equal($"{custom}/db/t", t.Location);
+        var explicitLocation = Path.Combine(custom, "db", "explicit");
         Assert.Equal(explicitLocation, (await catalog.CreateTableAsync(new CreateTableRequest(TableIdentifier.Of("db", "u"), Schema, Location: explicitLocation))).Location);
     }
 
@@ -342,18 +344,23 @@ public sealed class ProtocolTests
         using var http = host.Http();
         AssertError(HttpStatusCode.Conflict, "AlreadyExistsException", await SendAsync(http, HttpMethod.Post, "/v1/namespaces/db/register",
             new JsonObject { ["name"] = "b", ["metadata-location"] = a.MetadataLocation }));
-        var (status, _) = await SendAsync(http, HttpMethod.Post, "/v1/namespaces/db/register",
-            new JsonObject { ["name"] = "b", ["metadata-location"] = a.MetadataLocation, ["overwrite"] = true });
-        Assert.Equal(HttpStatusCode.OK, status);
-        Assert.Equal(a.Metadata.TableUuid, (await catalog.LoadTableAsync(b.Identifier)).Metadata.TableUuid);
+        // Two catalog entries over one set of files is refused while a still owns them (docs/rest-server.md, Storage locations).
         AssertError(HttpStatusCode.BadRequest, "BadRequestException", await SendAsync(http, HttpMethod.Post, "/v1/namespaces/db/register",
-            new JsonObject { ["name"] = "c", ["metadata-location"] = Path.Combine(host.Root, "missing.metadata.json") }));
+            new JsonObject { ["name"] = "b", ["metadata-location"] = a.MetadataLocation, ["overwrite"] = true }));
+        AssertError(HttpStatusCode.BadRequest, "BadRequestException", await SendAsync(http, HttpMethod.Post, "/v1/namespaces/db/register",
+            new JsonObject { ["name"] = "c", ["metadata-location"] = Path.Combine(host.Warehouse, "db", "c", "missing.metadata.json") }));
 
         var (unregStatus, unregistered) = await SendAsync(http, HttpMethod.Post, "/v1/namespaces/db/tables/a/unregister");
         Assert.Equal(HttpStatusCode.OK, unregStatus);
         Assert.Equal(a.MetadataLocation, unregistered!["metadata-location"]!.GetValue<string>());
         Assert.False(await catalog.TableExistsAsync(a.Identifier));
         Assert.True(File.Exists(a.MetadataLocation!));
+
+        // Once a is unregistered its files are free: b can take them over.
+        var (status, _) = await SendAsync(http, HttpMethod.Post, "/v1/namespaces/db/register",
+            new JsonObject { ["name"] = "b", ["metadata-location"] = a.MetadataLocation, ["overwrite"] = true });
+        Assert.Equal(HttpStatusCode.OK, status);
+        Assert.Equal(a.Metadata.TableUuid, (await catalog.LoadTableAsync(b.Identifier)).Metadata.TableUuid);
     }
 
     [Fact]

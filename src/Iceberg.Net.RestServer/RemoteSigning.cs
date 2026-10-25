@@ -113,13 +113,33 @@ public sealed partial class S3RequestSigner
         return (new JsonObject { ["uri"] = request.Uri.OriginalString, ["headers"] = headers }, request.Writes ? "no-cache" : "private");
     }
 
+    // What S3 clients (Iceberg Java, PyIceberg, this library) send for a table's objects: plain object reads and writes,
+    // multipart uploads, versions, and the AWS SDK for Java's x-id operation hint. Anything else on an object is a
+    // sub-resource a table does not need (acl, tagging, retention, legal-hold, restore, …).
+    private static readonly HashSet<string> ObjectQuery = new(StringComparer.Ordinal) { "uploads", "uploadId", "partNumber", "versionId", "x-id" };
+    private static readonly HashSet<string> ListQuery = new(StringComparer.Ordinal)
+        { "prefix", "list-type", "delimiter", "continuation-token", "max-keys", "start-after", "encoding-type", "fetch-owner", "x-id" };
+
+    /// <summary>Headers that change who may read an object or how long it must be kept: never signed.</summary>
+    private static bool PrivilegedHeader(string name) =>
+        name.Equals("x-amz-acl", StringComparison.OrdinalIgnoreCase)
+        || name.StartsWith("x-amz-grant-", StringComparison.OrdinalIgnoreCase)
+        || name.StartsWith("x-amz-object-lock-", StringComparison.OrdinalIgnoreCase)
+        || name.Equals("x-amz-bypass-governance-retention", StringComparison.OrdinalIgnoreCase)
+        || name.Equals("x-amz-website-redirect-location", StringComparison.OrdinalIgnoreCase);
+
     private void Authorize(RemoteSignRequest request, IReadOnlyList<(string Bucket, string Prefix)> prefixes)
     {
         var (bucket, key) = Address(request.Uri);
         bool Allowed(string b, string k) => prefixes.Any(p => p.Bucket == b && k.StartsWith(p.Prefix, StringComparison.Ordinal)) && !HasDotSegment(k);
+        if (request.Headers.Keys.FirstOrDefault(PrivilegedHeader) is { } privileged)
+            throw new ForbiddenException($"Requests setting {privileged} are not signed");
+        var query = ParseQuery(request.Uri.Query);
         if (key is not null)
         {
             if (!Allowed(bucket, key)) throw new ForbiddenException($"s3://{bucket}/{key} is outside the table");
+            if (query.Keys.FirstOrDefault(k => !ObjectQuery.Contains(k)) is { } sub)
+                throw new ForbiddenException($"The ?{sub} sub-resource of an object is not something a table needs");
             if (request.Headers.TryGetValue("x-amz-copy-source", out var sources))
                 foreach (var source in sources)
                 {
@@ -130,16 +150,17 @@ public sealed partial class S3RequestSigner
             return;
         }
 
-        var query = ParseQuery(request.Uri.Query);
+        // Bucket requests: only the table's own buckets, and only the parameters each operation takes.
+        if (!prefixes.Any(p => p.Bucket == bucket)) throw new ForbiddenException($"Bucket {bucket} holds none of the table's files");
         switch (request.Method)
         {
-            case "GET" when query.ContainsKey("location"):
+            case "GET" when query.Keys.All(k => k is "location" or "x-id") && query.ContainsKey("location"):
             case "HEAD" when query.Count == 0:
                 return;
-            case "GET" when query.TryGetValue("prefix", out var prefix):
+            case "GET" when query.Keys.All(ListQuery.Contains) && query.TryGetValue("prefix", out var prefix):
                 if (!Allowed(bucket, prefix)) throw new ForbiddenException($"Listing s3://{bucket}/{prefix} reaches outside the table");
                 return;
-            case "POST" when query.ContainsKey("delete"):
+            case "POST" when query.ContainsKey("delete") && query.Keys.All(k => k is "delete" or "x-id"):
                 if (request.Body is null) throw new BadRequestException("A DeleteObjects request must be signed with its body");
                 XDocument doc;
                 try { doc = XDocument.Parse(request.Body); }

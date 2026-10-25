@@ -57,6 +57,23 @@ public sealed class RestServerOptions
 
     /// <summary><c>Idempotency-Key</c> deduplication of mutating requests.</summary>
     public IdempotencyOptions Idempotency { get; set; } = new();
+
+    /// <summary>Where namespaces, tables and views may put their files (see <see cref="LocationOptions"/>).</summary>
+    public LocationOptions Locations { get; set; } = new();
+}
+
+/// <summary>
+/// The storage the server will accept as a location. The server acts on locations with its own credentials (it reads
+/// and writes metadata, vends credentials, signs requests and purges), so a location a client chooses must stay inside
+/// storage the operator allowed, inside its namespace, and clear of every other table's files.
+/// </summary>
+public sealed class LocationOptions
+{
+    /// <summary>
+    /// Roots besides <see cref="RestServerOptions.Warehouse"/> that namespace, table and view locations may be under, e.g.
+    /// <c>gs://lake/wh</c> or <c>abfss://c@acct.dfs.core.windows.net/wh</c>. Each must have a directory below the bucket.
+    /// </summary>
+    public List<string> Allowed { get; set; } = [];
 }
 
 /// <summary>

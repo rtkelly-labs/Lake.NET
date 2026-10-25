@@ -106,6 +106,41 @@ public sealed class RemoteSigningTests
     }
 
     [Fact]
+    public async Task The_signer_refuses_sub_resources_privileged_headers_and_other_buckets()
+    {
+        await using var host = ServerHost.Start(settings: Settings, services: s => s.AddSingleton<IFileIO>(new MemoryFileIO()));
+        using var http = host.Http();
+        var writer = await TokenAsync(http, "writer", "writer-secret");
+        await PostAsync(http, writer, "/v1/namespaces", new JsonObject { ["namespace"] = new JsonArray("db") });
+        await PostAsync(http, writer, "/v1/namespaces/db/tables", new JsonObject { ["name"] = "t", ["schema"] = Json.TypeJson.SchemaToJson(ScanPlanningTests.Schema) });
+        const string sign = "/v1/namespaces/db/tables/t/sign";
+        const string obj = "http://s3.test:9000/bucket/wh/db/t/data/00000-0.parquet";
+
+        // What clients send for the table's objects is signed: plain, multipart, versions, the Java SDK's x-id.
+        foreach (var (method, uri) in new[]
+                 {
+                     ("PUT", obj + "?x-id=PutObject"), ("POST", obj + "?uploads"), ("PUT", obj + "?partNumber=1&uploadId=u1"),
+                     ("POST", obj + "?uploadId=u1"), ("DELETE", obj + "?uploadId=u1"), ("GET", obj + "?versionId=v1"),
+                     ("GET", "http://s3.test:9000/bucket?list-type=2&prefix=wh%2Fdb%2Ft%2F&encoding-type=url&continuation-token=c"),
+                 })
+            Assert.Equal(HttpStatusCode.OK, (await PostAsync(http, writer, sign, Sign(method, uri))).Status);
+
+        // Sub-resources that change access or retention, and headers that do the same, are not.
+        foreach (var uri in new[] { obj + "?acl", obj + "?tagging", obj + "?retention", obj + "?legal-hold", obj + "?restore" })
+            Assert.Equal(HttpStatusCode.Forbidden, (await PostAsync(http, writer, sign, Sign("PUT", uri))).Status);
+        foreach (var header in new[] { "x-amz-acl", "x-amz-grant-read", "x-amz-object-lock-mode", "x-amz-bypass-governance-retention" })
+            Assert.Equal(HttpStatusCode.Forbidden, (await PostAsync(http, writer, sign,
+                Sign("PUT", obj, new JsonObject { [header] = new JsonArray("public-read") }))).Status);
+
+        // Bucket requests: only the table's bucket, and only each operation's own parameters.
+        Assert.Equal(HttpStatusCode.Forbidden, (await PostAsync(http, writer, sign, Sign("HEAD", "http://s3.test:9000/other-bucket"))).Status);
+        Assert.Equal(HttpStatusCode.Forbidden, (await PostAsync(http, writer, sign, Sign("GET", "http://s3.test:9000/other-bucket?location"))).Status);
+        Assert.Equal(HttpStatusCode.Forbidden, (await PostAsync(http, writer, sign, Sign("GET", "http://s3.test:9000/bucket?prefix=wh%2Fdb%2Ft%2F&acl"))).Status);
+        Assert.Equal(HttpStatusCode.Forbidden, (await PostAsync(http, writer, sign, Sign("GET", "http://s3.test:9000/bucket?location&policy"))).Status);
+        Assert.Equal(HttpStatusCode.OK, (await PostAsync(http, writer, sign, Sign("HEAD", "http://s3.test:9000/bucket"))).Status);
+    }
+
+    [Fact]
     public async Task The_signer_signs_only_the_tables_own_objects_at_the_principals_level()
     {
         await using var host = ServerHost.Start(settings: Settings, services: s => s.AddSingleton<IFileIO>(new MemoryFileIO()));
