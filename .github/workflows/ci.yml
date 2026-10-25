@@ -4,6 +4,9 @@ name: ci
 # need credentials and cost money; see docs/regression-suite.md.
 on:
   pull_request:
+  # A merge queue runs the required `ci` check on the queued merge commit before it lands.
+  # Every job feeding `ci` must run for this event too, or the queue waits on a check that never reports.
+  merge_group:
   push:
     branches: [main]
   workflow_dispatch:
