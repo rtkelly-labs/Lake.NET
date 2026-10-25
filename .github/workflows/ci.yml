@@ -16,10 +16,15 @@ concurrency:
   cancel-in-progress: ${{ github.event_name == 'pull_request' }}
 
 jobs:
-  test:
-    name: test
+  # Test projects are listed once: Iceberg.Net.slnx, each grouped into a job by its <CiSuite> property
+  # (tools/test-projects.sh fails on a test project with no suite, so none is skipped by accident).
+
+  # No Docker or Python oracles: the L0 spec tests, the typed and EF layers, the in-process REST catalog
+  # behaviour specs, the package smoke test and the spec traceability matrix.
+  unit:
+    name: unit
     runs-on: ubuntu-latest
-    timeout-minutes: 40
+    timeout-minutes: 20
     permissions:
       contents: read
     steps:
@@ -28,25 +33,24 @@ jobs:
         with:
           global-json-file: global.json
 
-      - uses: astral-sh/setup-uv@e58605a9b6da7c637471fab8847a5e5a6b8df081 # v5
-        with:
-          enable-cache: true
-
       # The SDK comes from global.json (setup-dotnet above).
       - name: CHANGELOG.md is well formed (the release reads its version from it)
         run: dotnet run scripts/ParseChangelog.cs
 
-      - name: L0 spec tests
-        run: dotnet test tests/Iceberg.Net.Spec.Tests --nologo
+      # Generated, not committed: the matrix is published as an artifact. --check fails on a link to a
+      # section that does not exist in the pinned upstream spec.
+      - name: Spec traceability matrix (fails on links to unknown sections)
+        run: python3 tools/spec_trace.py matrix --check
 
-      - name: L0 spec tests against the netstandard2.0 builds of Core and Avro
-        run: dotnet test tests/Iceberg.Net.NetStandard.Tests --nologo
+      - uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
+        if: ${{ !cancelled() && hashFiles('docs/spec-traceability.md') != '' }}
+        with:
+          name: spec-traceability
+          path: docs/spec-traceability.md
+          retention-days: 30
 
-      - name: Typed layer (LINQ provider, row mapping, typed writes)
-        run: dotnet test tests/Iceberg.Net.Linq.Tests --nologo
-
-      - name: EF Core provider (queries, SaveChanges, concurrency, ExecuteUpdate/Delete)
-        run: dotnet test tests/Iceberg.Net.EntityFrameworkCore.Tests --nologo
+      - name: Unit suite (spec, netstandard2.0, LINQ, EF Core, REST catalog behaviour)
+        run: ./tools/test-projects.sh test unit
 
       - name: Pack the libraries and smoke-test the packages
         run: ./tools/package-smoke.sh "$RUNNER_TEMP/nupkg"
@@ -57,55 +61,72 @@ jobs:
           path: ${{ runner.temp }}/nupkg/*.nupkg
           retention-days: 14
 
-      - name: Spec traceability matrix is current
-        run: |
-          python3 tools/spec_trace.py matrix --check
-          git diff --exit-code docs/spec-traceability.md || { echo "::error::run python tools/spec_trace.py matrix and commit docs/spec-traceability.md"; exit 1; }
+  # Other engines as oracles, with every emulator up: telemetry, Spark procedure SQL (run end to end in the
+  # Spark oracle image), the EMR Serverless / Glue / Athena clients against faked SDKs, DuckDB's iceberg
+  # extension (downloaded from extensions.duckdb.org here, so a load failure fails instead of skipping), the BDD
+  # specification, and the REST catalog server with PyIceberg and Spark against it.
+  cross-engine:
+    name: cross-engine
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    permissions:
+      contents: read
+    steps:
+      - uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0 # v7.0.0
+      - uses: actions/setup-dotnet@a98b56852c35b8e3190ac28c8c2271da59106c68 # v6
+        with:
+          global-json-file: global.json
+      - uses: astral-sh/setup-uv@e58605a9b6da7c637471fab8847a5e5a6b8df081 # v5
+        with:
+          enable-cache: true
 
-      - name: Start emulators (moto, REST fixture, Polaris, Trino) and fetch the Spark oracle
+      # The full set in both Docker-backed jobs: a missing engine or REST server is a skip, not a failure.
+      - name: Start emulators (moto, REST fixture, Polaris, Trino, Gravitino, Nessie, Lakekeeper) and fetch the Spark oracle
+        run: ./emulation/up.sh --spark --trino --polaris --gravitino --nessie --lakekeeper
+
+      - name: Install PyIceberg and DuckDB oracles
+        run: uv sync --project interop --group duckdb
+
+      - name: Cross-engine suite (ecosystem, BDD specification, REST catalog server)
+        env:
+          ICEBERG_PYTHON: ${{ github.workspace }}/interop/.venv/bin/python
+          ICEBERG_DUCKDB_REQUIRED: "1"
+        run: ./tools/test-projects.sh test cross-engine
+
+      - name: Emulator logs on failure
+        if: failure()
+        run: docker compose -f emulation/docker-compose.yml --profile trino --profile polaris --profile gravitino --profile nessie --profile lakekeeper logs --tail 200
+
+  # Fails rather than skips when an emulator is unreachable: every REST operation and the error contract
+  # against the emulated REST servers (Java reference, Polaris, Nessie, Lakekeeper, Gravitino), and the
+  # L1/L2 regression suite.
+  regression:
+    name: regression
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    permissions:
+      contents: read
+    steps:
+      - uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0 # v7.0.0
+      - uses: actions/setup-dotnet@a98b56852c35b8e3190ac28c8c2271da59106c68 # v6
+        with:
+          global-json-file: global.json
+      - uses: astral-sh/setup-uv@e58605a9b6da7c637471fab8847a5e5a6b8df081 # v5
+        with:
+          enable-cache: true
+
+      - name: Start emulators (moto, REST fixture, Polaris, Trino, Gravitino, Nessie, Lakekeeper) and fetch the Spark oracle
         run: ./emulation/up.sh --spark --trino --polaris --gravitino --nessie --lakekeeper
 
       - name: Install PyIceberg oracle
         run: uv sync --project interop
 
-      # Phase G: telemetry listeners, Spark procedure SQL (run end to end in the Spark oracle image), the EMR
-      # Serverless / Glue / Athena clients against faked SDKs, and DuckDB's iceberg extension as an oracle (it is
-      # downloaded from extensions.duckdb.org here, so a load failure fails the step instead of skipping).
-      - name: Ecosystem (telemetry, Spark/Athena helpers, DuckDB oracle)
-        env:
-          ICEBERG_PYTHON: ${{ github.workspace }}/interop/.venv/bin/python
-          ICEBERG_DUCKDB_REQUIRED: "1"
-        run: |
-          uv sync --project interop --group duckdb
-          dotnet test tests/Iceberg.Net.Ecosystem.Tests --nologo
-
-      - name: REST catalog behaviour (Reqnroll, in-process server)
-        run: dotnet test tests/Iceberg.Net.RestCatalogBehaviour.Tests --nologo
-
-      - name: BDD specification (Reqnroll)
-        env:
-          ICEBERG_PYTHON: ${{ github.workspace }}/interop/.venv/bin/python
-        run: dotnet test tests/Iceberg.Net.Behaviour.Tests --nologo
-
-      - name: REST catalog server (in-process, PyIceberg and Spark against it)
-        env:
-          ICEBERG_PYTHON: ${{ github.workspace }}/interop/.venv/bin/python
-        run: dotnet test tests/Iceberg.Net.RestServer.Tests --nologo
-
-      # Every REST operation against this repository's server, the client's status mapping, and the error contract
-      # against the emulated REST servers (Java reference, Polaris, Nessie, Lakekeeper, Gravitino).
-      - name: REST protocol (every operation, and the error contract across REST servers)
-        env:
-          ICEBERG_TEST_TARGET: emulation
-          ICEBERG_REQUIRE_TARGET: "1"
-        run: dotnet test tests/Iceberg.Net.RestProtocol.Tests --nologo
-
-      - name: L1/L2 regression (emulation)
+      - name: Regression suite (REST protocol, L1/L2 regression against the emulators)
         env:
           ICEBERG_TEST_TARGET: emulation
           ICEBERG_REQUIRE_TARGET: "1"
           ICEBERG_PYTHON: ${{ github.workspace }}/interop/.venv/bin/python
-        run: dotnet test tests/Iceberg.Net.Regression.Tests --nologo --logger "console;verbosity=normal"
+        run: ./tools/test-projects.sh test regression --logger "console;verbosity=normal"
 
       - name: Emulator logs on failure
         if: failure()
@@ -116,26 +137,29 @@ jobs:
   ci:
     name: ci
     runs-on: ubuntu-latest
-    needs: [test]
+    needs: [unit, cross-engine, regression]
     # `always()`, so this reports a verdict when a job fails rather than being skipped: a skipped
     # required check is indistinguishable from one still running, and blocks the PR either way.
     if: always()
     timeout-minutes: 5
     permissions: {}
     steps:
+      # Every job in `needs` is judged from the one JSON object, so adding a job to `needs` is the whole change.
       - name: Report the verdict of every job
         env:
-          TEST: ${{ needs.test.result }}
+          NEEDS: ${{ toJSON(needs) }}
         run: |
-          set -uo pipefail
-          failed=0
-          for job in TEST; do
-            result="${!job}"
-            if [ "${result}" = "success" ]; then
-              echo "✅ ${job}: ${result}"
-            else
-              echo "::error::${job} did not succeed (${result})"
-              failed=1
-            fi
-          done
-          exit "${failed}"
+          set -euo pipefail
+          [ "$(jq length <<<"${NEEDS}")" -gt 0 ] || { echo "::error::no jobs to judge"; exit 1; }
+          jq -r 'to_entries[] | "\(.key) \(.value.result)"' <<<"${NEEDS}" | {
+            failed=0
+            while read -r job result; do
+              if [ "${result}" = "success" ]; then
+                echo "✅ ${job}: ${result}"
+              else
+                echo "::error::${job} did not succeed (${result})"
+                failed=1
+              fi
+            done
+            exit "${failed}"
+          }

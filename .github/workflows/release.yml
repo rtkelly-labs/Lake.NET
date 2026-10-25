@@ -90,12 +90,8 @@ jobs:
 
       # The emulator, cross-engine and REST suites run in CI on this commit (checked by verify-ci); these are the fast
       # tiers over the exact Release build that is packed.
-      - name: Spec, netstandard2.0 and typed-layer tests
-        run: |
-          set -euo pipefail
-          for t in Spec NetStandard Linq; do
-            dotnet test "tests/Iceberg.Net.$t.Tests" -c Release --no-build --nologo
-          done
+      - name: Unit suite (spec, netstandard2.0, LINQ, EF Core, REST catalog behaviour)
+        run: ./tools/test-projects.sh test unit -c Release --no-build
 
       - name: Pack
         run: dotnet pack Iceberg.Net.slnx -c Release --no-build -p:Version="$VERSION" -o "$RUNNER_TEMP/nupkg" --nologo

@@ -4,6 +4,8 @@
   <PropertyGroup>
     <IsPackable>false</IsPackable>
     <IsTestProject>true</IsTestProject>
+    <!-- The CI job that runs this project (tools/test-projects.sh; registry: Iceberg.Net.slnx) -->
+    <CiSuite>cross-engine</CiSuite>
     <RootNamespace>Iceberg.Net.Ecosystem.Tests</RootNamespace>
   </PropertyGroup>
   <ItemGroup>

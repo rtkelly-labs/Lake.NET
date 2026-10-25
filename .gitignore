@@ -29,3 +29,9 @@ dist/
 
 # MSBuild binary logs
 *.binlog
+
+# Generated at build or in CI, never committed
+# Reqnroll's MSBuild generator writes these beside each .feature file on every build
+*.feature.cs
+# python3 tools/spec_trace.py matrix (CI uploads it as the spec-traceability artifact)
+docs/spec-traceability.md

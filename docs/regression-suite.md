@@ -3,7 +3,8 @@
 One suite, two targets. The **same test binaries** run in full emulation (default, local and CI) and against AWS
 (nightly once configured), selected by environment variables. Tests that need something the target cannot provide
 **skip with a reason**; with `ICEBERG_REQUIRE_TARGET=1` (set by `run-tests.sh` and CI) an unreachable target is
-a failure instead. Every test is linked to the spec section it verifies ([spec-traceability.md](spec-traceability.md)).
+a failure instead. Every test is linked to the spec section it verifies: `python3 tools/spec_trace.py matrix` writes
+`docs/spec-traceability.md` (generated, not committed; each CI run uploads it as the `spec-traceability` artifact).
 
 ## Tiers
 
@@ -127,17 +128,17 @@ and its runs. So the limits that stop a decoder allocating or looping on a claim
 
 | Workflow | When | What |
 |---|---|---|
-| `ci.yml` | every PR and push to `main` (its `ci` job is the required check) | L0, spec-traceability freshness, all emulators + Spark + Trino + Polaris, BDD, L1/L2 |
+| `ci.yml` | every PR, merge queue entry and push to `main` (its `ci` job is the required check, and fails unless every job below succeeds) | Three parallel jobs, one per `<CiSuite>` (`tools/test-projects.sh`): `unit` (L0, netstandard2.0, LINQ, EF Core, REST catalog behaviour, package smoke test, spec traceability matrix as an artifact; no Docker), `cross-engine` (all emulators + Spark + DuckDB: ecosystem, BDD, REST server) and `regression` (all emulators, `ICEBERG_REQUIRE_TARGET=1`: REST protocol, L1/L2) |
 | `upkeep.yml` | when dispatched | spec drift vs apache/iceberg `main` (red only for upstream changes not yet reviewed with `tools/spec_trace.py drift --acknowledge`); the regression suite against `:latest` emulator images |
 | `aws.yml` | when dispatched, **dormant until `ICEBERG_AWS_ROLE_ARN` is set** | L1–L3 against AWS; shadow comparison of `ICEBERG_SHADOW_TABLES` |
-| `release.yml` | when dispatched (a dry run unless unticked) | Release build, spec/netstandard/typed tests, pack, package smoke test, the commit's `ci` check; publishes the `CHANGELOG.md` version to NuGet (trusted publishing) |
+| `release.yml` | when dispatched (a dry run unless unticked) | Release build, the `unit` suite, pack, package smoke test, the commit's `ci` check; publishes the `CHANGELOG.md` version to NuGet (trusted publishing) |
 
 All are path-filtered or scheduled, so they do not affect the platform's CI time budget.
 
 ## Adding tests
 
 - Tag every test with the spec section it verifies: `[Spec("Row Lineage")]`, `[Spec("puffin: deletion-vector-v1 blob
-  type")]`, `[Spec("rest: loadTable")]`, or `@spec:row-lineage` in Gherkin; then `python tools/spec_trace.py matrix`.
+  type")]`, `[Spec("rest: loadTable")]`, or `@spec:row-lineage` in Gherkin; `python3 tools/spec_trace.py matrix --check` shows the result locally.
 - Spec behaviour → L0, preferring the spec's own vectors.
 - Anything that touches a catalog → add to `CatalogConformanceTests` (it runs for every catalog), not a new class.
 - Anything another engine observes → add a case to the cross-engine classes (extend `interop/pyiceberg_oracle.py` or

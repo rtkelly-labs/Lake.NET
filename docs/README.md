@@ -21,7 +21,7 @@
 | [libraries.md](libraries.md) | Libraries under the hood (Avro, Parquet, ORC, compression, Roaring/DVs, Puffin, sketches, Arrow, SigV4) and CLR type pitfalls |
 | [emulation.md](emulation.md) | The local AWS + REST emulation stack, its fidelity shims, and known gaps |
 | [regression-suite.md](regression-suite.md) | Test tiers, running in emulation and AWS, environment variables, CI, shadow comparison |
-| [spec-traceability.md](spec-traceability.md) | Generated: every upstream spec section (pinned at 1.12.0) and the tests linked to it |
+| `spec-traceability.md` | Generated, not committed (`python3 tools/spec_trace.py matrix`, or the `spec-traceability` artifact of a CI run): every upstream spec section (pinned at 1.12.0) and the tests linked to it |
 | [iceberg-v4.md](iceberg-v4.md) | Following the Iceberg v4 proposals: status of each, what adopting it would mean here, and the plan |
 | [telemetry.md](telemetry.md) | Traces and metrics (`ActivitySource`/`Meter` "Iceberg.Net"): every span, tag and instrument, and wiring into OpenTelemetry |
 | [spark-and-athena.md](spark-and-athena.md) | Spark procedure SQL and EMR Serverless / Glue job submission (run against moto and Spark), Athena SQL, its Trino dialect and runner (run on Trino and moto), the DuckDB oracle |
