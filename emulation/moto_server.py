@@ -5,13 +5,14 @@ concurrency guarantee of the real services. Each shim below enforces a documente
 behaviour that moto skips, so that the regression suite fails in emulation exactly where it
 would fail in AWS. Every shim is listed in docs/emulation.md; remove one when moto gains it.
 
-Run: python -I emulation/moto_server.py [--port 5000]
+Run: python -I emulation/moto_server.py [--port 5000]  (default: $MOTO_PORT, else 5000)
 """
 
 from __future__ import annotations
 
 import argparse
 import json
+import os
 import threading
 from typing import Any
 
@@ -115,7 +116,7 @@ def with_shim_listing(app: Any) -> Any:
 def main() -> None:
     parser = argparse.ArgumentParser()
     parser.add_argument("--host", default="0.0.0.0")  # noqa: S104 - emulator, local/CI only
-    parser.add_argument("--port", type=int, default=5000)
+    parser.add_argument("--port", type=int, default=int(os.environ.get("MOTO_PORT", "5000")))
     args = parser.parse_args()
     app = DomainDispatcherApplication(create_backend_app)
     run_simple(

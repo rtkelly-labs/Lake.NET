@@ -35,7 +35,8 @@ without AWS; Nessie skips the v3 conformance case; the Athena paging fidelity ca
 | `ICEBERG_TEST_TARGET` | `emulation` | `aws` | target selection |
 | `ICEBERG_REQUIRE_TARGET` | unset | `1` | fail instead of skip if the target is unreachable |
 | `AWS_REGION` | `eu-west-1` | your region | |
-| `ICEBERG_S3_ENDPOINT` | `http://localhost:5000` | unset | S3 endpoint override |
+| `MOTO_PORT` | `5000` | — | moto's host port, for `emulation/up.sh` and the tests' default endpoint (5000 is taken by AirPlay on macOS) |
+| `ICEBERG_S3_ENDPOINT` | `http://localhost:$MOTO_PORT` | unset | S3 endpoint override |
 | `ICEBERG_GLUE_ENDPOINT` | = S3 endpoint | unset | Glue endpoint override |
 | `ICEBERG_REST_URI` | `http://localhost:8181` | optional | REST catalog under test |
 | `ICEBERG_POLARIS_URI` | `http://localhost:8182/api/catalog` | — | Polaris (emulation only) |

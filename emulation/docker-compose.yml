@@ -1,6 +1,7 @@
 # Full-emulation stack for the regression suite. See ../docs/regression-suite.md.
 # Image tags are pinned; MOTO_TAG / REST_FIXTURE_TAG / TRINO_TAG / POLARIS_TAG / GRAVITINO_TAG override them (the weekly upkeep workflow runs
-# the suite against :latest to catch upstream drift before a pin bump).
+# the suite against :latest to catch upstream drift before a pin bump). MOTO_PORT moves moto's host port off 5000
+# (macOS AirPlay holds it); containers still reach moto as moto:5000, and the test host reads MOTO_PORT too.
 #   moto  - AWS emulator: S3 (incl. conditional writes) + Glue Data Catalog + STS, one endpoint,
 #           started through moto_server.py so the Glue fidelity shims (docs/emulation.md) apply
 #   rest  - apache/iceberg-rest-fixture: the Iceberg project's own REST catalog test server
@@ -21,7 +22,7 @@ name: iceberg-dotnet-emulation
 services:
   moto:
     image: motoserver/moto:${MOTO_TAG:-5.2.4}
-    ports: ["5000:5000"]
+    ports: ["${MOTO_PORT:-5000}:5000"]
     volumes: ["./moto_server.py:/shim/moto_server.py:ro"]
     entrypoint: ["python", "-I", "/shim/moto_server.py", "--port", "5000"]
     healthcheck:
@@ -128,7 +129,7 @@ services:
       - -Dnessie.catalog.default-warehouse=warehouse
       - -Dnessie.catalog.warehouses.warehouse.location=s3://iceberg-regression/nessie
       - -Dnessie.catalog.service.s3.default-options.endpoint=http://moto:5000
-      - -Dnessie.catalog.service.s3.default-options.external-endpoint=http://localhost:5000
+      - -Dnessie.catalog.service.s3.default-options.external-endpoint=http://localhost:${MOTO_PORT:-5000}
       - -Dnessie.catalog.service.s3.default-options.path-style-access=true
       - -Dnessie.catalog.service.s3.default-options.region=eu-west-1
       - -Dnessie.catalog.service.s3.default-options.request-signing-enabled=false
@@ -144,7 +145,7 @@ services:
       retries: 60
 
   # Lakekeeper shares the host network: its warehouse has one S3 endpoint for itself and for clients, and only
-  # localhost:5000 reaches moto from both. Ports are moved off the fixture's 8181 and Gravitino's metrics range.
+  # localhost:$MOTO_PORT (default 5000) reaches moto from both. Ports are moved off the fixture's 8181 and Gravitino's metrics range.
   lakekeeper-db:
     image: postgres:${LAKEKEEPER_PG_TAG:-17}
     profiles: ["lakekeeper"]
@@ -191,6 +192,7 @@ services:
     depends_on:
       lakekeeper: { condition: service_healthy }
     volumes: ["./lakekeeper_setup.py:/setup/lakekeeper_setup.py:ro"]
+    environment: { MOTO_PORT: "${MOTO_PORT:-5000}" }
     entrypoint: ["python", "-I", "/setup/lakekeeper_setup.py"]
     restart: "no"
 
@@ -200,4 +202,5 @@ services:
     depends_on:
       polaris: { condition: service_healthy }
     volumes: ["./polaris_setup.py:/setup/polaris_setup.py:ro"]
+    environment: { MOTO_PORT: "${MOTO_PORT:-5000}" }
     entrypoint: ["python", "-I", "/setup/polaris_setup.py"]

@@ -61,7 +61,7 @@ public sealed class TestEnvironment
 
         if (Target == Target.Emulation)
         {
-            S3Endpoint = Env("ICEBERG_S3_ENDPOINT") ?? "http://localhost:5000";
+            S3Endpoint = Env("ICEBERG_S3_ENDPOINT") ?? $"http://localhost:{Env("MOTO_PORT") ?? "5000"}";
             GlueEndpoint = Env("ICEBERG_GLUE_ENDPOINT") ?? S3Endpoint;
             RestUri = new Uri(Env("ICEBERG_REST_URI") ?? "http://localhost:8181");
             Warehouse = Env("ICEBERG_WAREHOUSE") ?? "s3://iceberg-regression/warehouse";

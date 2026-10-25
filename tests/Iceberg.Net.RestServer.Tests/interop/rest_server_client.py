@@ -27,6 +27,7 @@ import json
 import sys
 from typing import Any
 
+import fsspec.config
 import pyarrow as pa
 from pyiceberg.catalog import Catalog, load_catalog
 from pyiceberg.exceptions import NamespaceAlreadyExistsError, NoSuchTableError
@@ -34,6 +35,14 @@ from pyiceberg.partitioning import PartitionField, PartitionSpec
 from pyiceberg.schema import Schema
 from pyiceberg.transforms import IdentityTransform
 from pyiceberg.types import LongType, NestedField, StringType
+
+# PyIceberg 0.12 attaches its S3 remote signer (S3V4RestSigner) by unregistering and re-registering a botocore
+# handler each time a FileIO first builds its S3 filesystem on a thread. fsspec caches that filesystem across threads,
+# so the handler is swapped on a client other threads are using: a request made in the gap goes out unsigned (moto
+# answers 403), or two threads collide in the unregister (KeyError: 1925). PyIceberg reads manifests and data files
+# on a thread pool, so signed-append-read failed now and then (apache/iceberg-python#3896). A filesystem of its own
+# per FileIO and thread means the signer is registered before anything can use that client.
+fsspec.config.conf.setdefault("s3", {})["skip_instance_cache"] = True
 
 SCHEMA = Schema(
     NestedField(1, "id", LongType(), required=True),

@@ -63,7 +63,7 @@ try:
                 "storageConfigInfo": {
                     "storageType": "S3",
                     "allowedLocations": [WAREHOUSE],
-                    "endpoint": "http://localhost:5000",  # what clients (the test host) use
+                    "endpoint": f"http://localhost:{os.environ.get('MOTO_PORT', '5000')}",  # what clients (the test host) use
                     "endpointInternal": "http://moto:5000",  # what Polaris itself uses
                     "pathStyleAccess": True,
                     "stsUnavailable": True,  # no credential vending: clients use their own S3 credentials

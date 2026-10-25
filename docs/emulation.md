@@ -14,7 +14,9 @@ emulators**, and make every place the emulation is weaker than AWS explicit and 
 | Spark (`--spark`, not a service) | `apache/spark:4.0.1` + `iceberg-spark-runtime-4.0_2.13-1.12.0.jar` (SHA-256 pinned, cached in `.cache/`) | Iceberg Java, the reference implementation | Run per test session with `docker run --network none`; tables are shared through a bind mount at the same absolute path |
 
 All are configured to store data in moto's S3 (`http://moto:5000` inside the network, `http://localhost:5000` from
-the host), so tests read every catalog's tables from the same object store as Glue tables. Image tags are pinned;
+the host), so tests read every catalog's tables from the same object store as Glue tables. `MOTO_PORT` moves the host
+port (on macOS, AirPlay Receiver holds 5000): `MOTO_PORT=5050 ./emulation/up.sh`, then run the tests with the same
+`MOTO_PORT` exported. The test host, the Polaris, Nessie and Lakekeeper client endpoints and `moto_server.py` all follow it. Image tags are pinned;
 `MOTO_TAG`, `REST_FIXTURE_TAG`, `POLARIS_TAG` and `TRINO_TAG` override them, and the weekly upkeep workflow runs the
 regression suite against `:latest` so emulator changes show up before a pin bump.
 
@@ -80,7 +82,7 @@ Iceberg job. The jars are fetched, SHA-256 pinned, by `emulation/up.sh --spark`.
 ## Running without Docker
 
 ```bash
-uv run --project interop python -I emulation/moto_server.py --port 5000 &
+uv run --project interop python -I emulation/moto_server.py --port 5000 &   # or export MOTO_PORT
 aws --endpoint-url http://localhost:5000 s3 mb s3://iceberg-regression   # or boto3
 # REST tests will skip unless a REST catalog is reachable at ICEBERG_REST_URI
 ```

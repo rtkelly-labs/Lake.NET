@@ -84,7 +84,7 @@ Glue endpoint for Lake Formation governance. Challenges:
   passed every conformance, view, soak and PyIceberg cross-engine test the first time, v3 tables included. The
   setup needs three things:
   - One S3 endpoint serves both Lakekeeper and its clients, so it runs on the host network against
-    `localhost:5000`.
+    `localhost:5000` (`$MOTO_PORT`).
   - The warehouse uses a `hard` delete profile, because the default soft-delete defers the purge.
   - Remote signing is switched off (`remote-signing-enabled: false`). Lakekeeper enables it by default even
     without STS, and then pins PyIceberg to `FsspecFileIO` and signs every S3 request. Those signed requests

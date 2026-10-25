@@ -15,8 +15,8 @@ WAREHOUSE = {
         "type": "s3",
         "bucket": "iceberg-regression",
         "key-prefix": "lakekeeper",
-        # One endpoint serves Lakekeeper and its clients: both reach moto as localhost:5000 (host network).
-        "endpoint": "http://localhost:5000",
+        # One endpoint serves Lakekeeper and its clients: both reach moto as localhost:$MOTO_PORT (host network).
+        "endpoint": f"http://localhost:{os.environ.get('MOTO_PORT', '5000')}",
         "region": "eu-west-1",
         "path-style-access": True,
         "flavor": "s3-compat",
