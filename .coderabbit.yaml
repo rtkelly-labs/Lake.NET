@@ -1,0 +1,38 @@
+# yaml-language-server: $schema=https://coderabbit.ai/integrations/schema.v2.json
+language: en-GB
+reviews:
+  profile: chill
+  request_changes_workflow: false
+  high_level_summary: true
+  poem: false
+  review_status: false
+  collapse_walkthrough: true
+  auto_review:
+    enabled: true
+    drafts: false
+  path_filters:
+    # Generated or recorded, not written by hand.
+    - "!tests/**/fixtures/**"
+    - "!tests/**/Fixtures/**"
+    - "!tests/**/*.feature.cs"
+    - "!docs/spec-traceability.md"
+    - "!docs/spec/open-api/**"
+    - "!**/*.avro"
+    - "!**/*.parquet"
+    - "!**/*.puffin"
+  path_instructions:
+    - path: "src/**/*.cs"
+      instructions: >-
+        Check behaviour against the Apache Iceberg spec (docs/spec/sections.json maps sections to code). Flag
+        unbounded reads or allocations driven by file contents, and anything that deletes or signs outside a
+        table's locations. Skip style nits the analyzers already enforce.
+    - path: "tests/**/*.cs"
+      instructions: >-
+        Look for tests that can pass without exercising the behaviour they name, and for timing or shared-state
+        dependencies that would make them flaky.
+    - path: ".github/workflows/**"
+      instructions: >-
+        The required check is the aggregate `ci` job: every job that gates merging must feed it. Flag unpinned
+        third-party actions and permissions broader than a job needs.
+chat:
+  auto_reply: true
