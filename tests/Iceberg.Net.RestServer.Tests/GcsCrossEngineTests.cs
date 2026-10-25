@@ -35,6 +35,7 @@ public sealed class GcsCrossEngineTests
         var vendor = new GcsDownscopedCredentialVendor(new GcsCredentialVendingOptions(), new StaticGcpAccessTokenSource("ya29.source", DateTimeOffset.UtcNow.AddHours(2)), sts);
         var host = await KestrelHost.StartAsync(o =>
         {
+            o.Warehouse = "gs://lake/wh"; // a table's location must be under its namespace's root, which is under the warehouse
             o.Auth.Clients["probe"] = "probe-secret";
             o.Auth.Clients["writer"] = "writer-secret";
             o.Auth.SigningKey = "gcs-cross-engine-signing-key-of-32-bytes";
