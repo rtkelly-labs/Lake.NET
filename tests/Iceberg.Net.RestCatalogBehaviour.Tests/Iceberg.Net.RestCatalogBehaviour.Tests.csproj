@@ -2,6 +2,8 @@
   <PropertyGroup>
     <IsPackable>false</IsPackable>
     <IsTestProject>true</IsTestProject>
+    <!-- The CI job that runs this project (tools/test-projects.sh; registry: Iceberg.Net.slnx) -->
+    <CiSuite>unit</CiSuite>
     <RootNamespace>Iceberg.Net.RestCatalogBehaviour.Tests</RootNamespace>
     <Description>Executable specifications (Gherkin, Reqnroll) for the REST catalog: the server in-process, driven by RestCatalog and raw HTTP.</Description>
   </PropertyGroup>

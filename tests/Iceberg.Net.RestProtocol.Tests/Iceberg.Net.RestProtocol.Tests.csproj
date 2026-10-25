@@ -2,6 +2,8 @@
   <PropertyGroup>
     <IsPackable>false</IsPackable>
     <IsTestProject>true</IsTestProject>
+    <!-- The CI job that runs this project (tools/test-projects.sh; registry: Iceberg.Net.slnx) -->
+    <CiSuite>regression</CiSuite>
     <RootNamespace>Iceberg.Net.RestProtocol.Tests</RootNamespace>
     <Description>The REST catalog protocol, operation by operation: every OpenAPI operation's success and documented error responses against this repository's server, the client's mapping of each status, and the client contract against the emulated REST servers.</Description>
   </PropertyGroup>

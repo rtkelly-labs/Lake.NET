@@ -7,17 +7,12 @@ set -euo pipefail
 cd "$(dirname "$0")"
 mode="${1:-emulation}"
 
-dotnet test tests/Iceberg.Net.Spec.Tests --nologo
-dotnet test tests/Iceberg.Net.NetStandard.Tests --nologo   # the netstandard2.0 builds of Core and Avro
-dotnet test tests/Iceberg.Net.Linq.Tests --nologo
-dotnet test tests/Iceberg.Net.EntityFrameworkCore.Tests --nologo
-dotnet test tests/Iceberg.Net.RestCatalogBehaviour.Tests --nologo   # REST catalog behaviour (Reqnroll, in-process)
+# The suites are the CI jobs; tools/test-projects.sh reads them from Iceberg.Net.slnx.
+./tools/test-projects.sh test unit   # spec, netstandard2.0, LINQ, EF Core, REST catalog behaviour (no Docker)
 [[ "$mode" == "spec" ]] && exit 0
-dotnet test tests/Iceberg.Net.Behaviour.Tests --nologo
-# In-process server; its PyIceberg/Spark cases need ICEBERG_PYTHON / ICEBERG_SPARK_JAR and skip without them.
-dotnet test tests/Iceberg.Net.RestServer.Tests --nologo
-# Spark/DuckDB oracle cases skip without Docker / ICEBERG_DUCKDB_PYTHON.
-dotnet test tests/Iceberg.Net.Ecosystem.Tests --nologo
+# BDD, REST server and ecosystem. PyIceberg/Spark/DuckDB oracle cases skip without ICEBERG_PYTHON, Docker or
+# ICEBERG_DUCKDB_PYTHON.
+./tools/test-projects.sh test cross-engine
 
 if [[ "$mode" == "emulation" ]]; then
   export ICEBERG_TEST_TARGET=emulation
@@ -33,6 +28,5 @@ fi
 
 # Fail rather than skip when the chosen target is unreachable.
 export ICEBERG_REQUIRE_TARGET=1
-# Every REST operation, and the REST error contract across the emulated servers.
-dotnet test tests/Iceberg.Net.RestProtocol.Tests --nologo
-dotnet test tests/Iceberg.Net.Regression.Tests --nologo
+# Every REST operation and the REST error contract across the emulated servers, then L1/L2 regression.
+./tools/test-projects.sh test regression

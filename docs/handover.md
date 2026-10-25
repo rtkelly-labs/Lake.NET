@@ -76,8 +76,8 @@ These cost time during the build-out, and may not apply on a normal workstation 
 - **Don't delete `bin/` folders blindly.** `find -name bin` also matches `interop/.venv/bin`. If the venv breaks,
   rebuild it with `cd interop && uv sync --group duckdb`. Clean only `src/` and `tests/`.
 - **`uv run` at the repository root** creates a 1.6 GB `.venv` there. Delete it after linting.
-- **Building regenerates Behaviour `*.feature.cs` files** with no real change. Revert them before committing:
-  `git checkout -- tests/Iceberg.Net.Behaviour.Tests/Features/`.
+- **Reqnroll `*.feature.cs` files are generated on every build** (beside each `.feature`) and gitignored; never
+  commit them.
 - **Disk is tight** (about 6 GB free). Each full build tree is about 0.8 GB.
 
 ## Open items
