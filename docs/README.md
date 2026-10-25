@@ -2,7 +2,7 @@
 
 | Doc | Read it for |
 |---|---|
-| [handover.md](handover.md) | **Start here when picking the project up:** branch and CI state, what each phase delivered, the test inventory, environment gotchas, open items and next steps |
+| [handover.md](handover.md) | **Start here when picking the project up:** repository and CI state, how work lands (merge queue, required `ci`), local setup, the test inventory, open items and next steps |
 | [spec-coverage.md](spec-coverage.md) | **The foundation.** Section-by-section status against the table spec (v1–v3), REST, Puffin and view specs, with the test that pins each item |
 | [architecture.md](architecture.md) | Layers, the metadata-as-value model, the metastore commit protocol, retries, reading |
 | [state-management.md](state-management.md) | What Iceberg's release history taught about table state (sequence numbers, row lineage, unknown commits, idempotency, isolation, maintenance) and where we stand |
