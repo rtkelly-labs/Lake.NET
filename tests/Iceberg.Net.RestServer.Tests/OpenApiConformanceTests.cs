@@ -54,6 +54,17 @@ public sealed class OpenApiConformanceTests
         Assert.Equal(Load("docs/spec/sections.json")["ref"]!.GetValue<string>(),
             Load("docs/spec/open-api/rest-catalog-open-api.json")["x-iceberg-net-source"]!["ref"]!.GetValue<string>());
 
+    [Theory]
+    [InlineData("oauth")]
+    [InlineData("config")]
+    [InlineData("v1")]
+    public void Fixed_routes_keep_their_keys_whatever_the_prefix_is_called(string prefix)
+    {
+        Assert.Equal("GET /v1/config", OpenApiOperations.RouteKey("GET", "v1/config", prefix));
+        Assert.Equal("POST /v1/oauth/tokens", OpenApiOperations.RouteKey("POST", "v1/oauth/tokens", prefix));
+        Assert.Equal("GET /v1/{prefix}/namespaces", OpenApiOperations.RouteKey("GET", $"v1/{prefix}/namespaces", prefix));
+    }
+
     [Spec("rest: getConfig")]
     [Fact]
     public async Task The_generated_document_matches_the_reference_spec()

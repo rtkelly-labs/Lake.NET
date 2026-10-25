@@ -69,9 +69,11 @@ public static class OpenApiOperations
     public static string RouteKey(string method, string relativePath, string? prefix)
     {
         var path = "/" + relativePath.Trim('/');
+        // The config and token routes never take the prefix, even when it shares their spelling (Iceberg:Prefix=oauth).
+        if (path is "/v1/config" or "/v1/oauth/tokens") return $"{method.ToUpperInvariant()} {path}";
         if (prefix is { Length: > 0 } p && path.StartsWith($"/v1/{Uri.EscapeDataString(p)}/", StringComparison.Ordinal))
             path = "/v1/{prefix}/" + path[($"/v1/{Uri.EscapeDataString(p)}/".Length)..];
-        else if (path.StartsWith("/v1/", StringComparison.Ordinal) && path is not "/v1/config" and not "/v1/oauth/tokens")
+        else if (path.StartsWith("/v1/", StringComparison.Ordinal))
             path = "/v1/{prefix}/" + path["/v1/".Length..];
         return $"{method.ToUpperInvariant()} {path}";
     }
