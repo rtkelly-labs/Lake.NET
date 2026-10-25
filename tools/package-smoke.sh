@@ -10,12 +10,15 @@ trap 'rm -rf "$work"' EXIT
 dotnet pack Iceberg.Net.slnx -c Release -o "$out" --nologo -v quiet
 # The consumers restore into their own cache: every pack is version 0.1.0-preview, so the machine-wide cache could
 # hand back an older build of the same version.
+# A release exports VERSION (the changelog's), and MSBuild reads it as $(Version), so the pack carries it; consume
+# exactly that. Otherwise it is the default 0.1.0-preview, matched by 0.1.0-*.
+pkgver="${VERSION:-0.1.0-*}"
 export NUGET_PACKAGES="$work/packages"
 mkdir -p "$work/app"
-cat > "$work/app/app.csproj" <<'XML'
+cat > "$work/app/app.csproj" <<XML
 <Project Sdk="Microsoft.NET.Sdk">
   <PropertyGroup><OutputType>Exe</OutputType><TargetFramework>net10.0</TargetFramework><Nullable>enable</Nullable><ImplicitUsings>enable</ImplicitUsings></PropertyGroup>
-  <ItemGroup><PackageReference Include="Iceberg.Net.Data" Version="0.1.0-*" /></ItemGroup>
+  <ItemGroup><PackageReference Include="Iceberg.Net.Data" Version="${pkgver}" /></ItemGroup>
 </Project>
 XML
 cat > "$work/app/Program.cs" <<'CS'
@@ -49,10 +52,10 @@ actual="$(ls "$out"/*.nupkg | xargs -n1 basename | sed -E 's/\.[0-9]+\.[0-9]+\.[
 
 # The typed layer: a model, its schema, typed writes and a LINQ query pushed into the scan.
 mkdir -p "$work/typed"
-cat > "$work/typed/typed.csproj" <<'XML'
+cat > "$work/typed/typed.csproj" <<XML
 <Project Sdk="Microsoft.NET.Sdk">
   <PropertyGroup><OutputType>Exe</OutputType><TargetFramework>net10.0</TargetFramework><Nullable>enable</Nullable><ImplicitUsings>enable</ImplicitUsings></PropertyGroup>
-  <ItemGroup><PackageReference Include="Iceberg.Net.Linq" Version="0.1.0-*" /></ItemGroup>
+  <ItemGroup><PackageReference Include="Iceberg.Net.Linq" Version="${pkgver}" /></ItemGroup>
 </Project>
 XML
 cat > "$work/typed/Program.cs" <<'CS'
@@ -77,14 +80,14 @@ dotnet run --project "$work/typed" --nologo --source "$out" --source https://api
 # Core and Avro also ship netstandard2.0 (for .NET Framework 4.6.2+): a netstandard2.0 library must build against them.
 for pkg in Iceberg.Net.Core Iceberg.Net.Avro; do
   # Listed first: under pipefail, grep -q closing the pipe early would fail unzip with SIGPIPE.
-  listing="$(unzip -l "$out/$pkg".0.1.0-*[0-9a-z].nupkg)"
+  listing="$(unzip -l "$out/$pkg".${VERSION:-0.1.0-*[0-9a-z]}.nupkg)"
   grep -q "lib/netstandard2.0/$pkg.dll" <<<"$listing" || { echo "$pkg has no netstandard2.0 build" >&2; exit 1; }
 done
 mkdir -p "$work/legacy"
-cat > "$work/legacy/legacy.csproj" <<'XML'
+cat > "$work/legacy/legacy.csproj" <<XML
 <Project Sdk="Microsoft.NET.Sdk">
   <PropertyGroup><TargetFramework>netstandard2.0</TargetFramework><LangVersion>latest</LangVersion></PropertyGroup>
-  <ItemGroup><PackageReference Include="Iceberg.Net.Avro" Version="0.1.0-*" /></ItemGroup>
+  <ItemGroup><PackageReference Include="Iceberg.Net.Avro" Version="${pkgver}" /></ItemGroup>
 </Project>
 XML
 cat > "$work/legacy/Reader.cs" <<'CS'
