@@ -1,0 +1,58 @@
+# .ls-lint.yml
+# Estate-wide ban on PowerShell (.ps1, .psm1) and unauthorized scripts.
+# Staged rollout with soft warning mode in CI (warn: true).
+
+ls:
+  .ps1: exists:0
+  .psm1: exists:0
+  "**":
+    .ps1: exists:0
+    .psm1: exists:0
+  scripts:
+    .dir: regex:.*
+    .md: regex:.*
+    .json: regex:.*
+    .yml: regex:.*
+    .yaml: regex:.*
+    .toml: regex:.*
+    .xml: regex:.*
+    .sql: regex:.*
+    .txt: regex:.*
+    .cs: regex:.*
+    .fsx: regex:.*
+    .py: regex:.*
+    .sh: regex:.*
+    .*: exists:0
+  "scripts/**":
+    .dir: regex:.*
+    .md: regex:.*
+    .json: regex:.*
+    .yml: regex:.*
+    .yaml: regex:.*
+    .toml: regex:.*
+    .xml: regex:.*
+    .sql: regex:.*
+    .txt: regex:.*
+    .cs: regex:.*
+    .fsx: regex:.*
+    .py: regex:.*
+    .sh: regex:.*
+    .*: exists:0
+
+ignore:
+  - .git
+  - .venv
+  - "**/.venv"
+  - node_modules
+  - "**/node_modules"
+  - temp
+  - .temp
+  - "**/temp"
+  - .worktrees
+  - bin
+  - obj
+  - "**/bin"
+  - "**/obj"
+  - dist
+  - build
+  - artifacts
