@@ -2,7 +2,10 @@
 
 # Iceberg.NET — a C# port of Apache Iceberg
 
-**Status:** M0 (foundations) — exploratory, **not for production writes yet**.
+**Status:** capability review before `0.0.1` — exploratory, **not for production writes yet**.
+
+The [capability baseline](docs/capability-baseline.md) inventories implemented APIs, verification evidence,
+limitations and proposed release criteria. The `0.0.1` scope is still being formalised.
 
 ## Why this exists
 
@@ -12,7 +15,7 @@ directly through Glue (or any REST catalog) with the same guarantees PyIceberg a
 
 No production-grade .NET Iceberg library exists today (see [docs/ports-and-engines.md](docs/ports-and-engines.md)).
 
-## What works now (M0)
+## What works now
 
 | Area | State |
 |---|---|
@@ -20,7 +23,7 @@ No production-grade .NET Iceberg library exists today (see [docs/ports-and-engin
 | Transforms | identity, bucket (Murmur3, all spec vectors), truncate, year/month/day/hour, void, unknown-transform passthrough |
 | Table metadata | v1 read, v2/v3 read+write, full update/requirement state machine (REST-shaped), metadata & snapshot logs, refs, row lineage |
 | Manifests | In-house Avro codec; manifest + manifest list read (v1–v3) and write (v2–v3), field-ID resolution, sequence-number and `first_row_id` inheritance |
-| Data | ParquetSharp data files with field IDs and column metrics, every primitive type plus struct/list/map columns (Dremel levels over the physical API); Avro data and delete files read, and written when `write.format.default=avro`; expression-based scan pruning; append, overwrite, file delete; sorted writes |
+| Data | ParquetSharp data files with field IDs and column metrics, supported primitive types plus struct/list/map columns (Dremel levels over the physical API); Avro data and delete files read, and written when `write.format.default=avro`; expression-based scan pruning; append, overwrite, file delete; sorted writes |
 | Write modes | Pure insert, upsert by key, group key replacement, delete by key / predicate / whole files, UPDATE and MERGE — each one atomic snapshot, re-planned on conflict ([docs/write-modes.md](docs/write-modes.md), [docs/update-merge.md](docs/update-merge.md)) |
 | Reads | Streamed one Parquet row group at a time; only the footer and needed column chunks fetched; only projected columns decoded (by field ID); row groups skipped on footer statistics; time travel by snapshot, ref or instant, with the snapshot's own schema; metadata-only counts ([docs/read-path.md](docs/read-path.md)) |
 | Snapshot management | Branches and tags, rollback, cherry-pick, fast-forward, write-audit-publish branch writes, per-ref retention, metadata tables, change feed ([docs/snapshot-management.md](docs/snapshot-management.md)) |
@@ -36,7 +39,9 @@ No production-grade .NET Iceberg library exists today (see [docs/ports-and-engin
 | Maintenance | Snapshot expiry with file deletion and per-ref retention, orphan cleanup, bin-pack and sort compaction with partial progress, position-delete rewrite, merge-append, manifest rewrite |
 | Proven interop | Spark + Iceberg Java, PyIceberg, Trino and DuckDB read our tables (deletes, DVs, lineage, nested types) and we read theirs; Java REST, Polaris and JDBC catalogs accept our commits; DataSketches reads our sketches |
 
-Not yet: ORC data files, filters or partitions through lists and maps. See [docs/roadmap.md](docs/roadmap.md).
+Limits include read-only v1 tables, metadata-only support for variant/geospatial/unknown types, no ORC data files,
+and no filters or partitions through lists and maps. See the [capability baseline](docs/capability-baseline.md)
+for the full boundaries and [roadmap](docs/roadmap.md) for planned work.
 
 ## Layout
 
@@ -72,7 +77,7 @@ Iceberg.NET/
 ## Quick start
 
 ```bash
-cd iceberg-dotnet
+# Run from the repository root
 ./run-tests.sh spec        # L0 only: ~1 s, no network
 ./run-tests.sh emulation   # starts moto + REST fixture, runs everything that doesn't need AWS
 ICEBERG_WAREHOUSE=s3://my-bucket/iceberg-regression ICEBERG_ATHENA_WORKGROUP=primary \

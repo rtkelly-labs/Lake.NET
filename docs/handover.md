@@ -7,11 +7,13 @@ and verification plans. Check GitHub for current branches, pull requests and CI 
 
 ## What is implemented
 
-The README's ["What works now"](../README.md#what-works-now-m0) table summarizes the library. The
+The [capability baseline](capability-baseline.md) records the full inventory and the decisions needed before `0.0.1`.
+
+The README's ["What works now"](../README.md#what-works-now) table summarizes the library. The
 [documentation index](README.md) covers metadata and manifests, catalogs, reads and writes, snapshot management,
 LINQ, EF Core, the REST server, telemetry, and Spark/Athena helpers.
 
-The library reads and writes Iceberg v1–v3. The [v4 work](iceberg-v4.md) is preparation; complete v4 table support
+The library reads supported v1 tables and reads/writes v2 and v3 tables. The [v4 work](iceberg-v4.md) is preparation; complete v4 table support
 waits for reference files from Java. Real AWS and GCP verification remains outstanding: S3, Glue and the Athena
 runner have been exercised against emulators; Athena SQL has unit and Trino checks, not a real Athena run.
 

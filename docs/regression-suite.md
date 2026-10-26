@@ -1,7 +1,7 @@
 # Regression suite
 
 One suite, two targets. The **same test binaries** run in full emulation (default, local and CI) and against AWS
-(nightly once configured), selected by environment variables. Tests that need something the target cannot provide
+(manually dispatched once configured), selected by environment variables. Tests that need something the target cannot provide
 **skip with a reason**; with `ICEBERG_REQUIRE_TARGET=1` (set by `run-tests.sh` and CI) an unreachable target is
 a failure instead. Every test is linked to the spec section it verifies: `python3 tools/spec_trace.py matrix` writes
 `docs/spec-traceability.md` (generated, not committed; each CI run uploads it as the `spec-traceability` artifact).
@@ -75,7 +75,7 @@ export AWS_PROFILE=data-sandbox ICEBERG_WAREHOUSE=s3://iceberg-net-regression/ru
 AWS permissions needed: `s3:GetObject/PutObject/DeleteObject/ListBucket` on the warehouse prefix;
 `glue:*Database*`, `glue:*Table*` on `regr_*`; `athena:StartQueryExecution/GetQueryExecution/GetQueryResults`
 on the workgroup (and its output bucket). Cost per run: a handful of Athena queries over KB-sized tables (cents).
-For the nightly shadow read, add read-only S3/Glue access to the production tables listed in `ICEBERG_SHADOW_TABLES`.
+For the dispatched shadow read, add read-only S3/Glue access to the production tables listed in `ICEBERG_SHADOW_TABLES`.
 
 Leftovers: if a run is killed, delete Glue databases matching `regr_*` older than a day and the corresponding
 `$ICEBERG_WAREHOUSE` prefixes. Data files are not deleted by `DropTable(purge)` yet (metadata only) — set an S3
@@ -135,7 +135,8 @@ and its runs. So the limits that stop a decoder allocating or looping on a claim
 | `aws.yml` | when dispatched, **dormant until `ICEBERG_AWS_ROLE_ARN` is set** | L1–L3 against AWS; shadow comparison of `ICEBERG_SHADOW_TABLES` |
 | `release.yml` | when dispatched (a dry run unless unticked) | Release build, the `unit` suite, pack, package smoke test, the commit's `ci` check; publishes the `CHANGELOG.md` version to NuGet (trusted publishing) |
 
-All are path-filtered or scheduled, so they do not affect the platform's CI time budget.
+The main CI runs on pull requests, merge queue entries and pushes to `main`; AWS, fuzz, mutation and upkeep
+workflows are manually dispatched. Their comments do not establish an automatic schedule.
 
 ## Adding tests
 

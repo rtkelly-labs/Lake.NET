@@ -440,7 +440,11 @@ public sealed class CrossEngineTests
         {
             "run", "--rm", "--user", "root", "--network", "host", "-e", "SPARK_LOCAL_IP=127.0.0.1", "-e", "AWS_REGION=us-east-1",
             "-v", $"{Path.GetDirectoryName(jar)}:/jars:ro", "-v", $"{interop}:/client:ro", "-v", $"{SparkOracle.SharedRoot}:{SparkOracle.SharedRoot}",
-            SparkOracle.Image, "/opt/spark/bin/spark-submit", "--jars", jars, "/client/spark_rest_client.py",
+            // Spark writes root-owned files on the shared mount. Let the host client read/rewrite them
+            // after this invocation, as the shared Spark oracle does, while preserving Spark's exit code.
+            "-e", $"SHARED_ROOT={SparkOracle.SharedRoot}",
+            SparkOracle.Image, "sh", "-c", "\"$0\" \"$@\"; rc=$?; chmod -R a+rwX \"$SHARED_ROOT\"; exit $rc",
+            "/opt/spark/bin/spark-submit", "--jars", jars, "/client/spark_rest_client.py",
             uri, Credential, stepsFile, catalogFile,
         }) psi.ArgumentList.Add(a);
         using var p = Process.Start(psi)!;

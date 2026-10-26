@@ -60,7 +60,9 @@ Nested members bind by the same rules against the fields of their struct.
 - Promoted columns (int→long, float→double) read through the scan schema's type.
 
 **Writes.**
-- Every required column must be mapped, unless it has a write default.
+- Every required column must be mapped for reliable writes. The current validation permits an unmapped column
+  with a write default, but the mapper does not apply that default: optional columns become null and required
+  columns fail at write time. This is a confirmed gap tracked as F13 in the [capability baseline](capability-baseline.md).
 - Writes never round silently. A decimal with more scale or precision than the column throws. So do a `DateTime` with
   a time of day written to a `date` column and a non-exact `double` written to a `float` column.
 - Sub-microsecond ticks written to a micros timestamp are truncated, as Spark does.
@@ -190,5 +192,5 @@ Each call commits one snapshot through `TableMutations`.
   them.
 - `ToLower`/`Contains`/`EndsWith`, string ordering and arithmetic in filters are residuals.
 - Projection decodes only the columns the query uses (the core reads by field ID, row group by row group), but a data
-  file's bytes are still fetched whole.
+  file uses the shared ranged-read path when its size is known; location-only and small-file reads can fetch it whole.
 - A time-travel filter on a column dropped since that snapshot (or added after it) is evaluated as a residual on `T`.
