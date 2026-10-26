@@ -19,7 +19,6 @@ ls:
     .sql: regex:.*
     .txt: regex:.*
     .cs: regex:.*
-    .fsx: regex:.*
     .py: regex:.*
     .sh: regex:.*
     .*: exists:0
@@ -34,7 +33,6 @@ ls:
     .sql: regex:.*
     .txt: regex:.*
     .cs: regex:.*
-    .fsx: regex:.*
     .py: regex:.*
     .sh: regex:.*
     .*: exists:0
