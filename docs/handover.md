@@ -18,8 +18,8 @@ runner have been exercised against emulators; Athena SQL has unit and Trino chec
 ## Releases
 
 `CHANGELOG.md` controls release versions and notes. The initial `0.0.1-alpha.1` release exercised the release
-path and NuGet trusted publishing. The `0.1.0-preview.1` changelog cut prepares the first preview; a cut alone
-does not mean packages have been published. Check NuGet and repository tags for publication status.
+path and NuGet trusted publishing. The capability set and acceptance criteria for `0.0.1` are being formalised;
+no new release is cut. Check NuGet and repository tags for publication status.
 
 The first package set is `Iceberg.Net.Core`, `Avro`, `Puffin`, `IO`, `Catalog`, `Data` and `Linq`.
 `EntityFrameworkCore`, `Spark`, `Athena` and `Arrow` remain `IsPackable=false` for a later preview. The REST
