@@ -26,7 +26,7 @@ with NuGet trusted publishing.
 |---|---|---|
 | `0.1.0-preview.1` | `Core`, `Avro`, `Puffin`, `IO`, `Catalog`, `Data`, `Linq` | Emulation-tested; not yet run against real AWS |
 | later preview | `EntityFrameworkCore`, `Spark`, `Athena`, `Arrow` | `IsPackable=false` until then |
-| when its location checks land | `RestServer` | A server; run it from source until then |
+| unpublished by choice | `RestServer` | Storage-location checks are implemented; run the server from source |
 
 ### Next-phase design (phases A–G)
 
@@ -190,12 +190,10 @@ Runs when dispatched in `.github/workflows/mutation.yml` (Puffin, and Core's tra
    [#712](https://github.com/rtkelly-labs/Parquet.SourceGenerator/pull/712); bump the test pin from 0.0.3 once a
    release carries them; [gaps](parquet-sourcegenerator.md)).
 
-## Breaking out
+## Repository split
 
-The folder is designed to be extracted into its own repository (`rtkelly-labs/Iceberg.NET`) without changes:
-no references outside `iceberg-dotnet/`, its own `global.json`, `Directory.*.props`, `.gitignore`, docs, tools and
-CI workflows (move `.github/workflows/iceberg-dotnet*.yml` and drop the `iceberg-dotnet/` path prefixes). Suggested
-moment: when M1 starts and it needs NuGet publishing.
+Completed in October 2026: the project lives in `rtkelly-labs/Iceberg.NET`, with its own SDK pin, build settings,
+tools and CI workflows. Keep the repository self-contained; code must not reference the original parent repository.
 
 ## Open questions
 

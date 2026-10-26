@@ -119,7 +119,8 @@ and its runs. So the limits that stop a decoder allocating or looping on a claim
 | Limit | Value | Where |
 |---|---|---|
 | Avro block, compressed or inflated | 128 MiB (`AvroBinary.MaxBlockBytes`) | container and streamed data files |
-| Avro records per block | the block's bytes; 2^20 for a schema that encodes in zero bytes | `AvroBinary.CheckRecordCount` |
+| Avro records per block | at most 2^22 (4,194,304; `AvroBinary.MaxRecordsPerBlock`), also bounded by the block's bytes for a non-zero-width schema | `AvroBinary.CheckRecordCount` |
+| Avro records per block for a schema that encodes in zero bytes | 2^20 (1,048,576; `AvroBinary.MaxZeroWidthRecords`) | `AvroBinary.CheckRecordCount` |
 | Avro `fixed` size | the bytes left | `AvroBinary.Read` |
 | Puffin zstd blob, decompressed | 256 MiB (`PuffinFile.MaxDecompressedBlobBytes`) | `PuffinFile.Contents.Payload` |
 | Deletion vector positions | the manifest entry's `record_count`; runs must match each container's declared cardinality | `DeleteFiles.ReadDeletionVectorAsync`, `RoaringPositionBitmap` |
