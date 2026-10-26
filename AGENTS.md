@@ -78,3 +78,4 @@ Self-contained C# port of Apache Iceberg. Keep it that way: no references to cod
 6. **Gitignored Local TODO File**: A root `TODO.md` file MUST exist for local task tracking and be gitignored.
 7. **Auto-Merge Enabled**: PRs may enable auto-merge (squash) so they merge automatically once required checks pass.
 8. **Pinned Action SHAs**: All GitHub Actions workflows MUST use 40-character commit SHAs instead of mutable tags.
+9. **Script Language Policy**: Automation scripts in `scripts/` MUST use the repository's approved language stack (C# `.cs` for .NET, with Python `.py` or shell `.sh` confined to legacy emulation, interop or tools harnesses). Alien scripting runtimes (`.ps1`) are strictly prohibited and gated by CI (via `ls-lint` in staged warning mode during transition).
