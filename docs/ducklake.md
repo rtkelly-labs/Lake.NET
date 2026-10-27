@@ -50,6 +50,121 @@ What made this quick, and what got in the way, for whoever takes either format f
   - `tools/fuzz.sh` fails at start-up in the cloud sandbox (an access violation inside libfuzzer-dotnet, for the
     existing targets too), so the new targets have only run as the in-process mutation test.
 
+## Is this a good idea, and where should it live?
+
+**Recommendation: yes, as an incubation project in this repository, behind clear graduation criteria.**
+
+For:
+- **Same job as Iceberg.NET.** It lets a C# producer commit to a lakehouse without handing the write to Spark or
+  Python. DuckLake does that with one SQL transaction on a database the team already runs (PostgreSQL). There is no
+  metadata-file tree, and no REST or Glue catalog to operate.
+- **Cheap here.** Almost all of the hard part (Parquet with field IDs, nested columns, pruning, storage, the
+  oracle-test setup) is shared. Reaching read/write parity with DuckDB took about 2,500 lines.
+- **Momentum.** DuckLake 1.0 shipped in April 2026 and 1.1 in October 2026. DuckDB reports over 1.5 million downloads
+  a week for the extension.
+- **Multi-table transactions** are native, which Iceberg only gets through REST catalogs that support them.
+
+Against:
+- **Few readers.** In practice only DuckDB (and services built on it) reads DuckLake. Athena, Glue, Spark, Trino
+  and Snowflake read Iceberg. A table written here as DuckLake is invisible to an AWS Athena/Glue estate. So it suits
+  DuckDB-centred analytics, not tables that platform consumers query through Athena.
+- **The reference implementation is the spec.** DuckDB Labs owns the format, and some behaviour is defined only by
+  DuckDB (see the differences table below; 1.1 has since written several of those rules down). Releases come about
+  every six months, each with a catalog migration. Keeping up is a standing cost.
+- **The catalog database becomes production infrastructure.** Every read plans from it, and every commit is a
+  transaction on it.
+
+Why incubate here rather than in its own repository: the data plane is shared, and the oracle and traceability
+tooling apply unchanged. A separate repository would have to copy or package `Iceberg.Net.Data` first. Rules while
+incubating: no Iceberg project depends on DuckLake (one direction only), `IsPackable=false`, and DuckLake tests sit
+in the `cross-engine` CI suite. Graduation criteria: CI green with the DuckDB oracle, a tested PostgreSQL catalog,
+the current spec version supported, an API review, and a named consumer. At graduation, move the format-neutral
+Parquet layer out of `Iceberg.Net.Data`, so DuckLake no longer pulls in Avro, Puffin and the Iceberg catalogs.
+
+## Catalog databases
+
+DuckLake's catalog is "any database with transactions and primary keys". What matters in practice is which
+databases DuckDB can attach, because a lake that DuckDB cannot open has lost the format's only reader:
+
+| Catalog | DuckDB | Use | From C# |
+|---|---|---|---|
+| PostgreSQL (12+) | `ATTACH 'ducklake:postgres:dbname=… host=…'` | Multi-user lakehouse with remote clients: the production choice | Npgsql (an EF Core provider exists) |
+| SQLite file | `ATTACH 'ducklake:sqlite:metadata.sqlite'` | Several local processes, one writer at a time | Microsoft.Data.Sqlite (tested here) |
+| DuckDB file | `ATTACH 'ducklake:metadata.ducklake'` | One process | Only through DuckDB.NET; no maintained EF Core provider |
+| Quack (experimental) | A DuckDB catalog served over the network | Several clients on a DuckDB catalog | No .NET client |
+
+SQL Server, MySQL and others would work from C# but not from DuckDB, so they are out of scope.
+
+What DuckDB creates in PostgreSQL (observed with DuckDB 1.5.5 and PostgreSQL 16; DuckLake 1.0):
+- **Native types.** `boolean`, `uuid` and `timestamp with time zone` (SQLite gets `BIGINT` 0/1 and `VARCHAR`).
+- **29 tables.** The 28 catalog tables, plus one inlined-data table per table and schema version.
+- **Primary keys on 5 tables only:** `ducklake_snapshot`, `ducklake_snapshot_changes`, `ducklake_schema`,
+  `ducklake_data_file` and `ducklake_delete_file`. Every other table has none.
+- **Inlined values.** `VARCHAR` values are stored as `bytea`, as the spec's PostgreSQL inlining table says. Nested
+  values and timestamps are stored as text.
+
+So the catalog layer needs, per database: the column types DuckDB uses, the encodings of inlined values, a way to
+check whether a table exists, and how it reports a unique-key violation. `DuckLakeDialect` holds the first and the
+third today, and only for SQLite.
+
+## EF Core as the catalog layer
+
+The proposal: use EF Core for the catalog database instead of hand-written ADO.NET, so the PostgreSQL and SQLite
+providers handle connections, type mapping and transactions.
+
+**It fits for the 28 fixed tables.** Snapshot visibility (`s >= begin_snapshot && (end_snapshot == null || s < end_snapshot)`)
+becomes a reusable LINQ filter, and `ExecuteUpdateAsync` does the set-based `end_snapshot` updates. The provider's
+type mapping replaces most of `DuckLakeDialect`. The repository already uses EF Core 10
+(`Iceberg.Net.EntityFrameworkCore`), so the team knows it.
+
+**Constraints, so it stays compatible with DuckDB:**
+1. **No EF migrations or `EnsureCreated` against a shared catalog.** The schema belongs to the spec and to DuckDB,
+   which migrates it (1.0 → 1.1 adds columns, a table, and renames inlined columns). EF would add
+   `__EFMigrationsHistory` and create its own DDL. Create the schema from the spec's script per provider, and use EF
+   for queries and writes only.
+2. **Column types match DuckDB's per provider.** On SQLite that means value converters (bool ↔ `BIGINT`, Guid ↔
+   `VARCHAR`, `DateTimeOffset` ↔ text); on PostgreSQL the native mappings already match.
+3. **Keys exist in the EF model only.** Most tables have no primary key, and EF can't insert into a keyless entity.
+   Declare model-only composite keys (e.g. `(table_id, column_id, begin_snapshot)` for `ducklake_column`) and never
+   let EF create them in the database.
+4. **No change tracking.** Reads use `AsNoTracking`. A commit is one explicit transaction with inserts and
+   `ExecuteUpdate`, never `SaveChanges` over loaded entities. A lost snapshot-ID race shows up as
+   `DbUpdateException`, which the existing conflict check handles.
+5. **Raw SQL for the dynamic tables.** EF can't map `ducklake_inlined_data_{table}_{version}` or
+   `ducklake_inlined_delete_{table}` (names and columns vary per table). They stay on
+   `Database.GetDbConnection()` with quoted identifiers, and their per-provider encodings stay in the dialect.
+6. **Model per spec version.** 1.1 adds columns that 1.0 catalogs don't have, so the model is chosen from
+   `ducklake_metadata.version` at open time.
+
+Net effect: EF Core replaces most of `DuckLakeSql.cs` and the hand-written queries. It does not remove the dialect
+(inlined-value encodings, table existence checks) or the raw SQL for inlined tables. Mostly it makes PostgreSQL
+cheap to add correctly. A DuckDB-file catalog stays out of reach either way.
+
+The alternative is to keep ADO.NET and add a PostgreSQL dialect (column types, `bytea` for inlined varchar, catalog
+queries). That is smaller, but it repeats the type mapping EF already provides, and grows with each new provider.
+
+## DuckLake 1.1
+
+DuckLake 1.1 shipped on 21 October 2026 with DuckDB 2.0. This implementation is 1.0 (the `docs/1.0` pages are
+pinned). It refuses 1.1 catalogs at open, which is correct but blocks reading them. The catalog changes in 1.1:
+
+| 1.1 change | Effect here |
+|---|---|
+| `ducklake_schema.parent_schema_id` (nested schemas, e.g. `sales.europe.orders`) | Schema lookup by path instead of by name |
+| `row_group_count` on data and delete files | Write it (the writer knows it); planning can split without reading footers |
+| `min_is_exact` / `max_is_exact` on file and table statistics | Write `true`: bounds come from the rows, untruncated |
+| `ducklake_view_column_tag` table | Create it; views are not implemented |
+| Inlined tables' `row_id`/`begin_snapshot`/`end_snapshot` renamed `_ducklake_…` | Read either name, by catalog version |
+| `"NULL"` column type, promotable later | A new type mapping |
+| Partition transforms `epoch_year`/`epoch_month`/`epoch_day`/`epoch_hour` (Iceberg's convention) | Reuse Iceberg.NET's time transforms |
+| Multi-snapshot Puffin delete files | Puffin deletion vectors are not read yet; the Puffin library is in this repository |
+| Partial files and the path chain, now in the spec's Queries page | Already implemented from DuckDB's behaviour |
+
+Plan: support 1.0 and 1.1 side by side, chosen by `ducklake_metadata.version`, and write 1.1 by default for new
+catalogs. Testing against the 1.1 reference needs the DuckDB 2.0 `ducklake` extension. PyPI has no wheel for it
+(the newest is 1.5.5, which is 1.0), so the oracle downloads it from extensions.duckdb.org. GitHub's runners can;
+this sandbox cannot.
+
 ## Usage
 
 ```csharp
@@ -170,7 +285,9 @@ extension wheels.
 ## Next steps
 
 1. Run CI on the branch (the `cross-engine` job is the first run of the oracle on GitHub's runners).
-2. A PostgreSQL dialect and a test against a PostgreSQL container (DuckLake's most common production catalog).
-3. Typed rows through the LINQ layer's mapping, shared with the Iceberg tables.
-4. Maintenance: `expire_snapshots` and file cleanup through `ducklake_files_scheduled_for_deletion`.
-5. Return the footer size from `ParquetFiles.WriteAsync`, and write `INT(8)`/`INT(16)` annotations, in Iceberg.Net.Data.
+2. Move the catalog layer to EF Core, PostgreSQL first ([EF Core as the catalog layer](#ef-core-as-the-catalog-layer)),
+   with the DuckDB oracle on a PostgreSQL catalog.
+3. DuckLake 1.1 alongside 1.0 ([DuckLake 1.1](#ducklake-11)), with a DuckDB 2.0 oracle in CI.
+4. Typed rows through the LINQ layer's mapping, shared with the Iceberg tables.
+5. Maintenance: `expire_snapshots` and file cleanup through `ducklake_files_scheduled_for_deletion`.
+6. Return the footer size from `ParquetFiles.WriteAsync`, and write `INT(8)`/`INT(16)` annotations, in Iceberg.Net.Data.
