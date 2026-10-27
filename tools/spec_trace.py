@@ -46,14 +46,36 @@ DUCKLAKE_SNAPSHOT = ROOT / "docs" / "spec" / "ducklake-sections.json"
 DUCKLAKE_ACKNOWLEDGED = ROOT / "docs" / "spec" / "ducklake-acknowledged-drift.json"
 DUCKLAKE_RAW = "https://raw.githubusercontent.com/duckdb/ducklake-web/{ref}/{path}"
 DUCKLAKE_PINNED_REF = "9d095946cd3f930774171e3d397116ad504931e8"
-DUCKLAKE_TABLES = (
-    "ducklake_snapshot ducklake_snapshot_changes ducklake_schema ducklake_table ducklake_view ducklake_column "
-    "ducklake_macro ducklake_macro_impl ducklake_macro_parameters ducklake_data_file ducklake_delete_file "
-    "ducklake_files_scheduled_for_deletion ducklake_inlined_data_tables ducklake_column_mapping ducklake_name_mapping "
-    "ducklake_table_stats ducklake_table_column_stats ducklake_file_column_stats ducklake_file_variant_stats "
-    "ducklake_partition_info ducklake_partition_column ducklake_file_partition_value ducklake_sort_info "
-    "ducklake_sort_expression ducklake_metadata ducklake_tag ducklake_column_tag ducklake_schema_versions"
-).split()
+DUCKLAKE_TABLES = [
+    "ducklake_snapshot",
+    "ducklake_snapshot_changes",
+    "ducklake_schema",
+    "ducklake_table",
+    "ducklake_view",
+    "ducklake_column",
+    "ducklake_macro",
+    "ducklake_macro_impl",
+    "ducklake_macro_parameters",
+    "ducklake_data_file",
+    "ducklake_delete_file",
+    "ducklake_files_scheduled_for_deletion",
+    "ducklake_inlined_data_tables",
+    "ducklake_column_mapping",
+    "ducklake_name_mapping",
+    "ducklake_table_stats",
+    "ducklake_table_column_stats",
+    "ducklake_file_column_stats",
+    "ducklake_file_variant_stats",
+    "ducklake_partition_info",
+    "ducklake_partition_column",
+    "ducklake_file_partition_value",
+    "ducklake_sort_info",
+    "ducklake_sort_expression",
+    "ducklake_metadata",
+    "ducklake_tag",
+    "ducklake_column_tag",
+    "ducklake_schema_versions",
+]
 DUCKLAKE_DOCS = [
     "docs/1.0/specification/introduction.md",
     "docs/1.0/specification/queries.md",
@@ -199,7 +221,9 @@ def digest(lines: list[str]) -> str:
     return hashlib.sha256(text.encode()).hexdigest()[:16]
 
 
-def markdown_sections(doc: str, text: str, seen: dict[str, int] | None = None) -> list[Section]:
+def markdown_sections(
+    doc: str, text: str, seen: dict[str, int] | None = None
+) -> list[Section]:
     out: list[Section] = []
     current: tuple[str, int] | None = None
     body: list[str] = []
@@ -291,7 +315,9 @@ def fetch_ducklake(ref: str, source: str | None) -> list[Section]:
                 text = r.read().decode()
         title = re.search(r"^title:\s*(.+?)\s*$", text, re.MULTILINE)
         body = re.sub(r"\A---\n.*?\n---\n", "", text, flags=re.DOTALL)
-        out += markdown_sections("ducklake", f"# {title.group(1) if title else path}\n{body}", seen)
+        out += markdown_sections(
+            "ducklake", f"# {title.group(1) if title else path}\n{body}", seen
+        )
     return out
 
 
@@ -313,7 +339,9 @@ def cmd_snapshot_ducklake(ref: str, source: str | None) -> int:
         "sections": {"ducklake": [s.__dict__ for s in sections]},
     }
     DUCKLAKE_SNAPSHOT.write_text(json.dumps(data, indent=1) + "\n")
-    print(f"pinned {len(sections)} DuckLake sections at {ref} -> {DUCKLAKE_SNAPSHOT.relative_to(ROOT)}")
+    print(
+        f"pinned {len(sections)} DuckLake sections at {ref} -> {DUCKLAKE_SNAPSHOT.relative_to(ROOT)}"
+    )
     return 0
 
 
@@ -399,7 +427,9 @@ def cmd_matrix(check: bool) -> int:
     ducklake = [
         k
         for k in known
-        if k.startswith("ducklake:") and k not in NOT_IMPLEMENTED and k not in INFORMATIVE
+        if k.startswith("ducklake:")
+        and k not in NOT_IMPLEMENTED
+        and k not in INFORMATIVE
     ]
     rest = [k for k in known if k.startswith("rest:") and k not in NOT_IMPLEMENTED]
     out = [
@@ -411,8 +441,10 @@ def cmd_matrix(check: bool) -> int:
         f"- Table + Puffin spec sections linked to at least one test: **{sum(1 for k in impl if k in found)} / {len(impl)}** "
         "(excluding informative headings and sections marked not implemented)",
         f"- Implemented REST operations linked: **{sum(1 for k in rest if k in found)} / {len(rest)}**",
-        f"- DuckLake specification sections linked (pinned at `{snap.get('ducklake_ref', '-')}`, "
-        f"`docs/spec/ducklake-sections.json`): **{sum(1 for k in ducklake if k in found)} / {len(ducklake)}**",
+        (
+            f"- DuckLake specification sections linked (pinned at `{snap.get('ducklake_ref', '-')}`, "
+            f"`docs/spec/ducklake-sections.json`): **{sum(1 for k in ducklake if k in found)} / {len(ducklake)}**"
+        ),
         f"- Tests and scenarios carrying links: {len({t for ts in found.values() for t in ts})}",
         "",
         "Status: ✅ linked tests · ⛔ deliberately not implemented · · informative heading · ⬜ no linked test yet.",
@@ -468,16 +500,28 @@ def cmd_matrix(check: bool) -> int:
     return 1 if check and unknown else 0
 
 
-def cmd_drift(ref: str, source: str | None, acknowledge: bool, ducklake: bool = False) -> int:
+def cmd_drift(
+    ref: str, source: str | None, acknowledge: bool, ducklake: bool = False
+) -> int:
     """Report upstream changes since the pinned snapshot. Changes already reviewed (recorded in ACKNOWLEDGED with
     --acknowledge) are listed but do not fail; a section that changes again after review fails again."""
     snap = load_snapshot()
     if ducklake:
         docs = {"ducklake": "duckdb/ducklake-web docs/1.0"}
         upstream = {"ducklake": fetch_ducklake(ref, source)}
-        acknowledged, pinned, name = DUCKLAKE_ACKNOWLEDGED, snap.get("ducklake_ref"), "DuckLake"
+        acknowledged, pinned, name = (
+            DUCKLAKE_ACKNOWLEDGED,
+            snap.get("ducklake_ref"),
+            "DuckLake",
+        )
     else:
-        docs, upstream, acknowledged, pinned, name = DOCS, fetch(ref, source), ACKNOWLEDGED, snap["ref"], "Iceberg"
+        docs, upstream, acknowledged, pinned, name = (
+            DOCS,
+            fetch(ref, source),
+            ACKNOWLEDGED,
+            snap["ref"],
+            "Iceberg",
+        )
     found = links()
     acked: dict[str, str] = (
         json.loads(acknowledged.read_text())["sections"]
@@ -555,7 +599,9 @@ def main() -> int:
     s.add_argument(
         "--source", help="read the documents from this directory instead of GitHub"
     )
-    s.add_argument("--ducklake", action="store_true", help="pin the DuckLake specification instead")
+    s.add_argument(
+        "--ducklake", action="store_true", help="pin the DuckLake specification instead"
+    )
     m = sub.add_parser("matrix")
     m.add_argument(
         "--check", action="store_true", help="fail on links to unknown sections"
@@ -563,7 +609,9 @@ def main() -> int:
     d = sub.add_parser("drift")
     d.add_argument("--ref", default="main")
     d.add_argument("--source")
-    d.add_argument("--ducklake", action="store_true", help="the DuckLake specification instead")
+    d.add_argument(
+        "--ducklake", action="store_true", help="the DuckLake specification instead"
+    )
     d.add_argument(
         "--acknowledge",
         action="store_true",
@@ -571,7 +619,9 @@ def main() -> int:
     )
     a = p.parse_args()
     if a.cmd == "snapshot" and a.ducklake:
-        return cmd_snapshot_ducklake(DUCKLAKE_PINNED_REF if a.ref == PINNED_REF else a.ref, a.source)
+        return cmd_snapshot_ducklake(
+            DUCKLAKE_PINNED_REF if a.ref == PINNED_REF else a.ref, a.source
+        )
     if a.cmd == "snapshot":
         return cmd_snapshot(a.ref, a.source)
     if a.cmd == "matrix":

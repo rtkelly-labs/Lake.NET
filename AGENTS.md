@@ -23,6 +23,7 @@ Self-contained C# port of Apache Iceberg. Keep it that way: no references to cod
 | Following Iceberg v4 | [docs/iceberg-v4.md](docs/iceberg-v4.md) |
 | Deletes, deletion vectors, Puffin, statistics | [docs/puffin.md](docs/puffin.md) |
 | Adopting files from other Parquet writers (Parquet.SourceGenerator) | [docs/parquet-sourcegenerator.md](docs/parquet-sourcegenerator.md) |
+| DuckLake tables (`Iceberg.Net.DuckLake`), and where DuckDB and the DuckLake spec differ | [docs/ducklake.md](docs/ducklake.md) — behaviour DuckDB can observe needs a case in `CrossEngineTests` (oracle: DuckDB's `ducklake` extension); tag tests `[Spec("ducklake: …")]` |
 
 ## Commands
 
@@ -35,6 +36,8 @@ Self-contained C# port of Apache Iceberg. Keep it that way: no references to cod
 | L0 spec tests | `dotnet test tests/Iceberg.Net.Spec.Tests` |
 | Typed layer (LINQ) | `dotnet test tests/Iceberg.Net.Linq.Tests` |
 | EF Core provider | `dotnet test tests/Iceberg.Net.EntityFrameworkCore.Tests` |
+| DuckLake (unit; plus the DuckDB `ducklake` oracle when the Python is set) | `ICEBERG_DUCKDB_PYTHON=<python with the interop duckdb group> dotnet test tests/Iceberg.Net.DuckLake.Tests` |
+| DuckLake walk-through | `dotnet run --project examples/DuckLake.Quickstart [directory]` |
 | Ecosystem (telemetry, Spark/Athena helpers, Spark + DuckDB oracles) | `ICEBERG_DUCKDB_PYTHON=<python with the interop duckdb group> dotnet test tests/Iceberg.Net.Ecosystem.Tests` |
 | BDD specification (Reqnroll) | `ICEBERG_PYTHON=<python with interop deps> dotnet test tests/Iceberg.Net.Behaviour.Tests` |
 | REST protocol (every operation; cross-server contract with `ICEBERG_TEST_TARGET=emulation`) | `dotnet test tests/Iceberg.Net.RestProtocol.Tests` |
@@ -44,7 +47,7 @@ Self-contained C# port of Apache Iceberg. Keep it that way: no references to cod
 | Regenerate PyIceberg fixtures | `uv run --project interop python -I interop/pyiceberg_oracle.py fixtures tests/Iceberg.Net.Spec.Tests/fixtures/pyiceberg` |
 | Regenerate Puffin/DataSketches/Roaring fixtures | `uv run --project interop python -I interop/pyiceberg_oracle.py puffin-fixtures tests/Iceberg.Net.Spec.Tests/fixtures/puffin` |
 | Regenerate Spark fixtures | see `interop/spark_oracle.py` docstring (`docker run apache/spark … spark_oracle.py fixtures`) |
-| Spec traceability matrix / upstream drift | `python3 tools/spec_trace.py matrix` (writes the gitignored `docs/spec-traceability.md`) / `python3 tools/spec_trace.py drift` |
+| Spec traceability matrix / upstream drift | `python3 tools/spec_trace.py matrix` (writes the gitignored `docs/spec-traceability.md`) / `python3 tools/spec_trace.py drift` (`--ducklake` for the DuckLake spec) |
 | Refresh the reference REST OpenAPI (after moving the pinned ref) | `uv run --with pyyaml --no-project python -I tools/openapi_reference.py` (OpenApiConformanceTests diff the server's `/openapi/v1.json` against it) |
 | Shadow-compare a table with PyIceberg | `dotnet run --project tools/ShadowCompare -- --metadata <metadata.json>` |
 | Mutation testing (slow; nothing else may build meanwhile) | `cd mutation && dotnet stryker --config-file stryker-puffin.json` |

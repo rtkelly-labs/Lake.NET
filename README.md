@@ -34,6 +34,7 @@ No production-grade .NET Iceberg library exists today (see [docs/ports-and-engin
 | Catalogs | In-memory, AWS Glue (VersionId optimistic lock), JDBC/SQL (Java/PyIceberg layout, views in V1), Iceberg REST (OAuth2/bearer, SigV4 for Glue/S3 Tables, config merge, vended credentials, idempotent retries, views, multi-table transactions) |
 | Storage | Local and S3 FileIO (conditional create via `If-None-Match`) |
 | Maintenance | Snapshot expiry with file deletion and per-ref retention, orphan cleanup, bin-pack and sort compaction with partial progress, position-delete rewrite, merge-append, manifest rewrite |
+| DuckLake | `Iceberg.Net.DuckLake`: the DuckLake 1.0 format over the same Parquet data plane — a SQL catalog (SQLite tested), snapshots and time travel, DDL, inserts, merge-on-read deletes, UPDATE, schema evolution, partitioned writes, DuckDB's inlined and partial files on read, spec conflict resolution; DuckDB's `ducklake` extension reads what it writes and vice versa ([docs/ducklake.md](docs/ducklake.md)) |
 | Proven interop | Spark + Iceberg Java, PyIceberg, Trino and DuckDB read our tables (deletes, DVs, lineage, nested types) and we read theirs; Java REST, Polaris and JDBC catalogs accept our commits; DataSketches reads our sketches |
 
 Not yet: ORC data files, filters or partitions through lists and maps. See [docs/roadmap.md](docs/roadmap.md).
@@ -54,7 +55,9 @@ Iceberg.NET/
 │   ├── Iceberg.Net.EntityFrameworkCore  EF Core 10 provider over the typed layer
 │   ├── Iceberg.Net.RestServer           ASP.NET Core Iceberg REST catalog server
 │   ├── Iceberg.Net.Spark     Spark procedure SQL, EMR Serverless / Glue job runners
-│   └── Iceberg.Net.Athena    Athena SQL and query runner
+│   ├── Iceberg.Net.Athena    Athena SQL and query runner
+│   └── Iceberg.Net.DuckLake  DuckLake 1.0: SQL catalog over the same Parquet data plane (evaluation)
+├── examples/DuckLake.Quickstart   runnable DuckLake walk-through
 ├── tests/
 │   ├── Iceberg.Net.Spec.Tests        L0: spec vectors, state machine, PyIceberg fixtures (no network)
 │   ├── Iceberg.Net.Regression.Tests  L1–L3: emulation or AWS, same code
@@ -63,6 +66,7 @@ Iceberg.NET/
 │   ├── Iceberg.Net.EntityFrameworkCore.Tests  EF Core provider
 │   ├── Iceberg.Net.RestServer.Tests  REST server: contract, protocol, auth, PyIceberg and Spark against it
 │   ├── Iceberg.Net.Ecosystem.Tests   telemetry, Spark/Athena helpers, Spark and DuckDB oracles
+│   ├── Iceberg.Net.DuckLake.Tests    DuckLake encodings, conflicts, catalog rows, DuckDB ducklake oracle
 │   └── Iceberg.Net.TestSupport       shared target selection and PyIceberg oracle
 ├── interop/        PyIceberg oracle used by the cross-engine tests
 ├── emulation/      docker compose: moto (+ fidelity shims) and the Iceberg REST fixture
