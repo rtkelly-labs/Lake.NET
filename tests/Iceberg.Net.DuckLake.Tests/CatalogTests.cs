@@ -585,7 +585,9 @@ public abstract class CatalogTests : IAsyncLifetime
         await SqlAsync("UPDATE ducklake_data_file SET encryption_key = 'k'");
         await Assert.ThrowsAsync<NotSupportedException>(() => catalog.ReadAsync(table));
         await SqlAsync("UPDATE ducklake_data_file SET encryption_key = NULL, mapping_id = 1");
-        await Assert.ThrowsAsync<NotSupportedException>(() => catalog.ReadAsync(table));
+        await Assert.ThrowsAsync<InvalidDataException>(() => catalog.ReadAsync(table)); // no such mapping
+        await SqlAsync("INSERT INTO ducklake_column_mapping (mapping_id, table_id, type) VALUES (1, 1, 'map_by_position')");
+        await Assert.ThrowsAsync<NotSupportedException>(() => catalog.ReadAsync(table)); // a mapping type the spec does not define
         await SqlAsync("UPDATE ducklake_data_file SET mapping_id = NULL, file_format = 'orc'");
         await Assert.ThrowsAsync<NotSupportedException>(() => catalog.ReadAsync(table));
     }

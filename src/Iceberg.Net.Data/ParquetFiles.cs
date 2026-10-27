@@ -454,7 +454,7 @@ public static class ParquetFiles
         using var input = new ManagedRandomAccessFile(source);
         using var reader = new ParquetFileReader(input);
         using var meta = reader.FileMetaData;
-        var layout = FileLayout.Of(meta, projection, mapping);
+        var layout = FileLayout.Of(meta, projection, mapping, options?.MatchByName ?? false);
         var evaluator = options?.Filter is { } filter && filter is not AlwaysTrue ? new MetricsEvaluator(filter) : null;
         if (ranged is not null && evaluator is null && layout.LeafCount == meta.NumColumns) await ranged.PrefetchAsync(0, ranged.Length, ct);
         var metrics = options?.Metrics;
@@ -523,7 +523,7 @@ public static class ParquetFiles
             _ => [],
         }).Distinct().Count();
 
-        public static FileLayout Of(FileMetaData meta, Schema projection, NameMapping? mapping)
+        public static FileLayout Of(FileMetaData meta, Schema projection, NameMapping? mapping, bool matchByName = false)
         {
             var schema = meta.Schema;
             var byFieldId = new Dictionary<int, int>();
@@ -533,7 +533,7 @@ public static class ParquetFiles
             {
                 var descr = schema.Column(i);
                 using var node = descr.SchemaNode;
-                if (node.FieldId >= 0)
+                if (node.FieldId >= 0 && !matchByName)
                 {
                     byFieldId[node.FieldId] = i;
                     if (descr.MaxRepetitionLevel == 0) statsLeaves[node.FieldId] = i;
@@ -566,7 +566,7 @@ public static class ParquetFiles
                         continue;
                     }
                     var first = topLevel[top].FirstColumn;
-                    sources[c] = new ColumnSource.Nested(NestedColumns.FromFile(topLevel[top].Node, ref first));
+                    sources[c] = new ColumnSource.Nested(NestedColumns.FromFile(topLevel[top].Node, ref first, ignoreIds: matchByName));
                     continue;
                 }
                 var colIndex = -1;

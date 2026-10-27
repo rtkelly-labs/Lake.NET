@@ -154,14 +154,14 @@ internal static class NestedColumns
     /// The level tree of a nested column read from a file. Three-level lists and maps as written by Iceberg engines are
     /// read, as are two-level lists whose repeated field is the element itself (older Parquet writers).
     /// </summary>
-    public static PNode FromFile(Node n, ref int column, int parentDef = 0, int parentRep = 0)
+    public static PNode FromFile(Node n, ref int column, int parentDef = 0, int parentRep = 0, bool ignoreIds = false)
     {
         var optional = n.Repetition == Repetition.Optional;
         var def = parentDef + (optional ? 1 : 0);
         if (n is PrimitiveNode p)
         {
             if (n.Repetition == Repetition.Repeated) throw new NotSupportedException($"Repeated primitive {n.Name} outside a LIST group");
-            var leaf = new Leaf { Optional = optional, Def = def, FieldId = n.FieldId, Name = n.Name, Column = column++, Physical = p.PhysicalType, TypeLength = p.TypeLength, Decoding = DecodingOf(p) };
+            var leaf = new Leaf { Optional = optional, Def = def, FieldId = ignoreIds ? -1 : n.FieldId, Name = n.Name, Column = column++, Physical = p.PhysicalType, TypeLength = p.TypeLength, Decoding = DecodingOf(p) };
             leaf.Leaves.Add(leaf);
             return leaf;
         }
@@ -177,44 +177,44 @@ internal static class NestedColumns
             if (logical is MapLogicalType || repeated is GroupNode { Fields.Length: 2 } && logical is not ListLogicalType)
             {
                 var kv = (GroupNode)repeated;
-                var key = FromFile(kv.Fields[0], ref column, elementDef, rep);
-                var value = FromFile(kv.Fields[1], ref column, elementDef, rep);
-                node = new Repeated { Optional = optional, Def = def, FieldId = n.FieldId, Name = n.Name, ElementDef = elementDef, Rep = rep, Element = key, Value = value };
+                var key = FromFile(kv.Fields[0], ref column, elementDef, rep, ignoreIds);
+                var value = FromFile(kv.Fields[1], ref column, elementDef, rep, ignoreIds);
+                node = new Repeated { Optional = optional, Def = def, FieldId = ignoreIds ? -1 : n.FieldId, Name = n.Name, ElementDef = elementDef, Rep = rep, Element = key, Value = value };
             }
             else if (repeated is GroupNode { Fields.Length: 1 } rg && rg.Name is not "array" && !rg.Name.EndsWith("_tuple", StringComparison.Ordinal))
             {
-                var element = FromFile(rg.Fields[0], ref column, elementDef, rep);
-                node = new Repeated { Optional = optional, Def = def, FieldId = n.FieldId, Name = n.Name, ElementDef = elementDef, Rep = rep, Element = element };
+                var element = FromFile(rg.Fields[0], ref column, elementDef, rep, ignoreIds);
+                node = new Repeated { Optional = optional, Def = def, FieldId = ignoreIds ? -1 : n.FieldId, Name = n.Name, ElementDef = elementDef, Rep = rep, Element = element };
             }
             else
             {
                 // Two-level list: the repeated field is the (required) element.
-                var element = FromFileAsRequired(repeated, ref column, elementDef, rep);
-                node = new Repeated { Optional = optional, Def = def, FieldId = n.FieldId, Name = n.Name, ElementDef = elementDef, Rep = rep, Element = element };
+                var element = FromFileAsRequired(repeated, ref column, elementDef, rep, ignoreIds);
+                node = new Repeated { Optional = optional, Def = def, FieldId = ignoreIds ? -1 : n.FieldId, Name = n.Name, ElementDef = elementDef, Rep = rep, Element = element };
             }
         }
         else
         {
             var children = new List<PNode>();
-            foreach (var c in g.Fields) children.Add(FromFile(c, ref column, def, parentRep));
-            node = new Struct { Optional = optional, Def = def, FieldId = n.FieldId, Name = n.Name, Children = children };
+            foreach (var c in g.Fields) children.Add(FromFile(c, ref column, def, parentRep, ignoreIds));
+            node = new Struct { Optional = optional, Def = def, FieldId = ignoreIds ? -1 : n.FieldId, Name = n.Name, Children = children };
         }
         CollectLeaves(node);
         return node;
     }
 
-    private static PNode FromFileAsRequired(Node repeated, ref int column, int def, int rep)
+    private static PNode FromFileAsRequired(Node repeated, ref int column, int def, int rep, bool ignoreIds)
     {
         if (repeated is PrimitiveNode p)
         {
-            var leaf = new Leaf { Optional = false, Def = def, FieldId = p.FieldId, Name = p.Name, Column = column++, Physical = p.PhysicalType, TypeLength = p.TypeLength, Decoding = DecodingOf(p) };
+            var leaf = new Leaf { Optional = false, Def = def, FieldId = ignoreIds ? -1 : p.FieldId, Name = p.Name, Column = column++, Physical = p.PhysicalType, TypeLength = p.TypeLength, Decoding = DecodingOf(p) };
             leaf.Leaves.Add(leaf);
             return leaf;
         }
         var g = (GroupNode)repeated;
         var children = new List<PNode>();
-        foreach (var c in g.Fields) children.Add(FromFile(c, ref column, def, rep));
-        var node = new Struct { Optional = false, Def = def, FieldId = g.FieldId, Name = g.Name, Children = children };
+        foreach (var c in g.Fields) children.Add(FromFile(c, ref column, def, rep, ignoreIds));
+        var node = new Struct { Optional = false, Def = def, FieldId = ignoreIds ? -1 : g.FieldId, Name = g.Name, Children = children };
         CollectLeaves(node);
         return node;
     }

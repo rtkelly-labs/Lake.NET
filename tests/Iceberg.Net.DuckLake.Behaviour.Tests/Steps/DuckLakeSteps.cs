@@ -219,7 +219,9 @@ public sealed class DuckLakeSteps(DuckLakeWorld world)
     public async Task DuckDbRuns(string sql)
     {
         world.Oracle.Require();
-        var statements = sql.Split(";\n", StringSplitOptions.RemoveEmptyEntries | StringSplitOptions.TrimEntries).Select(s => s.TrimEnd(';')).ToArray();
+        // {root} is this scenario's lake directory (for files outside the data path).
+        var statements = sql.Split(";\n", StringSplitOptions.RemoveEmptyEntries | StringSplitOptions.TrimEntries)
+            .Select(s => s.TrimEnd(';').Replace("{root}", world.L.Root, StringComparison.Ordinal)).ToArray();
         await world.Oracle.RunAsync(world.L, statements);
         world.Catalog = await world.L.OpenAsync();
     }
@@ -336,6 +338,15 @@ public sealed class DuckLakeSteps(DuckLakeWorld world)
     [When(@"I expire snapshots (.*)")]
     public async Task Expire(string ids) =>
         await world.C.ExpireSnapshotsAsync(ids.Split(',', StringSplitOptions.TrimEntries).Select(x => long.Parse(x, CultureInfo.InvariantCulture)).ToList());
+
+    [When(@"I add the files ""(.*)"" to ""([^""]*)""(.*)")]
+    public async Task AddFiles(string files, string name, string how)
+    {
+        var (schema, table) = Split(name);
+        var paths = files.Split(',', StringSplitOptions.TrimEntries).Select(f => Path.Combine(world.L.Root, f)).ToList();
+        var options = new DuckLakeAddFileOptions { HivePartitioning = how.Contains("with Hive partitioning"), AllowMissing = how.Contains("allowing missing columns") };
+        await Try(() => Commit(async tx => world.Affected = await tx.AddDataFilesAsync(schema, table, paths, options)));
+    }
 
     [When(@"I flush the inlined data")]
     public async Task FlushInlined() => world.Affected = (await world.C.FlushInlinedDataAsync()).Sum(f => f.RowsFlushed);

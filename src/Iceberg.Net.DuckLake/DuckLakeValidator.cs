@@ -143,7 +143,8 @@ public static class DuckLakeValidator
                 if (f.DeleteFileLocation is { } dl && !await catalog.IO.ExistsAsync(dl, ct)) Problem($"data file {f.DataFileId}", $"delete file {dl} does not exist");
                 if (!options.Deep) continue;
                 var rows = 0L;
-                await foreach (var batch in Data.ParquetFiles.ReadBatchesAsync(catalog.IO, f.Location, DuckLakeCatalog.FileProjection(table), null, null, ct)) rows += batch.Rows.Count;
+                await foreach (var batch in catalog.ReadDataFileAsync(table, f.Location, f.Mapping, DuckLakeCatalog.FileProjection(table), new Data.DataFileReadOptions(), ct))
+                    rows += batch.Rows.Count;
                 if (rows != f.RecordCount) Problem($"data file {f.DataFileId}", $"holds {rows} rows, recorded as {f.RecordCount}");
                 if (f.DeleteFileLocation is { } d)
                 {
