@@ -60,15 +60,16 @@ public abstract class CatalogTests : IAsyncLifetime
 
     [SkippableFact]
     [Spec("ducklake: ducklake_metadata")]
-    public async Task Opening_refuses_other_format_versions_and_encrypted_catalogs()
+    public async Task Opening_refuses_other_format_versions_and_takes_the_encryption_mode()
     {
         _lake.Corrupted = true;
         await _lake.CreateAsync();
         await SqlAsync("UPDATE ducklake_metadata SET \"value\" = '0.3' WHERE \"key\" = 'version'");
         await Assert.ThrowsAsync<NotSupportedException>(() => _lake.OpenAsync());
         await SqlAsync($"UPDATE ducklake_metadata SET \"value\" = '{_lake.Version}' WHERE \"key\" = 'version'");
+        Assert.False((await _lake.OpenAsync()).Encrypted);
         await SqlAsync("UPDATE ducklake_metadata SET \"value\" = 'true' WHERE \"key\" = 'encrypted'");
-        await Assert.ThrowsAsync<NotSupportedException>(() => _lake.OpenAsync());
+        Assert.True((await _lake.OpenAsync()).Encrypted);
     }
 
     [SkippableFact]
@@ -582,8 +583,8 @@ public abstract class CatalogTests : IAsyncLifetime
         _lake.Corrupted = true;
         var catalog = await WithTableAsync(rows: 2);
         var table = await catalog.LoadTableAsync("main", "t");
-        await SqlAsync("UPDATE ducklake_data_file SET encryption_key = 'k'");
-        await Assert.ThrowsAsync<NotSupportedException>(() => catalog.ReadAsync(table));
+        await SqlAsync("UPDATE ducklake_data_file SET encryption_key = 'not base64!'");
+        await Assert.ThrowsAsync<InvalidDataException>(() => catalog.ReadAsync(table));
         await SqlAsync("UPDATE ducklake_data_file SET encryption_key = NULL, mapping_id = 1");
         await Assert.ThrowsAsync<InvalidDataException>(() => catalog.ReadAsync(table)); // no such mapping
         await SqlAsync("INSERT INTO ducklake_column_mapping (mapping_id, table_id, type) VALUES (1, 1, 'map_by_position')");

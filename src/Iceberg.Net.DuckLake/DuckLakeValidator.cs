@@ -143,12 +143,12 @@ public static class DuckLakeValidator
                 if (f.DeleteFileLocation is { } dl && !await catalog.IO.ExistsAsync(dl, ct)) Problem($"data file {f.DataFileId}", $"delete file {dl} does not exist");
                 if (!options.Deep) continue;
                 var rows = 0L;
-                await foreach (var batch in catalog.ReadDataFileAsync(table, f.Location, f.Mapping, DuckLakeCatalog.FileProjection(table), new Data.DataFileReadOptions(), ct))
+                await foreach (var batch in catalog.ReadDataFileAsync(table, f.Location, f.Mapping, DuckLakeCatalog.FileProjection(table), new Data.DataFileReadOptions { DecryptionKey = f.Key }, ct))
                     rows += batch.Rows.Count;
                 if (rows != f.RecordCount) Problem($"data file {f.DataFileId}", $"holds {rows} rows, recorded as {f.RecordCount}");
                 if (f.DeleteFileLocation is { } d)
                 {
-                    var positions = await DuckLakeDeleteFiles.ReadPositionsAsync(catalog.IO, d, ct: ct);
+                    var positions = await DuckLakeDeleteFiles.ReadPositionsAsync(catalog.IO, d, ct: ct, key: f.DeleteKey);
                     if (positions.Any(p => p < 0 || p >= f.RecordCount)) Problem($"data file {f.DataFileId}", "its delete file has positions outside the file");
                 }
             }

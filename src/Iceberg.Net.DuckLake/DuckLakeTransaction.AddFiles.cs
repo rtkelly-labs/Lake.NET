@@ -29,6 +29,7 @@ public sealed partial class DuckLakeTransaction
         options ??= new DuckLakeAddFileOptions();
         PendingTable t;
         await using (var db = await BeginAsync(ct)) t = await TableAsync(db, schema, table, ct);
+        if (_catalog.Encrypted) throw new NotSupportedException("The lake is encrypted: files written elsewhere have no key in it to be added with");
         if (t.PartitionKeys.Count > 0) throw new NotSupportedException($"{schema}.{table} is partitioned: existing files can only be added to unpartitioned tables");
         var columns = t.Columns;
         var projection = DuckLakeTypes.ToIceberg(columns.Where(c => c.Type is not DuckLakePrimitive { Name: "null" }).ToList());

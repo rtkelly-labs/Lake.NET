@@ -15,7 +15,8 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
   narrow integers, millisecond timestamps, UTC times, INTERVAL); the reader decodes unsigned and millisecond columns
   (values and footer statistics) from any writer's annotations. `ParquetInspection.InspectAsync` reads an existing
   file's footer (fields, sizes, name-matched statistics and type compatibility); `DataFileReadOptions.MatchByName`
-  reads a file by column names, ignoring its field IDs.
+  reads a file by column names, ignoring its field IDs. `ParquetWriteOptions.EncryptionKey` /
+  `DataFileReadOptions.DecryptionKey`: Parquet modular encryption (AES-GCM, encrypted footer).
 - `Iceberg.Net.DuckLake` (not yet packed): the DuckLake 1.0 and 1.1 table formats on the Iceberg data plane — an
   EF Core catalog on SQLite or PostgreSQL (the databases DuckDB attaches), nested schemas and the `null` type (1.1), snapshots and time travel, schema/table DDL, inserts with file and table statistics,
   merge-on-read deletes, UPDATE, schema evolution, partitioned writes, DuckDB's inlined rows and partial files on
@@ -26,7 +27,8 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
   `timestamp_s`/`timestamp_ms`, `timetz` and `interval`, stored with DuckDB's Parquet annotations and inlining encodings.
   Registering existing Parquet files under a name mapping (`AddDataFilesAsync`, as `ducklake_add_data_files`), and
   reading files DuckDB registered that way. Typed reads: `ReadClrAsync` (natural CLR values) and `ReadAsync<T>` (rows bound to
-  records by column name). Format 1.1's Puffin deletion vectors, read and (under `write_deletion_vectors`) written. DuckDB's `ducklake` extension is the cross-engine oracle in both
+  records by column name). Format 1.1's Puffin deletion vectors, read and (under `write_deletion_vectors`) written. Encrypted lakes (Parquet
+  modular encryption with a key per write in `encryption_key`, as DuckDB's `ENCRYPTED`). DuckDB's `ducklake` extension is the cross-engine oracle in both
   directions on both databases, with a BDD specification and model-based property tests; DuckLake spec sections are
   pinned and traced like Iceberg's ([docs/ducklake.md](docs/ducklake.md)).
 
