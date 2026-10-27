@@ -135,7 +135,9 @@ public abstract class CatalogTests : IAsyncLifetime
         Assert.Equal([1L, 3L, 1L, 3L, 1L, "parquet"], files[1][..6]);
         var location = _lake.DataPath + "main/t/" + (string)files[0][6]!;
         Assert.Equal(new FileInfo(location).Length, files[0][7]);
-        Assert.True((long)files[0][8]! > 0 && (long)files[0][8]! < (long)files[0][7]!);
+        // footer_size is the footer length the file itself ends with (4 bytes before "PAR1").
+        var bytes = await File.ReadAllBytesAsync(location);
+        Assert.Equal((long)BitConverter.ToUInt32(bytes, bytes.Length - 8), files[0][8]);
 
         // value_count counts non-null values, as DuckDB writes it.
         Assert.Equal([[0L, 1L, 3L, 0L, "1", "9", null], [0L, 2L, 2L, 1L, "a", "b", null]],

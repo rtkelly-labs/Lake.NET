@@ -77,3 +77,47 @@ public abstract class PerformanceTests(CatalogBackend backend, ITestOutputHelper
 
 public sealed class SqlitePerformanceTests(ITestOutputHelper output) : PerformanceTests(CatalogBackend.Sqlite, output);
 public sealed class PostgresPerformanceTests(ITestOutputHelper output) : PerformanceTests(CatalogBackend.Postgres, output);
+
+/// <summary>
+/// Many writers committing to one table at once all succeed: every lost race for the snapshot ID is retried (with
+/// backoff) until it lands, snapshots stay gap-free and every row is there. (With the snapshot row written last,
+/// PostgreSQL writers used to collide on <c>ducklake_data_file</c>'s key after doing all their work; it is now written
+/// first, so a loser waits for the winner and retries at once.)
+/// </summary>
+public abstract class ConcurrentWriterTests(CatalogBackend backend) : IDisposable
+{
+    private readonly TestLake _lake = new(backend);
+
+    public void Dispose() => _lake.Dispose();
+
+    [SkippableFact]
+    [Spec("ducklake: Conflict Resolution")]
+    public async Task Concurrent_writers_all_commit()
+    {
+        if (backend == CatalogBackend.Postgres) TestLake.RequirePostgres();
+        const int writers = 6, commits = 15;
+        var catalog = await _lake.CreateAsync(new DuckLakeOptions { MaxCommitAttempts = 50 });
+        await using (var tx = catalog.BeginTransaction())
+        {
+            await tx.CreateTableAsync("main", "t", [new("writer", DuckLakeType.Int32), new("n", DuckLakeType.Int32)]);
+            await tx.CommitAsync();
+        }
+        await Task.WhenAll(Enumerable.Range(0, writers).Select(w => Task.Run(async () =>
+        {
+            for (var i = 0; i < commits; i++)
+            {
+                await using var tx = catalog.BeginTransaction();
+                await tx.InsertAsync("main", "t", [[w, i]]);
+                await tx.CommitAsync();
+            }
+        })));
+        var snapshots = await catalog.ListSnapshotsAsync();
+        Assert.Equal(Enumerable.Range(0, 2 + writers * commits).Select(i => (long)i), snapshots.Select(s => s.SnapshotId));
+        var rows = await catalog.ReadAsync(await catalog.LoadTableAsync("main", "t"));
+        Assert.Equal(writers * commits, rows.Select(r => ((int)r[0]!, (int)r[1]!)).Distinct().Count());
+        await DuckLakeValidator.AssertValidAsync(catalog, new DuckLakeValidationOptions { Deep = true });
+    }
+}
+
+public sealed class SqliteConcurrentWriterTests() : ConcurrentWriterTests(CatalogBackend.Sqlite);
+public sealed class PostgresConcurrentWriterTests() : ConcurrentWriterTests(CatalogBackend.Postgres);

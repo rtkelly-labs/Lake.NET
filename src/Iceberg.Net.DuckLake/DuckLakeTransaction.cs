@@ -381,38 +381,41 @@ public sealed class DuckLakeTransaction : IAsyncDisposable
         PendingTable t;
         await using (var db = await BeginAsync(ct)) t = await TableAsync(db, schema, table, ct);
         var columns = t.Columns;
-        var normalized = rows.Select(r =>
+        var normalizers = columns.Select(c => DuckLakeValues.Normalizer(c.Type, c.Name)).ToArray();
+        var required = columns.Select(c => !c.Nullable).ToArray();
+        var normalized = new List<object?[]>(rows.TryGetNonEnumeratedCount(out var n) ? n : 0);
+        foreach (var r in rows)
         {
             if (r.Length != columns.Count) throw new ArgumentException($"Row has {r.Length} values; {t.Schema.Name}.{t.Name} has {columns.Count} columns");
             var values = new object?[r.Length];
             for (var i = 0; i < r.Length; i++)
             {
-                values[i] = DuckLakeValues.Normalize(columns[i].Type, r[i], columns[i].Name);
-                if (values[i] is null && !columns[i].Nullable) throw new ArgumentException($"Column {columns[i].Name} is NOT NULL");
+                values[i] = normalizers[i](r[i]);
+                if (values[i] is null && required[i]) throw new ArgumentException($"Column {columns[i].Name} is NOT NULL");
             }
-            return values;
-        }).ToList();
+            normalized.Add(values);
+        }
         if (normalized.Count == 0) return;
         // Columns of the null type hold no data: they are left out of the file (and read back as null).
         var stored = columns.Select((c, i) => (c, i)).Where(x => x.c.Type is not DuckLakePrimitive { Name: "null" }).ToList();
+        var allStored = stored.Count == columns.Count;
         var fileSchema = DuckLakeTypes.ToIceberg(stored.Select(x => x.c).ToList());
         var groups = t.PartitionKeys.Count == 0
             ? [(Values: (IReadOnlyList<string?>)[], Rows: normalized)]
             : DuckLakePartitioning.Split(columns, t.PartitionKeys, normalized);
-        var groupRows = _catalog.Options.Parquet.RowGroupRows is > 0 and var g ? g : int.MaxValue;
         foreach (var (partitionValues, part) in groups)
         {
             var directory = t.PartitionKeys.Count == 0 ? "" : DuckLakePartitioning.HivePath(columns, t.PartitionKeys, partitionValues);
             var relative = $"{directory}ducklake-{Guid.CreateVersion7()}.parquet";
             var location = t.Location + relative;
             _written.Add(location);
-            var fileRows = part.Select(r => stored.Select(x => r[x.i]).ToArray()).ToList();
-            var file = await ParquetFiles.WriteAsync(_catalog.IO, location, fileSchema, 0, [], fileRows, _catalog.Options.Parquet, ct);
-            var footer = await DuckLakeDeleteFiles.FooterSizeAsync(_catalog.IO, location, file.FileSizeInBytes, ct);
+            var fileRows = allStored ? part : part.Select(r => stored.Select(x => r[x.i]).ToArray()).ToList();
+            // DuckLake keeps its own statistics (StatsCollector), so the Iceberg metrics pass is skipped.
+            var written = await ParquetFiles.WriteFileAsync(_catalog.IO, location, fileSchema, 0, [], fileRows, _catalog.Options.Parquet with { Metrics = false }, ct);
             var stats = new StatsCollector(columns);
             foreach (var row in part) stats.Add(row);
-            var rowGroups = (part.Count + (long)groupRows - 1) / groupRows;
-            _ops.Add(new InsertOp(t, new WrittenFile(relative, part.Count, file.FileSizeInBytes, footer, Math.Max(1, rowGroups), stats.Result(file.ColumnSizes), partitionValues)));
+            _ops.Add(new InsertOp(t, new WrittenFile(relative, part.Count, written.File.FileSizeInBytes, written.FooterSize, written.RowGroups,
+                stats.Result(written.File.ColumnSizes), partitionValues)));
         }
         t.Inserted = true;
     }
@@ -548,7 +551,11 @@ public sealed class DuckLakeTransaction : IAsyncDisposable
                 // error; nothing was committed, so the files go.
                 last = e;
                 await tx.RollbackAsync(CancellationToken.None);
-                if (await SnapshotTakenAsync(scope, ct)) continue;
+                if (await SnapshotTakenAsync(scope, ct))
+                {
+                    await Task.Delay(Backoff(attempt), ct);
+                    continue;
+                }
                 await CleanUpAsync();
                 throw;
             }
@@ -570,6 +577,14 @@ public sealed class DuckLakeTransaction : IAsyncDisposable
         }
         await CleanUpAsync();
         throw new DuckLakeConflictException($"Gave up after {_catalog.Options.MaxCommitAttempts} attempts: {last?.Message}");
+    }
+
+    /// <summary>Wait before retry <paramref name="attempt"/>: exponential with jitter, so writers that collided do not collide again in step.</summary>
+    private TimeSpan Backoff(int attempt)
+    {
+        var o = _catalog.Options;
+        var ms = Math.Min(o.MaxRetryWait.TotalMilliseconds, o.RetryWait.TotalMilliseconds * Math.Pow(1.5, attempt));
+        return TimeSpan.FromMilliseconds(ms * (0.5 + Random.Shared.NextDouble()));
     }
 
     private async Task<bool> SnapshotTakenAsync(DuckLakeTelemetry.Scope scope, CancellationToken ct)
@@ -645,6 +660,23 @@ public sealed class DuckLakeTransaction : IAsyncDisposable
         var schemaVersion = latest.SchemaVersion + (schemaChanged ? 1 : 0);
         var v11 = _catalog.Is11;
         var rows = new CatalogRows();
+
+        // The snapshot row goes in first: it is the row concurrent committers race for (its primary key), so a loser
+        // finds out before writing anything else (on PostgreSQL it waits for the winner, then fails at once). Its
+        // counters follow from the staged operations alone; the ID assignment below must land on the same values.
+        var time = DateTimeOffset.UtcNow;
+        var snapshotRow = new SnapshotEntity
+        {
+            SnapshotId = snapshotId, SnapshotTime = time, SchemaVersion = schemaVersion,
+            NextCatalogId = latest.NextCatalogId + _ops.Count(o => o is CreateSchemaOp or CreateTableOp or SetPartitionOp { Keys.Count: > 0 }),
+            NextFileId = latest.NextFileId + _ops.Sum(o => o switch
+            {
+                InsertOp => 1,
+                DeleteOp d => d.Files.Count(f => f.NewFile is not null),
+                _ => 0,
+            }),
+        };
+        await BulkInsert.InsertAsync(db, [snapshotRow], ct);
 
         // Pending IDs are per attempt: a retry re-assigns them from the new latest snapshot.
         foreach (var s in _schemas.Values.Where(s => s.Created)) s.SchemaId = null;
@@ -862,14 +894,11 @@ public sealed class DuckLakeTransaction : IAsyncDisposable
         var final = Changes();
         foreach (var i in inserts.Where(i => i.Table.Created)) final.InsertedTables.Add(i.Table.TableId!.Value);
         var changes = string.Join(",", final.Entries());
-        var time = DateTimeOffset.UtcNow;
+        if (nextCatalogId != snapshotRow.NextCatalogId || nextFileId != snapshotRow.NextFileId)
+            throw new InvalidOperationException($"Snapshot {snapshotId}: assigned IDs up to {nextCatalogId}/{nextFileId}, recorded {snapshotRow.NextCatalogId}/{snapshotRow.NextFileId}");
         rows.SnapshotChanges.Add(new SnapshotChangesEntity
         {
             SnapshotId = snapshotId, ChangesMade = changes, Author = Author, CommitMessage = CommitMessage, CommitExtraInfo = CommitExtraInfo,
-        });
-        rows.Snapshots.Add(new SnapshotEntity
-        {
-            SnapshotId = snapshotId, SnapshotTime = time, SchemaVersion = schemaVersion, NextCatalogId = nextCatalogId, NextFileId = nextFileId,
         });
         await rows.WriteAsync(db, ct);
         return new DuckLakeSnapshot(snapshotId, time, schemaVersion, nextCatalogId, nextFileId)
@@ -991,7 +1020,7 @@ public sealed class DuckLakeTransaction : IAsyncDisposable
         }
     }
 
-    /// <summary>The catalog rows a commit inserts, written with one multi-row statement per table (in an order without forward references).</summary>
+    /// <summary>The catalog rows a commit inserts after its snapshot row, written with one multi-row statement per table.</summary>
     private sealed class CatalogRows
     {
         public readonly List<SchemaEntity> Schemas = [];
@@ -1007,7 +1036,6 @@ public sealed class DuckLakeTransaction : IAsyncDisposable
         public readonly List<TableColumnStatsEntity> TableColumnStats = [];
         public readonly List<SchemaVersionEntity> SchemaVersions = [];
         public readonly List<SnapshotChangesEntity> SnapshotChanges = [];
-        public readonly List<SnapshotEntity> Snapshots = [];
 
         public async Task WriteAsync(DuckLakeDbContext db, CancellationToken ct)
         {
@@ -1024,8 +1052,6 @@ public sealed class DuckLakeTransaction : IAsyncDisposable
             await BulkInsert.InsertAsync(db, TableColumnStats, ct);
             await BulkInsert.InsertAsync(db, SchemaVersions, ct);
             await BulkInsert.InsertAsync(db, SnapshotChanges, ct);
-            // Last: the snapshot row is the one a concurrent committer races for (its primary key).
-            await BulkInsert.InsertAsync(db, Snapshots, ct);
         }
     }
 
