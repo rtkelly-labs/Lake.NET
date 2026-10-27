@@ -123,6 +123,11 @@ public abstract class CrossEngineTests : IAsyncLifetime
         LakeJson.AssertSameRows(await Oracle.RowsAsync(_lake, "SELECT * FROM lake.t"), LakeJson.Rows(table.Columns, ours));
         Assert.Equal(["[85]"], await Oracle.RowsAsync(_lake, "SELECT count(*) FROM lake.t"));
         Assert.Equal(["[\"updated\"]"], await Oracle.RowsAsync(_lake, "SELECT v FROM lake.t WHERE id = 99"));
+        // The updated row keeps its row ID (stored in the new file's _ducklake_internal_row_id), in both engines.
+        var rowIds = new List<DuckLakeRow>();
+        await foreach (var r in catalog.ReadRowsAsync(table)) rowIds.Add(r);
+        Assert.Equal(99L, rowIds.Single(r => (long)r.Values[0]! == 99L).RowId);
+        Assert.Equal(["[99]"], await Oracle.RowsAsync(_lake, "SELECT rowid FROM lake.t WHERE id = 99"));
         // DuckDB's own filtered reads (its pruning uses the statistics written here) agree.
         Assert.Equal(["[40]"], await Oracle.RowsAsync(_lake, "SELECT count(*) FROM lake.t WHERE id >= 10 AND id < 55"));
     }
