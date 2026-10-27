@@ -192,4 +192,48 @@ public sealed class EncodingTests
         Assert.Throws<NotSupportedException>(() => DuckLakeTypes.Tree([Row(1, "hugeint_of_the_future")]));
         Assert.Throws<InvalidDataException>(() => DuckLakeTypes.ToIceberg([new DuckLakeColumn(1L << 40, "x", DuckLakeType.Int32, true, [])]));
     }
+
+    /// <summary>
+    /// The Corruption contract under random mutation (the in-process twin of tools/fuzz.sh's ducklake-* targets): any
+    /// mutation of a valid value either parses or fails with a format error, never another exception.
+    /// </summary>
+    [Fact]
+    public void Mutated_catalog_text_only_ever_fails_as_a_format_error()
+    {
+        var type = DuckLakeType.Struct(("a", DuckLakeType.Int32), ("b", DuckLakeType.List(DuckLakeType.Varchar)),
+            ("c", DuckLakeType.Map(DuckLakeType.Varchar, DuckLakeType.List(DuckLakeType.Float64))),
+            ("d", DuckLakeType.Struct(("x", DuckLakeType.Date), ("t", DuckLakeType.TimestampTz), ("n", DuckLakeType.Decimal(9, 2)))));
+        const string inlined = "{'a': 1, 'b': ['x, y', NULL, a\\b], 'c': {k=[1.5, nan, inf], 'k 2'=NULL}, 'd': {'x': CAST('2024-01-02' AS DATE), 't': '2024-01-01 00:00:00+00', 'n': 12.50}}";
+        const string changes = "created_table:\"main\".\"a, \"\"b\"\"\",inserted_into_table:2,inline_flush:3";
+        Assert.NotNull(DuckLakeNestedText.Parse(type, inlined));
+        var random = new Random(20261027);
+        const string alphabet = "[]{}(),:='\"\\ NULLCASTnainf0123456789.-+x";
+        for (var i = 0; i < 20_000; i++)
+        {
+            foreach (var (seed, decode) in new (string, Action<string>)[]
+                     {
+                         (inlined, t => DuckLakeNestedText.Parse(type, t)),
+                         (changes, t =>
+                         {
+                             foreach (var c in DuckLakeChange.Parse(t))
+                                 if (c.Target.StartsWith('"')) DuckLakeChange.SplitName(c.Target);
+                         }),
+                     })
+            {
+                var text = new System.Text.StringBuilder(seed);
+                for (var m = random.Next(1, 4); m > 0 && text.Length > 0; m--)
+                {
+                    var at = random.Next(text.Length);
+                    switch (random.Next(3))
+                    {
+                        case 0: text.Remove(at, 1); break;
+                        case 1: text.Insert(at, alphabet[random.Next(alphabet.Length)]); break;
+                        default: text[at] = alphabet[random.Next(alphabet.Length)]; break;
+                    }
+                }
+                var e = Record.Exception(() => decode(text.ToString()));
+                Assert.True(e is null || Corruption.IsFormatError(e), $"{e?.GetType().Name} on '{text}': {e?.Message}");
+            }
+        }
+    }
 }
