@@ -1,6 +1,7 @@
 using System.Text;
 using Iceberg.Net;
 using Iceberg.Net.Avro;
+using Iceberg.Net.DuckLake;
 using Iceberg.Net.Json;
 using Iceberg.Net.Metadata;
 using Iceberg.Net.Puffin;
@@ -40,6 +41,13 @@ internal static class Targets
         MetadataJson.Read(File.ReadAllText(Environment.GetEnvironmentVariable("FUZZ_TABLE_METADATA")
             ?? throw new ArgumentException("The manifest target needs FUZZ_TABLE_METADATA (a metadata.json for its spec and schema)"))));
 
+    /// <summary>Every nesting form and the primitives with their own text parsers, in one type.</summary>
+    private static readonly DuckLakeType InlinedType = DuckLakeType.Struct(
+        ("a", DuckLakeType.Int32), ("b", DuckLakeType.List(DuckLakeType.Varchar)),
+        ("c", DuckLakeType.Map(DuckLakeType.Varchar, DuckLakeType.List(DuckLakeType.Float64))),
+        ("d", DuckLakeType.Struct(("x", DuckLakeType.Date), ("t", DuckLakeType.TimestampTz), ("n", DuckLakeType.Decimal(9, 2)),
+            ("u", DuckLakeType.Uuid), ("z", DuckLakeType.Blob))));
+
     public static readonly Dictionary<string, Action<byte[]>> All = new()
     {
         ["metadata"] = b => MetadataJson.Read(Encoding.UTF8.GetString(b)),
@@ -55,5 +63,12 @@ internal static class Targets
         ["roaring"] = b => RoaringPositionBitmap.Deserialize(b),
         ["mumbling"] = b => MumblingBitmap.Deserialize(b),
         ["theta"] = b => ThetaSketch.Deserialize(b),
+        // DuckLake catalog text (rows of a catalog database another writer controls).
+        ["ducklake-changes"] = b =>
+        {
+            foreach (var change in DuckLakeChange.Parse(Encoding.UTF8.GetString(b)))
+                if (change.Target.StartsWith('"')) DuckLakeChange.SplitName(change.Target);
+        },
+        ["ducklake-inlined"] = b => DuckLakeNestedText.Parse(InlinedType, Encoding.UTF8.GetString(b)),
     };
 }
