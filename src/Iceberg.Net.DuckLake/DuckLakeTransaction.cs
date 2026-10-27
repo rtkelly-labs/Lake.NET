@@ -456,6 +456,9 @@ public sealed partial class DuckLakeTransaction : IAsyncDisposable
                 NestedField.Optional(DuckLakeCatalog.RowIdFieldId, "_ducklake_internal_row_id", PrimitiveType.Long)));
             stored.Add((null!, columns.Count)); // the row ID, after the values
         }
+        var storedColumns = stored.Where(x => x.c is not null).Select(x => x.c).ToList();
+        var toFile = DuckLakeValues.FileRowConverter(storedColumns, toFile: true);
+        var parquet = _catalog.Options.Parquet with { Metrics = false, Annotations = DuckLakeTypes.Annotations(storedColumns) };
         var groups = t.PartitionKeys.Count == 0
             ? [(Values: (IReadOnlyList<string?>)[], Rows: normalized)]
             : DuckLakePartitioning.Split(columns, t.PartitionKeys, normalized);
@@ -466,8 +469,9 @@ public sealed partial class DuckLakeTransaction : IAsyncDisposable
             var location = t.Location + relative;
             _written.Add(location);
             var fileRows = allStored ? part : part.Select(r => stored.Select(x => r[x.i]).ToArray()).ToList();
+            if (toFile is not null) fileRows = fileRows.Select(toFile).ToList();
             // DuckLake keeps its own statistics (StatsCollector), so the Iceberg metrics pass is skipped.
-            var written = await ParquetFiles.WriteFileAsync(_catalog.IO, location, fileSchema, 0, [], fileRows, _catalog.Options.Parquet with { Metrics = false }, ct);
+            var written = await ParquetFiles.WriteFileAsync(_catalog.IO, location, fileSchema, 0, [], fileRows, parquet, ct);
             var stats = new StatsCollector(columns);
             foreach (var row in part) stats.Add(row);
             _ops.Add(new InsertOp(t, new WrittenFile(relative, part.Count, written.File.FileSizeInBytes, written.FooterSize, written.RowGroups,

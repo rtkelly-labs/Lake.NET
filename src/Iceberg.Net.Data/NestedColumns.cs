@@ -33,6 +33,8 @@ internal static class NestedColumns
         public required PhysicalType Physical { get; init; }
         public int TypeLength { get; init; }
         public IcebergType? Type { get; init; } // write side only
+        public ParquetAnnotation? Annotation { get; init; } // write side only
+        public ParquetFiles.Decoding Decoding { get; init; } // read side only
         // Column data for one row group: levels plus the defined values in order.
         public List<short> Defs { get; } = [];
         public List<short> Reps { get; } = [];
@@ -59,43 +61,44 @@ internal static class NestedColumns
 
     // ---------- schema ----------
 
-    public static Node ToNode(NestedField f) => ToNode(f.Name, f.Type, f.Required, f.Id);
+    public static Node ToNode(NestedField f, IReadOnlyDictionary<int, ParquetAnnotation>? annotations) => ToNode(f.Name, f.Type, f.Required, f.Id, annotations);
 
-    private static Node ToNode(string name, IcebergType type, bool required, int id)
+    private static Node ToNode(string name, IcebergType type, bool required, int id, IReadOnlyDictionary<int, ParquetAnnotation>? annotations)
     {
         var rep = required ? Repetition.Required : Repetition.Optional;
         switch (type)
         {
             case StructType s:
-                return new GroupNode(name, rep, s.Fields.Select(ToNode).ToArray(), null, id);
+                return new GroupNode(name, rep, s.Fields.Select(f => ToNode(f, annotations)).ToArray(), null, id);
             case ListType l:
             {
-                using var element = ToNode("element", l.ElementType, l.ElementRequired, l.ElementId);
+                using var element = ToNode("element", l.ElementType, l.ElementRequired, l.ElementId, annotations);
                 using var list = new GroupNode("list", Repetition.Repeated, [element]);
                 using var logical = LogicalType.List();
                 return new GroupNode(name, rep, [list], logical, id);
             }
             case MapType m:
             {
-                using var key = ToNode("key", m.KeyType, true, m.KeyId);
-                using var value = ToNode("value", m.ValueType, m.ValueRequired, m.ValueId);
+                using var key = ToNode("key", m.KeyType, true, m.KeyId, annotations);
+                using var value = ToNode("value", m.ValueType, m.ValueRequired, m.ValueId, annotations);
                 using var kv = new GroupNode("key_value", Repetition.Repeated, [key, value]);
                 using var logical = LogicalType.Map();
                 return new GroupNode(name, rep, [kv], logical, id);
             }
             default:
-                return ParquetFiles.ToNode(new NestedField(id, name, type, required));
+                return ParquetFiles.ToNode(new NestedField(id, name, type, required), annotations);
         }
     }
 
     /// <summary>The level tree for writing <paramref name="f"/>, with leaves numbered from <paramref name="firstColumn"/>.</summary>
-    public static PNode Plan(NestedField f, int firstColumn)
+    public static PNode Plan(NestedField f, int firstColumn, IReadOnlyDictionary<int, ParquetAnnotation>? annotations = null)
     {
         var column = firstColumn;
-        return Build(f.Type, !f.Required, 0, 0, f.Id, f.Name, ref column);
+        return Build(f.Type, !f.Required, 0, 0, f.Id, f.Name, ref column, annotations);
     }
 
-    private static PNode Build(IcebergType type, bool optional, int parentDef, int parentRep, int id, string name, ref int column)
+    private static PNode Build(IcebergType type, bool optional, int parentDef, int parentRep, int id, string name, ref int column,
+        IReadOnlyDictionary<int, ParquetAnnotation>? annotations)
     {
         var def = parentDef + (optional ? 1 : 0);
         PNode node;
@@ -104,27 +107,29 @@ internal static class NestedColumns
             case StructType s:
             {
                 var children = new List<PNode>();
-                foreach (var c in s.Fields) children.Add(Build(c.Type, !c.Required, def, parentRep, c.Id, c.Name, ref column));
+                foreach (var c in s.Fields) children.Add(Build(c.Type, !c.Required, def, parentRep, c.Id, c.Name, ref column, annotations));
                 node = new Struct { Optional = optional, Def = def, FieldId = id, Name = name, Children = children };
                 break;
             }
             case ListType l:
             {
-                var element = Build(l.ElementType, !l.ElementRequired, def + 1, parentRep + 1, l.ElementId, "element", ref column);
+                var element = Build(l.ElementType, !l.ElementRequired, def + 1, parentRep + 1, l.ElementId, "element", ref column, annotations);
                 node = new Repeated { Optional = optional, Def = def, FieldId = id, Name = name, ElementDef = def + 1, Rep = parentRep + 1, Element = element };
                 break;
             }
             case MapType m:
             {
-                var key = Build(m.KeyType, false, def + 1, parentRep + 1, m.KeyId, "key", ref column);
-                var value = Build(m.ValueType, !m.ValueRequired, def + 1, parentRep + 1, m.ValueId, "value", ref column);
+                var key = Build(m.KeyType, false, def + 1, parentRep + 1, m.KeyId, "key", ref column, annotations);
+                var value = Build(m.ValueType, !m.ValueRequired, def + 1, parentRep + 1, m.ValueId, "value", ref column, annotations);
                 node = new Repeated { Optional = optional, Def = def, FieldId = id, Name = name, ElementDef = def + 1, Rep = parentRep + 1, Element = key, Value = value };
                 break;
             }
             default:
             {
-                using var p = (PrimitiveNode)ParquetFiles.ToNode(new NestedField(id, name, type, !optional));
-                var leaf = new Leaf { Optional = optional, Def = def, FieldId = id, Name = name, Column = column++, Physical = p.PhysicalType, TypeLength = p.TypeLength, Type = type };
+                using var p = (PrimitiveNode)ParquetFiles.ToNode(new NestedField(id, name, type, !optional), annotations);
+                ParquetAnnotation? annotation = annotations is not null && annotations.TryGetValue(id, out var a) ? a : null;
+                var leaf = new Leaf { Optional = optional, Def = def, FieldId = id, Name = name, Column = column++, Physical = p.PhysicalType, TypeLength = p.TypeLength, Type = type,
+                    Annotation = annotation };
                 leaf.Leaves.Add(leaf);
                 return leaf;
             }
@@ -156,7 +161,7 @@ internal static class NestedColumns
         if (n is PrimitiveNode p)
         {
             if (n.Repetition == Repetition.Repeated) throw new NotSupportedException($"Repeated primitive {n.Name} outside a LIST group");
-            var leaf = new Leaf { Optional = optional, Def = def, FieldId = n.FieldId, Name = n.Name, Column = column++, Physical = p.PhysicalType, TypeLength = p.TypeLength };
+            var leaf = new Leaf { Optional = optional, Def = def, FieldId = n.FieldId, Name = n.Name, Column = column++, Physical = p.PhysicalType, TypeLength = p.TypeLength, Decoding = DecodingOf(p) };
             leaf.Leaves.Add(leaf);
             return leaf;
         }
@@ -202,7 +207,7 @@ internal static class NestedColumns
     {
         if (repeated is PrimitiveNode p)
         {
-            var leaf = new Leaf { Optional = false, Def = def, FieldId = p.FieldId, Name = p.Name, Column = column++, Physical = p.PhysicalType, TypeLength = p.TypeLength };
+            var leaf = new Leaf { Optional = false, Def = def, FieldId = p.FieldId, Name = p.Name, Column = column++, Physical = p.PhysicalType, TypeLength = p.TypeLength, Decoding = DecodingOf(p) };
             leaf.Leaves.Add(leaf);
             return leaf;
         }
@@ -285,8 +290,15 @@ internal static class NestedColumns
         }
     }
 
+    private static ParquetFiles.Decoding DecodingOf(PrimitiveNode p)
+    {
+        using var logical = p.LogicalType;
+        return ParquetFiles.DecodingOf(logical);
+    }
+
     private static object ToPhysical(Leaf leaf, object v)
     {
+        if (leaf.Annotation is { } annotation and not (ParquetAnnotation.TimeUtc or ParquetAnnotation.Interval)) return ParquetFiles.Encode(annotation, v);
         var type = leaf.Type!;
         return type switch
         {
@@ -366,7 +378,9 @@ internal static class NestedColumns
             switch (leaf.Physical)
             {
                 case PhysicalType.Boolean: ReadAll<bool>(col, leaf, v => v); break;
+                case PhysicalType.Int32 when leaf.Decoding != ParquetFiles.Decoding.None: ReadAll<int>(col, leaf, v => ParquetFiles.Decode(leaf.Decoding, v)); break;
                 case PhysicalType.Int32: ReadAll<int>(col, leaf, v => v); break;
+                case PhysicalType.Int64 when leaf.Decoding != ParquetFiles.Decoding.None: ReadAll<long>(col, leaf, v => ParquetFiles.Decode(leaf.Decoding, v)); break;
                 case PhysicalType.Int64: ReadAll<long>(col, leaf, v => v); break;
                 case PhysicalType.Float: ReadAll<float>(col, leaf, v => v); break;
                 case PhysicalType.Double: ReadAll<double>(col, leaf, v => v); break;

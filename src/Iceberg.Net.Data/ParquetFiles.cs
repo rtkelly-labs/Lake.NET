@@ -23,6 +23,38 @@ public sealed record ParquetWriteOptions
     /// A caller that keeps its own statistics (DuckLake) turns this off and saves a pass over every value.
     /// </summary>
     public bool Metrics { get; init; } = true;
+    /// <summary>
+    /// Parquet annotations by field ID, for columns stored narrower or differently than their Iceberg type (formats
+    /// layered on these files, such as DuckLake's unsigned integers). Readers decode them from the file's own
+    /// annotations, so no option is needed to read.
+    /// </summary>
+    public IReadOnlyDictionary<int, ParquetAnnotation>? Annotations { get; init; }
+}
+
+/// <summary>
+/// How a column is stored when it is not the Iceberg default for its type. The Iceberg type a column must have is given
+/// per member; the value passed to the writer is that type's value and the writer converts it.
+/// </summary>
+public enum ParquetAnnotation
+{
+    /// <summary><c>int</c> as INT32 annotated INT(8, signed).</summary>
+    Int8,
+    /// <summary><c>int</c> as INT32 annotated INT(16, signed).</summary>
+    Int16,
+    /// <summary><c>int</c> (0–255) as INT32 annotated INT(8, unsigned).</summary>
+    UInt8,
+    /// <summary><c>int</c> (0–65535) as INT32 annotated INT(16, unsigned).</summary>
+    UInt16,
+    /// <summary><c>long</c> (0–4294967295) as INT32 annotated INT(32, unsigned).</summary>
+    UInt32,
+    /// <summary><c>decimal(20, 0)</c> (0–18446744073709551615) as INT64 annotated INT(64, unsigned).</summary>
+    UInt64,
+    /// <summary><c>timestamp</c>/<c>timestamptz</c> as INT64 milliseconds (sub-millisecond digits are dropped).</summary>
+    TimestampMillis,
+    /// <summary><c>time</c> annotated as adjusted to UTC.</summary>
+    TimeUtc,
+    /// <summary><c>fixed[12]</c> annotated INTERVAL: little-endian unsigned months, days and milliseconds.</summary>
+    Interval,
 }
 
 /// <summary>A written Parquet file: its Iceberg <see cref="DataFile"/> and the layout facts some catalogs record.</summary>
@@ -37,10 +69,11 @@ public sealed record ParquetWriteResult(DataFile File, long FooterSize, int RowG
 /// </summary>
 public static class ParquetFiles
 {
-    internal static Node ToNode(NestedField f)
+    internal static Node ToNode(NestedField f, IReadOnlyDictionary<int, ParquetAnnotation>? annotations = null)
     {
-        if (!f.Type.IsPrimitive) return NestedColumns.ToNode(f);
+        if (!f.Type.IsPrimitive) return NestedColumns.ToNode(f, annotations);
         var rep = f.Required ? Repetition.Required : Repetition.Optional;
+        if (annotations is not null && annotations.TryGetValue(f.Id, out var annotation)) return Annotated(f, rep, annotation);
         return f.Type.TypeId switch
         {
             TypeId.Boolean => new PrimitiveNode(f.Name, rep, LogicalType.None(), PhysicalType.Boolean, fieldId: f.Id),
@@ -65,6 +98,61 @@ public static class ParquetFiles
             _ => throw new NotSupportedException($"Column {f.Name}: {f.Type} is not supported by the phase-0 Parquet writer"),
         };
     }
+
+    private static PrimitiveNode Annotated(NestedField f, Repetition rep, ParquetAnnotation annotation)
+    {
+        var (expected, logical, physical, length) = annotation switch
+        {
+            ParquetAnnotation.Int8 => (f.Type.TypeId == TypeId.Int, LogicalType.Int(8, true), PhysicalType.Int32, -1),
+            ParquetAnnotation.Int16 => (f.Type.TypeId == TypeId.Int, LogicalType.Int(16, true), PhysicalType.Int32, -1),
+            ParquetAnnotation.UInt8 => (f.Type.TypeId == TypeId.Int, LogicalType.Int(8, false), PhysicalType.Int32, -1),
+            ParquetAnnotation.UInt16 => (f.Type.TypeId == TypeId.Int, LogicalType.Int(16, false), PhysicalType.Int32, -1),
+            ParquetAnnotation.UInt32 => (f.Type.TypeId == TypeId.Long, LogicalType.Int(32, false), PhysicalType.Int32, -1),
+            ParquetAnnotation.UInt64 => (f.Type is DecimalType { Precision: 20, Scale: 0 }, LogicalType.Int(64, false), PhysicalType.Int64, -1),
+            ParquetAnnotation.TimestampMillis => (f.Type.TypeId is TypeId.Timestamp or TypeId.TimestampTz,
+                LogicalType.Timestamp(f.Type.TypeId == TypeId.TimestampTz, TimeUnit.Millis), PhysicalType.Int64, -1),
+            ParquetAnnotation.TimeUtc => (f.Type.TypeId == TypeId.Time, LogicalType.Time(true, TimeUnit.Micros), PhysicalType.Int64, -1),
+            ParquetAnnotation.Interval => (f.Type is FixedType { Length: 12 }, LogicalType.Interval(), PhysicalType.FixedLenByteArray, 12),
+            _ => throw new ArgumentOutOfRangeException(nameof(annotation), annotation, null),
+        };
+        using (logical)
+        {
+            if (!expected) throw new ArgumentException($"Column {f.Name}: annotation {annotation} does not apply to {f.Type}");
+            return new PrimitiveNode(f.Name, rep, logical, physical, length, f.Id);
+        }
+    }
+
+    /// <summary>A value of an annotated column as its stored physical value (unsigned bits, milliseconds).</summary>
+    internal static object Encode(ParquetAnnotation annotation, object v) => annotation switch
+    {
+        ParquetAnnotation.UInt8 => (int)checked((byte)Convert.ToInt32(v, System.Globalization.CultureInfo.InvariantCulture)),
+        ParquetAnnotation.UInt16 => (int)checked((ushort)Convert.ToInt32(v, System.Globalization.CultureInfo.InvariantCulture)),
+        ParquetAnnotation.UInt32 => unchecked((int)checked((uint)Convert.ToInt64(v, System.Globalization.CultureInfo.InvariantCulture))),
+        ParquetAnnotation.UInt64 => v is IcebergDecimal { Scale: 0 } d ? unchecked((long)checked((ulong)d.Unscaled))
+            : throw new ArgumentException($"Expected decimal(20, 0), got {v}"),
+        ParquetAnnotation.TimestampMillis => IcebergTime.FloorDiv(Convert.ToInt64(v, System.Globalization.CultureInfo.InvariantCulture), 1000),
+        _ => v,
+    };
+
+    /// <summary>How a stored value of a column is decoded, from the column's own annotation.</summary>
+    internal enum Decoding { None, UInt32, UInt64, Millis }
+
+    internal static Decoding DecodingOf(LogicalType logical) => logical switch
+    {
+        IntLogicalType { IsSigned: false, BitWidth: 32 } => Decoding.UInt32,
+        IntLogicalType { IsSigned: false, BitWidth: 64 } => Decoding.UInt64,
+        TimestampLogicalType { TimeUnit: TimeUnit.Millis } => Decoding.Millis,
+        _ => Decoding.None,
+    };
+
+    /// <summary>A raw stored value decoded per <paramref name="decoding"/>: unsigned 32-bit as long, unsigned 64-bit as ulong, millis as micros.</summary>
+    internal static object Decode(Decoding decoding, object raw) => (decoding, raw) switch
+    {
+        (Decoding.UInt32, int i) => (long)unchecked((uint)i),
+        (Decoding.UInt64, long l) => unchecked((ulong)l),
+        (Decoding.Millis, long l) => checked(l * 1000),
+        _ => raw,
+    };
 
     /// <summary>Smallest byte width whose two's-complement range holds every unscaled value of the precision.</summary>
     public static int DecimalBytes(int precision)
@@ -120,7 +208,7 @@ public static class ParquetFiles
         CancellationToken ct = default)
     {
         var columns = schema.Columns;
-        using var root = new GroupNode("table", Repetition.Required, columns.Select(ToNode).ToArray());
+        using var root = new GroupNode("table", Repetition.Required, columns.Select(c => ToNode(c, options.Annotations)).ToArray());
         using var builder = new WriterPropertiesBuilder().Compression(Compression.Zstd);
         if (!options.Statistics) builder.DisableStatistics();
         using var props = builder.Build();
@@ -144,12 +232,12 @@ public static class ParquetFiles
                         if (columns[c].Type.IsPrimitive)
                         {
                             using var col = rg.NextColumn();
-                            WriteColumn(col, columns[c], slice.Select(r => r[c]).ToArray());
+                            WriteColumn(col, columns[c], slice.Select(r => r[c]).ToArray(), options.Annotations);
                             if (first) leafIds.Add(columns[c].Id);
                             leafCount++;
                             continue;
                         }
-                        var plan = NestedColumns.Plan(columns[c], leafCount);
+                        var plan = NestedColumns.Plan(columns[c], leafCount, options.Annotations);
                         NestedColumns.Shred(plan, slice.Select(r => r[c]));
                         foreach (var leaf in plan.Leaves)
                         {
@@ -208,8 +296,15 @@ public static class ParquetFiles
         return new ParquetWriteResult(file, footer, rowGroups);
     }
 
-    private static void WriteColumn(ColumnWriter col, NestedField f, object?[] values)
+    private static void WriteColumn(ColumnWriter col, NestedField f, object?[] values, IReadOnlyDictionary<int, ParquetAnnotation>? annotations)
     {
+        if (annotations is not null && annotations.TryGetValue(f.Id, out var annotation) && annotation is not (ParquetAnnotation.TimeUtc or ParquetAnnotation.Interval))
+        {
+            var stored = values.Select(v => v is null ? null : Encode(annotation, v)).ToArray();
+            if (annotation is ParquetAnnotation.UInt64 or ParquetAnnotation.TimestampMillis) Write<long>(col, f, stored);
+            else Write<int>(col, f, stored);
+            return;
+        }
         switch (f.Type.TypeId)
         {
             case TypeId.Boolean: Write<bool>(col, f, values); break;
@@ -493,7 +588,23 @@ public static class ParquetFiles
             StatsLeaves.TryGetValue(fieldId, out var leaf) ? RowGroupStatistics.For(group, Descriptor.Column(leaf), leaf, fieldId, type, rows) : null;
     }
 
-    private static object?[] ReadColumn(ColumnReader col, IcebergType type, int n) => type.TypeId switch
+    private static object?[] ReadColumn(ColumnReader col, IcebergType type, int n)
+    {
+        Decoding decoding;
+        using (var logical = col.ColumnDescriptor.LogicalType) decoding = DecodingOf(logical);
+        return (decoding, type.TypeId) switch
+        {
+            (Decoding.UInt32, TypeId.Long) =>
+                col.LogicalReaderOverride<int?>().ReadAll(n).Select(v => v is null ? null : (object?)(long)unchecked((uint)v.Value)).ToArray(),
+            (Decoding.UInt64, TypeId.Decimal) => col.LogicalReaderOverride<long?>().ReadAll(n)
+                .Select(v => v is null ? null : (object?)new IcebergDecimal(unchecked((ulong)v.Value), ((DecimalType)type).Scale)).ToArray(),
+            (Decoding.Millis, TypeId.Timestamp or TypeId.TimestampTz) =>
+                col.LogicalReaderOverride<long?>().ReadAll(n).Select(v => v is null ? null : (object?)checked(v.Value * 1000)).ToArray(),
+            _ => ReadPlain(col, type, n),
+        };
+    }
+
+    private static object?[] ReadPlain(ColumnReader col, IcebergType type, int n) => type.TypeId switch
     {
         TypeId.Boolean => col.LogicalReaderOverride<bool?>().ReadAll(n).Select(v => (object?)v).ToArray(),
         TypeId.Int or TypeId.Date => col.LogicalReaderOverride<int?>().ReadAll(n).Select(v => (object?)v).ToArray(),
@@ -533,6 +644,7 @@ public static class ParquetFiles
         {
             int i => i,
             long l => l,
+            ulong u => u,
             byte[] b => new System.Numerics.BigInteger(b, isUnsigned: false, isBigEndian: true),
             _ => throw new InvalidDataException($"Decimal stored as {physical}"),
         }, d.Scale),
@@ -622,6 +734,8 @@ internal static class RowGroupStatistics
             case Statistics<long> l:
             {
                 var v = min ? l.Min : l.Max;
+                using (var logical = descr.LogicalType)
+                    if (ParquetFiles.DecodingOf(logical) == ParquetFiles.Decoding.Millis) return checked(v * 1000);
                 return type is DecimalType d ? new IcebergDecimal(v, d.Scale) : v;
             }
             case Statistics<float> f:

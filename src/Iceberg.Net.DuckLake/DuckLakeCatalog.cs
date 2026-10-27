@@ -419,6 +419,13 @@ public sealed partial class DuckLakeCatalog
             .OrderBy(f => f.FileOrder).ThenBy(f => f.DataFileId).ToListAsync(ct));
         var deletes = await DeleteFilesAsync(db, table.TableId, table.SnapshotId, ct);
         var bound = filter is null or AlwaysTrue ? null : Binder.Bind(table.Schema, filter);
+        if (bound is not null)
+        {
+            // timetz and interval values have no order this reader shares with their Parquet form: filter them after reading.
+            var ids = FieldIds(bound);
+            if (table.Columns.SelectMany(c => c.SelfAndDescendants()).FirstOrDefault(c => ids.Contains((int)c.Id) && DuckLakeTypes.HasFileForm(c.Type)) is { } unfiltered)
+                throw new NotSupportedException($"Column {unfiltered.Name} ({unfiltered.Type}) cannot be filtered on; filter the rows read instead");
+        }
         Dictionary<long, Dictionary<long, FileColumnStatsEntity>>? stats = null;
         if (bound is not null)
         {
@@ -657,6 +664,7 @@ public sealed partial class DuckLakeCatalog
         var residual = bound is null ? null : RowEvaluator.Compile(bound);
         var width = table.Columns.Count;
         var projection = FileProjection(table);
+        var fromFile = DuckLakeValues.FileRowConverter(table.Columns, toFile: false);
         // Up to MaxParallelFileReads files are read ahead, each into a queue of two batches (row groups): decoding
         // overlaps, memory stays bounded, and rows come out in file order.
         var parallelism = Math.Max(1, Options.MaxParallelFileReads);
@@ -687,7 +695,7 @@ public sealed partial class DuckLakeCatalog
                         var rowId = full[width] is long stored ? stored
                             : file.RowIdStart is { } start ? start + pos
                             : throw new InvalidDataException($"Data file {file.DataFileId} has no row_id_start and no stored row IDs");
-                        yield return new ScannedRow(rowId, row, file.DataFileId, pos, null);
+                        yield return new ScannedRow(rowId, fromFile is null ? row : fromFile(row), file.DataFileId, pos, null);
                     }
                 }
                 await read.Producer; // rethrows a read failure (the queue only ends early)

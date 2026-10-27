@@ -327,6 +327,63 @@ public abstract class CrossEngineTests : IAsyncLifetime
     }
 
     [SkippableFact]
+    [Spec("ducklake: Data Types")]
+    [Spec("ducklake: Data Inlining")]
+    [Spec("ducklake: Flushing Inlined Data")]
+    public async Task DuckDB_reads_the_unsigned_timestamp_timetz_and_interval_values_written_here()
+    {
+        Oracle.Require();
+        var catalog = await _lake.CreateAsync(new DuckLakeOptions { DataInliningRowLimit = 10 });
+        await using (var tx = catalog.BeginTransaction())
+        {
+            await tx.CreateTableAsync("main", "t", WideTypes.Columns);
+            await tx.CommitAsync();
+        }
+        static object?[] WithId(object?[] row, long id) => [id, .. row[1..]];
+        var inlined = WideTypes.Rows().ToList();
+        var filed = Enumerable.Range(0, 20).Select(i => WithId(WideTypes.Row(i % 4), 100 + i)).ToList();
+        foreach (var rows in new[] { inlined, filed })
+        {
+            await using var tx = catalog.BeginTransaction();
+            await tx.InsertAsync("main", "t", rows);
+            await tx.CommitAsync();
+        }
+        Assert.Single(_lake.Files());
+        var expected = inlined.Select(r => WideTypes.Expected(r, fromFile: false)).Concat(filed.Select(r => WideTypes.Expected(r, fromFile: true))).ToList();
+        LakeJson.AssertSameRows(WideTypes.Json(expected), await Oracle.RowsAsync(_lake, WideTypes.Select));
+
+        await catalog.FlushInlinedDataAsync();
+        LakeJson.AssertSameRows(WideTypes.Json(expected.Select(r => WideTypes.Expected(r, fromFile: true))), await Oracle.RowsAsync(_lake, WideTypes.Select));
+    }
+
+    [SkippableFact]
+    [Spec("ducklake: Data Types")]
+    [Spec("ducklake: Data Inlining")]
+    public async Task This_library_reads_the_unsigned_timestamp_timetz_and_interval_values_DuckDB_writes()
+    {
+        Oracle.Require();
+        // Ids 10..13, inlined. DuckDB 1.5.5 inlines a struct holding a timetz as "{'t': CAST(... AS TIME WITH TIME ZONE)}",
+        // which it cannot read back itself, so those rows have no struct.
+        var shifted = WideTypes.Values.Select(v => "(1" + System.Text.RegularExpressions.Regex.Replace(v[1..], @"\{'t'.*\}\)$", "NULL)")).ToArray();
+        await Oracle.RunAsync(_lake,
+            WideTypes.Create,
+            "CALL lake.set_option('data_inlining_row_limit', 0)",
+            "INSERT INTO lake.t VALUES " + string.Join(", ", WideTypes.Values),
+            "CALL lake.set_option('data_inlining_row_limit', 10)",
+            "INSERT INTO lake.t VALUES " + string.Join(", ", shifted));
+        Assert.Single(_lake.Files());
+        var catalog = await _lake.OpenAsync();
+        var table = await catalog.LoadTableAsync("main", "t");
+        var ours = await catalog.ReadAsync(table);
+        LakeJson.AssertSameRows(await Oracle.RowsAsync(_lake, WideTypes.Select), WideTypes.Json(ours));
+        // Inlined by DuckDB: exact (offsets and microseconds kept); from its file: the UTC instant and milliseconds.
+        Assert.Equal(new DuckLakeTimeTz(3_723_456_789, 19_800), ours.Single(r => (long)r[0]! == 11)[9]);
+        Assert.Equal(new DuckLakeTimeTz(70_323_456_789, 0), ours.Single(r => (long)r[0]! == 1)[9]);
+        Assert.Equal(new DuckLakeInterval(1, 2, 3_004_005), ours.Single(r => (long)r[0]! == 11)[10]);
+        Assert.Equal(new DuckLakeInterval(1, 2, 3_004_000), ours.Single(r => (long)r[0]! == 1)[10]);
+    }
+
+    [SkippableFact]
     [Spec("ducklake: Flushing Inlined Data")]
     public async Task Each_engine_flushes_what_the_other_inlined()
     {
