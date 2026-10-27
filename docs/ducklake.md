@@ -449,14 +449,14 @@ string>"]`) on a 4-core container, local disk, a 5-column table (bigint, varchar
 | Delete 10% of 500,000 rows across 20 files | 0.55 s | 0.70 s |
 | 4 writers, 25 one-row commits each, at once | 100 commits in 1.1 s, none lost | 100 commits in 1.1 s, none lost |
 
-Features added later, SQLite catalog, same container:
+Features added later, same container (the PostgreSQL run predates the compiled `ReadAsync<T>` binder):
 
-| Scenario | Result |
-|---|---|
-| Full scan of 1,000,000 rows as records (`ReadAsync<T>`) | 1.86 s (537,000 rows/s; 765,000 rows/s as physical values) |
-| Delete 10% of 500,000 rows across 20 files as deletion vectors (1.1) | 0.65 s (0.56 s as Parquet delete files); reading what is left 0.54 s |
-| Register 100 existing files of 1,000,000 rows (`AddDataFilesAsync`) | 0.22 s (footers only); reading them through the name mapping 0.63 s |
-| Insert 500,000 rows of `uint64`, `timestamp_ms`, `timetz`, `interval` | 2.05 s (244,000 rows/s); reading them 0.53 s |
+| Scenario | SQLite catalog | PostgreSQL catalog (local) |
+|---|---|---|
+| Full scan of 1,000,000 rows as records (`ReadAsync<T>`) | 1.86 s (537,000 rows/s; 765,000 rows/s as physical values) | 3.03 s (2.24 s as physical values) |
+| Delete 10% of 500,000 rows across 20 files as deletion vectors (1.1) | 0.65 s (0.56 s as Parquet delete files); reading what is left 0.54 s | 0.75 s (1.01 s as Parquet delete files); reading 1.10 s |
+| Register 100 existing files of 1,000,000 rows (`AddDataFilesAsync`) | 0.22 s (footers only); reading them through the name mapping 0.63 s | 0.15 s; reading 1.16 s |
+| Insert 500,000 rows of `uint64`, `timestamp_ms`, `timetz`, `interval` | 2.05 s (244,000 rows/s); reading them 0.53 s | 2.37 s; reading 0.57 s |
 
 `ReadAsync<T>` compiles its binder once per read (a constructor and property setters as an expression tree, each
 column's conversion chosen once); binding by reflection per row ran at 336,000 rows/s. Name-mapped files are read
