@@ -67,6 +67,10 @@ public sealed partial class DuckLakeTransaction
                 stats.Add(new DuckLakeColumnStats(c.Id, (s.ValueCount ?? 0) - nulls, nulls, min is null || max is null ? null : min, min is null || max is null ? null : max, null)
                     { ColumnSizeBytes = s.ColumnSize });
             }
+            // Format 1.1 (DuckDB 2.0): each leaf column the file lacks gets an all-null statistics row.
+            if (_catalog.Is11)
+                foreach (var c in missing.Where(c => c.Type is DuckLakePrimitive))
+                    stats.Add(new DuckLakeColumnStats(c.Id, 0, facts.RecordCount, null, null, null));
             foreach (var c in fromPath)
             {
                 var text = partition[c.Name];
