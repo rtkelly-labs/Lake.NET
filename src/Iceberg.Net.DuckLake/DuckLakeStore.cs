@@ -28,20 +28,27 @@ public sealed class DuckLakeStore
     public DuckLakeDialect Dialect { get; }
     public string ConnectionString { get; }
 
-    /// <summary>A SQLite catalog file (DuckDB: <c>ATTACH 'ducklake:sqlite:&lt;file&gt;'</c>). One writer at a time; others wait on the file lock.</summary>
-    public static DuckLakeStore Sqlite(string connectionString) =>
-        new(DuckLakeDialect.Sqlite, o => o.UseSqlite(connectionString), connectionString);
+    /// <summary>
+    /// A SQLite catalog file (DuckDB: <c>ATTACH 'ducklake:sqlite:&lt;file&gt;'</c>). One writer at a time; others wait on the
+    /// file lock. <paramref name="configure"/> adds EF Core options such as logging or interceptors.
+    /// </summary>
+    public static DuckLakeStore Sqlite(string connectionString, Action<DbContextOptionsBuilder>? configure = null) =>
+        new(DuckLakeDialect.Sqlite, o => { o.UseSqlite(connectionString); configure?.Invoke(o); }, connectionString);
 
-    /// <summary>A PostgreSQL catalog (DuckDB: <c>ATTACH 'ducklake:postgres:dbname=… host=…'</c>), the multi-user choice.</summary>
-    public static DuckLakeStore PostgreSql(string connectionString) =>
-        new(DuckLakeDialect.PostgreSql, o => o.UseNpgsql(connectionString), connectionString);
+    /// <summary>
+    /// A PostgreSQL catalog (DuckDB: <c>ATTACH 'ducklake:postgres:dbname=… host=…'</c>), the multi-user choice.
+    /// <paramref name="configure"/> adds EF Core options such as logging or interceptors.
+    /// </summary>
+    public static DuckLakeStore PostgreSql(string connectionString, Action<DbContextOptionsBuilder>? configure = null) =>
+        new(DuckLakeDialect.PostgreSql, o => { o.UseNpgsql(connectionString); configure?.Invoke(o); }, connectionString);
 
-    internal DuckLakeDbContext Context(string formatVersion)
+    internal DuckLakeDbContext Context(string formatVersion, DuckLakeTelemetry.Scope? scope = null)
     {
         var builder = new DbContextOptionsBuilder<DuckLakeDbContext>();
         _configure(builder);
         builder.ReplaceService<IModelCacheKeyFactory, DuckLakeModelCacheKeyFactory>();
-        return new DuckLakeDbContext(builder.Options, Dialect, formatVersion);
+        builder.AddInterceptors(DuckLakeCommandCounter.Instance);
+        return new DuckLakeDbContext(builder.Options, Dialect, formatVersion) { Scope = scope };
     }
 
     /// <summary>
@@ -270,6 +277,8 @@ internal sealed class DuckLakeDbContext(DbContextOptions<DuckLakeDbContext> opti
     public DuckLakeDialect Dialect { get; } = dialect;
     public string FormatVersion { get; } = formatVersion;
     public bool Is11 => FormatVersion != DuckLakeCatalog.FormatVersion10;
+    /// <summary>The operation this context works for; its commands are counted there.</summary>
+    public DuckLakeTelemetry.Scope? Scope { get; init; }
 
     public DbSet<SnapshotEntity> Snapshots => Set<SnapshotEntity>();
     public DbSet<SnapshotChangesEntity> SnapshotChanges => Set<SnapshotChangesEntity>();
@@ -288,9 +297,15 @@ internal sealed class DuckLakeDbContext(DbContextOptions<DuckLakeDbContext> opti
     public DbSet<InlinedDataTableEntity> InlinedDataTables => Set<InlinedDataTableEntity>();
     public DbSet<MetadataEntity> Metadata => Set<MetadataEntity>();
 
-    /// <summary>The connection and the transaction EF is using, for the statements EF cannot model (inlined tables, DDL).</summary>
-    public (DbConnection Connection, DbTransaction? Transaction) Raw() =>
-        (Database.GetDbConnection(), Database.CurrentTransaction is { } t ? Microsoft.EntityFrameworkCore.Storage.DbContextTransactionExtensions.GetDbTransaction(t) : null);
+    /// <summary>
+    /// The connection and the transaction EF is using, for a statement EF cannot model (inlined tables, DDL). Take it
+    /// once per statement: it counts one catalog command, as EF's interceptor counts EF's.
+    /// </summary>
+    public (DbConnection Connection, DbTransaction? Transaction) Raw()
+    {
+        if (Scope is { } scope) Interlocked.Increment(ref scope.CatalogCommands);
+        return (Database.GetDbConnection(), Database.CurrentTransaction is { } t ? Microsoft.EntityFrameworkCore.Storage.DbContextTransactionExtensions.GetDbTransaction(t) : null);
+    }
 
     protected override void OnConfiguring(DbContextOptionsBuilder optionsBuilder) =>
         optionsBuilder.UseQueryTrackingBehavior(QueryTrackingBehavior.NoTracking);
@@ -385,4 +400,49 @@ internal static class VersionedQueries
     /// <summary>The rows not yet ended (the latest state, for commits).</summary>
     public static IQueryable<T> Current<T>(this IQueryable<T> rows) where T : class, IVersioned =>
         rows.Where(x => x.EndSnapshot == null);
+}
+
+/// <summary>
+/// Multi-row <c>INSERT</c>s of catalog rows, from the EF model's own mapping (table and column names, value converters,
+/// the columns a format version lacks). EF Core's SQLite provider sends one statement per row and its PostgreSQL
+/// provider one batch per <c>SaveChanges</c>: a commit of many files would otherwise cost a command per row.
+/// </summary>
+internal static class BulkInsert
+{
+    /// <summary>Parameters per statement: under SQLite's 32,766 and PostgreSQL's 65,535.</summary>
+    private const int MaxParameters = 30_000;
+
+    public static async Task InsertAsync<T>(DuckLakeDbContext db, IReadOnlyCollection<T> rows, CancellationToken ct) where T : class
+    {
+        if (rows.Count == 0) return;
+        var entity = db.Model.FindEntityType(typeof(T)) ?? throw new InvalidOperationException($"{typeof(T).Name} is not in the model");
+        var table = entity.GetTableName()!;
+        var store = Microsoft.EntityFrameworkCore.Metadata.StoreObjectIdentifier.Table(table, entity.GetSchema());
+        var columns = entity.GetProperties().Select(p => (
+            Name: p.GetColumnName(store) ?? throw new InvalidOperationException($"{p.Name} has no column"),
+            Get: p.PropertyInfo ?? throw new InvalidOperationException($"{p.Name} has no CLR property"),
+            Convert: p.GetValueConverter() ?? p.GetTypeMapping().Converter)).ToList();
+        var head = $"INSERT INTO {Db.Quote(table)} ({string.Join(", ", columns.Select(c => Db.Quote(c.Name)))}) VALUES ";
+        var perStatement = Math.Max(1, Math.Min(1000, MaxParameters / columns.Count));
+        await db.Database.OpenConnectionAsync(ct);
+        foreach (var chunk in rows.Chunk(perStatement))
+        {
+            var args = new object?[chunk.Length * columns.Count];
+            var sql = new System.Text.StringBuilder(head);
+            for (var r = 0; r < chunk.Length; r++)
+            {
+                sql.Append(r == 0 ? "(" : ", (");
+                for (var c = 0; c < columns.Count; c++)
+                {
+                    var i = r * columns.Count + c;
+                    var value = columns[c].Get.GetValue(chunk[r]);
+                    args[i] = value is null || columns[c].Convert is not { } convert ? value : convert.ConvertToProvider(value);
+                    sql.Append(c == 0 ? "@p" : ", @p").Append(i.ToString(CultureInfo.InvariantCulture));
+                }
+                sql.Append(')');
+            }
+            var (connection, tx) = db.Raw();
+            await Db.ExecAsync(connection, tx, sql.ToString(), ct, args);
+        }
+    }
 }
