@@ -234,6 +234,7 @@ dotnet run --project examples/DuckLake.Quickstart [directory] [postgres connecti
 | Catalog objects | Tags and comments (tables, columns and nested fields, views; view columns in 1.1), table renames, views, scalar and table macros, sort orders (written files follow the leading column keys); DuckDB uses each, and this library reads DuckDB's (see [Catalog objects](#catalog-objects)) |
 | Maintenance | Merging adjacent small files into partial files, rewriting files with many deleted rows, expiring snapshots, deleting scheduled and orphaned files; DuckDB reads the results and cleans up after them, and the reverse (see [Maintenance](#maintenance)) |
 | Existing files | `AddDataFilesAsync` registers Parquet files written elsewhere, in place, under a `map_by_name` column mapping with footer statistics, as `ducklake_add_data_files` does (Hive partition columns, missing and extra columns); files DuckDB added are read through their mapping (see [Adding existing files](#adding-existing-files)) |
+| Deletion vectors (1.1) | Puffin delete files read (bare `deletion-vector-v1` blobs, and containers of cumulative vectors keyed by `ducklake-snapshot-id`, the latest not after the scanned snapshot); written as bare vectors when `write_deletion_vectors` is set in the lake or `DuckLakeOptions.WriteDeletionVectors` is on |
 | Validation | `DuckLakeValidator` checks a whole lake (any writer's) and reports problems; `Deep` also reads every live file |
 
 ## The same constraints
@@ -279,7 +280,7 @@ below was observed with DuckDB 1.5.5 (`ducklake` extension `d8a1881e`) and is wh
 ## What is not implemented
 
 Encryption, `variant` and `geometry`, `int128`/`uint128` (DuckDB writes them to Parquet as DOUBLE and cannot read
-them back), `time_ns` (DuckDB cannot write it to Parquet), the experimental Puffin deletion vectors, inlining into partitioned tables (their small inserts go to files), and
+them back), `time_ns` (DuckDB cannot write it to Parquet), inlining into partitioned tables (their small inserts go to files), and
 catalog migration (1.0 → 1.1 is DuckDB's). Each fails with `NotSupportedException` when met in a catalog
 or file rather than reading wrong values. The same list is in `tools/spec_trace.py` (`NOT_IMPLEMENTED`).
 
@@ -290,7 +291,7 @@ cannot be altered in it (define its columns at creation).
 
 | Suite | Needs | Command |
 |---|---|---|
-| `Iceberg.Net.DuckLake.Tests`: `EncodingTests`, `TypeTests`, `TemporalPropertyTests`, `AddFilesTests`, `ClrTests`, `ConflictRuleTests`, `CatalogTests`, `FormatVersionTests`, `ValidatorTests`, `ModelBasedTests`, and the inlining, maintenance, catalog object and performance tests | nothing (PostgreSQL variants skip without a server) | `dotnet test tests/Iceberg.Net.DuckLake.Tests --filter "FullyQualifiedName!~CrossEngine"` |
+| `Iceberg.Net.DuckLake.Tests`: `EncodingTests`, `TypeTests`, `TemporalPropertyTests`, `AddFilesTests`, `ClrTests`, `DeletionVectorTests`, `ConflictRuleTests`, `CatalogTests`, `FormatVersionTests`, `ValidatorTests`, `ModelBasedTests`, and the inlining, maintenance, catalog object and performance tests | nothing (PostgreSQL variants skip without a server) | `dotnet test tests/Iceberg.Net.DuckLake.Tests --filter "FullyQualifiedName!~CrossEngine"` |
 | `CrossEngineTests` | a Python with the interop `duckdb` group (1.0); DuckDB 2.0 (1.1) | `ICEBERG_DUCKDB_PYTHON=<python> dotnet test tests/Iceberg.Net.DuckLake.Tests` |
 | `Iceberg.Net.DuckLake.Behaviour.Tests` (BDD) | as above for the DuckDB scenarios (`CrossEngine.feature` and the 1.1 ones in `FormatVersions.feature`) | `ICEBERG_DUCKDB_PYTHON=<python> dotnet test tests/Iceberg.Net.DuckLake.Behaviour.Tests` |
 
@@ -306,8 +307,8 @@ dropped afterwards, and validates the lake when the test ends. Environment:
 | `ICEBERG_DUCKLAKE11_PYTHON` / `ICEBERG_DUCKLAKE11_REQUIRED=1` | The 1.1 oracle: a Python with `duckdb==2.0.0` (downloads the extension) |
 | `ICEBERG_PBT_RUNS` / `ICEBERG_PBT_SEED` | Model-based test: number of cases, and a replay seed printed by a failure |
 
-In CI (both databases, both oracles): all 562 tests and all 111 BDD scenarios pass, none skipped. Locally without
-the 1.1 oracle: 522 and 95 pass, the 40 and 16 DuckDB 2.0 cases skip. The projects are in the `cross-engine` CI suite, which starts the emulation stack's
+In CI (both databases, both oracles): 572 of the 574 tests (the two format-1.0 runs of the deletion-vector cross-engine test skip by design) and all 111 BDD scenarios pass. Locally without
+the 1.1 oracle: 530 and 95 pass, the 44 and 16 others skip. The projects are in the `cross-engine` CI suite, which starts the emulation stack's
 PostgreSQL, installs both oracles and requires all three. The oracle is `interop/ducklake_oracle.py`: it attaches the
 test's catalog (SQLite or PostgreSQL) in DuckDB and runs SQL against it.
 

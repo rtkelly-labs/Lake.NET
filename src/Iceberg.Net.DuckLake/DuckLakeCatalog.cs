@@ -36,6 +36,12 @@ public sealed record DuckLakeOptions
     /// </summary>
     public int DataInliningRowLimit { get; init; }
 
+    /// <summary>
+    /// Write deletes as Iceberg <c>deletion-vector-v1</c> blobs (format 1.1's experimental <c>puffin</c> delete files)
+    /// instead of Parquet delete files. The lake's persisted <c>write_deletion_vectors</c> option takes precedence.
+    /// </summary>
+    public bool WriteDeletionVectors { get; init; }
+
     public const int DefaultRowGroupRows = 122_880;
 }
 
@@ -462,8 +468,8 @@ public sealed partial class DuckLakeCatalog
             if (deletes.TryGetValue(f.DataFileId, out var d))
             {
                 if (d.EncryptionKey is not null) throw new NotSupportedException($"Delete file {d.DeleteFileId} is encrypted");
-                if (!string.Equals(d.Format ?? "parquet", "parquet", StringComparison.OrdinalIgnoreCase))
-                    throw new NotSupportedException($"Delete file {d.DeleteFileId} has format {d.Format} (deletion vectors are not read yet)");
+                if (d.Format is { } format && !format.Equals("parquet", StringComparison.OrdinalIgnoreCase) && !format.Equals("puffin", StringComparison.OrdinalIgnoreCase))
+                    throw new NotSupportedException($"Delete file {d.DeleteFileId} has format {d.Format}");
                 deleteLocation = Resolve(table.Location, d.Path ?? throw new InvalidDataException($"Delete file {d.DeleteFileId} has no path"), d.PathIsRelative ?? true);
             }
             tasks.Add(new DuckLakeFileTask(f.DataFileId, location, f.RecordCount, f.FileSizeBytes, deleteLocation, f.RowIdStart) { RowGroupCount = f.RowGroupCount });

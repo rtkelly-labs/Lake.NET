@@ -188,9 +188,9 @@ public abstract class CrossEngineTests : IAsyncLifetime
     }
 
     /// <summary>Our rows of <c>main.t</c> at a snapshot, each led by its row ID, as the oracle renders <c>SELECT rowid, *</c>.</summary>
-    private static async Task<List<string>> RowsWithIdsAsync(DuckLakeCatalog catalog, long snapshot)
+    private static async Task<List<string>> RowsWithIdsAsync(DuckLakeCatalog catalog, long snapshot, string name = "t")
     {
-        var table = await catalog.LoadTableAsync("main", "t", snapshot);
+        var table = await catalog.LoadTableAsync("main", name, snapshot);
         var rows = new List<string>();
         await foreach (var r in catalog.ReadRowsAsync(table))
             rows.Add(LakeJson.Canonical(new System.Text.Json.Nodes.JsonArray([System.Text.Json.Nodes.JsonValue.Create(r.RowId),
@@ -199,16 +199,16 @@ public abstract class CrossEngineTests : IAsyncLifetime
     }
 
     /// <summary>Both engines read every snapshot of <c>main.t</c> that is still there the same, row IDs included.</summary>
-    private async Task AssertSameHistoryAsync(DuckLakeCatalog catalog)
+    private async Task AssertSameHistoryAsync(DuckLakeCatalog catalog, string name = "t")
     {
         var snapshots = (await catalog.ListSnapshotsAsync()).Select(s => s.SnapshotId).ToList();
         var checkedAny = false;
         foreach (var s in snapshots)
         {
             List<string> ours;
-            try { ours = await RowsWithIdsAsync(catalog, s); }
+            try { ours = await RowsWithIdsAsync(catalog, s, name); }
             catch (DuckLakeNotFoundException) { continue; } // before the table existed
-            LakeJson.AssertSameRows(await Oracle.RowsAsync(_lake, $"SELECT rowid, * FROM lake.t AT (VERSION => {s})"), ours);
+            LakeJson.AssertSameRows(await Oracle.RowsAsync(_lake, $"SELECT rowid, * FROM lake.{name} AT (VERSION => {s})"), ours);
             checkedAny = true;
         }
         Assert.True(checkedAny);
@@ -459,6 +459,37 @@ public abstract class CrossEngineTests : IAsyncLifetime
             var table = await catalog.LoadTableAsync("main", name);
             LakeJson.AssertSameRows(await Oracle.RowsAsync(_lake, $"SELECT * FROM lake.{name}"), LakeJson.Rows(table.Columns, await catalog.ReadAsync(table)));
         }
+    }
+
+    [SkippableFact]
+    [Spec("ducklake: ducklake_delete_file")]
+    public async Task Each_engine_reads_the_deletion_vectors_the_other_writes()
+    {
+        Skip.If(Oracle.Version == DuckLakeCatalog.FormatVersion10, "deletion vectors are format 1.1");
+        Oracle.Require();
+        await Oracle.RunAsync(_lake,
+            "CREATE TABLE lake.theirs AS SELECT i AS id FROM range(100) r(i)",
+            "CREATE TABLE lake.ours AS SELECT i AS id FROM range(100) r(i)",
+            "CALL lake.set_option('write_deletion_vectors', true, table_name => 'theirs')",
+            "DELETE FROM lake.theirs WHERE id % 10 = 0",
+            "DELETE FROM lake.theirs WHERE id % 7 = 0");
+        var catalog = await _lake.OpenAsync(new DuckLakeOptions { WriteDeletionVectors = true });
+        foreach (var filter in new[] { Expr.LessThan("id", 5L), Expr.Equal("id", 50L) })
+        {
+            await using var tx = catalog.BeginTransaction();
+            await tx.DeleteAsync("main", "ours", filter);
+            await tx.CommitAsync();
+        }
+        Assert.Contains("puffin", (await _lake.SqlAsync("SELECT DISTINCT format FROM ducklake_delete_file")).Select(r => (string)r[0]!));
+        foreach (var name in new[] { "theirs", "ours" }) await AssertSameHistoryAsync(catalog, name);
+        // And each deletes again over the other's vectors.
+        await Oracle.RunAsync(_lake, "DELETE FROM lake.ours WHERE id = 99");
+        await using (var tx = catalog.BeginTransaction())
+        {
+            await tx.DeleteAsync("main", "theirs", Expr.Equal("id", 99L));
+            await tx.CommitAsync();
+        }
+        foreach (var name in new[] { "theirs", "ours" }) await AssertSameHistoryAsync(catalog, name);
     }
 
     [SkippableFact]
