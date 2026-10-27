@@ -227,7 +227,7 @@ jobs:
         shell: bash
         run: |
           uv venv --python 3.12 "$RUNNER_TEMP/pyarrow"
-          uv pip install --python "$RUNNER_TEMP/pyarrow" pyarrow
+          uv pip install --python "$RUNNER_TEMP/pyarrow" pyarrow pandas
           if [ "$RUNNER_OS" = "Windows" ]; then
             # the test runs python3.exe; a Windows venv may only have python.exe
             [ -f "$RUNNER_TEMP/pyarrow/Scripts/python3.exe" ] || cp "$RUNNER_TEMP/pyarrow/Scripts/python.exe" "$RUNNER_TEMP/pyarrow/Scripts/python3.exe"
