@@ -62,7 +62,7 @@ Already covered by Parquet.Net, so not a blocker:
 ## Fork status
 
 Branch `ccr-87fadcf9-bxi9wr` of [rtkelly-labs/parquet-dotnet](https://github.com/rtkelly-labs/parquet-dotnet), each
-change with its own tests (fork suite: 722 passed; the one failure needs `pyarrow`, which the environment lacks).
+change with its own tests (fork suite: 750 passed; the one failure needs `pyarrow`, which the environment lacks).
 
 | Gap | Fork commit | What changed |
 |---|---|---|
@@ -70,6 +70,8 @@ change with its own tests (fork suite: 722 passed; the one failure needs `pyarro
 | 3 physical values | `7ecfa00` | `DataField.PhysicalClrType` (`bool`, `int`, `long`, `float`, `double`, `ReadOnlyMemory<byte>`): `ReadRawAsync<T>`/`WriteAsync<T>` accept it for any column, with the logical annotation kept, so `TIMESTAMP(NANOS)` reads as `long` nanoseconds |
 | 5 `fixed[n]` | `54efd9a` | `DataField.FixedLength` writes `byte[]`/`ReadOnlyMemory<byte>` as `FIXED_LEN_BYTE_ARRAY(n)` (and is set on read) |
 | 8 no statistics | `54efd9a` | `ParquetOptions.WriteStatistics = false` leaves statistics out of column chunks and page headers |
+| 4 encryption | `344675a` | `ParquetOptions.Encryption`/`Decryption`: AES_GCM_V1 and AES_GCM_CTR_V1, encrypted (`PARE`) or signed plaintext footers, the footer key for every column or separate column keys, key metadata and a key retriever, AAD prefixes stored or supplied. AES from the BCL, no new dependency. Interop both ways with parquet-cpp in all five modes (fixtures written by ParquetSharp are in the fork's tests); DuckDB 1.5.5 reads the GCM files in full scans. 2M rows: write 477 ms plain / 482 ms GCM, read 781 / 921 ms |
+| 6 typed statistics | `35bd5c1` | `DataColumnStatistics.SortOrder` (signed, unsigned, unknown, from the type and the file's column orders), `HasMinMax`, `MinBytes`/`MaxBytes`, `PhysicalMin`/`PhysicalMax`, exactness, `NanCount`; the deprecated `min`/`max` used only for signed numeric columns, nothing for unknown orders |
 | 7 legacy lists | `ff03dcc` | Backward-compatibility rules 2 and 3 (a repeated group with several fields, or named `array` or `<list>_tuple`, is a struct element); rules 1 and the bare repeated field already worked. Tested on files written by parquet-cpp. Legacy maps (`MAP_KEY_VALUE`, any group name) already worked |
 
 Bugs found on the way, also fixed in the fork. These are worth reporting upstream on their own, by hand:
@@ -83,11 +85,21 @@ Bugs found on the way, also fixed in the fork. These are worth reporting upstrea
 - **`List<T?>` deserialization loses data** (`ff03dcc`). `ParquetSerializer` read `[1, null, 2]` back as `[1, 2]` and
   `[]` as `null`, for lists and arrays of nullable values, including files it wrote itself. The levels on disk were
   right; the assembler created a list only at the item's definition level, one too deep for nullable items.
+- **Decimal and unsigned statistics decode wrongly** (`35bd5c1`). Min/max of decimals stored as `INT32`/`INT64` came
+  back as raw unscaled integers (the decimal branch was unreachable), and a `uint64` max of 2^64−1 as −1.
+- **The writer leaves `dictionary_page_offset` unset** (`344675a`), pointing `data_page_offset` at the dictionary
+  page instead. Readers tolerate it, but encrypted readers need the dictionary page's offset to pick its AAD.
+- **`DATA_PAGE_V2` pages of repeated columns throw** `NotImplementedException` (`bfd86da`), and the values section of
+  compressed v2 pages was decompressed to the whole page's size. Tested on v2 files written by parquet-cpp.
 - **Legacy-named list groups deserialize as null** (`ff03dcc`). When a file's list groups are named differently from
   the class schema's (`array`, `bag`, `<name>_tuple`), the serializer found no column for the property and silently
   left it null. It now falls back to matching on field names.
 
-Still open in the fork: encryption (4), typed statistics with sort order (6), and a typed physical-schema descriptor (9).
+Still open in the fork: a typed physical-schema descriptor (9; the raw thrift covers it). With the P0 and P1 items
+done, the next step is a Parquet.Net backend for `ParquetFiles` behind its existing API, run against the Spec, DuckLake
+and cross-engine suites alongside ParquetSharp. The fork's GitHub Actions workflow is not enabled (dispatching it
+returns 404, the default for forks), so its suite has only been run locally; enabling Actions on the fork would let
+it run on Linux, Windows and macOS.
 
 ## Suggested order
 
