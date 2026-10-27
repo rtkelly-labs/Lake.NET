@@ -1,0 +1,27 @@
+<Project Sdk="Microsoft.NET.Sdk">
+  <!-- Iceberg.Net.DuckLake: encodings, conflict rules and the full write/read cycle (no network), plus DuckDB's ducklake
+       extension as the cross-engine oracle in both directions, which skips when the extension is unavailable. -->
+  <PropertyGroup>
+    <IsPackable>false</IsPackable>
+    <IsTestProject>true</IsTestProject>
+    <!-- The CI job that runs this project (tools/test-projects.sh; registry: Iceberg.Net.slnx) -->
+    <CiSuite>cross-engine</CiSuite>
+    <RootNamespace>Iceberg.Net.DuckLake.Tests</RootNamespace>
+  </PropertyGroup>
+  <ItemGroup>
+    <PackageReference Include="Microsoft.NET.Test.Sdk" />
+    <PackageReference Include="xunit" />
+    <PackageReference Include="Xunit.SkippableFact" />
+    <PackageReference Include="Microsoft.Data.Sqlite" />
+    <PackageReference Include="xunit.runner.visualstudio" PrivateAssets="all" />
+  </ItemGroup>
+  <ItemGroup>
+    <ProjectReference Include="../../src/Iceberg.Net.Core/Iceberg.Net.Core.csproj" />
+    <ProjectReference Include="../../src/Iceberg.Net.Data/Iceberg.Net.Data.csproj" />
+    <ProjectReference Include="../../src/Iceberg.Net.DuckLake/Iceberg.Net.DuckLake.csproj" />
+    <ProjectReference Include="../Iceberg.Net.TestSupport/Iceberg.Net.TestSupport.csproj" />
+  </ItemGroup>
+  <ItemGroup>
+    <Using Include="Xunit" />
+  </ItemGroup>
+</Project>

@@ -11,6 +11,7 @@
     <Project Path="src/Iceberg.Net.Catalog/Iceberg.Net.Catalog.csproj" />
     <Project Path="src/Iceberg.Net.Core/Iceberg.Net.Core.csproj" />
     <Project Path="src/Iceberg.Net.Data/Iceberg.Net.Data.csproj" />
+    <Project Path="src/Iceberg.Net.DuckLake/Iceberg.Net.DuckLake.csproj" />
     <Project Path="src/Iceberg.Net.EntityFrameworkCore/Iceberg.Net.EntityFrameworkCore.csproj" />
     <Project Path="src/Iceberg.Net.IO/Iceberg.Net.IO.csproj" />
     <Project Path="src/Iceberg.Net.Linq/Iceberg.Net.Linq.csproj" />
@@ -20,6 +21,7 @@
   </Folder>
   <Folder Name="/tests/">
     <Project Path="tests/Iceberg.Net.Behaviour.Tests/Iceberg.Net.Behaviour.Tests.csproj" />
+    <Project Path="tests/Iceberg.Net.DuckLake.Tests/Iceberg.Net.DuckLake.Tests.csproj" />
     <Project Path="tests/Iceberg.Net.Ecosystem.Tests/Iceberg.Net.Ecosystem.Tests.csproj" />
     <Project Path="tests/Iceberg.Net.EntityFrameworkCore.Tests/Iceberg.Net.EntityFrameworkCore.Tests.csproj" />
     <Project Path="tests/Iceberg.Net.Fuzz/Iceberg.Net.Fuzz.csproj" />
