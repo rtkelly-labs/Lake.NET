@@ -6,9 +6,6 @@
     <RootNamespace>DuckLake.Quickstart</RootNamespace>
   </PropertyGroup>
   <ItemGroup>
-    <PackageReference Include="Microsoft.Data.Sqlite" />
-  </ItemGroup>
-  <ItemGroup>
     <ProjectReference Include="../../src/Iceberg.Net.DuckLake/Iceberg.Net.DuckLake.csproj" />
   </ItemGroup>
 </Project>

@@ -92,10 +92,21 @@ jobs:
       - name: Install PyIceberg and DuckDB oracles
         run: uv sync --project interop --group duckdb
 
-      - name: Cross-engine suite (ecosystem, BDD specification, REST catalog server)
+      # DuckLake 1.1 is written by DuckDB 2.0, whose ducklake extension is not on PyPI: it downloads from
+      # extensions.duckdb.org on first use (interop/ducklake_oracle.py). The 1.0 oracle is DuckDB 1.5 in the group above.
+      - name: Install the DuckLake 1.1 oracle (DuckDB 2.0)
+        run: |
+          uv venv --python 3.12 "$RUNNER_TEMP/ducklake11"
+          uv pip install --python "$RUNNER_TEMP/ducklake11/bin/python" duckdb==2.0.0 pytz
+
+      - name: Cross-engine suite (ecosystem, BDD specifications, REST catalog server, DuckLake)
         env:
           ICEBERG_PYTHON: ${{ github.workspace }}/interop/.venv/bin/python
           ICEBERG_DUCKDB_REQUIRED: "1"
+          ICEBERG_DUCKLAKE11_PYTHON: ${{ runner.temp }}/ducklake11/bin/python
+          ICEBERG_DUCKLAKE11_REQUIRED: "1"
+          ICEBERG_DUCKLAKE_POSTGRES: Host=localhost;Port=5434;Username=postgres;Password=postgres
+          ICEBERG_DUCKLAKE_POSTGRES_REQUIRED: "1"
         run: ./tools/test-projects.sh test cross-engine
 
       - name: Emulator logs on failure
