@@ -48,8 +48,9 @@ What made this quick, and what got in the way, for whoever takes either format f
   - Rows are `object?[]` of *physical* values (days, microseconds, unscaled decimals). Correct and fast, but a C#
     caller converts by hand; `DuckLakeValues.Normalize` accepts CLR types on the way in, nothing converts on the way
     out. The LINQ layer's mapping (`docs/linq.md`) is the natural next step for both formats.
-  - `tools/fuzz.sh` fails at start-up in the cloud sandbox (an access violation inside libfuzzer-dotnet, for the
-    existing targets too), so the new targets have only run as the in-process mutation test.
+  - SharpFuzz-instrumented code must not run before `Fuzzer.LibFuzzer.Run` maps its coverage memory, so the fuzz
+    harness builds its DuckLake type lazily (like its Iceberg metadata). An eager static field crashed every target
+    at start-up with an access violation.
 
 ## Is this a good idea, and where should it live?
 
@@ -230,7 +231,7 @@ dotnet run --project examples/DuckLake.Quickstart [directory] [postgres connecti
 | Resolve by field ID, never by name or position | Data files by `column_id` = `field_id`; delete files by their field IDs; inlined tables by the column IDs of the schema version they were created for |
 | Metadata files are never overwritten; nothing written for an unknown commit is deleted | Data and delete files are written once (`overwrite: false`) with UUIDv7 names; files are deleted only when the commit is known not to have happened (conflict, error before COMMIT, abandoned transaction); a failure *during* COMMIT throws `DuckLakeCommitStateUnknownException` and keeps them |
 | New behaviour other engines can observe needs a cross-engine test | `CrossEngineTests` (each case on SQLite and PostgreSQL, 1.0 and 1.1) and the BDD `CrossEngine.feature`: DuckDB reads every type, delete, update, schema change and partition written here and agrees with time travel at every snapshot; this library reads DuckDB's inlined rows, inlined deletions, flushed and merged partial files, and partitioned tables; the two engines write to one lake in turn and conflict correctly |
-| Decoders of untrusted input follow the `Corruption` contract | Catalog rows are untrusted: `changes_made`, column trees, statistics, timestamps and inlined nested text fail with format errors (tested in `CatalogTests`/`EncodingTests`), nesting is bounded, and `tools/fuzz.sh` has `ducklake-changes` and `ducklake-inlined` targets plus an always-on mutation test |
+| Decoders of untrusted input follow the `Corruption` contract | Catalog rows are untrusted: `changes_made`, column trees, statistics, timestamps and inlined nested text fail with format errors (tested in `CatalogTests`/`EncodingTests`), nesting is bounded, and `tools/fuzz.sh` has `ducklake-changes` and `ducklake-inlined` targets (in the weekly `fuzz` workflow; about 500,000 runs each without a finding so far) plus an always-on mutation test |
 | Fixtures are other engines' outputs, never hand-edited | No committed fixtures: the oracle generates DuckDB's lakes at test time |
 | A BDD specification for user-visible behaviour | `Iceberg.Net.DuckLake.Behaviour.Tests`: Gherkin features for tables, deletes, schema evolution, partitioning, concurrency, format versions and DuckDB interop; every scenario ends with a deep validation |
 | Property tests against a model | `ModelBasedTests`: random operation sequences against an in-memory model, shrinking to a minimal failing sequence with a replay seed |
@@ -293,7 +294,7 @@ test's catalog (SQLite or PostgreSQL) in DuckDB and runs SQL against it.
 Shared pieces changed for this: `SpecAttribute` accepts the `ducklake:` prefix; `tools/spec_trace.py` pins and
 checks the DuckLake spec (`snapshot --ducklake`, `drift --ducklake`, a DuckLake line in the matrix);
 `tests/Iceberg.Net.Fuzz` and `tools/fuzz.sh` gained two targets; the interop `duckdb` dependency group gained the
-extension wheels (including `postgres_scanner`); the emulation stack gained a PostgreSQL.
+extension wheels (including `postgres_scanner`) and `pytz` (DuckDB's client needs it for `timestamptz` values); the emulation stack gained a PostgreSQL.
 
 ## Next steps
 
