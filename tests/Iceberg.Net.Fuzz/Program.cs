@@ -41,12 +41,15 @@ internal static class Targets
         MetadataJson.Read(File.ReadAllText(Environment.GetEnvironmentVariable("FUZZ_TABLE_METADATA")
             ?? throw new ArgumentException("The manifest target needs FUZZ_TABLE_METADATA (a metadata.json for its spec and schema)"))));
 
-    /// <summary>Every nesting form and the primitives with their own text parsers, in one type.</summary>
-    private static readonly DuckLakeType InlinedType = DuckLakeType.Struct(
+    /// <summary>
+    /// Every nesting form and the primitives with their own text parsers, in one type. Lazy, like <see cref="Metadata"/>:
+    /// instrumented code (DuckLakeType's) must not run before Fuzzer.LibFuzzer.Run maps the coverage memory.
+    /// </summary>
+    private static readonly Lazy<DuckLakeType> InlinedType = new(() => DuckLakeType.Struct(
         ("a", DuckLakeType.Int32), ("b", DuckLakeType.List(DuckLakeType.Varchar)),
         ("c", DuckLakeType.Map(DuckLakeType.Varchar, DuckLakeType.List(DuckLakeType.Float64))),
         ("d", DuckLakeType.Struct(("x", DuckLakeType.Date), ("t", DuckLakeType.TimestampTz), ("n", DuckLakeType.Decimal(9, 2)),
-            ("u", DuckLakeType.Uuid), ("z", DuckLakeType.Blob))));
+            ("u", DuckLakeType.Uuid), ("z", DuckLakeType.Blob)))));
 
     public static readonly Dictionary<string, Action<byte[]>> All = new()
     {
@@ -69,6 +72,6 @@ internal static class Targets
             foreach (var change in DuckLakeChange.Parse(Encoding.UTF8.GetString(b)))
                 if (change.Target.StartsWith('"')) DuckLakeChange.SplitName(change.Target);
         },
-        ["ducklake-inlined"] = b => DuckLakeNestedText.Parse(InlinedType, Encoding.UTF8.GetString(b)),
+        ["ducklake-inlined"] = b => DuckLakeNestedText.Parse(InlinedType.Value, Encoding.UTF8.GetString(b)),
     };
 }

@@ -26,4 +26,6 @@ duckdb = [
   "duckdb-extension-sqlite-scanner==1.5.5",
   "duckdb-extension-postgres-scanner==1.5.5",
   "duckdb-extension-parquet==1.5.5",
+  # DuckDB's Python client imports pytz to return TIMESTAMP WITH TIME ZONE values (the DuckLake oracle reads them).
+  "pytz==2025.2",
 ]

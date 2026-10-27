@@ -23,6 +23,7 @@ from __future__ import annotations
 import datetime as dt
 import decimal
 import json
+import math
 import sys
 import uuid
 from typing import Any
@@ -58,12 +59,13 @@ def connect() -> tuple[Any, str]:
 
             import_extension(name, con=con)
             con.sql(f"LOAD {name}")
-        except Exception as e:  # noqa: BLE001 - every failure is a reason to report
+        except Exception as e:
             raise RuntimeError("; ".join([*errors, f"wheel {name}: {e}"])) from e
+    # fetchall, not fetchone: DuckDB 2.0's relations no longer have fetchone (each fetch re-runs the query).
     version = con.sql(
         "SELECT extension_version FROM duckdb_extensions() WHERE extension_name = 'ducklake'"
-    ).fetchone()
-    return con, str(version[0]) if version else "?"
+    ).fetchall()
+    return con, str(version[0][0]) if version else "?"
 
 
 def jsonable(value: Any) -> Any:
@@ -84,7 +86,7 @@ def jsonable(value: Any) -> Any:
         return bytes(value).hex()
     if isinstance(value, (uuid.UUID, decimal.Decimal)):
         return str(value)
-    if isinstance(value, float) and value != value:  # NaN
+    if isinstance(value, float) and math.isnan(value):
         return "NaN"
     return value
 
