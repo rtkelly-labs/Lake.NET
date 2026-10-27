@@ -55,13 +55,23 @@ list of strings, a map and a struct; row groups of 250,000 rows; Zstd):
 
 | Backend | Table | Write | Read | Size |
 |---|---|---|---|---|
-| ParquetSharp | flat, 1,000,000 rows | 2,730 ms | 1,194 ms | 33.6 MB |
-| Parquet.Net | flat, 1,000,000 rows | 2,245 ms | 1,509 ms | 29.0 MB |
-| ParquetSharp | nested, 250,000 rows | 771 ms | 955 ms | 4.5 MB |
-| Parquet.Net | nested, 250,000 rows | 710 ms | 996 ms | 3.5 MB |
+| ParquetSharp | flat, 1,000,000 rows | 2,489 ms | 1,227 ms | 33.6 MB |
+| Parquet.Net | flat, 1,000,000 rows | 2,300 ms | 1,347 ms | 29.0 MB |
+| ParquetSharp | nested, 250,000 rows | 726 ms | 853 ms | 4.5 MB |
+| Parquet.Net | nested, 250,000 rows | 718 ms | 941 ms | 3.5 MB |
 
-Parquet.Net writes faster and smaller (its dictionary and Zstd settings differ); it reads the flat table about a
-quarter slower, the nested one about as fast. Where the read time goes on each side has not been profiled yet.
+Parquet.Net writes a little faster and smaller (its dictionary and Zstd settings differ) and reads within about 10%
+(run to run, the benchmark varies by about as much). Reading the flat table was 26% slower at first; profiling each
+column on its own (forced GC, best of seven) put all of it on two columns:
+
+- **strings**: Parquet.Net returned each value in its own `char[]`, which the backend then copied into a string. The
+  fork now decodes a page's text into one array (`003c77f`), and the backend keeps one string per distinct value (up
+  to 4,096) rather than a new one per row: the string column went from 311 to 174 ms (ParquetSharp 159);
+- **UUIDs**: a `byte[]` per value, then a `Guid` from it. The fork now slices one array per page, and the backend
+  decodes `Guid`s straight from the bytes (`PqValues.Uuids`): from 319 to 164 ms (ParquetSharp 185).
+
+Per column (same file, Parquet.Net's): id 139 / 137, ts 145 / 137, name 174 / 159, amount 162 / 151, score 154 / 135,
+key 164 / 185, all six 979 / 956 ms (Parquet.Net / ParquetSharp).
 
 ## Gaps
 

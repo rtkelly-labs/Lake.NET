@@ -475,7 +475,12 @@ public static class ParquetFiles
                         break;
                     case ColumnSource.Leaf l:
                     {
-                        var data = await reader.ReadLeafAsync(rg, l.Column, f.Type.TypeId == TypeId.String, ct);
+                        var data = await reader.ReadLeafAsync(rg, l.Column, f.Type.TypeId switch
+                        {
+                            TypeId.String => PqValues.Strings,
+                            TypeId.Uuid => PqValues.Uuids,
+                            _ => PqValues.Physical,
+                        }, ct);
                         var values = ReadColumn(data, layout.Leaves[l.Column], f.Type, n);
                         for (var r = 0; r < n; r++) rows[r][c] = values[r];
                         break;
@@ -653,6 +658,7 @@ public static class ParquetFiles
             case string[] s when type.TypeId == TypeId.String: Fill(s, x => x); break;
             case byte[][] s when type.TypeId == TypeId.String: Fill(s, x => System.Text.Encoding.UTF8.GetString(x)); break;
             case byte[][] bytes when type.TypeId is TypeId.Binary or TypeId.Fixed: Fill(bytes, x => x); break;
+            case Guid[] uuids when type.TypeId == TypeId.Uuid: Fill(uuids, x => x); break;
             case byte[][] bytes when type.TypeId == TypeId.Uuid: Fill(bytes, x => new Guid(x, bigEndian: true)); break;
             // FIXED (or BINARY) decimals, any precision: big-endian two's-complement unscaled value.
             case byte[][] bytes when type is DecimalType:
@@ -667,7 +673,7 @@ public static class ParquetFiles
     private static object FromPhysical(IcebergType type, PqPhysical physical, int typeLength, object raw) => type switch
     {
         PrimitiveType { TypeId: TypeId.String } => raw as string ?? System.Text.Encoding.UTF8.GetString((byte[])raw),
-        PrimitiveType { TypeId: TypeId.Uuid } => new Guid((byte[])raw, bigEndian: true),
+        PrimitiveType { TypeId: TypeId.Uuid } => raw as Guid? ?? new Guid((byte[])raw, bigEndian: true),
         DecimalType d => new IcebergDecimal(raw switch
         {
             int i => i,

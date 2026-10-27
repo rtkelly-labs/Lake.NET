@@ -34,8 +34,8 @@ internal static class NestedColumns
         /// <summary>Highest repetition level (lists and maps around the leaf); write side only.</summary>
         public int MaxRep { get; init; }
         public ParquetFiles.Decoding Decoding { get; init; } // read side only
-        /// <summary>A byte array column annotated as text: read as strings.</summary>
-        public bool Strings { get; init; } // read side only
+        /// <summary>Byte arrays annotated as text or UUID: read as strings or <see cref="Guid"/>s.</summary>
+        public PqValues ReadAs { get; init; } // read side only
         // Column data for one row group: levels plus the defined values in order.
         public List<short> Defs { get; } = [];
         public List<short> Reps { get; } = [];
@@ -204,7 +204,9 @@ internal static class NestedColumns
         {
             Optional = optional, Def = def, FieldId = ignoreIds ? -1 : p.FieldId, Name = p.Name, Column = column++, Physical = p.PhysicalType,
             TypeLength = p.TypeLength, Decoding = ParquetFiles.DecodingOf(p.Logical),
-            Strings = p.PhysicalType == PqPhysical.ByteArray && p.Logical.Kind is PqLogicalKind.String or PqLogicalKind.Enum or PqLogicalKind.Json,
+            ReadAs = p.PhysicalType == PqPhysical.ByteArray && p.Logical.Kind is PqLogicalKind.String or PqLogicalKind.Enum or PqLogicalKind.Json ? PqValues.Strings
+                : p.PhysicalType == PqPhysical.FixedLenByteArray && p.TypeLength == 16 && p.Logical.Kind == PqLogicalKind.Uuid ? PqValues.Uuids
+                : PqValues.Physical,
         };
         leaf.Leaves.Add(leaf);
         return leaf;
@@ -350,7 +352,7 @@ internal static class NestedColumns
         {
             leaf.Defs.Clear(); leaf.Reps.Clear(); leaf.Values.Clear();
             leaf.Position = leaf.ValuePosition = 0;
-            var data = await reader.ReadLeafAsync(rowGroup, leaf.Column, leaf.Strings, ct);
+            var data = await reader.ReadLeafAsync(rowGroup, leaf.Column, leaf.ReadAs, ct);
             for (var i = 0; i < data.Levels; i++)
             {
                 leaf.Defs.Add(data.Defs?[i] ?? 0);

@@ -200,7 +200,7 @@ internal sealed class ParquetSharpBackend : IParquetBackend
             }
         }
 
-        public ValueTask<PqLeafData> ReadLeafAsync(int rowGroup, int leaf, bool strings, CancellationToken ct)
+        public ValueTask<PqLeafData> ReadLeafAsync(int rowGroup, int leaf, PqValues wanted, CancellationToken ct)
         {
             using var col = Group(rowGroup).Column(leaf);
             var descr = col.ColumnDescriptor;
@@ -215,8 +215,9 @@ internal sealed class ParquetSharpBackend : IParquetBackend
                 ColumnReader<long> r => ReadAll(r, defs, reps, levels),
                 ColumnReader<float> r => ReadAll(r, defs, reps, levels),
                 ColumnReader<double> r => ReadAll(r, defs, reps, levels),
-                ColumnReader<ByteArray> r when strings => ReadBytes(r, defs, reps, levels, v => v.Length == 0 ? "" : Marshal.PtrToStringUTF8(v.Pointer, v.Length)),
+                ColumnReader<ByteArray> r when wanted == PqValues.Strings => ReadBytes(r, defs, reps, levels, v => v.Length == 0 ? "" : Marshal.PtrToStringUTF8(v.Pointer, v.Length)),
                 ColumnReader<ByteArray> r => ReadBytes(r, defs, reps, levels, v => Copy(v)),
+                ColumnReader<FixedLenByteArray> r when wanted == PqValues.Uuids && descr.TypeLength == 16 => ReadBytes(r, defs, reps, levels, v => Uuid(v.Pointer)),
                 ColumnReader<FixedLenByteArray> r => ReadBytes(r, defs, reps, levels, v => Copy(v.Pointer, descr.TypeLength)),
                 _ => throw new NotSupportedException($"Reading {descr.PhysicalType} columns"),
             };
@@ -265,6 +266,14 @@ internal sealed class ParquetSharpBackend : IParquetBackend
     }
 
     private static byte[] Copy(ByteArray v) => Copy(v.Pointer, v.Length);
+
+    /// <summary>A UUID from its 16 big-endian bytes, without an intermediate array.</summary>
+    private static Guid Uuid(IntPtr pointer)
+    {
+        Span<byte> bytes = stackalloc byte[16];
+        for (var i = 0; i < 16; i++) bytes[i] = Marshal.ReadByte(pointer, i);
+        return new Guid(bytes, bigEndian: true);
+    }
 
     private static byte[] Copy(IntPtr pointer, int length)
     {

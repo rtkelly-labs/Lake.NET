@@ -266,7 +266,7 @@ internal sealed class ParquetNetBackend : IParquetBackend
             return new PqColumnChunk(meta.TotalCompressedSize, meta.NumValues, statistics) { Offset = offset };
         }
 
-        public async ValueTask<PqLeafData> ReadLeafAsync(int rowGroup, int leaf, bool strings, CancellationToken ct)
+        public async ValueTask<PqLeafData> ReadLeafAsync(int rowGroup, int leaf, PqValues wanted, CancellationToken ct)
         {
             var field = Field(leaf);
             var group = _reader.RowGroups[rowGroup];
@@ -295,12 +295,40 @@ internal sealed class ParquetNetBackend : IParquetBackend
                 PqPhysical.Int64 => await Read<long>(),
                 PqPhysical.Float => await Read<float>(),
                 PqPhysical.Double => await Read<double>(),
-                PqPhysical.ByteArray when strings && field.ClrType == typeof(string) => Array.ConvertAll(await Read<ReadOnlyMemory<char>>(), v => v.ToString()),
-                PqPhysical.ByteArray when strings => Array.ConvertAll(await Read<ReadOnlyMemory<byte>>(), v => System.Text.Encoding.UTF8.GetString(v.Span)),
+                PqPhysical.ByteArray when wanted == PqValues.Strings && field.ClrType == typeof(string) => Strings(await Read<ReadOnlyMemory<char>>()),
+                PqPhysical.ByteArray when wanted == PqValues.Strings => Array.ConvertAll(await Read<ReadOnlyMemory<byte>>(), v => System.Text.Encoding.UTF8.GetString(v.Span)),
+                PqPhysical.FixedLenByteArray when wanted == PqValues.Uuids && _leaves[leaf].TypeLength == 16 =>
+                    Array.ConvertAll(await Read<ReadOnlyMemory<byte>>(), v => new Guid(v.Span, bigEndian: true)),
                 PqPhysical.ByteArray or PqPhysical.FixedLenByteArray => Array.ConvertAll(await Read<ReadOnlyMemory<byte>>(), v => v.ToArray()),
                 var p => throw new NotSupportedException($"Reading {p} columns"),
             };
             return new PqLeafData(levels, defs is null ? null : Array.ConvertAll(defs, d => (short)d), reps is null ? null : Array.ConvertAll(reps, r => (short)r), result);
+        }
+
+        /// <summary>
+        /// Text values as strings, one string per distinct value while there are few of them: Parquet.Net hands back each
+        /// value's own characters, also for dictionary-encoded columns, so a repeated value would otherwise be a new
+        /// string every time.
+        /// </summary>
+        private static string[] Strings(ReadOnlyMemory<char>[] values)
+        {
+            const int distinct = 4096;
+            var seen = new Dictionary<string, string>(StringComparer.Ordinal);
+            var lookup = seen.GetAlternateLookup<ReadOnlySpan<char>>();
+            var result = new string[values.Length];
+            for (var i = 0; i < values.Length; i++)
+            {
+                var span = values[i].Span;
+                if (lookup.TryGetValue(span, out var known))
+                {
+                    result[i] = known;
+                    continue;
+                }
+                var s = new string(span);
+                if (seen.Count < distinct) seen[s] = s;
+                result[i] = s;
+            }
+            return result;
         }
 
         public void Dispose() => _reader.DisposeAsync().AsTask().GetAwaiter().GetResult();

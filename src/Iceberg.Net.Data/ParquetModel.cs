@@ -106,9 +106,13 @@ internal sealed record PqColumnChunk(long TotalCompressedSize, long NumValues, P
 /// <summary>
 /// One leaf column of a row group: <see cref="Levels"/> level entries, definition and repetition levels (null when the
 /// column has none), and the defined values only, as a typed array: <c>bool[]</c>, <c>int[]</c>, <c>long[]</c>,
-/// <c>float[]</c>, <c>double[]</c>, <c>byte[][]</c> (byte arrays), or <c>string[]</c> (strings, when asked for).
+/// <c>float[]</c>, <c>double[]</c>, <c>byte[][]</c> (byte arrays), or <c>string[]</c> / <c>Guid[]</c> (byte arrays read
+/// as <see cref="PqValues.Strings"/> / <see cref="PqValues.Uuids"/>).
 /// </summary>
 internal sealed record PqLeafData(int Levels, short[]? Defs, short[]? Reps, Array Values);
+
+/// <summary>How a leaf's values are wanted: as stored, or byte arrays already decoded as text or as UUIDs.</summary>
+internal enum PqValues { Physical, Strings, Uuids }
 
 internal sealed record PqWriteSettings(bool Statistics, bool Dictionary, byte[]? EncryptionKey);
 
@@ -120,8 +124,8 @@ internal interface IPqReader : IDisposable
     long NumRows { get; }
     long RowGroupRows(int rowGroup);
     PqColumnChunk Chunk(int rowGroup, int leaf);
-    /// <summary>A leaf's levels and values; byte arrays as <c>string[]</c> when <paramref name="strings"/>.</summary>
-    ValueTask<PqLeafData> ReadLeafAsync(int rowGroup, int leaf, bool strings, CancellationToken ct);
+    /// <summary>A leaf's levels and values, byte arrays decoded as <paramref name="values"/> asks (when they are byte arrays).</summary>
+    ValueTask<PqLeafData> ReadLeafAsync(int rowGroup, int leaf, PqValues values, CancellationToken ct);
 }
 
 internal interface IPqWriter : IDisposable

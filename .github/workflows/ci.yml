@@ -200,6 +200,44 @@ jobs:
           dotnet test tests/Iceberg.Net.DuckLake.Tests --nologo
           dotnet test tests/Iceberg.Net.DuckLake.Behaviour.Tests --nologo
 
+  # The Parquet.Net fork's own suite (net8.0 and net10.0) on every OS: the fork's repository has no Actions of its own.
+  # Not part of the required `ci` check: it reports, but a platform quirk in an upstream test must not block merges.
+  parquet-net-fork:
+    name: parquet-net-fork (${{ matrix.os }})
+    runs-on: ${{ matrix.os }}
+    timeout-minutes: 30
+    permissions:
+      contents: read
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [ubuntu-latest, windows-latest, macos-latest]
+    steps:
+      - uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0 # v7.0.0
+        with:
+          submodules: true  # external/parquet-dotnet (the Parquet.Net backend)
+      - uses: actions/setup-dotnet@a98b56852c35b8e3190ac28c8c2271da59106c68 # v6
+        with:
+          dotnet-version: |
+            8.0.x
+            10.0.x
+      - uses: astral-sh/setup-uv@e58605a9b6da7c637471fab8847a5e5a6b8df081 # v5
+      # One test reads a file back with pyarrow (python3 on the PATH).
+      - name: pyarrow for the Arrow interop test
+        shell: bash
+        run: |
+          uv venv --python 3.12 "$RUNNER_TEMP/pyarrow"
+          uv pip install --python "$RUNNER_TEMP/pyarrow" pyarrow
+          if [ "$RUNNER_OS" = "Windows" ]; then
+            # the test runs python3.exe; a Windows venv may only have python.exe
+            [ -f "$RUNNER_TEMP/pyarrow/Scripts/python3.exe" ] || cp "$RUNNER_TEMP/pyarrow/Scripts/python.exe" "$RUNNER_TEMP/pyarrow/Scripts/python3.exe"
+            echo "$RUNNER_TEMP/pyarrow/Scripts" >> "$GITHUB_PATH"
+          else
+            echo "$RUNNER_TEMP/pyarrow/bin" >> "$GITHUB_PATH"
+          fi
+      - name: Parquet.Net fork tests
+        run: dotnet test external/parquet-dotnet/src/Parquet.Test --nologo
+
   # The one required check. Branch protection matches on this name, so it stays `ci` whatever
   # the jobs above are called or however they are split.
   ci:
