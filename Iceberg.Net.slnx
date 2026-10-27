@@ -4,6 +4,9 @@
     <Platform Name="x64" />
     <Platform Name="x86" />
   </Configurations>
+  <Folder Name="/examples/">
+    <Project Path="examples/DuckLake.Quickstart/DuckLake.Quickstart.csproj" />
+  </Folder>
   <Folder Name="/src/">
     <Project Path="src/Iceberg.Net.Arrow/Iceberg.Net.Arrow.csproj" />
     <Project Path="src/Iceberg.Net.Athena/Iceberg.Net.Athena.csproj" />

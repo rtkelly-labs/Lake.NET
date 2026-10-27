@@ -10,6 +10,13 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 
 ## [Unreleased]
 
+### Added
+- `Iceberg.Net.DuckLake` (not yet packed): the DuckLake 1.0 table format on the Iceberg data plane — a SQL catalog
+  over ADO.NET (SQLite tested), snapshots and time travel, schema/table DDL, inserts with file and table statistics,
+  merge-on-read deletes, UPDATE, schema evolution, partitioned writes, DuckDB's inlined rows and partial files on
+  read, and the spec's conflict resolution on commit. DuckDB's `ducklake` extension is the cross-engine oracle in both
+  directions; DuckLake spec sections are pinned and traced like Iceberg's ([docs/ducklake.md](docs/ducklake.md)).
+
 ## [0.0.1-alpha.1] - 2026-10-25
 
 The first published build: an early alpha of `Iceberg.Net.Core`, `Avro`, `Puffin`, `IO`, `Catalog`, `Data` and `Linq`,

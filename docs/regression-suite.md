@@ -43,7 +43,7 @@ without AWS; Nessie skips the v3 conformance case; the Athena paging fidelity ca
 | `ICEBERG_POLARIS_URI` | `http://localhost:8182/api/catalog` | — | Polaris (emulation only) |
 | `ICEBERG_TRINO_URI` | `http://localhost:8080` | — | Trino (emulation only) |
 | `ICEBERG_SPARK` / `ICEBERG_SPARK_IMAGE` / `ICEBERG_SPARK_JAR` | on / `apache/spark:4.0.1` / `emulation/.cache/…jar` | — | Spark oracle; `ICEBERG_SPARK=0` disables it, `ICEBERG_SPARK_KEEP=1` keeps its tables for debugging. The managed-job emulation also needs the AWS jars `up.sh --spark` puts next to the runtime jar |
-| `ICEBERG_DUCKDB_PYTHON` / `ICEBERG_DUCKDB` / `ICEBERG_DUCKDB_REQUIRED` | `ICEBERG_PYTHON` / on / off | — | DuckDB oracle (`Iceberg.Net.Ecosystem.Tests`): the Python with the interop `duckdb` group; `ICEBERG_DUCKDB=0` disables it; `ICEBERG_DUCKDB_REQUIRED=1` (CI) fails instead of skipping when the extension cannot load ([spark-and-athena.md](spark-and-athena.md#duckdb-oracle)) |
+| `ICEBERG_DUCKDB_PYTHON` / `ICEBERG_DUCKDB` / `ICEBERG_DUCKDB_REQUIRED` | `ICEBERG_PYTHON` / on / off | — | DuckDB oracles (`Iceberg.Net.Ecosystem.Tests`'s `iceberg` extension, `Iceberg.Net.DuckLake.Tests`'s `ducklake` extension): the Python with the interop `duckdb` group; `ICEBERG_DUCKDB=0` disables it; `ICEBERG_DUCKDB_REQUIRED=1` (CI) fails instead of skipping when the extension cannot load ([spark-and-athena.md](spark-and-athena.md#duckdb-oracle)) |
 | `ICEBERG_WAREHOUSE` | `s3://iceberg-regression/warehouse` | **required** `s3://bucket/prefix` | where test tables live (Glue tables under `/glue`) |
 | `ICEBERG_ATHENA_WORKGROUP` | — | e.g. `primary` | enables L3 |
 | `ICEBERG_ATHENA_OUTPUT` | — | optional `s3://…` | Athena result location if the workgroup has none |
