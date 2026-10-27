@@ -62,7 +62,7 @@ Already covered by Parquet.Net, so not a blocker:
 ## Fork status
 
 Branch `ccr-87fadcf9-bxi9wr` of [rtkelly-labs/parquet-dotnet](https://github.com/rtkelly-labs/parquet-dotnet), each
-change with its own tests (fork suite: 750 passed; the one failure needs `pyarrow`, which the environment lacks).
+change with its own tests (fork suite: 753 passed, 3 skipped, none failing, with `pyarrow` installed for its Arrow interop test).
 
 | Gap | Fork commit | What changed |
 |---|---|---|
@@ -72,6 +72,7 @@ change with its own tests (fork suite: 750 passed; the one failure needs `pyarro
 | 8 no statistics | `54efd9a` | `ParquetOptions.WriteStatistics = false` leaves statistics out of column chunks and page headers |
 | 4 encryption | `344675a` | `ParquetOptions.Encryption`/`Decryption`: AES_GCM_V1 and AES_GCM_CTR_V1, encrypted (`PARE`) or signed plaintext footers, the footer key for every column or separate column keys, key metadata and a key retriever, AAD prefixes stored or supplied. AES from the BCL, no new dependency. Interop both ways with parquet-cpp in all five modes (fixtures written by ParquetSharp are in the fork's tests); DuckDB 1.5.5 reads the GCM files in full scans. 2M rows: write 477 ms plain / 482 ms GCM, read 781 / 921 ms |
 | 6 typed statistics | `35bd5c1` | `DataColumnStatistics.SortOrder` (signed, unsigned, unknown, from the type and the file's column orders), `HasMinMax`, `MinBytes`/`MaxBytes`, `PhysicalMin`/`PhysicalMax`, exactness, `NanCount`; the deprecated `min`/`max` used only for signed numeric columns, nothing for unknown orders |
+| 9 physical schema | `da1574b` | `ParquetReader.Columns`: a descriptor per leaf column (path, ordinal, physical type, FLBA length, logical and converted types, field ID, max levels, sort order), and `ParquetReader.FooterLength` |
 | 7 legacy lists | `ff03dcc` | Backward-compatibility rules 2 and 3 (a repeated group with several fields, or named `array` or `<list>_tuple`, is a struct element); rules 1 and the bare repeated field already worked. Tested on files written by parquet-cpp. Legacy maps (`MAP_KEY_VALUE`, any group name) already worked |
 
 Bugs found on the way, also fixed in the fork. These are worth reporting upstream on their own, by hand:
@@ -95,8 +96,21 @@ Bugs found on the way, also fixed in the fork. These are worth reporting upstrea
   the class schema's (`array`, `bag`, `<name>_tuple`), the serializer found no column for the property and silently
   left it null. It now falls back to matching on field names.
 
-Still open in the fork: a typed physical-schema descriptor (9; the raw thrift covers it). With the P0 and P1 items
-done, the next step is a Parquet.Net backend for `ParquetFiles` behind its existing API, run against the Spec, DuckLake
+### Iceberg files, both ways
+
+One schema covering every shape Iceberg.NET writes (required `long`; `timestamp` and `timestamp_ns` as physical
+`long`s; `date` as days; `decimal(10,2)`; `uuid`; `fixed[4]`; `string`; `list<int>`; `map<string,long>`; a struct),
+three rows with nulls, empty and null collections and a struct with a null field:
+
+| Written by | Read by | Result |
+|---|---|---|
+| `ParquetFiles` (ParquetSharp) | `ParquetFiles` | the rows written |
+| the fork, with Iceberg's layout and field IDs | `ParquetFiles` (field-ID projection) | the same rows |
+| `ParquetFiles` | the fork | field IDs on every leaf and group, nanoseconds as `long`, `fixed[4]` length, timestamp and UUID statistics as written |
+| the fork | DuckDB 1.5.5 | the same rows; `ts >` and `u =` filters (pruned by statistics) return the right rows |
+| the fork | pyarrow 26 | the same rows; `timestamp[ns]` kept |
+
+Every gap in the table is now closed in the fork. The next step is a Parquet.Net backend for `ParquetFiles` behind its existing API, run against the Spec, DuckLake
 and cross-engine suites alongside ParquetSharp. The fork's GitHub Actions workflow is not enabled (dispatching it
 returns 404, the default for forks), so its suite has only been run locally; enabling Actions on the fork would let
 it run on Linux, Windows and macOS.
