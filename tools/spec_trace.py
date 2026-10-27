@@ -40,7 +40,7 @@ DOCS = {
 }
 PINNED_REF = "apache-iceberg-1.12.0"  # the release the Spark oracle runs (emulation/up.sh --spark)
 
-# DuckLake (src/Iceberg.Net.DuckLake): the 1.0 specification pages, plus the two DuckDB pages that define behaviour the
+# DuckLake (src/Iceberg.Net.DuckLake): the 1.1 specification pages ("stable" at the pinned commit), plus the two DuckDB pages that define behaviour the
 # specification relies on (conflict resolution, inlined data), pinned at a duckdb/ducklake-web commit.
 DUCKLAKE_SNAPSHOT = ROOT / "docs" / "spec" / "ducklake-sections.json"
 DUCKLAKE_ACKNOWLEDGED = ROOT / "docs" / "spec" / "ducklake-acknowledged-drift.json"
@@ -75,15 +75,16 @@ DUCKLAKE_TABLES = [
     "ducklake_tag",
     "ducklake_column_tag",
     "ducklake_schema_versions",
+    "ducklake_view_column_tag",
 ]
 DUCKLAKE_DOCS = [
-    "docs/1.0/specification/introduction.md",
-    "docs/1.0/specification/queries.md",
-    "docs/1.0/specification/data_types.md",
-    "docs/1.0/specification/tables/overview.md",
-    *[f"docs/1.0/specification/tables/{t}.md" for t in DUCKLAKE_TABLES],
-    "docs/1.0/duckdb/advanced_features/conflict_resolution.md",
-    "docs/1.0/duckdb/advanced_features/data_inlining.md",
+    "docs/stable/specification/introduction.md",
+    "docs/stable/specification/queries.md",
+    "docs/stable/specification/data_types.md",
+    "docs/stable/specification/tables/overview.md",
+    *[f"docs/stable/specification/tables/{t}.md" for t in DUCKLAKE_TABLES],
+    "docs/stable/duckdb/advanced_features/conflict_resolution.md",
+    "docs/stable/duckdb/advanced_features/data_inlining.md",
 ]
 
 # Container and prose headings: nothing to test directly (their subsections carry the requirements).
@@ -161,6 +162,7 @@ NOT_IMPLEMENTED = {
         f"ducklake:{k}": reason
         for k, reason in {
             "ducklake_view": "views are not read or written",
+            "ducklake_view_column_tag": "views are not read or written (the 1.1 table is created)",
             "ducklake_macro": "macros are not read or written",
             "ducklake_macro_impl": "macros are not read or written",
             "ducklake_macro_parameters": "macros are not read or written",
@@ -186,6 +188,7 @@ NOT_IMPLEMENTED = {
                     "configuring-data-inlining",
                     "global-default",
                     "per-connection-override",
+                    "per-attach-override",
                     "persistent-override",
                     "flushing-inlined-data",
                     "return-values",
@@ -454,7 +457,7 @@ def cmd_matrix(check: bool) -> int:
         "spec": "Table spec (format/spec.md)",
         "puffin": "Puffin (format/puffin-spec.md)",
         "rest": "REST catalog operations (OpenAPI)",
-        "ducklake": "DuckLake 1.0 (duckdb/ducklake-web docs/1.0/specification, conflict resolution, data inlining)",
+        "ducklake": "DuckLake 1.0 (duckdb/ducklake-web docs/stable/specification, conflict resolution, data inlining)",
     }
     for doc, secs in snap["sections"].items():
         out += [
@@ -507,7 +510,7 @@ def cmd_drift(
     --acknowledge) are listed but do not fail; a section that changes again after review fails again."""
     snap = load_snapshot()
     if ducklake:
-        docs = {"ducklake": "duckdb/ducklake-web docs/1.0"}
+        docs = {"ducklake": "duckdb/ducklake-web docs/stable"}
         upstream = {"ducklake": fetch_ducklake(ref, source)}
         acknowledged, pinned, name = (
             DUCKLAKE_ACKNOWLEDGED,

@@ -149,16 +149,21 @@ internal sealed class ChangeSet
         return null;
     }
 
-    private static string Single(string target) => DuckLakeChange.SplitName(target) is [var only] ? only : target;
+    /// <summary>A schema path (<c>"sales"."europe"</c>, 1.1) as this library names schemas: <c>sales.europe</c>.</summary>
+    private static string Single(string target) => string.Join('.', DuckLakeChange.SplitName(target));
 
+    /// <summary>A table or view under a schema path: every name but the last is the schema's.</summary>
     private static (string? Schema, string? Name) Qualified(string target) =>
-        DuckLakeChange.SplitName(target) is [var schema, var name] ? (schema, name) : (null, null);
+        DuckLakeChange.SplitName(target) is { Count: >= 2 } parts ? (string.Join('.', parts.Take(parts.Count - 1)), parts[^1]) : (null, null);
+
+    /// <summary>A schema path quoted as the spec writes it: each name quoted, joined by <c>.</c>.</summary>
+    internal static string QuotePath(string schemaPath) => string.Join('.', schemaPath.Split('.').Select(DuckLakeChange.QuoteName));
 
     public IEnumerable<DuckLakeChange> Entries()
     {
-        foreach (var s in CreatedSchemas) yield return new(DuckLakeChange.CreatedSchema, DuckLakeChange.QuoteName(s));
+        foreach (var s in CreatedSchemas) yield return new(DuckLakeChange.CreatedSchema, QuotePath(s));
         foreach (var (schema, _, name) in CreatedTables)
-            yield return new(DuckLakeChange.CreatedTable, DuckLakeChange.QuoteName(schema) + "." + DuckLakeChange.QuoteName(name));
+            yield return new(DuckLakeChange.CreatedTable, QuotePath(schema) + "." + DuckLakeChange.QuoteName(name));
         foreach (var t in InsertedTables) yield return DuckLakeChange.Of(DuckLakeChange.InsertedIntoTable, t);
         foreach (var t in DeletedTables) yield return DuckLakeChange.Of(DuckLakeChange.DeletedFromTable, t);
         foreach (var t in AlteredTables) yield return DuckLakeChange.Of(DuckLakeChange.AlteredTable, t);

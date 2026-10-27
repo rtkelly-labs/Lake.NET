@@ -84,6 +84,20 @@ public sealed class ConflictRuleTests
     public void Deleting(string theirs, bool conflict) =>
         Assert.Equal(conflict, Ours(o => o.DeletedTables.Add(7)).ConflictWith(9, Theirs(theirs)) is not null);
 
+    [Theory]
+    [Spec("ducklake: Schemas")]
+    [Spec("ducklake: Tables / Views")]
+    [InlineData("created_schema:\"sales\".\"europe\"", true)]                 // 1.1 nested schema paths
+    [InlineData("created_schema:\"europe\"", false)]
+    [InlineData("created_table:\"sales\".\"europe\".\"orders\"", true)]
+    [InlineData("created_table:\"sales\".\"orders\"", false)]
+    public void Nested_schema_paths_are_compared_as_paths(string theirs, bool conflict) =>
+        Assert.Equal(conflict, Ours(o =>
+        {
+            o.CreatedSchemas.Add("sales.europe");
+            o.CreatedTables.Add(("sales.europe", null, "orders"));
+        }).ConflictWith(9, Theirs(theirs)) is not null);
+
     [Fact]
     [Spec("ducklake: Conflict Resolution")]
     public void Unknown_change_kinds_conflict_only_on_tables_we_touch()
