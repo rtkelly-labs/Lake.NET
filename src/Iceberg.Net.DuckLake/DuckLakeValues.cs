@@ -144,6 +144,32 @@ public static class DuckLakeValues
         _ => null,
     };
 
+    /// <summary>
+    /// A value as the text DuckDB casts back to its type, for inlined rows a catalog database holds as text (spec "Type
+    /// Encoding for Data Inlining"): the statistics encoding, except that NaN is <c>nan</c>, booleans are
+    /// <c>true</c>/<c>false</c> and blobs use DuckDB's escaped text (<c>\x00</c> for unprintable bytes).
+    /// </summary>
+    public static string InlineText(DuckLakePrimitive type, object value) => (type.Name, value) switch
+    {
+        ("boolean", bool b) => b ? "true" : "false",
+        ("float32", float f) => float.IsNaN(f) ? "nan" : FormatFloat(f)!,
+        ("float64", double d) => double.IsNaN(d) ? "nan" : FormatDouble(d)!,
+        ("blob", byte[] bytes) => BlobText(bytes),
+        _ => Format(type, value) ?? throw new NotSupportedException($"Cannot inline a {type} value"),
+    };
+
+    /// <summary>DuckDB's text of a blob: printable ASCII as is, every other byte (the backslash too) as <c>\xHH</c>.</summary>
+    private static string BlobText(byte[] bytes)
+    {
+        var sb = new System.Text.StringBuilder(bytes.Length);
+        foreach (var b in bytes)
+        {
+            if (b is >= 0x20 and < 0x7F and not (byte)'\\') sb.Append((char)b);
+            else sb.Append("\\x").Append(b.ToString("X2", CultureInfo.InvariantCulture));
+        }
+        return sb.ToString();
+    }
+
     private static string? FormatFloat(float f) => float.IsNaN(f) ? null
         : float.IsPositiveInfinity(f) ? "inf" : float.IsNegativeInfinity(f) ? "-inf" : f.ToString("R", CultureInfo.InvariantCulture);
 
@@ -307,6 +333,25 @@ public static class DuckLakeValues
     }
 
     /// <summary>Hex (the spec's encoding) or DuckDB's escaped form (<c>\x00\xFF</c>, other bytes literal).</summary>
+    /// <summary>DuckDB's escaped blob text only (<c>\xHH</c> escapes, other characters as bytes), as nested values hold it.</summary>
+    internal static byte[] ParseBlobText(string text)
+    {
+        var bytes = new List<byte>();
+        for (var i = 0; i < text.Length; i++)
+        {
+            if (text[i] == '\\')
+            {
+                if (i + 3 >= text.Length || text[i + 1] != 'x' || !char.IsAsciiHexDigit(text[i + 2]) || !char.IsAsciiHexDigit(text[i + 3]))
+                    throw new FormatException($"Invalid escape in blob text '{text}'");
+                bytes.Add(Convert.ToByte(text.Substring(i + 2, 2), 16));
+                i += 3;
+            }
+            else if (text[i] < 0x80) bytes.Add((byte)text[i]);
+            else bytes.AddRange(Encoding.UTF8.GetBytes(text[i].ToString()));
+        }
+        return [.. bytes];
+    }
+
     private static byte[]? ParseBlob(string text)
     {
         if (text.Length % 2 == 0 && text.All(char.IsAsciiHexDigit)) return Convert.FromHexString(text);

@@ -61,6 +61,13 @@ public sealed class DuckLakeSteps(DuckLakeWorld world)
         world.Catalog = await world.L.CreateAsync();
     }
 
+    [Given(@"a DuckLake on (SQLite|PostgreSQL) in format (1\.0|1\.1) that inlines inserts of up to (\d+) rows?")]
+    public async Task GivenAnInliningLake(string catalog, string version, int limit)
+    {
+        world.Use(catalog == "SQLite" ? CatalogBackend.Sqlite : CatalogBackend.Postgres, version);
+        world.Catalog = await world.L.CreateAsync(new DuckLakeOptions { DataInliningRowLimit = limit });
+    }
+
     [Given(@"a DuckLake that DuckDB created on (SQLite|PostgreSQL) in format (1\.0|1\.1)")]
     public void GivenADuckDbLake(string catalog, string version)
     {
@@ -282,6 +289,22 @@ public sealed class DuckLakeSteps(DuckLakeWorld world)
     [When(@"I expire snapshots (.*)")]
     public async Task Expire(string ids) =>
         await world.C.ExpireSnapshotsAsync(ids.Split(',', StringSplitOptions.TrimEntries).Select(x => long.Parse(x, CultureInfo.InvariantCulture)).ToList());
+
+    [When(@"I flush the inlined data")]
+    public async Task FlushInlined() => world.Affected = (await world.C.FlushInlinedDataAsync()).Sum(f => f.RowsFlushed);
+
+    [Then(@"there (?:is|are) (\d+) data files? in storage")]
+    public void FilesInStorage(int n) => Assert.Equal(n, world.L.Files().Count(f => !f.EndsWith("-delete.parquet", StringComparison.Ordinal)));
+
+    [Then(@"""(.*)"" has (\d+) inlined rows?")]
+    public async Task InlinedRows(string name, int n)
+    {
+        var t = await LoadAsync(name);
+        long total = 0;
+        foreach (var r in await world.L.SqlAsync($"SELECT table_name FROM ducklake_inlined_data_tables WHERE table_id = {t.TableId}"))
+            total += (long)(await world.L.SqlAsync($"SELECT count(*) FROM {r[0]}"))[0][0]!;
+        Assert.Equal(n, total);
+    }
 
     [When(@"I clean up old files")]
     public async Task CleanUp() => world.CleanedUp = await world.C.CleanupOldFilesAsync();

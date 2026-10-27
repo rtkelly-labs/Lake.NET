@@ -28,6 +28,13 @@ public sealed record DuckLakeOptions
     /// latency-bound). Rows still come out in file order. 1 reads one file at a time.
     /// </summary>
     public int MaxParallelFileReads { get; init; } = 4;
+    /// <summary>
+    /// Data inlining (DuckDB's <c>data_inlining_row_limit</c>): an insert of at most this many rows is written into the
+    /// catalog database instead of a Parquet file, and a delete of at most this many rows from one data file is recorded
+    /// there instead of in a delete file. 0 (the default) turns it off; DuckDB's default is 10. A limit persisted in the
+    /// lake (<c>ducklake_metadata</c>, per table, schema or catalog) takes precedence, as in DuckDB.
+    /// </summary>
+    public int DataInliningRowLimit { get; init; }
 
     public const int DefaultRowGroupRows = 122_880;
 }

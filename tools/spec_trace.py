@@ -178,17 +178,13 @@ NOT_IMPLEMENTED = {
             "extra-statistics": "geometry and variant statistics not implemented",
             "geometry": "geometry type not implemented",
             "variant": "variant type not implemented",
-            "type-encoding-for-data-inlining": "inlined rows are read, never written",
             # DuckDB's own inlining settings and maintenance calls: extension behaviour, not format.
             **{
                 k: "DuckDB extension setting or function, not part of the format"
                 for k in (
-                    "configuring-data-inlining",
                     "global-default",
                     "per-connection-override",
                     "per-attach-override",
-                    "persistent-override",
-                    "flushing-inlined-data",
                     "return-values",
                     "sorted-flush",
                     "interaction-with-auto_compact",
