@@ -184,8 +184,14 @@ await using (var tx = lake.BeginTransaction())
 }
 var table = await lake.LoadTableAsync("main", "events");                 // latest, or snapshotId: n
 var rows = await lake.ReadAsync(table, Expr.GreaterThan("id", 0L));      // pruned by file statistics, filtered exactly
+await foreach (var e in lake.ReadAsync<Event>(table)) { }                 // record Event(long Id, List<object?>? Tags)
 await DuckLakeValidator.AssertValidAsync(lake);                         // the catalog's invariants hold
 ```
+
+`ReadAsync` returns each type's physical value (an `int` of days for a date, `long` microseconds for a timestamp, as
+the Iceberg data plane holds them); `ReadClrAsync` and `ReadAsync<T>` give natural CLR values (`DateOnly`,
+`DateTime`, `DateTimeOffset`, `decimal`, `ulong`, …; see `DuckLakeClr`), the latter bound to a record or class by
+column name (`customer_name` ↔ `CustomerName`). Inserts accept either form.
 
 DuckDB opens the same lake with `ATTACH '<store.DuckDbAttach()>' AS lake` (`ducklake:sqlite:lake/catalog.sqlite` or
 `ducklake:postgres:dbname=… host=…`). A longer walk-through (nested types, partitioning, UPDATE, schema evolution,
@@ -284,7 +290,7 @@ cannot be altered in it (define its columns at creation).
 
 | Suite | Needs | Command |
 |---|---|---|
-| `Iceberg.Net.DuckLake.Tests`: `EncodingTests`, `TypeTests`, `TemporalPropertyTests`, `AddFilesTests`, `ConflictRuleTests`, `CatalogTests`, `FormatVersionTests`, `ValidatorTests`, `ModelBasedTests`, and the inlining, maintenance, catalog object and performance tests | nothing (PostgreSQL variants skip without a server) | `dotnet test tests/Iceberg.Net.DuckLake.Tests --filter "FullyQualifiedName!~CrossEngine"` |
+| `Iceberg.Net.DuckLake.Tests`: `EncodingTests`, `TypeTests`, `TemporalPropertyTests`, `AddFilesTests`, `ClrTests`, `ConflictRuleTests`, `CatalogTests`, `FormatVersionTests`, `ValidatorTests`, `ModelBasedTests`, and the inlining, maintenance, catalog object and performance tests | nothing (PostgreSQL variants skip without a server) | `dotnet test tests/Iceberg.Net.DuckLake.Tests --filter "FullyQualifiedName!~CrossEngine"` |
 | `CrossEngineTests` | a Python with the interop `duckdb` group (1.0); DuckDB 2.0 (1.1) | `ICEBERG_DUCKDB_PYTHON=<python> dotnet test tests/Iceberg.Net.DuckLake.Tests` |
 | `Iceberg.Net.DuckLake.Behaviour.Tests` (BDD) | as above for the DuckDB scenarios (`CrossEngine.feature` and the 1.1 ones in `FormatVersions.feature`) | `ICEBERG_DUCKDB_PYTHON=<python> dotnet test tests/Iceberg.Net.DuckLake.Behaviour.Tests` |
 
@@ -300,8 +306,8 @@ dropped afterwards, and validates the lake when the test ends. Environment:
 | `ICEBERG_DUCKLAKE11_PYTHON` / `ICEBERG_DUCKLAKE11_REQUIRED=1` | The 1.1 oracle: a Python with `duckdb==2.0.0` (downloads the extension) |
 | `ICEBERG_PBT_RUNS` / `ICEBERG_PBT_SEED` | Model-based test: number of cases, and a replay seed printed by a failure |
 
-In CI (both databases, both oracles): all 543 tests and all 111 BDD scenarios pass, none skipped. Locally without
-the 1.1 oracle: 503 and 95 pass, the 40 and 16 DuckDB 2.0 cases skip. The projects are in the `cross-engine` CI suite, which starts the emulation stack's
+In CI (both databases, both oracles): all 562 tests and all 111 BDD scenarios pass, none skipped. Locally without
+the 1.1 oracle: 522 and 95 pass, the 40 and 16 DuckDB 2.0 cases skip. The projects are in the `cross-engine` CI suite, which starts the emulation stack's
 PostgreSQL, installs both oracles and requires all three. The oracle is `interop/ducklake_oracle.py`: it attaches the
 test's catalog (SQLite or PostgreSQL) in DuckDB and runs SQL against it.
 

@@ -575,6 +575,24 @@ public sealed partial class DuckLakeCatalog
         return rows;
     }
 
+    /// <summary>
+    /// The rows as <typeparamref name="T"/>, bound by column name (see <see cref="DuckLakeClr.Binder{T}"/>): a record
+    /// such as <c>record Order(long Id, string? Name, DateOnly Day)</c> for a table <c>(id, name, day)</c>.
+    /// </summary>
+    public async IAsyncEnumerable<T> ReadAsync<T>(DuckLakeTable table, Expression? filter = null, [EnumeratorCancellation] CancellationToken ct = default)
+    {
+        var bind = DuckLakeClr.Binder<T>(table.Columns);
+        await foreach (var r in ScanAsync(table, filter, ct)) yield return bind(r.Values);
+    }
+
+    /// <summary>As <see cref="ReadAsync"/>, with values as natural CLR types (see <see cref="DuckLakeClr"/>).</summary>
+    public async Task<List<object?[]>> ReadClrAsync(DuckLakeTable table, Expression? filter = null, CancellationToken ct = default)
+    {
+        var rows = new List<object?[]>();
+        await foreach (var r in ScanAsync(table, filter, ct)) rows.Add(DuckLakeClr.ToClr(table.Columns, r.Values));
+        return rows;
+    }
+
     /// <summary>As <see cref="ReadAsync"/>, with row IDs.</summary>
     public async IAsyncEnumerable<DuckLakeRow> ReadRowsAsync(DuckLakeTable table, Expression? filter = null, [EnumeratorCancellation] CancellationToken ct = default)
     {
