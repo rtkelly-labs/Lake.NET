@@ -110,6 +110,25 @@ three rows with nulls, empty and null collections and a struct with a null field
 | the fork | DuckDB 1.5.5 | the same rows; `ts >` and `u =` filters (pruned by statistics) return the right rows |
 | the fork | pyarrow 26 | the same rows; `timestamp[ns]` kept |
 
+The fork's suite carries the parquet-cpp half of this as tests (`ParquetCppInteropTest`, with ParquetSharp as a
+test-only dependency), plain and encrypted.
+
+### Performance against ParquetSharp
+
+2M rows of Iceberg-shaped physical columns (`long` id, `timestamp` as `long` microseconds, a string with 1,000
+distinct values, `double`), Zstd, one row group, best of 3 after a warm-up, Release:
+
+| Library | Write | Read | Size |
+|---|---|---|---|
+| Parquet.Net fork | 369–376 ms | 169–187 ms | 7.4 MB |
+| ParquetSharp 25.0.1.1 | 401–406 ms | 177–190 ms | 8.2 MB |
+
+Two things got it there. Parquet.Net dictionary-encodes a string column only when asked
+(`ParquetOptions.ColumnEncodingHints[path] = EncodingHint.Dictionary`); without it the string column alone took
+212–374 ms to read, so a backend should set the hint the way ParquetSharp's default dictionary encoding does. And Zstd
+decompression copied each page twice (fixed in `cbcc43d`): reads went from 399 to about 180 ms. Without
+compression the fork is ahead (write 173 vs 360 ms, read 81 vs 111 ms).
+
 Every gap in the table is now closed in the fork. The next step is a Parquet.Net backend for `ParquetFiles` behind its existing API, run against the Spec, DuckLake
 and cross-engine suites alongside ParquetSharp. The fork's GitHub Actions workflow is not enabled (dispatching it
 returns 404, the default for forks), so its suite has only been run locally; enabling Actions on the fork would let
