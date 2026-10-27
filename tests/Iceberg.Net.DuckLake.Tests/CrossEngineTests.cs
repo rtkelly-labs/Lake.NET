@@ -1,6 +1,5 @@
 using Iceberg.Net.Expressions;
 using Iceberg.Net.TestSupport;
-using Iceberg.Net.Types;
 
 namespace Iceberg.Net.DuckLake.Tests;
 
@@ -200,6 +199,8 @@ public sealed class CrossEngineTests : IDisposable
     [SkippableFact]
     [Spec("ducklake: SELECT")]
     [Spec("ducklake: Data Inlining")]
+    [Spec("ducklake: ducklake_inlined_data_tables")]
+    [Spec("ducklake: ALTER TABLE Support")]
     public async Task This_library_reads_what_DuckDB_writes_including_inlined_rows_deletes_and_alters()
     {
         DuckLakeOracle.Require();
@@ -273,5 +274,107 @@ public sealed class CrossEngineTests : IDisposable
         var catalog = await other.OpenAsync();
         Assert.Equal(["main"], await catalog.ListSchemasAsync());
         Assert.Equal(["x"], await catalog.ListTablesAsync("main"));
+    }
+
+    [SkippableFact]
+    [Spec("ducklake: Deletion Inlining")]
+    [Spec("ducklake: Insertion Inlining")]
+    [Spec("ducklake: Time Travel and Deletions")]
+    [Spec("ducklake: Compaction")]
+    public async Task Time_travel_agrees_with_DuckDB_across_its_inlining_flush_and_merge()
+    {
+        DuckLakeOracle.Require();
+        await DuckLakeOracle.RunAsync(_lake,
+            "CALL lake.set_option('data_inlining_row_limit', 10)",
+            "CREATE TABLE lake.t (a INT, s VARCHAR)",
+            "INSERT INTO lake.t SELECT i, 's' || i FROM range(100) r(i)",        // Parquet
+            "DELETE FROM lake.t WHERE a < 2",                                   // inlined deletion
+            "DELETE FROM lake.t WHERE a = 50",                                  // inlined deletion
+            "INSERT INTO lake.t VALUES (1000, 'x'), (1001, 'y')",               // inlined insert
+            "DELETE FROM lake.t WHERE a = 1000",                                // end_snapshot on an inlined row
+            "UPDATE lake.t SET s = 'upd' WHERE a = 60",
+            "CALL ducklake_flush_inlined_data('lake')",                         // partial delete and data files
+            "INSERT INTO lake.t SELECT i, 'more' FROM range(200, 220) r(i)",
+            "INSERT INTO lake.t SELECT i, 'more' FROM range(300, 320) r(i)",
+            "CALL ducklake_merge_adjacent_files('lake')");                     // merged file with per-row snapshots
+        // The state under test exists: partial data and delete files, and inlined deletions.
+        await using (var c = _lake.Connect())
+        {
+            await c.OpenAsync();
+            await using var cmd = c.CreateCommand();
+            cmd.CommandText = "SELECT (SELECT count(*) FROM ducklake_data_file WHERE partial_max IS NOT NULL), " +
+                              "(SELECT count(*) FROM ducklake_delete_file WHERE partial_max IS NOT NULL), " +
+                              "(SELECT count(*) FROM sqlite_master WHERE name = 'ducklake_inlined_delete_1')";
+            await using var r = await cmd.ExecuteReaderAsync();
+            await r.ReadAsync();
+            Assert.True(r.GetInt64(0) > 0 && r.GetInt64(1) > 0 && r.GetInt64(2) == 1, $"partial data {r.GetInt64(0)}, partial delete {r.GetInt64(1)}, inlined delete table {r.GetInt64(2)}");
+        }
+        var catalog = await _lake.OpenAsync();
+        var compared = 0;
+        foreach (var snapshot in await catalog.ListSnapshotsAsync())
+        {
+            if (snapshot.SnapshotId < 2) continue;
+            compared++;
+            var table = await catalog.LoadTableAsync("main", "t", snapshot.SnapshotId);
+            LakeJson.AssertSameRows(await DuckLakeOracle.RowsAsync(_lake, $"SELECT * FROM lake.t AT (VERSION => {snapshot.SnapshotId})"),
+                LakeJson.Rows(table.Columns, await catalog.ReadAsync(table)));
+        }
+        Assert.True(compared >= 10, $"{compared} snapshots compared");
+        // And this library's deletes on top of DuckDB's partial and inlined state agree with DuckDB afterwards.
+        await using (var tx = catalog.BeginTransaction())
+        {
+            await tx.DeleteAsync("main", "t", Expr.Or(Expr.LessThan("a", 5), Expr.GreaterThan("a", 310)));
+            await tx.CommitAsync();
+        }
+        var now = await catalog.LoadTableAsync("main", "t");
+        LakeJson.AssertSameRows(await DuckLakeOracle.RowsAsync(_lake, "SELECT * FROM lake.t"), LakeJson.Rows(now.Columns, await catalog.ReadAsync(now)));
+    }
+
+    [SkippableFact]
+    [Spec("ducklake: ducklake_partition_column")]
+    [Spec("ducklake: SELECT with File Pruning")]
+    public async Task This_library_reads_and_prunes_DuckDB_partitioned_tables()
+    {
+        DuckLakeOracle.Require();
+        await DuckLakeOracle.RunAsync(_lake,
+            "CALL lake.set_option('data_inlining_row_limit', 0)",
+            "CREATE TABLE lake.p (id INT, region VARCHAR, ts TIMESTAMP)",
+            "ALTER TABLE lake.p SET PARTITIONED BY (region, year(ts), month(ts))",
+            "INSERT INTO lake.p SELECT i, ['eu', 'us', NULL][i % 3 + 1], TIMESTAMP '2023-11-01' + INTERVAL (i) DAY FROM range(120) r(i)");
+        var catalog = await _lake.OpenAsync();
+        var table = await catalog.LoadTableAsync("main", "p");
+        Assert.Equal(["identity", "year", "month"], table.PartitionKeys.Select(k => k.Transform));
+        LakeJson.AssertSameRows(await DuckLakeOracle.RowsAsync(_lake, "SELECT * FROM lake.p"), LakeJson.Rows(table.Columns, await catalog.ReadAsync(table)));
+        var filter = Expr.Equal("region", "eu");
+        var plan = await catalog.PlanScanAsync(table, filter);
+        Assert.True(plan.PrunedFiles > plan.Files.Count, $"{plan.PrunedFiles} pruned, {plan.Files.Count} read");
+        LakeJson.AssertSameRows(await DuckLakeOracle.RowsAsync(_lake, "SELECT * FROM lake.p WHERE region = 'eu'"),
+            LakeJson.Rows(table.Columns, await catalog.ReadAsync(table, filter)));
+    }
+
+    [SkippableFact]
+    [Spec("ducklake: Conflict Resolution")]
+    [Spec("ducklake: Data")]
+    public async Task A_commit_retries_over_DuckDB_inserts_and_refuses_over_DuckDB_deletes()
+    {
+        DuckLakeOracle.Require();
+        var catalog = await _lake.CreateAsync();
+        await using (var tx = catalog.BeginTransaction())
+        {
+            await tx.CreateTableAsync("main", "t", [new("id", DuckLakeType.Int64)]);
+            await tx.InsertAsync("main", "t", [[1L], [2L]]);
+            await tx.CommitAsync();
+        }
+        var retried = catalog.BeginTransaction();
+        await retried.InsertAsync("main", "t", [[10L]]);
+        await DuckLakeOracle.RunAsync(_lake, "INSERT INTO lake.t VALUES (20)");
+        var snapshot = await retried.CommitAsync();
+        Assert.Equal(3, snapshot.SnapshotId);
+
+        var refused = catalog.BeginTransaction();
+        await refused.InsertAsync("main", "t", [[30L]]);
+        await DuckLakeOracle.RunAsync(_lake, "DELETE FROM lake.t WHERE id = 1");
+        await Assert.ThrowsAsync<DuckLakeConflictException>(() => refused.CommitAsync());
+        Assert.Equal(["[10]", "[20]", "[2]"], await DuckLakeOracle.RowsAsync(_lake, "SELECT id FROM lake.t"));
     }
 }
