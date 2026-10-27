@@ -15,13 +15,20 @@ public static class DuckLakePartitioning
     public static void Validate(DuckLakePrimitive type, string transform)
     {
         var temporal = type.Name is "date" or "timestamp" or "timestamptz" or "timestamp_ns";
+        if (BucketCount(transform) is { } n)
+        {
+            if (n <= 0) throw new ArgumentException($"{transform}: the bucket count must be positive");
+            if (DuckLakeTypes.ToIceberg(type).TypeId is TypeId.Boolean or TypeId.Float or TypeId.Double or TypeId.Unknown)
+                throw new ArgumentException($"Transform {transform} does not apply to {type}");
+            return;
+        }
         var ok = transform switch
         {
             "identity" => DuckLakeValues.Format(type, Sample(type)) is not null,
             "year" or "month" or "day" or "epoch_year" or "epoch_month" or "epoch_day" => temporal,
             "hour" or "epoch_hour" => temporal && type.Name != "date",
             _ => throw new NotSupportedException(
-                $"Partition transform '{transform}' is not supported (identity, year, month, day, hour, epoch_year, epoch_month, epoch_day, epoch_hour)"),
+                $"Partition transform '{transform}' is not supported (identity, bucket(N), year, month, day, hour, epoch_year, epoch_month, epoch_day, epoch_hour)"),
         };
         if (!ok) throw new ArgumentException($"Transform {transform} does not apply to {type}");
     }
@@ -37,6 +44,10 @@ public static class DuckLakePartitioning
     public static string? Apply(DuckLakePrimitive type, string transform, object? value)
     {
         if (value is null) return null;
+        // bucket(N): Iceberg's Murmur3 bucket, (murmur3_32(v) & INT_MAX) % N (spec ducklake_partition_column).
+        if (BucketCount(transform) is { } buckets)
+            return Convert.ToInt64(Iceberg.Net.Transforms.Transform.Bucket(buckets).Apply(DuckLakeTypes.ToIceberg(type), value),
+                System.Globalization.CultureInfo.InvariantCulture).ToString(System.Globalization.CultureInfo.InvariantCulture);
         if (transform == "identity") return DuckLakeValues.Format(type, value) ?? throw new NotSupportedException($"Cannot partition by identity on {type}");
         var utc = type.Name switch
         {
@@ -57,6 +68,13 @@ public static class DuckLakePartitioning
         };
         return field.ToString(System.Globalization.CultureInfo.InvariantCulture);
     }
+
+    /// <summary>N of a <c>bucket(N)</c> transform (as DuckDB stores it in <c>ducklake_partition_column.transform</c>), else null.</summary>
+    public static int? BucketCount(string transform) =>
+        transform.StartsWith("bucket(", StringComparison.Ordinal) && transform.EndsWith(')')
+            ? int.TryParse(transform["bucket(".Length..^1], System.Globalization.NumberStyles.Integer, System.Globalization.CultureInfo.InvariantCulture, out var n)
+                ? n : throw new FormatException($"Malformed partition transform '{transform}'")
+            : null;
 
     private static Iceberg.Net.Transforms.Transform EpochTransform(string name) => name switch
     {
@@ -91,7 +109,7 @@ public static class DuckLakePartitioning
     internal static string HivePath(IReadOnlyList<DuckLakeColumn> columns, IReadOnlyList<DuckLakePartitionKey> keys, IReadOnlyList<string?> values) =>
         string.Concat(keys.Select((k, i) =>
         {
-            var name = k.Transform == "identity" ? columns.First(c => c.Id == k.ColumnId).Name : k.Transform;
+            var name = k.Transform == "identity" ? columns.First(c => c.Id == k.ColumnId).Name : BucketCount(k.Transform) is not null ? "bucket" : k.Transform;
             return $"{Uri.EscapeDataString(name)}={(values[i] is { } v ? Uri.EscapeDataString(v) : HiveDefaultPartition)}/";
         }));
 }

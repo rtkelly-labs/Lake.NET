@@ -2,40 +2,41 @@
  "ref": "9d095946cd3f930774171e3d397116ad504931e8",
  "repository": "duckdb/ducklake-web",
  "documents": [
-  "docs/1.0/specification/introduction.md",
-  "docs/1.0/specification/queries.md",
-  "docs/1.0/specification/data_types.md",
-  "docs/1.0/specification/tables/overview.md",
-  "docs/1.0/specification/tables/ducklake_snapshot.md",
-  "docs/1.0/specification/tables/ducklake_snapshot_changes.md",
-  "docs/1.0/specification/tables/ducklake_schema.md",
-  "docs/1.0/specification/tables/ducklake_table.md",
-  "docs/1.0/specification/tables/ducklake_view.md",
-  "docs/1.0/specification/tables/ducklake_column.md",
-  "docs/1.0/specification/tables/ducklake_macro.md",
-  "docs/1.0/specification/tables/ducklake_macro_impl.md",
-  "docs/1.0/specification/tables/ducklake_macro_parameters.md",
-  "docs/1.0/specification/tables/ducklake_data_file.md",
-  "docs/1.0/specification/tables/ducklake_delete_file.md",
-  "docs/1.0/specification/tables/ducklake_files_scheduled_for_deletion.md",
-  "docs/1.0/specification/tables/ducklake_inlined_data_tables.md",
-  "docs/1.0/specification/tables/ducklake_column_mapping.md",
-  "docs/1.0/specification/tables/ducklake_name_mapping.md",
-  "docs/1.0/specification/tables/ducklake_table_stats.md",
-  "docs/1.0/specification/tables/ducklake_table_column_stats.md",
-  "docs/1.0/specification/tables/ducklake_file_column_stats.md",
-  "docs/1.0/specification/tables/ducklake_file_variant_stats.md",
-  "docs/1.0/specification/tables/ducklake_partition_info.md",
-  "docs/1.0/specification/tables/ducklake_partition_column.md",
-  "docs/1.0/specification/tables/ducklake_file_partition_value.md",
-  "docs/1.0/specification/tables/ducklake_sort_info.md",
-  "docs/1.0/specification/tables/ducklake_sort_expression.md",
-  "docs/1.0/specification/tables/ducklake_metadata.md",
-  "docs/1.0/specification/tables/ducklake_tag.md",
-  "docs/1.0/specification/tables/ducklake_column_tag.md",
-  "docs/1.0/specification/tables/ducklake_schema_versions.md",
-  "docs/1.0/duckdb/advanced_features/conflict_resolution.md",
-  "docs/1.0/duckdb/advanced_features/data_inlining.md"
+  "docs/stable/specification/introduction.md",
+  "docs/stable/specification/queries.md",
+  "docs/stable/specification/data_types.md",
+  "docs/stable/specification/tables/overview.md",
+  "docs/stable/specification/tables/ducklake_snapshot.md",
+  "docs/stable/specification/tables/ducklake_snapshot_changes.md",
+  "docs/stable/specification/tables/ducklake_schema.md",
+  "docs/stable/specification/tables/ducklake_table.md",
+  "docs/stable/specification/tables/ducklake_view.md",
+  "docs/stable/specification/tables/ducklake_column.md",
+  "docs/stable/specification/tables/ducklake_macro.md",
+  "docs/stable/specification/tables/ducklake_macro_impl.md",
+  "docs/stable/specification/tables/ducklake_macro_parameters.md",
+  "docs/stable/specification/tables/ducklake_data_file.md",
+  "docs/stable/specification/tables/ducklake_delete_file.md",
+  "docs/stable/specification/tables/ducklake_files_scheduled_for_deletion.md",
+  "docs/stable/specification/tables/ducklake_inlined_data_tables.md",
+  "docs/stable/specification/tables/ducklake_column_mapping.md",
+  "docs/stable/specification/tables/ducklake_name_mapping.md",
+  "docs/stable/specification/tables/ducklake_table_stats.md",
+  "docs/stable/specification/tables/ducklake_table_column_stats.md",
+  "docs/stable/specification/tables/ducklake_file_column_stats.md",
+  "docs/stable/specification/tables/ducklake_file_variant_stats.md",
+  "docs/stable/specification/tables/ducklake_partition_info.md",
+  "docs/stable/specification/tables/ducklake_partition_column.md",
+  "docs/stable/specification/tables/ducklake_file_partition_value.md",
+  "docs/stable/specification/tables/ducklake_sort_info.md",
+  "docs/stable/specification/tables/ducklake_sort_expression.md",
+  "docs/stable/specification/tables/ducklake_metadata.md",
+  "docs/stable/specification/tables/ducklake_tag.md",
+  "docs/stable/specification/tables/ducklake_column_tag.md",
+  "docs/stable/specification/tables/ducklake_schema_versions.md",
+  "docs/stable/specification/tables/ducklake_view_column_tag.md",
+  "docs/stable/duckdb/advanced_features/conflict_resolution.md",
+  "docs/stable/duckdb/advanced_features/data_inlining.md"
  ],
  "sections": {
   "ducklake": [
@@ -43,7 +44,7 @@
     "key": "ducklake:introduction",
     "title": "Introduction",
     "level": 1,
-    "sha": "d0114f9579dc12d7"
+    "sha": "fe005d26f9e70273"
    },
    {
     "key": "ducklake:building-blocks",
@@ -55,7 +56,7 @@
     "key": "ducklake:catalog-database",
     "title": "Catalog Database",
     "level": 3,
-    "sha": "e659474ff9860641"
+    "sha": "91c782e4b07aceb0"
    },
    {
     "key": "ducklake:data-storage",
@@ -79,43 +80,49 @@
     "key": "ducklake:get-current-snapshot",
     "title": "Get Current Snapshot",
     "level": 3,
-    "sha": "d7f8a2a1bca5add0"
+    "sha": "6f85f4b8ba6f0753"
    },
    {
     "key": "ducklake:list-schemas",
     "title": "List Schemas",
     "level": 3,
-    "sha": "a47507e5c9eb5d65"
+    "sha": "96c04f353645cb12"
    },
    {
     "key": "ducklake:list-tables",
     "title": "List Tables",
     "level": 3,
-    "sha": "000b8b3189564652"
+    "sha": "bc0151da881d23dc"
    },
    {
     "key": "ducklake:show-the-structure-of-a-table",
     "title": "Show the Structure of a Table",
     "level": 3,
-    "sha": "716891ee2a6f67dd"
+    "sha": "96bcec5ecf307566"
    },
    {
     "key": "ducklake:select",
     "title": "SELECT",
     "level": 3,
-    "sha": "dd1a815d22ce1fb8"
+    "sha": "fd727cf2a842b671"
    },
    {
     "key": "ducklake:note-on-paths",
     "title": "Note on Paths",
     "level": 4,
-    "sha": "c01f4d741d2995ef"
+    "sha": "9a349b3fd6631474"
+   },
+   {
+    "key": "ducklake:read-inlined-data",
+    "title": "Read Inlined Data",
+    "level": 3,
+    "sha": "dc57651992fbcf24"
    },
    {
     "key": "ducklake:select-with-file-pruning",
     "title": "SELECT with File Pruning",
     "level": 3,
-    "sha": "258f66cc5e92cf09"
+    "sha": "4e6763fa15336657"
    },
    {
     "key": "ducklake:writing-data",
@@ -127,43 +134,43 @@
     "key": "ducklake:snapshot-creation",
     "title": "Snapshot Creation",
     "level": 3,
-    "sha": "74484c92ec6f492a"
+    "sha": "91d69cb528e8226d"
    },
    {
     "key": "ducklake:create-schema",
     "title": "CREATE SCHEMA",
     "level": 3,
-    "sha": "8d34419af2771d0c"
+    "sha": "0e3ccf669f9d1972"
    },
    {
     "key": "ducklake:create-table",
     "title": "CREATE TABLE",
     "level": 3,
-    "sha": "65be2f6a6536e648"
+    "sha": "182eb5aa8507604c"
    },
    {
     "key": "ducklake:drop-table",
     "title": "DROP TABLE",
     "level": 3,
-    "sha": "a5f8ad3937dba145"
+    "sha": "c7257adde5f664e6"
    },
    {
     "key": "ducklake:drop-schema",
     "title": "DROP SCHEMA",
     "level": 3,
-    "sha": "02f3614d7b14ddae"
+    "sha": "00a7b63e45807715"
    },
    {
     "key": "ducklake:insert",
     "title": "INSERT",
     "level": 3,
-    "sha": "0f691e1459182392"
+    "sha": "cdf3236e6b8f8272"
    },
    {
     "key": "ducklake:delete",
     "title": "DELETE",
     "level": 3,
-    "sha": "f480c80fd1f560bd"
+    "sha": "b2f67dd65ab14e5c"
    },
    {
     "key": "ducklake:update",
@@ -181,19 +188,19 @@
     "key": "ducklake:primitive-types",
     "title": "Primitive Types",
     "level": 2,
-    "sha": "8742040fab5065bf"
+    "sha": "ba97949e612d190e"
    },
    {
     "key": "ducklake:nested-types",
     "title": "Nested Types",
     "level": 2,
-    "sha": "9fe1bc7ec58a718e"
+    "sha": "0d24a413d3ac1d41"
    },
    {
     "key": "ducklake:semi-structured-types",
     "title": "Semi-Structured Types",
     "level": 2,
-    "sha": "3d50e6d512694dcd"
+    "sha": "dbd61bef5caae98d"
    },
    {
     "key": "ducklake:geometry-types",
@@ -205,7 +212,7 @@
     "key": "ducklake:type-encoding-for-statistics",
     "title": "Type Encoding for Statistics",
     "level": 2,
-    "sha": "02ca4e154093d88d"
+    "sha": "c7b982bb7d8b96bd"
    },
    {
     "key": "ducklake:nested-types-2",
@@ -217,7 +224,7 @@
     "key": "ducklake:extra-statistics",
     "title": "Extra Statistics",
     "level": 3,
-    "sha": "b3b8bdf36c3824c6"
+    "sha": "dc918409e1ae9dac"
    },
    {
     "key": "ducklake:geometry",
@@ -229,187 +236,187 @@
     "key": "ducklake:variant",
     "title": "Variant",
     "level": 4,
-    "sha": "8c5c896aa7602419"
+    "sha": "0da7d7c25f16cc96"
    },
    {
     "key": "ducklake:type-encoding-for-data-inlining",
     "title": "Type Encoding for Data Inlining",
     "level": 2,
-    "sha": "9b85700b13347095"
+    "sha": "a66af39a196ddaa2"
    },
    {
     "key": "ducklake:postgresql-catalog",
     "title": "PostgreSQL Catalog",
     "level": 3,
-    "sha": "d8a1ce76f99c3ed4"
+    "sha": "674289e3b36c25d9"
    },
    {
     "key": "ducklake:sqlite-catalog",
     "title": "SQLite Catalog",
     "level": 3,
-    "sha": "dcfe899d817af35d"
+    "sha": "d94d4c544c99c7d6"
    },
    {
     "key": "ducklake:tables",
     "title": "Tables",
     "level": 1,
-    "sha": "cc27a25cb038bb92"
+    "sha": "81f1fa7fbb1e8f52"
    },
    {
     "key": "ducklake:snapshots",
     "title": "Snapshots",
     "level": 2,
-    "sha": "ac98e05801438313"
+    "sha": "1dc70dbf0f37901b"
    },
    {
     "key": "ducklake:ducklake-schema",
     "title": "DuckLake Schema",
     "level": 2,
-    "sha": "0ef861f3f607aea1"
+    "sha": "d03f96ae1b560102"
    },
    {
     "key": "ducklake:macros",
     "title": "Macros",
     "level": 2,
-    "sha": "a09095057bfba6f8"
+    "sha": "396e689f248a3255"
    },
    {
     "key": "ducklake:data-files-and-tables",
     "title": "Data Files and Tables",
     "level": 2,
-    "sha": "fa52738e6da45079"
+    "sha": "5f4f45aa1c4c90b5"
    },
    {
     "key": "ducklake:data-file-mapping",
     "title": "Data File Mapping",
     "level": 2,
-    "sha": "57ec17b6aaed5d8b"
+    "sha": "7a568b102dcf0b69"
    },
    {
     "key": "ducklake:statistics",
     "title": "Statistics",
     "level": 2,
-    "sha": "71a5b46f0ba344e6"
+    "sha": "79a2f39bf1277a6d"
    },
    {
     "key": "ducklake:partitioning-information",
     "title": "Partitioning Information",
     "level": 2,
-    "sha": "0623c2d164d37844"
+    "sha": "8e75449598ad7ef8"
    },
    {
     "key": "ducklake:sort-information",
     "title": "Sort Information",
     "level": 2,
-    "sha": "38b9fbde0fdea9ad"
+    "sha": "d9c568d7a3ec7ede"
    },
    {
     "key": "ducklake:auxiliary-tables",
     "title": "Auxiliary Tables",
     "level": 2,
-    "sha": "b91dbf68e9ef7930"
+    "sha": "d4b9cf87af989b08"
    },
    {
     "key": "ducklake:full-schema-creation-script",
     "title": "Full Schema Creation Script",
     "level": 2,
-    "sha": "00bb922981e93e6d"
+    "sha": "65148c5cc8b5a241"
    },
    {
     "key": "ducklake:ducklake_snapshot",
     "title": "ducklake_snapshot",
     "level": 1,
-    "sha": "d92688a51ef64776"
+    "sha": "571c8ce816e4566c"
    },
    {
     "key": "ducklake:ducklake_snapshot_changes",
     "title": "ducklake_snapshot_changes",
     "level": 1,
-    "sha": "0a196bd936767ee7"
+    "sha": "54a9a82ba7965ae1"
    },
    {
     "key": "ducklake:ducklake_schema",
     "title": "ducklake_schema",
     "level": 1,
-    "sha": "bc3c4fbc18ace650"
+    "sha": "8632b86482be8305"
    },
    {
     "key": "ducklake:ducklake_table",
     "title": "ducklake_table",
     "level": 1,
-    "sha": "c018271312bd47f0"
+    "sha": "f5f29ecb012d671f"
    },
    {
     "key": "ducklake:ducklake_view",
     "title": "ducklake_view",
     "level": 1,
-    "sha": "8994a78eb26d6724"
+    "sha": "558e2afb04dfe03f"
    },
    {
     "key": "ducklake:ducklake_column",
     "title": "ducklake_column",
     "level": 1,
-    "sha": "f837be05a997c9a8"
+    "sha": "db956959f6bdf19f"
    },
    {
     "key": "ducklake:ducklake_macro",
     "title": "ducklake_macro",
     "level": 1,
-    "sha": "17054cc26cdcab33"
+    "sha": "f3106f3b7edf9f21"
    },
    {
     "key": "ducklake:ducklake_macro_impl",
     "title": "ducklake_macro_impl",
     "level": 1,
-    "sha": "f6a6dec8ceeee7d6"
+    "sha": "c732303a299c0f12"
    },
    {
     "key": "ducklake:ducklake_macro_parameters",
     "title": "ducklake_macro_parameters",
     "level": 1,
-    "sha": "69d9df5c88f67222"
+    "sha": "70bdc845bd239cc4"
    },
    {
     "key": "ducklake:ducklake_data_file",
     "title": "ducklake_data_file",
     "level": 1,
-    "sha": "7aa7ec48b470d469"
+    "sha": "6d1f84b2c4cb0e2b"
    },
    {
     "key": "ducklake:ducklake_delete_file",
     "title": "ducklake_delete_file",
     "level": 1,
-    "sha": "6c75899b02b80a76"
+    "sha": "b6ba998f10ec6fe9"
    },
    {
     "key": "ducklake:ducklake_files_scheduled_for_deletion",
     "title": "ducklake_files_scheduled_for_deletion",
     "level": 1,
-    "sha": "0fe35b392001d239"
+    "sha": "72323baa37a23013"
    },
    {
     "key": "ducklake:ducklake_inlined_data_tables",
     "title": "ducklake_inlined_data_tables",
     "level": 1,
-    "sha": "ceaaac49a66f1148"
+    "sha": "92ec8de618039e7d"
    },
    {
     "key": "ducklake:ducklake_column_mapping",
     "title": "ducklake_column_mapping",
     "level": 1,
-    "sha": "f5a0472cc23a0fdf"
+    "sha": "652960ef1540671f"
    },
    {
     "key": "ducklake:ducklake_name_mapping",
     "title": "ducklake_name_mapping",
     "level": 1,
-    "sha": "bd83455e8bd782f0"
+    "sha": "e1744c697a855ad8"
    },
    {
     "key": "ducklake:ducklake_table_stats",
     "title": "ducklake_table_stats",
     "level": 1,
-    "sha": "afb19f5a78bc9038"
+    "sha": "20ab45b3152c966b"
    },
    {
     "key": "ducklake:ducklake_table_column_stats",
@@ -421,85 +428,91 @@
     "key": "ducklake:snapshot-validity",
     "title": "Snapshot Validity",
     "level": 2,
-    "sha": "851c5c9cda4b6e79"
+    "sha": "9b0a501cd7400c41"
    },
    {
     "key": "ducklake:columns",
     "title": "Columns",
     "level": 2,
-    "sha": "692b2b712e7e00e3"
+    "sha": "a4ca57e87a834704"
    },
    {
     "key": "ducklake:ducklake_file_column_stats",
     "title": "ducklake_file_column_stats",
     "level": 1,
-    "sha": "0d9936d8c69ee16d"
+    "sha": "03a8d437be04bb88"
    },
    {
     "key": "ducklake:ducklake_file_variant_stats",
     "title": "ducklake_file_variant_stats",
     "level": 1,
-    "sha": "9953d299a308463a"
+    "sha": "85cf1b5830ae4a70"
    },
    {
     "key": "ducklake:ducklake_partition_info",
     "title": "ducklake_partition_info",
     "level": 1,
-    "sha": "1149b8adf145af39"
+    "sha": "e8c01af53b2f0739"
    },
    {
     "key": "ducklake:ducklake_partition_column",
     "title": "ducklake_partition_column",
     "level": 1,
-    "sha": "0f7f7bbc637e4236"
+    "sha": "ed6abd52ed3c27a4"
    },
    {
     "key": "ducklake:ducklake_file_partition_value",
     "title": "ducklake_file_partition_value",
     "level": 1,
-    "sha": "6a0b496262e6ff84"
+    "sha": "b55b2b3070400ac6"
    },
    {
     "key": "ducklake:ducklake_sort_info",
     "title": "ducklake_sort_info",
     "level": 1,
-    "sha": "e83397693956c56e"
+    "sha": "c5189960ca784218"
    },
    {
     "key": "ducklake:ducklake_sort_expression",
     "title": "ducklake_sort_expression",
     "level": 1,
-    "sha": "6cd48bd36a61c47c"
+    "sha": "6ddb4b59455bea39"
    },
    {
     "key": "ducklake:ducklake_metadata",
     "title": "ducklake_metadata",
     "level": 1,
-    "sha": "ea622df43289a0c2"
+    "sha": "9951a2a2df0173c6"
    },
    {
     "key": "ducklake:ducklake_tag",
     "title": "ducklake_tag",
     "level": 1,
-    "sha": "445c37aaa20d00ed"
+    "sha": "bcaf3ee8a8466fe6"
    },
    {
     "key": "ducklake:ducklake_column_tag",
     "title": "ducklake_column_tag",
     "level": 1,
-    "sha": "130249130b22dd6e"
+    "sha": "1c0b9909e5aea1d9"
    },
    {
     "key": "ducklake:ducklake_schema_versions",
     "title": "ducklake_schema_versions",
     "level": 1,
-    "sha": "3dbf37708e7c7881"
+    "sha": "6a96855030641af6"
+   },
+   {
+    "key": "ducklake:ducklake_view_column_tag",
+    "title": "ducklake_view_column_tag",
+    "level": 1,
+    "sha": "fab188ed6b8bd18a"
    },
    {
     "key": "ducklake:conflict-resolution",
     "title": "Conflict Resolution",
     "level": 1,
-    "sha": "5ae54dc2de414dde"
+    "sha": "d7661f25c64ab5b5"
    },
    {
     "key": "ducklake:logical-conflicts",
@@ -511,37 +524,37 @@
     "key": "ducklake:schemas",
     "title": "Schemas",
     "level": 3,
-    "sha": "0150db6f487c8214"
+    "sha": "b929a3db56eba4a4"
    },
    {
     "key": "ducklake:tables-views",
     "title": "Tables / Views",
     "level": 3,
-    "sha": "6831e366ae5be676"
+    "sha": "713527b31fad425d"
    },
    {
     "key": "ducklake:data",
     "title": "Data",
     "level": 3,
-    "sha": "f62c6a19fbe6d41c"
+    "sha": "52e970600269f058"
    },
    {
     "key": "ducklake:compaction",
     "title": "Compaction",
     "level": 3,
-    "sha": "702b442112a1203d"
+    "sha": "c809a3c1c0c985c2"
    },
    {
     "key": "ducklake:data-inlining",
     "title": "Data Inlining",
     "level": 1,
-    "sha": "7e1edaecc8be171c"
+    "sha": "0404dee967884ea4"
    },
    {
     "key": "ducklake:configuring-data-inlining",
     "title": "Configuring Data Inlining",
     "level": 2,
-    "sha": "db5d569662eeb9a7"
+    "sha": "b547f3d0fac2c870"
    },
    {
     "key": "ducklake:global-default",
@@ -550,28 +563,28 @@
     "sha": "88e643aaaec24d35"
    },
    {
-    "key": "ducklake:per-connection-override",
-    "title": "Per-Connection Override",
+    "key": "ducklake:per-attach-override",
+    "title": "Per-Attach Override",
     "level": 3,
-    "sha": "f73761e35b3e67f5"
+    "sha": "418e998d575affcb"
    },
    {
     "key": "ducklake:persistent-override",
     "title": "Persistent Override",
     "level": 3,
-    "sha": "bf8af17f60c22e4e"
+    "sha": "5fc26e01892e5bc7"
    },
    {
     "key": "ducklake:insertion-inlining",
     "title": "Insertion Inlining",
     "level": 2,
-    "sha": "a692ba9cc941e794"
+    "sha": "7020cc24c47d1020"
    },
    {
     "key": "ducklake:deletion-inlining",
     "title": "Deletion Inlining",
     "level": 2,
-    "sha": "ea4f7f4e1443365b"
+    "sha": "e21993b24c95304d"
    },
    {
     "key": "ducklake:alter-table-support",
@@ -583,37 +596,37 @@
     "key": "ducklake:metadata-catalog-support",
     "title": "Metadata Catalog Support",
     "level": 2,
-    "sha": "6cc2d21c12b6db40"
+    "sha": "2f0bead3f2893a75"
    },
    {
     "key": "ducklake:flushing-inlined-data",
     "title": "Flushing Inlined Data",
     "level": 2,
-    "sha": "211e1ebdac3f6fa7"
+    "sha": "57eb371838b502e9"
    },
    {
     "key": "ducklake:return-values",
     "title": "Return Values",
     "level": 3,
-    "sha": "cd5fd246ca7ce0a5"
+    "sha": "4e0e22e52e6629be"
    },
    {
     "key": "ducklake:time-travel-and-deletions",
     "title": "Time Travel and Deletions",
     "level": 3,
-    "sha": "d1ce84c6b48179d0"
+    "sha": "0a8160bbf90da204"
    },
    {
     "key": "ducklake:sorted-flush",
     "title": "Sorted Flush",
     "level": 3,
-    "sha": "98574adfebe5eb19"
+    "sha": "82a19fae42f2fb65"
    },
    {
     "key": "ducklake:interaction-with-auto_compact",
     "title": "Interaction with auto_compact",
     "level": 3,
-    "sha": "40a7bfebda41f92f"
+    "sha": "a541df1c58a8ee12"
    }
   ]
  }
