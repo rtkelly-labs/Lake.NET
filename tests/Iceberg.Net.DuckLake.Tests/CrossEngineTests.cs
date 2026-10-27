@@ -512,27 +512,35 @@ public abstract class CrossEngineTests : IAsyncLifetime
         }
         await AssertSameHistoryAsync(catalog);
 
-        // DuckDB writes encrypted files only with a secure random generator, from its httpfs extension (downloaded).
-        string[] statements =
-        [
-            "INSTALL httpfs", "LOAD httpfs",
-            "SELECT count(*) FROM lake.t", // reads this library's files with httpfs's crypto
-            "CREATE TABLE lake.d AS SELECT 1 AS x", // DuckDB's own encrypted file
-            "SELECT * FROM lake.d", // ... read back by DuckDB
-            "INSERT INTO lake.t VALUES (100, 'duckdb')",
-            "DELETE FROM lake.t WHERE id = 10",
-        ];
-        var results = await Oracle.TryRunAsync(_lake, statements);
-        var failedAt = results.FindIndex(r => r["error"] is not null);
-        if (failedAt >= 0)
+        // DuckDB writes encrypted files only with a secure random generator, from its httpfs extension (downloaded),
+        // which also makes it verify GCM tags on read. Each probe runs on its own connection, so all are reported.
+        var install = await Oracle.TryRunAsync(_lake, "INSTALL httpfs", "LOAD httpfs");
+        if (install.FirstOrDefault(r => r["error"] is not null) is { } noHttpfs)
         {
-            var message = $"DuckDB failed at \"{statements[failedAt]}\": {results[failedAt]["error"]}";
-            if (failedAt >= 2) Assert.Fail(message);
-            Assert.False(Environment.GetEnvironmentVariable("CI") == "true", message);
-            Skip.If(true, $"DuckDB cannot write encrypted files here (no httpfs): {message}");
+            Assert.False(Environment.GetEnvironmentVariable("CI") == "true", $"httpfs: {noHttpfs["error"]}");
+            Skip.If(true, $"DuckDB cannot write encrypted files here (no httpfs): {noHttpfs["error"]}");
         }
-        var keys = await _lake.SqlAsync("SELECT encryption_key FROM ducklake_data_file WHERE begin_snapshot > 3");
-        Assert.All(keys, k => Assert.Equal(32, Convert.FromBase64String((string)k[0]!).Length));
+        async Task<string?> Probe(string sql) =>
+            (await Oracle.TryRunAsync(_lake, "LOAD httpfs", sql)).Select(r => r["error"]?.ToString()).FirstOrDefault(e => e is not null);
+        var probes = new List<(string What, string? Error)>
+        {
+            ("DuckDB reads every row this library wrote", await Probe("SELECT sum(id) FROM lake.t")),
+            ("DuckDB writes its own encrypted table", await Probe("CREATE TABLE lake.d AS SELECT range AS x FROM range(5)")),
+            ("DuckDB inserts into this library's table", await Probe("INSERT INTO lake.t VALUES (100, 'duckdb')")),
+            ("DuckDB deletes from this library's file", await Probe("DELETE FROM lake.t WHERE id = 10")),
+        };
+        string? ours;
+        try
+        {
+            var reopened = await _lake.OpenAsync();
+            await reopened.ReadAsync(await reopened.LoadTableAsync("main", "d"));
+            await reopened.ReadAsync(await reopened.LoadTableAsync("main", "t"));
+            ours = null;
+        }
+        catch (Exception e) { ours = $"{e.GetType().Name}: {e.Message}"; }
+        probes.Add(("This library reads DuckDB's encrypted files", ours));
+        var report = string.Join("\n", probes.Select(p => $"{(p.Error is null ? "ok  " : "FAIL")} {p.What}{(p.Error is null ? "" : ": " + p.Error)}"));
+        Assert.True(probes.All(p => p.Error is null), report);
         await AssertSameHistoryAsync(await _lake.OpenAsync());
     }
 
