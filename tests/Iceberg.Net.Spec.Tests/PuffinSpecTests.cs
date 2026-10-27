@@ -127,7 +127,7 @@ public class PuffinSpecTests
     {
         var theta = new ThetaSketch();
         theta.Update("x"u8);
-        var written = PuffinFile.Write(
+        var written = IcebergPuffinFile.Write(
         [
             new PuffinBlob(PuffinBlobTypes.ThetaSketchV1, [1], theta.Serialize(), 42, 7, "zstd", new Dictionary<string, string> { ["ndv"] = "1" }),
             DeletionVector.ToBlob("s3://b/f.parquet", PositionsOf(1, 2, 3)),
@@ -139,7 +139,7 @@ public class PuffinSpecTests
         Assert.Equal("zstd", read.Blobs[0].CompressionCodec);
         Assert.Equal([1L, 2L, 3L], DeletionVector.Decode(read.Payload(read.Blobs[1])).Positions());
         Assert.Equal(-1, read.Blobs[1].SnapshotId);
-        Assert.Throws<ArgumentException>(() => PuffinFile.Write([new PuffinBlob(PuffinBlobTypes.DeletionVectorV1, [], new byte[1], CompressionCodec: "zstd")]));
+        Assert.Throws<ArgumentException>(() => IcebergPuffinFile.Write([new PuffinBlob(PuffinBlobTypes.DeletionVectorV1, [], new byte[1], CompressionCodec: "zstd")]));
     }
 
     private static RoaringPositionBitmap PositionsOf(params long[] p)

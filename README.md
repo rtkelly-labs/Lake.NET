@@ -29,7 +29,7 @@ No production-grade .NET Iceberg library exists today (see [docs/ports-and-engin
 | REST catalog server | `Iceberg.Net.RestServer`: an ASP.NET Core Iceberg REST catalog over a SQL or in-memory store, with bearer/OAuth auth and multi-table transactions; PyIceberg and Spark use it ([docs/rest-server.md](docs/rest-server.md)) |
 | Ecosystem | Traces and metrics (`Iceberg.Net` ActivitySource/Meter, [docs/telemetry.md](docs/telemetry.md)); Spark procedure SQL with EMR Serverless and Glue job runners, and Athena SQL with a query runner ([docs/spark-and-athena.md](docs/spark-and-athena.md)) |
 | Delete mechanisms | Copy-on-write, v2 position delete files, v3 deletion vectors (one per data file, merged), equality deletes; v2→v3 converter |
-| Puffin | Container, `deletion-vector-v1` (Roaring64), `apache-datasketches-theta-v1`; NDV statistics files |
+| Puffin | Generic container; Iceberg shapes for `deletion-vector-v1` (Roaring64) and `apache-datasketches-theta-v1`; NDV statistics files |
 | Foreign Parquet | `ParquetImport` adopts files from other writers (e.g. Parquet.SourceGenerator) via name mapping and type validation |
 | Catalogs | In-memory, AWS Glue (VersionId optimistic lock), JDBC/SQL (Java/PyIceberg layout, views in V1), Iceberg REST (OAuth2/bearer, SigV4 for Glue/S3 Tables, config merge, vended credentials, idempotent retries, views, multi-table transactions) |
 | Storage | Local and S3 FileIO (conditional create via `If-None-Match`) |
@@ -47,7 +47,7 @@ Iceberg.NET/
 │   ├── Iceberg.Net.Avro      Avro container codec + manifest/manifest-list encoding
 │   ├── Iceberg.Net.IO        FileIO: local, S3
 │   ├── Iceberg.Net.Catalog   ICatalog, metastore commit protocol, in-memory, Glue, REST
-│   ├── Iceberg.Net.Puffin    Puffin container, deletion vectors (Roaring64), Theta sketches
+│   ├── Iceberg.Net.Puffin    Puffin container (Format/) and Iceberg blob shapes (Blobs/)
 │   ├── Iceberg.Net.Data      Parquet files, scans, deletes, snapshot producers, import, statistics
 │   ├── Iceberg.Net.Arrow     Arrow record batches in and out
 │   ├── Iceberg.Net.Linq      typed mapping, LINQ provider, typed writes

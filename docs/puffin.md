@@ -10,11 +10,24 @@ Puffin (`format/puffin-spec.md`) is Iceberg's container for blobs that don't fit
 `Iceberg.Net.Puffin` implements the container and both blobs from scratch (no native dependencies), and
 `Iceberg.Net.Data` uses them for merge-on-read deletes and table statistics.
 
+## Layering
+
+The assembly uses one namespace, `Iceberg.Net.Puffin`, split by folder:
+
+| Folder | What belongs here |
+|---|---|
+| `Format/` | The generic container: `PuffinFile`, `PuffinBlob`, `PuffinBlobMetadata`, and `PuffinBlobType` rules. It treats blob types as opaque and has no built-in knowledge of Iceberg's blob types. |
+| `Blobs/` | Iceberg's shapes: `PuffinBlobTypes`, `DeletionVector`, `RoaringPositionBitmap`, `ThetaSketch`, `MumblingBitmap`/`MumblingPfor`, and `IcebergPuffinFile.Write`, which applies Iceberg's blob-type rules (for example, `deletion-vector-v1` must be uncompressed). |
+
+The folder split is a source boundary, not a namespace one. A format that defines a blob type supplies its rules to
+`PuffinFile.Write(..., blobTypes: ...)`; unknown types are unrestricted. Reading is always the generic
+`PuffinFile.Read`, because a reader must accept blobs of any type.
+
 ## What it does
 
 | Capability | API | Notes |
 |---|---|---|
-| Read/write Puffin files | `PuffinFile.Write` / `PuffinFile.Read` | blobs uncompressed or `zstd`; LZ4-compressed **footers** are rejected on read (none of the engines we read write them by default) |
+| Read/write Puffin files | `PuffinFile.Write` / `PuffinFile.Read`; `IcebergPuffinFile.Write` | generic container; blobs uncompressed or `zstd`; LZ4-compressed **footers** are rejected on read (none of the engines we read write them by default) |
 | Deletion vectors | `DeletionVector.Encode/Decode`, `RoaringPositionBitmap` | Roaring64 portable format; array + bitmap containers written, run containers also read; CRC-32 verified |
 | Mumbling bitmaps (v4 manifest deletion vectors) | `MumblingBitmap`, `MumblingPfor` | `format/mumbling-spec.md` v1: positions 0–2,097,151, sparse/dense 256-bit containers, PFOR-encoded descriptors; not yet used (no v4 manifests) |
 | Theta sketches | `ThetaSketch` | DataSketches compact/ordered serial v3, seed 9001, MurmurHash3_x64_128 over Iceberg single-value bytes |

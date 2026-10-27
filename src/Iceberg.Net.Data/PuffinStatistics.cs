@@ -40,7 +40,7 @@ public static class PuffinStatistics
             }
         }
 
-        var written = PuffinFile.Write(selected.Select((f, i) => new PuffinBlob(
+        var written = IcebergPuffinFile.Write(selected.Select((f, i) => new PuffinBlob(
             PuffinBlobTypes.ThetaSketchV1,
             [f.Id],
             sketches[i].Serialize(),

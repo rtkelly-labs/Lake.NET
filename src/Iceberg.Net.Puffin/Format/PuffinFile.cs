@@ -15,7 +15,7 @@ public sealed record PuffinBlobMetadata(
     string? CompressionCodec = null,
     IReadOnlyDictionary<string, string>? Properties = null);
 
-/// <summary>A blob to write. Snapshot ID and sequence number are -1 for deletion vectors (assigned by inheritance).</summary>
+/// <summary>A blob to write. Snapshot ID and sequence number are -1 when the blob inherits them from its entry.</summary>
 public sealed record PuffinBlob(
     string Type,
     IReadOnlyList<int> Fields,
@@ -25,10 +25,18 @@ public sealed record PuffinBlob(
     string? CompressionCodec = null,
     IReadOnlyDictionary<string, string>? Properties = null);
 
-public static class PuffinBlobTypes
+/// <summary>
+/// Rules for one blob type. The Puffin container is deliberately unaware of the blob types Iceberg (or another
+/// format) defines; a caller supplies these rules when writing a container with <see cref="PuffinFile.Write"/>.
+/// </summary>
+public sealed record PuffinBlobType(string Type, bool Compressible = true)
 {
-    public const string DeletionVectorV1 = "deletion-vector-v1";
-    public const string ThetaSketchV1 = "apache-datasketches-theta-v1";
+    public void Validate(PuffinBlob blob)
+    {
+        if (blob.Type != Type) throw new ArgumentException($"Blob type '{blob.Type}' does not match rule '{Type}'");
+        if (!Compressible && blob.CompressionCodec is not null)
+            throw new ArgumentException($"'{Type}' blobs must not be compressed");
+    }
 }
 
 /// <summary>
@@ -43,15 +51,24 @@ public static class PuffinFile
 
     public sealed record Written(byte[] Bytes, IReadOnlyList<PuffinBlobMetadata> Blobs, long FooterSize);
 
-    public static Written Write(IEnumerable<PuffinBlob> blobs, IReadOnlyDictionary<string, string>? properties = null)
+    /// <param name="blobs">The blobs to write, in file order.</param>
+    /// <param name="properties">File-level properties; defaults to <c>created-by: iceberg-net</c>.</param>
+    /// <param name="blobTypes">
+    /// Rules for the blob types the caller defines (unknown types are unrestricted). Formats that define blob types
+    /// pass their rules here; the container itself does not know what a type means.
+    /// </param>
+    public static Written Write(
+        IEnumerable<PuffinBlob> blobs,
+        IReadOnlyDictionary<string, string>? properties = null,
+        IReadOnlyCollection<PuffinBlobType>? blobTypes = null)
     {
         using var ms = new MemoryStream();
         ms.Write(Magic);
+        var rules = blobTypes?.ToDictionary(t => t.Type, StringComparer.Ordinal);
         var metadata = new List<PuffinBlobMetadata>();
         foreach (var blob in blobs)
         {
-            if (blob.Type == PuffinBlobTypes.DeletionVectorV1 && blob.CompressionCodec is not null)
-                throw new ArgumentException("deletion-vector-v1 blobs must not be compressed");
+            if (rules?.GetValueOrDefault(blob.Type) is { } rule) rule.Validate(blob);
             var stored = Compress(blob.CompressionCodec, blob.Payload.Span);
             var offset = ms.Position;
             ms.Write(stored);

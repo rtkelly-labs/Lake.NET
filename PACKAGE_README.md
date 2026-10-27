@@ -13,7 +13,7 @@ tables from C#, through AWS Glue, any Iceberg REST catalog, a JDBC/SQL catalog o
 |---|---|
 | `Iceberg.Net.Core` | The table spec model: types, schemas, partitioning, snapshots, metadata JSON (also `netstandard2.0`) |
 | `Iceberg.Net.Avro` | Manifest and manifest-list encoding, v1–v3 (also `netstandard2.0`) |
-| `Iceberg.Net.Puffin` | Puffin files: deletion vectors and theta sketches |
+| `Iceberg.Net.Puffin` | Puffin files: the generic container, plus Iceberg's deletion vectors and theta sketches |
 | `Iceberg.Net.IO` | File IO: local and S3 |
 | `Iceberg.Net.Catalog` | Catalogs: in-memory, AWS Glue, Iceberg REST, JDBC/SQL |
 | `Iceberg.Net.Data` | Table operations: scans, appends, upserts, deletes, UPDATE/MERGE, maintenance |

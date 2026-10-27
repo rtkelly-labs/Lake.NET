@@ -9,8 +9,8 @@ What a complete Iceberg implementation needs beneath the spec layer, what .NET o
 | **Parquet** | data files, v4 manifests | ParquetSharp 25 (Arrow C++), Parquet.Net 6 (managed) | **ParquetSharp** for the engine; Parquet.SourceGenerator (Parquet.Net) as a typed producer path via `ParquetImport` ([parquet-sourcegenerator.md](parquet-sourcegenerator.md)) |
 | **ORC** | data files (optional) | none mature (ApacheOrcDotNet 2020, EngineeredWood.Orc experimental) | Out of scope; refuse ORC files explicitly |
 | **Compression** | Avro deflate; Parquet zstd/snappy/gzip; Puffin lz4/zstd | BCL `DeflateStream`/`GZipStream`; ZstdSharp.Port; Snappier; K4os LZ4 | BCL for Avro deflate (Iceberg default); Parquet codecs come with ParquetSharp; ZstdSharp.Port for Puffin blobs (LZ4 not needed yet) |
-| **Roaring bitmaps** | v3 deletion vectors, position-delete indexes | Roaring.Net (native CRoaring), Equativ.RoaringBitmaps (managed, young) | **Built** — managed Roaring64 portable codec in `Iceberg.Net.Puffin`, verified against pyroaring/CRoaring |
-| **Puffin** | DVs, table statistics | none | **Built** ([puffin.md](puffin.md)) |
+| **Roaring bitmaps** | v3 deletion vectors, position-delete indexes | Roaring.Net (native CRoaring), Equativ.RoaringBitmaps (managed, young) | **Built** — managed Roaring64 portable codec in `Iceberg.Net.Puffin` (`Blobs/`), verified against pyroaring/CRoaring |
+| **Puffin** | DVs, table statistics | none | **Built** — generic container in `Iceberg.Net.Puffin/Format`, Iceberg's blob shapes in `Iceberg.Net.Puffin/Blobs`; the container does not know Iceberg's blob types ([puffin.md](puffin.md)) |
 | **Theta sketches** | NDV statistics blobs | Clast.Sketches 0.1 (very new) | **Built** — compact serialization byte-identical to Apache DataSketches in exact mode |
 | **Murmur3 x86 32** | bucket transform | various | In-house, pinned by spec vectors |
 | **JSON** | metadata, REST | System.Text.Json | `JsonNode` for exact field control and forward-compatible round-trips |

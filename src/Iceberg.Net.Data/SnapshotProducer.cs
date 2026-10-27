@@ -676,7 +676,7 @@ public sealed class SnapshotProducer
             if (targets.Count == 0) return new DeleteChange(_addedDeleteFiles, removed, removedFiles);
 
             var ordered = targets.OrderBy(t => t.Key, StringComparer.Ordinal).ToList();
-            var written = PuffinFile.Write(ordered.Select(t => DeletionVector.ToBlob(t.Key, t.Value)));
+            var written = IcebergPuffinFile.Write(ordered.Select(t => DeletionVector.ToBlob(t.Key, t.Value)));
             var location = $"{DataDir(m)}/{commitUuid:N}-deletes.puffin";
             await _table.IO.WriteAsync(location, written.Bytes, overwrite: false, ct);
             _attemptArtifacts.Add(location);

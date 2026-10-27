@@ -1,7 +1,7 @@
 <Project Sdk="Microsoft.NET.Sdk">
   <PropertyGroup>
     <RootNamespace>Iceberg.Net.Puffin</RootNamespace>
-    <Description>Puffin files: container format, deletion-vector-v1 blobs (Roaring64 portable bitmaps) and apache-datasketches-theta-v1 blobs.</Description>
+    <Description>Puffin files: the generic container format (Format/), plus Iceberg's deletion-vector-v1 (Roaring64) and apache-datasketches-theta-v1 blob shapes (Blobs/).</Description>
   </PropertyGroup>
   <ItemGroup>
     <PackageReference Include="ZstdSharp.Port" />

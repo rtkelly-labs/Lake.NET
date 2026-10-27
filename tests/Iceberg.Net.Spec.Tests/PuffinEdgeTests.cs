@@ -150,7 +150,38 @@ public sealed class PuffinEdgeTests
     }
 
     [Fact]
+    [Spec("puffin: BlobMetadata")]
+    public void Generic_container_writes_blob_types_it_does_not_define()
+    {
+        var written = PuffinFile.Write(
+        [
+            new PuffinBlob("custom-blob-v1", [7], new byte[] { 1, 2, 3 }, 4, 5, Properties: new Dictionary<string, string> { ["k"] = "v" }),
+        ]);
+        var read = PuffinFile.Read(written.Bytes);
+        Assert.Equal("custom-blob-v1", read.Blobs[0].Type);
+        Assert.Equal([1, 2, 3], read.Payload(read.Blobs[0]));
+        Assert.Equal("v", read.Blobs[0].Properties!["k"]);
+    }
+
+    [Fact]
+    [Spec("puffin: BlobMetadata")]
+    public void Blob_type_rules_are_supplied_by_the_format_that_defines_them()
+    {
+        var blob = new PuffinBlob("custom-blob-v1", [1], new byte[] { 1 }, CompressionCodec: "zstd");
+        // The generic container does not know what this type means...
+        Assert.NotEmpty(PuffinFile.Write([blob]).Bytes);
+        // ...but a format that defines the type can supply its rules.
+        Assert.Throws<ArgumentException>(() =>
+            PuffinFile.Write([blob], blobTypes: [new PuffinBlobType("custom-blob-v1", Compressible: false)]));
+
+        // Iceberg's deletion-vector type is likewise opaque to the container; the Iceberg layer owns its rule.
+        var dv = new PuffinBlob(PuffinBlobTypes.DeletionVectorV1, [], new byte[] { 1 }, CompressionCodec: "zstd");
+        Assert.NotEmpty(PuffinFile.Write([dv]).Bytes);
+        Assert.Throws<ArgumentException>(() => IcebergPuffinFile.Write([dv]));
+    }
+
+    [Fact]
     [Spec("puffin: deletion-vector-v1 blob type")]
     public void Deletion_vectors_must_not_be_compressed() =>
-        Assert.Throws<ArgumentException>(() => PuffinFile.Write([new PuffinBlob(PuffinBlobTypes.DeletionVectorV1, [], new byte[] { 1 }, CompressionCodec: "zstd")]));
+        Assert.Throws<ArgumentException>(() => IcebergPuffinFile.Write([new PuffinBlob(PuffinBlobTypes.DeletionVectorV1, [], new byte[] { 1 }, CompressionCodec: "zstd")]));
 }
