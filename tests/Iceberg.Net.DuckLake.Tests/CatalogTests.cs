@@ -408,6 +408,28 @@ public abstract class CatalogTests : IAsyncLifetime
 
     [SkippableFact]
     [Spec("ducklake: Data")]
+    public async Task A_delete_matching_nothing_still_conflicts_with_a_concurrent_insert()
+    {
+        // The spec's example: delete a missing key, then insert it; a concurrent insert into the table conflicts.
+        var catalog = await WithTableAsync(rows: 2);
+        var upsert = catalog.BeginTransaction();
+        Assert.Equal(0, await upsert.DeleteAsync("main", "t", Expr.Equal("id", 7L)));
+        await upsert.InsertAsync("main", "t", [[7L, "mine"]]);
+        await using (var other = catalog.BeginTransaction())
+        {
+            await other.InsertAsync("main", "t", [[7L, "theirs"]]);
+            await other.CommitAsync();
+        }
+        await Assert.ThrowsAsync<DuckLakeConflictException>(() => upsert.CommitAsync());
+        // Without the concurrent insert it commits, and records only the insert (as DuckDB does).
+        await using var again = catalog.BeginTransaction();
+        Assert.Equal(0, await again.DeleteAsync("main", "t", Expr.Equal("id", 8L)));
+        await again.InsertAsync("main", "t", [[8L, "x"]]);
+        Assert.Equal("inserted_into_table:1", string.Join(",", (await again.CommitAsync()).Changes));
+    }
+
+    [SkippableFact]
+    [Spec("ducklake: Data")]
     public async Task An_insert_conflicting_with_a_concurrent_delete_fails_and_cleans_up_its_files()
     {
         var catalog = await WithTableAsync(rows: 5);
