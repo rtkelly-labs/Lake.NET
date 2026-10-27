@@ -33,6 +33,8 @@ public sealed record DataFileReadOptions
     /// carries the file's names.
     /// </summary>
     public bool MatchByName { get; init; }
+    /// <summary>The key of a file written with Parquet modular encryption (<see cref="ParquetWriteOptions.EncryptionKey"/>).</summary>
+    public byte[]? DecryptionKey { get; init; }
 }
 
 /// <summary>

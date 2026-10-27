@@ -109,7 +109,7 @@ public sealed partial class DuckLakeTransaction
             if (deleteRows.TryGetValue(fileId, out var old))
             {
                 oldId = old.DeleteFileId;
-                foreach (var (pos, snapshot) in await DuckLakeDeleteFiles.ReadEntriesAsync(_catalog.IO, task.DeleteFileLocation!, ct))
+                foreach (var (pos, snapshot) in await DuckLakeDeleteFiles.ReadEntriesAsync(_catalog.IO, task.DeleteFileLocation!, ct, task.DeleteKey))
                     entries.Add((pos, snapshot ?? old.BeginSnapshot));
             }
             var relative = task.Location.StartsWith(t.Location, StringComparison.Ordinal) ? task.Location[t.Location.Length..] : task.Location;
@@ -130,7 +130,8 @@ public sealed partial class DuckLakeTransaction
         var relative = $"ducklake-{Guid.CreateVersion7()}-delete.parquet";
         var location = t.Location + relative;
         _written.Add(location);
-        var (size, footer) = await DuckLakeDeleteFiles.WritePartialAsync(_catalog.IO, location, DuckLakeCatalog.Resolve(t.Location, dataFileRelative, true), entries, ct);
-        return new WrittenDelete(relative, entries.Count, size, footer);
+        var (key, keyText) = _catalog.NewKey();
+        var (size, footer) = await DuckLakeDeleteFiles.WritePartialAsync(_catalog.IO, location, DuckLakeCatalog.Resolve(t.Location, dataFileRelative, true), entries, ct, key);
+        return new WrittenDelete(relative, entries.Count, size, footer) { Key = keyText };
     }
 }

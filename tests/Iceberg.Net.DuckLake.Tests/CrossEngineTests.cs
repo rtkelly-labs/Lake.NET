@@ -493,6 +493,38 @@ public abstract class CrossEngineTests : IAsyncLifetime
     }
 
     [SkippableFact]
+    [Spec("ducklake: ducklake_metadata")]
+    [Spec("ducklake: ducklake_data_file")]
+    public async Task DuckDB_reads_an_encrypted_lake_written_here_and_writes_to_it_what_this_library_reads()
+    {
+        Oracle.Require();
+        var catalog = await _lake.CreateAsync(new DuckLakeOptions { Encrypted = true });
+        await using (var tx = catalog.BeginTransaction())
+        {
+            await tx.CreateTableAsync("main", "t", [new("id", DuckLakeType.Int64), new("v", DuckLakeType.Varchar)]);
+            await tx.InsertAsync("main", "t", Enumerable.Range(0, 20).Select(i => new object?[] { (long)i, $"v{i}" }));
+            await tx.CommitAsync();
+        }
+        await using (var tx = catalog.BeginTransaction())
+        {
+            await tx.DeleteAsync("main", "t", Expr.LessThan("id", 3L));
+            await tx.CommitAsync();
+        }
+        await AssertSameHistoryAsync(catalog);
+
+        // DuckDB writes encrypted files only with a secure random generator, from its httpfs extension (downloaded).
+        var results = await Oracle.TryRunAsync(_lake, "INSTALL httpfs", "LOAD httpfs", "INSERT INTO lake.t VALUES (100, 'duckdb')", "DELETE FROM lake.t WHERE id = 10");
+        if (results.FirstOrDefault(r => r["error"] is not null) is { } failed)
+        {
+            Assert.False(Environment.GetEnvironmentVariable("CI") == "true", $"DuckDB could not write to the encrypted lake: {failed["error"]}");
+            Skip.If(true, $"DuckDB cannot write encrypted files here (no httpfs): {failed["error"]}");
+        }
+        var keys = await _lake.SqlAsync("SELECT encryption_key FROM ducklake_data_file WHERE begin_snapshot > 3");
+        Assert.All(keys, k => Assert.Equal(32, Convert.FromBase64String((string)k[0]!).Length));
+        await AssertSameHistoryAsync(await _lake.OpenAsync());
+    }
+
+    [SkippableFact]
     [Spec("ducklake: Flushing Inlined Data")]
     public async Task Each_engine_flushes_what_the_other_inlined()
     {
