@@ -79,7 +79,7 @@ Against:
 Why incubate here rather than in its own repository: the data plane is shared, and the oracle and traceability
 tooling apply unchanged. A separate repository would have to copy or package `Iceberg.Net.Data` first. Rules while
 incubating: no Iceberg project depends on DuckLake (one direction only), `IsPackable=false`, and DuckLake tests sit
-in the `cross-engine` CI suite. Graduation criteria: CI green with the DuckDB oracle (1.0 and 1.1), a tested PostgreSQL
+in the `cross-engine` CI suite. Graduation criteria: CI green with the DuckDB oracle (1.0 and 1.1; done), a tested PostgreSQL
 catalog (done), the current spec version supported (done), an API review, and a named consumer. At graduation, move the format-neutral
 Parquet layer out of `Iceberg.Net.Data`, so DuckLake no longer pulls in Avro, Puffin and the Iceberg catalogs.
 
@@ -157,8 +157,8 @@ DuckLake 1.1 shipped on 21 October 2026 with DuckDB 2.0. Both versions are suppo
 
 The 1.1 reference is DuckDB 2.0's `ducklake` extension. PyPI has no wheel for it (the newest extension wheel is 1.5.5,
 which writes 1.0), so its oracle downloads it from extensions.duckdb.org. The `cross-engine` CI job installs DuckDB 2.0
-and requires it (`ICEBERG_DUCKLAKE11_REQUIRED=1`); this sandbox cannot reach that host, so the 1.1 oracle cases have
-only run in CI. The 1.0 oracle (DuckDB 1.5.5) runs everywhere.
+and requires it (`ICEBERG_DUCKLAKE11_REQUIRED=1`); every 1.1 case passes there. This sandbox cannot reach that host,
+so locally the 1.1 oracle cases skip. The 1.0 oracle (DuckDB 1.5.5) runs everywhere.
 
 ## Usage
 
@@ -286,8 +286,8 @@ dropped afterwards, and validates the lake when the test ends. Environment:
 | `ICEBERG_DUCKLAKE11_PYTHON` / `ICEBERG_DUCKLAKE11_REQUIRED=1` | The 1.1 oracle: a Python with `duckdb==2.0.0` (downloads the extension) |
 | `ICEBERG_PBT_RUNS` / `ICEBERG_PBT_SEED` | Model-based test: number of cases, and a replay seed printed by a failure |
 
-Locally (SQLite, PostgreSQL and the 1.0 oracle): 234 unit, model-based and cross-engine tests pass and 22 skip (the 1.1 oracle);
-70 BDD scenarios pass and 6 skip. The projects are in the `cross-engine` CI suite, which starts the emulation stack's
+In CI (both databases, both oracles): all 256 tests and all 76 BDD scenarios pass, none skipped. Locally without
+the 1.1 oracle: 234 and 70 pass, the 22 and 6 DuckDB 2.0 cases skip. The projects are in the `cross-engine` CI suite, which starts the emulation stack's
 PostgreSQL, installs both oracles and requires all three. The oracle is `interop/ducklake_oracle.py`: it attaches the
 test's catalog (SQLite or PostgreSQL) in DuckDB and runs SQL against it.
 
@@ -298,10 +298,9 @@ extension wheels (including `postgres_scanner`) and `pytz` (DuckDB's client need
 
 ## Next steps
 
-1. The first green CI run of the `cross-engine` job with the DuckDB 2.0 (1.1) oracle, which this sandbox cannot run.
-2. Typed rows through the LINQ layer's mapping, shared with the Iceberg tables.
-3. Maintenance: `expire_snapshots` and file cleanup through `ducklake_files_scheduled_for_deletion`, and compaction.
-4. Writing inlined data for small inserts (DuckDB's default), and Puffin deletion vectors.
-5. Return the footer size from `ParquetFiles.WriteAsync`, and write `INT(8)`/`INT(16)` annotations, in Iceberg.Net.Data.
-6. An API review, then a named consumer, before graduation.
+1. Typed rows through the LINQ layer's mapping, shared with the Iceberg tables.
+2. Maintenance: `expire_snapshots` and file cleanup through `ducklake_files_scheduled_for_deletion`, and compaction.
+3. Writing inlined data for small inserts (DuckDB's default), and Puffin deletion vectors.
+4. Return the footer size from `ParquetFiles.WriteAsync`, and write `INT(8)`/`INT(16)` annotations, in Iceberg.Net.Data.
+5. An API review, then a named consumer, before graduation.
 
