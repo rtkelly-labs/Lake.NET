@@ -210,6 +210,7 @@ dotnet run --project examples/DuckLake.Quickstart [directory] [postgres connecti
 | `DuckLakeNestedText.cs` | DuckDB's text form of nested inlined values |
 | `DuckLakePartitioning.cs` | Partitioned writes (`identity`, `year`/`month`/`day`/`hour`, 1.1's `epoch_*`, `bucket(N)`) |
 | `DuckLakeValidator.cs` | Whole-lake consistency check: snapshot and ID counters, versioned ranges, delete files, row IDs, files in storage |
+| `DuckLakeObjects.cs`, `DuckLakeTransaction.Objects.cs` | Tags and comments, table renames, views, macros, sort orders: reading and writing |
 | `DuckLakeTransaction.Inlining.cs` | Data inlining limits and flushing inlined data |
 | `DuckLakeMaintenance.cs`, `DuckLakeTransaction.Maintenance.cs` | Expiry, cleanup and orphan removal; merging and rewriting files (staged and committed like other operations) |
 | `DuckLakeTelemetry.cs` | Spans and metrics (`Iceberg.Net.DuckLake`), with the catalog commands each operation ran |
@@ -224,6 +225,7 @@ dotnet run --project examples/DuckLake.Quickstart [directory] [postgres connecti
 | Writes | CREATE/DROP SCHEMA (nested in 1.1), CREATE/DROP TABLE, INSERT (file, file and table statistics, row IDs), DELETE (merge-on-read; a replacement delete file per data file, emptied files removed), UPDATE (delete + insert in one snapshot; the new versions keep their row IDs in `_ducklake_internal_row_id`, as the spec allows and DuckDB does), ADD/DROP/RENAME COLUMN, type widening (and `null` promotion), partitioned inserts, author/message/extra info |
 | Types | `boolean`, `int8`–`int64`, `float32/64`, `decimal(p,s)`, `date`, `time`, `timestamp`, `timestamptz`, `timestamp_ns`, `varchar`, `json`, `blob`, `uuid`, `list`, `struct`, `map`, and 1.1's `null` |
 | Concurrency | Optimistic commits: on a lost race for the snapshot ID, the `changes_made` of every snapshot since the base are checked against the spec's logical conflicts, then the metadata is retried without rewriting files; delete-vs-delete is decided per data file. Tested with concurrent writers on both databases, and with DuckDB writing in between |
+| Catalog objects | Tags and comments (tables, columns and nested fields, views; view columns in 1.1), table renames, views, scalar and table macros, sort orders (written files follow the leading column keys); DuckDB uses each, and this library reads DuckDB's (see [Catalog objects](#catalog-objects)) |
 | Maintenance | Merging adjacent small files into partial files, rewriting files with many deleted rows, expiring snapshots, deleting scheduled and orphaned files; DuckDB reads the results and cleans up after them, and the reverse (see [Maintenance](#maintenance)) |
 | Validation | `DuckLakeValidator` checks a whole lake (any writer's) and reports problems; `Deep` also reads every live file |
 
@@ -260,12 +262,14 @@ below was observed with DuckDB 1.5.5 (`ducklake` extension `d8a1881e`) and is wh
 | Inlined deletions vs delete files | Not specified | A row deleted from a file while its deletions are inlined is recorded in `ducklake_inlined_delete_{table}`, not in the file's delete file; the two are combined on read | A replacement delete file holds the previous delete file's positions plus the new ones, never the inlined deletions (merging them made DuckDB count the rows twice) |
 | Expiry and `ducklake_snapshot_changes` | "Snapshot expiration keeps rows in `ducklake_snapshot_changes`" (1.1) | 1.5.5 deletes them with the snapshots | Kept, as the spec says: a commit whose base snapshot was expired still sees every change since it |
 | A `DELETE` that matches no rows | "still records a delete attempt for conflict checking" | Nothing is written for it (no snapshot on its own; only the insert alongside it) | The same: it counts in this transaction's conflict check only |
+| Renames | `created_table`/`created_view` with the new name are not described for renames | Records a rename as `created_table`/`created_view` with the new name | The same; for conflicts a rename counts as altering the table or view |
+| `{DUCKLAKE_CATALOG}` | Resolved when loading a view | Resolved in views; a macro body holding it fails to load; DuckDB stores macro bodies with the catalog name they were attached under | Stored as given; `DuckLakeView.SqlFor(catalog)` resolves it |
 | `changes_made` kinds | 11 kinds | Also `inlined_insert`, `inlined_delete`, `inline_flush` | Treated as insert, delete and compaction for conflict checks; unknown kinds conflict only with tables this transaction touches |
 | Statistics encodings | `boolean` as `0`/`1`, `blob` as hex | Inlined rows' table statistics hold `true`, `nan`, `\x00\xFF` | Write the spec's encodings (no bounds for blobs); parse all of these, and treat anything unparseable as "no bound" |
 
 ## What is not implemented
 
-Views, macros, tags and comments, sort orders, encryption, name-mapped files (`ducklake_add_data_files` without
+Encryption, name-mapped files (`ducklake_add_data_files` without
 field IDs), `variant` and `geometry`, unsigned/128-bit integers, `interval`, `timetz`, second/millisecond timestamps,
 the experimental Puffin deletion vectors, inlining into partitioned tables (their small inserts go to files), and
 catalog migration (1.0 → 1.1 is DuckDB's). Each fails with `NotSupportedException` when met in a catalog
@@ -303,6 +307,27 @@ Shared pieces changed for this: `SpecAttribute` accepts the `ducklake:` prefix; 
 checks the DuckLake spec (`snapshot --ducklake`, `drift --ducklake`, a DuckLake line in the matrix);
 `tests/Iceberg.Net.Fuzz` and `tools/fuzz.sh` gained two targets; the interop `duckdb` dependency group gained the
 extension wheels (including `postgres_scanner`) and `pytz` (DuckDB's client needs it for `timestamptz` values); the emulation stack gained a PostgreSQL.
+
+## Catalog objects
+
+Metadata besides tables, written as DuckDB 1.5.5 writes it (probed with the oracle). Each change bumps the snapshot's
+`schema_version`; renames also add a `ducklake_schema_versions` row, comments and sort orders do not.
+
+| Call | Catalog rows | Change recorded |
+|---|---|---|
+| `SetTagAsync`, `SetCommentAsync` (key `comment`); `SetColumnTagAsync`/`SetColumnCommentAsync` (nested fields as `a.b`) | `ducklake_tag` / `ducklake_column_tag`: a new version, the old one ended; null removes | `altered_table:{id}` |
+| `SetViewTagAsync`/`SetViewCommentAsync`; `SetViewColumnTagAsync` (1.1) | `ducklake_tag` with the view's ID; `ducklake_view_column_tag` | `altered_view:{id}` |
+| `RenameTableAsync` / `RenameViewAsync` | A new version of the row, same ID (and, for a table, files and directory) | `created_table` / `created_view` with the new name |
+| `CreateViewAsync(sql, columnAliases, dialect)`, `DropViewAsync` | `ducklake_view` (ID from `next_catalog_id`; aliases as `"a","b"`); dropping ends its tags | `created_view`, `dropped_view` |
+| `CreateMacroAsync` (one or more implementations, parameters with types and defaults), `DropMacroAsync` | `ducklake_macro`, `ducklake_macro_impl`, `ducklake_macro_parameters` | `created_scalar_macro`/`created_table_macro`, `dropped_*_macro` |
+| `SetSortOrderAsync(keys)` (empty removes) | `ducklake_sort_info`, `ducklake_sort_expression` (`ASC`/`DESC`, `NULLS_FIRST`/`NULLS_LAST`) | `altered_table:{id}` |
+
+`LoadTableAsync` returns tags, column tags and sort keys; `ListViewsAsync`/`LoadViewAsync` and `ListMacrosAsync`/
+`LoadMacroAsync` read views and macros, at any snapshot. Views and macros are stored and returned, not executed: this
+library has no SQL engine. Tables and views share a schema's names, and a schema holding views or macros is not empty
+for `DropSchemaAsync`. Dropping a column ends its tags (its fields' too, as the spec says); dropping a table ends its
+tags and sort order. Conflicts follow the spec: two creates of one view or macro name, a create in a schema dropped
+meanwhile, two drops of one macro, an alteration of a view altered or dropped meanwhile, two renames of one table.
 
 ## Data inlining
 

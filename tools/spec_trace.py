@@ -161,15 +161,6 @@ NOT_IMPLEMENTED = {
     **{
         f"ducklake:{k}": reason
         for k, reason in {
-            "ducklake_view": "views are not read or written",
-            "ducklake_view_column_tag": "views are not read or written (the 1.1 table is created)",
-            "ducklake_macro": "macros are not read or written",
-            "ducklake_macro_impl": "macros are not read or written",
-            "ducklake_macro_parameters": "macros are not read or written",
-            "ducklake_tag": "tags and comments are not read or written",
-            "ducklake_column_tag": "tags and comments are not read or written",
-            "ducklake_sort_info": "sort orders are not written",
-            "ducklake_sort_expression": "sort orders are not written",
             "ducklake_column_mapping": "files added without field IDs (name mapping) are rejected",
             "ducklake_name_mapping": "files added without field IDs (name mapping) are rejected",
             "ducklake_file_variant_stats": "variant type not implemented",
