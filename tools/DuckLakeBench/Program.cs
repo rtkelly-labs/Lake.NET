@@ -213,6 +213,29 @@ await Scenario("insert unsigned, timetz and interval columns", async lake =>
     await foreach (var _ in lake.ReadRowsAsync(await lake.LoadTableAsync("main", "w"))) read++;
     return $"{rows:N0} rows in {write:F2} s ({rows / write:N0} rows/s); read {sw.Elapsed.TotalSeconds:F2} s ({read / sw.Elapsed.TotalSeconds:N0} rows/s)";
 });
+await Scenario("encrypted lake: insert, scan, delete", async lake =>
+{
+    await Create(lake, "t");
+    var sw = Stopwatch.StartNew();
+    await using (var tx = lake.BeginTransaction())
+    {
+        for (var f = 0; f < 10; f++) await tx.InsertAsync("main", "t", Enumerable.Range(f * (n / 10), n / 10).Select(i => Row(i)));
+        await tx.CommitAsync();
+    }
+    var write = sw.Elapsed.TotalSeconds;
+    sw.Restart();
+    long count = 0;
+    await foreach (var _ in lake.ReadRowsAsync(await lake.LoadTableAsync("main", "t"))) count++;
+    var scan = sw.Elapsed.TotalSeconds;
+    sw.Restart();
+    long deleted;
+    await using (var tx = lake.BeginTransaction())
+    {
+        deleted = await tx.DeleteAsync("main", "t", Expr.Equal("day", 7));
+        await tx.CommitAsync();
+    }
+    return $"{n:N0} rows in {write:F2} s ({n / write:N0} rows/s); full scan {scan:F2} s ({count / scan:N0} rows/s); delete {deleted:N0} rows {sw.Elapsed.TotalSeconds:F2} s";
+}, new DuckLakeOptions { Encrypted = true });
 await Scenario("4 concurrent writers", async lake =>
 {
     await Create(lake, "t");
