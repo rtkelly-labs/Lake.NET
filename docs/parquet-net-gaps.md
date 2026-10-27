@@ -112,8 +112,8 @@ Already covered by Parquet.Net, so not a blocker:
 Branch `ccr-87fadcf9-bxi9wr` of [rtkelly-labs/parquet-dotnet](https://github.com/rtkelly-labs/parquet-dotnet), each
 change with its own tests (fork suite: 772 passed, 3 skipped on net8.0 and net10.0, with `pyarrow` and `pandas` installed for its Arrow interop test;
 CI runs it on Linux, Windows and macOS). For upstreaming, the fork's `docs/upstream-review.md` splits it into review
-units, and `docs/upstream/` has units 1 to 10c as patches that apply to upstream `master` on their own, each verified
-(tests failing without it, the suite passing with it).
+units, and `docs/upstream/` has every unit as a verified patch (its tests failing or not compiling without it, the
+suite passing with it), on its own and as an ordered series that applies to upstream `master` without conflicts.
 
 | Gap | Fork commit | What changed |
 |---|---|---|
