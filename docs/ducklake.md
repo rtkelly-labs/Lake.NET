@@ -41,8 +41,8 @@ What made this quick, and what got in the way, for whoever takes either format f
 - **Friction found:**
   - The positional-delete reader (`PositionDeleteFiles`) hard-codes Iceberg's reserved field IDs; DuckDB writes
     different ones, so DuckLake has its own small reader that accepts both.
-  - `ParquetFiles.WriteAsync` does not report the footer length, which DuckLake records (`footer_size`); it costs one
-    8-byte ranged read per file. Returning it from the writer would remove that.
+  - `ParquetFiles.WriteAsync` did not report the footer length, which DuckLake records (`footer_size`), so each file
+    cost an extra ranged read; `ParquetFiles.WriteFileAsync` now returns it (and the row-group count).
   - `int8`/`int16` are written as plain `INT32` (Iceberg has no narrower ints). DuckDB reads them correctly, but the
     files lose the `INT(8)`/`INT(16)` annotation DuckDB itself writes.
   - Rows are `object?[]` of *physical* values (days, microseconds, unscaled decimals). Correct and fast, but a C#
@@ -210,6 +210,7 @@ dotnet run --project examples/DuckLake.Quickstart [directory] [postgres connecti
 | `DuckLakeNestedText.cs` | DuckDB's text form of nested inlined values |
 | `DuckLakePartitioning.cs` | Partitioned writes (`identity`, `year`/`month`/`day`/`hour`, 1.1's `epoch_*`, `bucket(N)`) |
 | `DuckLakeValidator.cs` | Whole-lake consistency check: snapshot and ID counters, versioned ranges, delete files, row IDs, files in storage |
+| `DuckLakeMaintenance.cs`, `DuckLakeTransaction.Maintenance.cs` | Expiry, cleanup and orphan removal; merging and rewriting files (staged and committed like other operations) |
 | `DuckLakeTelemetry.cs` | Spans and metrics (`Iceberg.Net.DuckLake`), with the catalog commands each operation ran |
 
 ## What works
@@ -222,6 +223,7 @@ dotnet run --project examples/DuckLake.Quickstart [directory] [postgres connecti
 | Writes | CREATE/DROP SCHEMA (nested in 1.1), CREATE/DROP TABLE, INSERT (file, file and table statistics, row IDs), DELETE (merge-on-read; a replacement delete file per data file, emptied files removed), UPDATE (delete + insert in one snapshot; the new versions keep their row IDs in `_ducklake_internal_row_id`, as the spec allows and DuckDB does), ADD/DROP/RENAME COLUMN, type widening (and `null` promotion), partitioned inserts, author/message/extra info |
 | Types | `boolean`, `int8`–`int64`, `float32/64`, `decimal(p,s)`, `date`, `time`, `timestamp`, `timestamptz`, `timestamp_ns`, `varchar`, `json`, `blob`, `uuid`, `list`, `struct`, `map`, and 1.1's `null` |
 | Concurrency | Optimistic commits: on a lost race for the snapshot ID, the `changes_made` of every snapshot since the base are checked against the spec's logical conflicts, then the metadata is retried without rewriting files; delete-vs-delete is decided per data file. Tested with concurrent writers on both databases, and with DuckDB writing in between |
+| Maintenance | Merging adjacent small files into partial files, rewriting files with many deleted rows, expiring snapshots, deleting scheduled and orphaned files; DuckDB reads the results and cleans up after them, and the reverse (see [Maintenance](#maintenance)) |
 | Validation | `DuckLakeValidator` checks a whole lake (any writer's) and reports problems; `Deep` also reads every live file |
 
 ## The same constraints
@@ -253,6 +255,8 @@ below was observed with DuckDB 1.5.5 (`ducklake` extension `d8a1881e`) and is wh
 | Inlined data and deletions | Data inlining page (not the specification) | `ducklake_inlined_data_{table}_{schema_version}` and `ducklake_inlined_delete_{table}` (the latter not listed in any catalog table); nested values as DuckDB's text cast | Read both, nested values included; never written (inlining is optional) |
 | Nested inlined values | Not specified | Text casts such as `{'c': {'x': CAST('2024-01-02' AS DATE)}}`, which DuckDB 1.5.5 itself fails to read back for dates inside structs | Parsed against the column type, `CAST('…' AS T)` included |
 | Inlined deletions vs delete files | Not specified | A row deleted from a file while its deletions are inlined is recorded in `ducklake_inlined_delete_{table}`, not in the file's delete file; the two are combined on read | A replacement delete file holds the previous delete file's positions plus the new ones, never the inlined deletions (merging them made DuckDB count the rows twice) |
+| Expiry and `ducklake_snapshot_changes` | "Snapshot expiration keeps rows in `ducklake_snapshot_changes`" (1.1) | 1.5.5 deletes them with the snapshots | Kept, as the spec says: a commit whose base snapshot was expired still sees every change since it |
+| A `DELETE` that matches no rows | "still records a delete attempt for conflict checking" | Nothing is written for it (no snapshot on its own; only the insert alongside it) | The same: it counts in this transaction's conflict check only |
 | `changes_made` kinds | 11 kinds | Also `inlined_insert`, `inlined_delete`, `inline_flush` | Treated as insert, delete and compaction for conflict checks; unknown kinds conflict only with tables this transaction touches |
 | Statistics encodings | `boolean` as `0`/`1`, `blob` as hex | Inlined rows' table statistics hold `true`, `nan`, `\x00\xFF` | Write the spec's encodings (no bounds for blobs); parse all of these, and treat anything unparseable as "no bound" |
 
@@ -260,8 +264,8 @@ below was observed with DuckDB 1.5.5 (`ducklake` extension `d8a1881e`) and is wh
 
 Views, macros, tags and comments, sort orders, encryption, name-mapped files (`ducklake_add_data_files` without
 field IDs), `variant` and `geometry`, unsigned/128-bit integers, `interval`, `timetz`, second/millisecond timestamps,
-the experimental Puffin deletion vectors, writing inlined data, catalog migration (1.0 → 1.1 is DuckDB's), and
-maintenance (snapshot expiry, file cleanup, compaction). Each fails with `NotSupportedException` when met in a catalog
+the experimental Puffin deletion vectors, writing inlined data (and so flushing it), and catalog migration (1.0 → 1.1
+is DuckDB's). Each fails with `NotSupportedException` when met in a catalog
 or file rather than reading wrong values. The same list is in `tools/spec_trace.py` (`NOT_IMPLEMENTED`).
 
 Within a transaction, a delete must be the first data operation on its table, and a table created in the transaction
@@ -296,6 +300,26 @@ Shared pieces changed for this: `SpecAttribute` accepts the `ducklake:` prefix; 
 checks the DuckLake spec (`snapshot --ducklake`, `drift --ducklake`, a DuckLake line in the matrix);
 `tests/Iceberg.Net.Fuzz` and `tools/fuzz.sh` gained two targets; the interop `duckdb` dependency group gained the
 extension wheels (including `postgres_scanner`) and `pytz` (DuckDB's client needs it for `timestamptz` values); the emulation stack gained a PostgreSQL.
+
+## Maintenance
+
+DuckDB's maintenance functions are extension behaviour, not format; these do what DuckDB 1.5.5 does to the catalog
+(probed with the oracle), and DuckDB and this library clean up after each other.
+
+| Call | DuckDB | Catalog effect |
+|---|---|---|
+| `MergeAdjacentFilesAsync(schema?, table?, DuckLakeMergeOptions)` | `ducklake_merge_adjacent_files` | One snapshot (`merge_adjacent:{table}`). Files of one partition, in commit order, grouped towards `TargetFileSize`, become one *partial* file holding each row's row ID and writing snapshot (`_ducklake_internal_row_id`, `_ducklake_internal_snapshot_id`); it begins at the earliest input's snapshot, with `partial_max` the latest. The inputs leave `ducklake_data_file` and are scheduled for deletion. Files with deletes, and files from before the table's last schema change, are skipped |
+| `RewriteDataFilesAsync(schema?, table?, deleteThreshold = 0.95)` | `ducklake_rewrite_data_files` | One snapshot (`rewrite_delete:{table}`). A file whose deleted share (delete file plus inlined deletions) reaches the threshold is replaced by its survivors, row IDs stored (`row_id_start` NULL); the old file and its delete file end, so older snapshots still read them |
+| `ExpireSnapshotsAsync(versions)` / `ExpireSnapshotsAsync(olderThan)` | `ducklake_expire_snapshots` | No snapshot. Every catalog row no retained snapshot can see (`begin <= s < end` for none) is removed: files, delete files, dropped tables and their columns, statistics and inlined tables, tags, partition and sort specs, deleted inlined rows. Files among them are scheduled. The latest snapshot is never expired. `dryRun` reports without changing anything |
+| `CleanupOldFilesAsync(olderThan?)` | `ducklake_cleanup_old_files` | Deletes scheduled files (relative paths resolve against `data_path`, as DuckDB writes them) and their rows |
+| `DeleteOrphanedFilesAsync(olderThan = 3 days)` | `ducklake_delete_orphaned_files` | Deletes `.parquet`/`.puffin` files under `data_path` that no row refers to, older than the age given (at least an hour: younger ones may belong to a commit in flight). Needs an `IFileIO` that lists |
+
+Compactions take part in conflict resolution per data file, as the spec's Compaction rules say: a delete and a merge or
+rewrite of the same file conflict (whichever commits second loses), compactions of different files of one table
+commit side by side. The guarantees are tested three ways: `MaintenanceTests` (every kept snapshot reads the same,
+row IDs included, on both databases and versions), the model-based test (random compactions and expiries between
+writes, checked against the model at every snapshot, and against DuckDB), and `CrossEngineTests` (DuckDB reads our
+maintenance and cleans up our scheduled files; we read DuckDB's and clean up its).
 
 ## Performance
 
@@ -341,8 +365,7 @@ catalog instead; see [What is not implemented](#what-is-not-implemented)).
 ## Next steps
 
 1. Typed rows through the LINQ layer's mapping, shared with the Iceberg tables.
-2. Maintenance: `expire_snapshots` and file cleanup through `ducklake_files_scheduled_for_deletion`, and compaction.
-3. Writing inlined data for small inserts (DuckDB's default), and Puffin deletion vectors.
-4. Return the footer size from `ParquetFiles.WriteAsync`, and write `INT(8)`/`INT(16)` annotations, in Iceberg.Net.Data.
-5. An API review, then a named consumer, before graduation.
+2. Writing inlined data for small inserts (DuckDB's default), and Puffin deletion vectors.
+3. Write `INT(8)`/`INT(16)` annotations in Iceberg.Net.Data.
+4. An API review, then a named consumer, before graduation.
 

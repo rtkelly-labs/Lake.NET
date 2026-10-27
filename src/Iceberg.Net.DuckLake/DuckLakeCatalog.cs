@@ -93,7 +93,7 @@ public sealed class DuckLakeNotFoundException(string message) : KeyNotFoundExcep
 /// exactly the catalog rows valid in it; writes go through <see cref="DuckLakeTransaction"/>, one snapshot per commit.
 /// Format versions 1.0 and 1.1 are both read and written; a new catalog is 1.1.
 /// </summary>
-public sealed class DuckLakeCatalog
+public sealed partial class DuckLakeCatalog
 {
     public const string FormatVersion10 = "1.0";
     public const string FormatVersion11 = "1.1";
@@ -454,7 +454,7 @@ public sealed class DuckLakeCatalog
     }
 
     /// <summary>Rows of a data file (<c>file_id</c>, position <c>row_id</c>) deleted in or before <paramref name="snapshot"/>.</summary>
-    private static async Task<Dictionary<long, HashSet<long>>> InlinedDeletionsAsync(DuckLakeDbContext db, long tableId, long snapshot, CancellationToken ct)
+    internal static async Task<Dictionary<long, HashSet<long>>> InlinedDeletionsAsync(DuckLakeDbContext db, long tableId, long snapshot, CancellationToken ct)
     {
         var result = new Dictionary<long, HashSet<long>>();
         var name = InlinedDeleteTable(tableId);

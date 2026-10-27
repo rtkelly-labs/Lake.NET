@@ -163,6 +163,103 @@ public abstract class CrossEngineTests : IAsyncLifetime
         }
     }
 
+    /// <summary>Our rows of <c>main.t</c> at a snapshot, each led by its row ID, as the oracle renders <c>SELECT rowid, *</c>.</summary>
+    private static async Task<List<string>> RowsWithIdsAsync(DuckLakeCatalog catalog, long snapshot)
+    {
+        var table = await catalog.LoadTableAsync("main", "t", snapshot);
+        var rows = new List<string>();
+        await foreach (var r in catalog.ReadRowsAsync(table))
+            rows.Add(LakeJson.Canonical(new System.Text.Json.Nodes.JsonArray([System.Text.Json.Nodes.JsonValue.Create(r.RowId),
+                .. table.Columns.Select((c, i) => LakeJson.Value(c.Type, r.Values[i]))]))!.ToJsonString());
+        return rows.Order(StringComparer.Ordinal).ToList();
+    }
+
+    /// <summary>Both engines read every snapshot of <c>main.t</c> that is still there the same, row IDs included.</summary>
+    private async Task AssertSameHistoryAsync(DuckLakeCatalog catalog)
+    {
+        var snapshots = (await catalog.ListSnapshotsAsync()).Select(s => s.SnapshotId).ToList();
+        var checkedAny = false;
+        foreach (var s in snapshots)
+        {
+            List<string> ours;
+            try { ours = await RowsWithIdsAsync(catalog, s); }
+            catch (DuckLakeNotFoundException) { continue; } // before the table existed
+            LakeJson.AssertSameRows(await Oracle.RowsAsync(_lake, $"SELECT rowid, * FROM lake.t AT (VERSION => {s})"), ours);
+            checkedAny = true;
+        }
+        Assert.True(checkedAny);
+    }
+
+    [SkippableFact]
+    [Spec("ducklake: ducklake_data_file")]
+    [Spec("ducklake: ducklake_files_scheduled_for_deletion")]
+    public async Task Maintenance_done_here_reads_the_same_in_DuckDB_which_cleans_up_after_it()
+    {
+        Oracle.Require();
+        var catalog = await _lake.CreateAsync();
+        await using (var tx = catalog.BeginTransaction())
+        {
+            await tx.CreateTableAsync("main", "t", [new("id", DuckLakeType.Int64), new("v", DuckLakeType.Varchar)]);
+            await tx.InsertAsync("main", "t", Enumerable.Range(0, 20).Select(i => new object?[] { (long)i, $"v{i}" }));
+            await tx.CommitAsync();
+        }
+        for (var c = 0; c < 3; c++)
+        {
+            await using var tx = catalog.BeginTransaction();
+            await tx.InsertAsync("main", "t", Enumerable.Range(20 + c * 3, 3).Select(i => new object?[] { (long)i, $"v{i}" }));
+            await tx.CommitAsync();
+        }
+        await using (var tx = catalog.BeginTransaction())
+        {
+            await tx.DeleteAsync("main", "t", Expr.LessThan("id", 19L)); // 19 of the first file's 20 rows
+            await tx.CommitAsync();
+        }
+        await using (var tx = catalog.BeginTransaction())
+        {
+            await tx.UpdateAsync("main", "t", Expr.Equal("id", 21L), r => [r[0], "updated"]); // keeps its row ID
+            await tx.CommitAsync();
+        }
+        Assert.NotEmpty(await catalog.MergeAdjacentFilesAsync());
+        Assert.NotEmpty(await catalog.RewriteDataFilesAsync());
+        Assert.Equal(2, (await catalog.ExpireSnapshotsAsync([2, 3])).ExpiredSnapshots.Count);
+        await AssertSameHistoryAsync(catalog);
+
+        var scheduled = (await _lake.SqlAsync("SELECT path FROM ducklake_files_scheduled_for_deletion")).Select(r => _lake.DataPath + (string)r[0]!).ToList();
+        Assert.NotEmpty(scheduled);
+        Assert.All(scheduled, f => Assert.True(File.Exists(f), f));
+        await Oracle.RunAsync(_lake, "CALL ducklake_cleanup_old_files('lake', cleanup_all => true)");
+        Assert.All(scheduled, f => Assert.False(File.Exists(f), f));
+        Assert.Empty(await _lake.SqlAsync("SELECT * FROM ducklake_files_scheduled_for_deletion"));
+        await AssertSameHistoryAsync(catalog);
+    }
+
+    [SkippableFact]
+    [Spec("ducklake: ducklake_data_file")]
+    [Spec("ducklake: ducklake_files_scheduled_for_deletion")]
+    public async Task This_library_reads_DuckDBs_maintenance_and_cleans_up_after_it()
+    {
+        Oracle.Require();
+        await Oracle.RunAsync(_lake,
+            "CALL lake.set_option('data_inlining_row_limit', 0)",
+            "CREATE TABLE lake.t(id BIGINT, v VARCHAR)",
+            "INSERT INTO lake.t SELECT i, 'v' || i FROM range(20) r(i)",
+            "INSERT INTO lake.t VALUES (20, 'v20'), (21, 'v21')",
+            "INSERT INTO lake.t VALUES (22, 'v22')",
+            "INSERT INTO lake.t VALUES (23, 'v23')",
+            "DELETE FROM lake.t WHERE id < 15",
+            "UPDATE lake.t SET v = 'updated' WHERE id = 22",
+            "CALL ducklake_merge_adjacent_files('lake')",
+            "CALL ducklake_rewrite_data_files('lake', delete_threshold => 0.5)",
+            "CALL ducklake_expire_snapshots('lake', versions => [2, 3])");
+        var catalog = await _lake.OpenAsync();
+        Assert.DoesNotContain(2L, (await catalog.ListSnapshotsAsync()).Select(s => s.SnapshotId));
+        await AssertSameHistoryAsync(catalog);
+        var scheduled = await catalog.CleanupOldFilesAsync();
+        Assert.NotEmpty(scheduled);
+        Assert.All(scheduled, f => Assert.False(File.Exists(f), f));
+        await AssertSameHistoryAsync(catalog);
+    }
+
     [SkippableFact]
     [Spec("ducklake: ducklake_column")]
     public async Task Schema_evolution_written_here_reads_the_same_in_DuckDB()
@@ -223,6 +320,8 @@ public abstract class CrossEngineTests : IAsyncLifetime
     [Spec("ducklake: Data Inlining")]
     [Spec("ducklake: ducklake_inlined_data_tables")]
     [Spec("ducklake: ALTER TABLE Support")]
+    [Spec("ducklake: SQLite Catalog")]
+    [Spec("ducklake: PostgreSQL Catalog")]
     public async Task This_library_reads_what_DuckDB_writes_including_inlined_rows_deletes_and_alters()
     {
         Oracle.Require();

@@ -35,6 +35,10 @@ public abstract class DuckLakeModelBasedTests(CatalogBackend backend, int defaul
     public sealed record DeleteDay(int Day) : Op;
     public sealed record Rename(long[] Ids, string Name) : Op { public override string ToString() => $"Update[{string.Join(",", Ids)}]={Name}"; }
     public sealed record PartitionByDay(bool On) : Op;
+    /// <summary>Merge adjacent files and rewrite files with deletes: changes no row and no row ID.</summary>
+    public sealed record Compact : Op;
+    /// <summary>Expire the oldest <paramref name="Count"/> snapshots (never the latest) and delete their files.</summary>
+    public sealed record Expire(int Count) : Op;
 
     public sealed record Case(string Version, Op[] Ops)
     {
@@ -54,7 +58,9 @@ public abstract class DuckLakeModelBasedTests(CatalogBackend backend, int defaul
         (2, Ids.Select(i => (Op)new DeleteIds(i))),
         (1, Gen.Choose(0, 2).Select(d => (Op)new DeleteDay(d))),
         (2, Ids.SelectMany(i => Gen.Elements("x", "y").Select(n => (Op)new Rename(i, n)))),
-        (1, Gen.Elements(true, false).Select(on => (Op)new PartitionByDay(on))));
+        (1, Gen.Elements(true, false).Select(on => (Op)new PartitionByDay(on))),
+        (1, Gen.Constant((Op)new Compact())),
+        (1, Gen.Choose(1, 3).Select(n => (Op)new Expire(n))));
 
     private static readonly Gen<Case> CaseGen =
         from v in Gen.Elements(DuckLakeCatalog.FormatVersion10, DuckLakeCatalog.FormatVersion11)
@@ -121,11 +127,15 @@ public abstract class DuckLakeModelBasedTests(CatalogBackend backend, int defaul
                 if (rowIds.TryGetValue(r.RowId, out var before) && before != row && !touched(before))
                     throw new InvalidOperationException($"step {step} ({op}): row ID {r.RowId} moved from {before} to {row}");
             }
-            // An UPDATE keeps the row IDs of the rows it rewrites (spec "Row Lineage"): no ID appears or disappears.
-            if (op is Rename && !rows.Select(r => r.RowId).ToHashSet().SetEquals(rowIds.Keys))
+            // An UPDATE keeps the row IDs of the rows it rewrites (spec "Row Lineage"), and maintenance keeps every row
+            // ID: no ID appears or disappears.
+            if (op is Rename or Compact or Expire && !rows.Select(r => r.RowId).ToHashSet().SetEquals(rowIds.Keys))
                 throw new InvalidOperationException($"step {step} ({op}): the update changed the set of row IDs");
             rowIds = rows.ToDictionary(r => r.RowId, r => Row.From(r.Values));
             history[table.SnapshotId] = Canon(model);
+            // Expired snapshots are gone from the history to check.
+            var live = (await catalog.ListSnapshotsAsync()).Select(x => x.SnapshotId).ToHashSet();
+            foreach (var gone in history.Keys.Where(k => !live.Contains(k)).ToList()) history.Remove(gone);
         }
         foreach (var (snapshot, expected) in history)
         {
@@ -176,6 +186,17 @@ public abstract class DuckLakeModelBasedTests(CatalogBackend backend, int defaul
                 break;
             case PartitionByDay x:
                 await tx.SetPartitioningAsync("main", "t", x.On ? [("day", "identity")] : []);
+                break;
+            case Compact:
+                await catalog.MergeAdjacentFilesAsync();
+                await catalog.RewriteDataFilesAsync(deleteThreshold: 0.3);
+                changed = false;
+                break;
+            case Expire x:
+                var snapshots = await catalog.ListSnapshotsAsync();
+                await catalog.ExpireSnapshotsAsync(snapshots.Take(Math.Min(x.Count, snapshots.Count - 1)).Select(s => s.SnapshotId).ToList());
+                await catalog.CleanupOldFilesAsync();
+                changed = false;
                 break;
         }
         if (changed) await tx.CommitAsync();

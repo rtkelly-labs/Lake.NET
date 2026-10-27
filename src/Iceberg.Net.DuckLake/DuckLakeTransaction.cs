@@ -30,7 +30,7 @@ public sealed class DuckLakeCommitStateUnknownException(string message, Exceptio
 /// transaction takes its columns from its definition (only its partitioning can be set afterwards).
 /// </para>
 /// </summary>
-public sealed class DuckLakeTransaction : IAsyncDisposable
+public sealed partial class DuckLakeTransaction : IAsyncDisposable
 {
     private readonly DuckLakeCatalog _catalog;
     private readonly List<Op> _ops = [];
@@ -38,6 +38,12 @@ public sealed class DuckLakeTransaction : IAsyncDisposable
     private readonly Dictionary<(string Schema, string Table), PendingTable> _tables = [];
     private readonly Dictionary<string, PendingSchema> _schemas = new(StringComparer.Ordinal);
     private readonly Dictionary<PendingTable, long?> _partitionIds = [];
+    /// <summary>
+    /// Tables a DELETE matched no rows in. Not written to <c>changes_made</c> (DuckDB writes nothing for them either),
+    /// but they count for this transaction's conflict check: spec "Conflict Resolution", "A DELETE that matches zero
+    /// rows still records a delete attempt".
+    /// </summary>
+    private readonly HashSet<PendingTable> _deleteAttempts = [];
     private long? _base;
     private long? _attemptedSnapshot;
     private bool _finished;
@@ -83,7 +89,7 @@ public sealed class DuckLakeTransaction : IAsyncDisposable
         public required List<DuckLakeColumn> Columns;
         public long NextColumnId;
         public IReadOnlyList<DuckLakePartitionKey> PartitionKeys = [];
-        public bool Created, Dropped, Altered, PartitionChanged, Inserted, Deleted;
+        public bool Created, Dropped, Altered, PartitionChanged, Inserted, Deleted, Compacted;
         public Guid Uuid = Guid.NewGuid();
         public long? BaseTableId => Created ? null : TableId;
     }
@@ -358,7 +364,7 @@ public sealed class DuckLakeTransaction : IAsyncDisposable
     private async Task<PendingTable> AlterableAsync(DuckLakeDbContext db, string schema, string table, CancellationToken ct, bool allowCreated = false)
     {
         var t = await TableAsync(db, schema, table, ct);
-        if (t.Inserted || t.Deleted) throw new InvalidOperationException($"Alter {schema}.{table} before writing data to it in the same transaction");
+        if (t.Inserted || t.Deleted || t.Compacted) throw new InvalidOperationException($"Alter {schema}.{table} before writing data to it in the same transaction");
         if (t.Created && !allowCreated) throw new InvalidOperationException($"Table {schema}.{table} is created in this transaction: define its columns there");
         if (!t.Created) t.Altered = true;
         return t;
@@ -457,7 +463,7 @@ public sealed class DuckLakeTransaction : IAsyncDisposable
         await using (var db = await BeginAsync(ct))
         {
             t = await TableAsync(db, schema, table, ct);
-            if (t.Created || t.Altered || t.PartitionChanged || t.Inserted || t.Deleted)
+            if (t.Created || t.Altered || t.PartitionChanged || t.Inserted || t.Deleted || t.Compacted)
                 throw new InvalidOperationException($"A delete must be the first change to {schema}.{table} in a transaction");
             loaded = await _catalog.LoadTableAsync(db, t.Schema.Name, t.Name, _base!.Value, ct);
             plan = await _catalog.PlanScanAsync(db, loaded, null, ct);
@@ -492,7 +498,11 @@ public sealed class DuckLakeTransaction : IAsyncDisposable
             files.Add(new FileDelete(fileId, deleteRows.TryGetValue(fileId, out var old) ? old.DeleteFileId : null, positions.Count, task.RecordCount, written));
         }
         var count = byFile.Values.Sum(p => (long)p.Count) + inlined.Values.Sum(p => (long)p.Count);
-        if (count == 0) return 0;
+        if (count == 0)
+        {
+            _deleteAttempts.Add(t);
+            return 0;
+        }
         t.Deleted = true;
         _ops.Add(new DeleteOp(t, files, inlined.ToDictionary(kv => kv.Key, kv => (IReadOnlyList<long>)kv.Value), count));
         return count;
@@ -651,6 +661,8 @@ public sealed class DuckLakeTransaction : IAsyncDisposable
                 case AddColumnOp or EndColumnsOp or ReplaceColumnOp or SetPartitionOp when Base(op) is { } id: set.AlteredTables.Add(id); break;
                 case InsertOp i when i.Table.BaseTableId is { } id: set.InsertedTables.Add(id); break;
                 case DeleteOp d: set.DeletedTables.Add(d.Table.TableId!.Value); break;
+                case MergeOp m: set.MergedTables.Add(m.Table.TableId!.Value); break;
+                case RewriteOp r: set.RewrittenTables.Add(r.Table.TableId!.Value); break;
             }
         }
         return set;
@@ -669,6 +681,7 @@ public sealed class DuckLakeTransaction : IAsyncDisposable
     {
         var latest = await db.Snapshots.OrderByDescending(s => s.SnapshotId).FirstOrDefaultAsync(ct) ?? throw new InvalidDataException("ducklake_snapshot is empty");
         var ours = Changes();
+        foreach (var t in _deleteAttempts) ours.DeletedTables.Add(t.TableId!.Value);
         if (latest.SnapshotId != _base)
         {
             var baseId = _base!.Value;
@@ -695,8 +708,9 @@ public sealed class DuckLakeTransaction : IAsyncDisposable
             NextCatalogId = latest.NextCatalogId + _ops.Count(o => o is CreateSchemaOp or CreateTableOp or SetPartitionOp { Keys.Count: > 0 }),
             NextFileId = latest.NextFileId + _ops.Sum(o => o switch
             {
-                InsertOp => 1,
+                InsertOp or MergeOp => 1,
                 DeleteOp d => d.Files.Count(f => f.NewFile is not null),
+                RewriteOp r => r.Files.Count,
                 _ => 0,
             }),
         };
@@ -884,6 +898,9 @@ public sealed class DuckLakeTransaction : IAsyncDisposable
         }
 
         if (deletes.Count > 0) nextFileId = await DeleteAll(nextFileId);
+        var merges = _ops.OfType<MergeOp>().ToList();
+        var rewrites = _ops.OfType<RewriteOp>().ToList();
+        if (merges.Count + rewrites.Count > 0) nextFileId = await CompactAll(nextFileId);
 
         // Table statistics: existing rows by increment (one statement per table), new ones inserted.
         foreach (var (tableId, d) in statsDelta)
@@ -1032,11 +1049,90 @@ public sealed class DuckLakeTransaction : IAsyncDisposable
             return fileId;
         }
 
-        async Task CheckInlinedDeletionsAsync(long tableId, IReadOnlyList<FileDelete> files)
+        // Compactions (spec "Conflict Resolution", Compaction): each input file must be as it was when the compaction
+        // read it; merged inputs leave the catalog (their rows live on in the partial file) and are scheduled for
+        // deletion, rewritten inputs end at this snapshot (older snapshots still read them).
+        async Task<long> CompactAll(long fileId)
+        {
+            var inputIds = merges.SelectMany(m => m.Inputs).Concat(rewrites.SelectMany(r => r.Inputs.Select(i => i.DataFileId))).ToList();
+            var state = (await db.DataFiles.Where(x => inputIds.Contains(x.DataFileId))
+                    .Select(x => new { x.DataFileId, x.EndSnapshot, x.Path, x.PathIsRelative }).ToListAsync(ct))
+                .ToDictionary(x => x.DataFileId);
+            var current = (await db.DeleteFiles.Current().Where(x => inputIds.Contains(x.DataFileId)).Select(x => new { x.DataFileId, x.DeleteFileId }).ToListAsync(ct))
+                .GroupBy(x => x.DataFileId).ToDictionary(g => g.Key, g => g.Select(x => x.DeleteFileId).ToList());
+            var removed = new List<long>();
+            var endData = new List<long>();
+            var endDeletes = new List<long>();
+            foreach (var m in merges)
+            {
+                var tableId = m.Table.TableId!.Value;
+                await CheckInlinedDeletionsOfAsync(tableId, m.Inputs);
+                foreach (var id in m.Inputs)
+                {
+                    if (!state.TryGetValue(id, out var f) || f.EndSnapshot is not null || current.ContainsKey(id))
+                        throw new DuckLakeConflictException($"Data file {id} was deleted from, compacted or removed concurrently");
+                    removed.Add(id);
+                    rows.ScheduleDeletion(_catalog, id, DuckLakeCatalog.Resolve(m.Table.Location, f.Path, f.PathIsRelative ?? true));
+                }
+                AddFile(m.Table, fileId++, m.File, m.BeginSnapshot, m.PartialMax, m.RowIdStart, m.PartitionId);
+            }
+            foreach (var r in rewrites)
+            {
+                var tableId = r.Table.TableId!.Value;
+                await CheckInlinedDeletionsOfAsync(tableId, r.Inputs.Select(i => i.DataFileId).ToList());
+                foreach (var (id, deleteFile) in r.Inputs)
+                {
+                    var now = current.GetValueOrDefault(id) ?? [];
+                    long? currentDelete = now.Count == 1 ? now[0] : null;
+                    if (!state.TryGetValue(id, out var f) || f.EndSnapshot is not null || now.Count > 1 || currentDelete != deleteFile)
+                        throw new DuckLakeConflictException($"Data file {id} was deleted from, compacted or removed concurrently");
+                    endData.Add(id);
+                    if (deleteFile is { } d) endDeletes.Add(d);
+                }
+                foreach (var (file, partitionId) in r.Files) AddFile(r.Table, fileId++, file, snapshotId, null, null, partitionId);
+            }
+            if (removed.Count > 0)
+            {
+                await db.FileColumnStats.Where(x => removed.Contains(x.DataFileId)).ExecuteDeleteAsync(ct);
+                await db.FilePartitionValues.Where(x => removed.Contains(x.DataFileId)).ExecuteDeleteAsync(ct);
+                await db.DataFiles.Where(x => removed.Contains(x.DataFileId)).ExecuteDeleteAsync(ct);
+            }
+            if (endDeletes.Count > 0)
+                await db.DeleteFiles.Current().Where(x => endDeletes.Contains(x.DeleteFileId)).ExecuteUpdateAsync(u => u.SetProperty(x => x.EndSnapshot, snapshotId), ct);
+            if (endData.Count > 0)
+                await db.DataFiles.Current().Where(x => endData.Contains(x.DataFileId)).ExecuteUpdateAsync(u => u.SetProperty(x => x.EndSnapshot, snapshotId), ct);
+            return fileId;
+        }
+
+        void AddFile(PendingTable t, long fileId, WrittenFile f, long begin, long? partialMax, long? rowIdStart, long? partitionId)
+        {
+            var tableId = t.TableId!.Value;
+            rows.DataFiles.Add(new DataFileEntity
+            {
+                DataFileId = fileId, TableId = tableId, BeginSnapshot = begin, FileOrder = fileId, Path = f.RelativePath, PathIsRelative = true,
+                FileFormat = "parquet", RecordCount = f.RecordCount, FileSizeBytes = f.Size, FooterSize = f.FooterSize, RowIdStart = rowIdStart,
+                PartitionId = partitionId, PartialMax = partialMax, RowGroupCount = v11 ? f.RowGroups : null,
+            });
+            foreach (var s in f.Stats)
+            {
+                var exact = v11 && s.Min is not null ? true : (bool?)null;
+                rows.FileColumnStats.Add(new FileColumnStatsEntity
+                {
+                    DataFileId = fileId, TableId = tableId, ColumnId = s.ColumnId, ColumnSizeBytes = s.ColumnSizeBytes, ValueCount = s.ValueCount,
+                    NullCount = s.NullCount, MinValue = s.Min, MaxValue = s.Max, ContainsNan = s.ContainsNan, MinIsExact = exact, MaxIsExact = exact,
+                });
+            }
+            for (var k = 0; k < f.PartitionValues.Count; k++)
+                rows.FilePartitionValues.Add(new FilePartitionValueEntity { DataFileId = fileId, TableId = tableId, PartitionKeyIndex = k, PartitionValue = f.PartitionValues[k] });
+        }
+
+        Task CheckInlinedDeletionsAsync(long tableId, IReadOnlyList<FileDelete> files) => CheckInlinedDeletionsOfAsync(tableId, files.Select(f => f.DataFileId).ToList());
+
+        async Task CheckInlinedDeletionsOfAsync(long tableId, IReadOnlyList<long> files)
         {
             var inlinedDeletes = DuckLakeCatalog.InlinedDeleteTable(tableId);
-            if (!await DuckLakeCatalog.TableExistsAsync(db, inlinedDeletes, ct)) return;
-            var ids = string.Join(", ", files.Select(f => f.DataFileId.ToString(CultureInfo.InvariantCulture)));
+            if (files.Count == 0 || !await DuckLakeCatalog.TableExistsAsync(db, inlinedDeletes, ct)) return;
+            var ids = string.Join(", ", files.Select(f => f.ToString(CultureInfo.InvariantCulture)));
             var (c, tx) = db.Raw();
             var concurrent = await Db.QueryAsync(c, tx, $"SELECT count(*) FROM {Db.Quote(inlinedDeletes)} WHERE begin_snapshot > @p0 AND file_id IN ({ids})",
                 r => Db.ReqLong(r, 0), ct, null, _base);
@@ -1060,6 +1156,11 @@ public sealed class DuckLakeTransaction : IAsyncDisposable
         public readonly List<TableColumnStatsEntity> TableColumnStats = [];
         public readonly List<SchemaVersionEntity> SchemaVersions = [];
         public readonly List<SnapshotChangesEntity> SnapshotChanges = [];
+        public readonly List<FileScheduledForDeletionEntity> FilesScheduled = [];
+
+        /// <summary>A file no snapshot reads any more, recorded as DuckDB does: relative to <c>data_path</c> when under it.</summary>
+        public void ScheduleDeletion(DuckLakeCatalog catalog, long fileId, string location) =>
+            FilesScheduled.Add(catalog.ScheduledFile(fileId, location, DateTimeOffset.UtcNow));
 
         public async Task WriteAsync(DuckLakeDbContext db, CancellationToken ct)
         {
@@ -1076,6 +1177,7 @@ public sealed class DuckLakeTransaction : IAsyncDisposable
             await BulkInsert.InsertAsync(db, TableColumnStats, ct);
             await BulkInsert.InsertAsync(db, SchemaVersions, ct);
             await BulkInsert.InsertAsync(db, SnapshotChanges, ct);
+            await BulkInsert.InsertAsync(db, FilesScheduled, ct);
         }
     }
 
