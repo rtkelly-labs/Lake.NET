@@ -1,25 +1,29 @@
-// A DuckLake from C#: a SQLite catalog file plus a directory of Parquet files, which DuckDB opens as it is.
+// A DuckLake from C#: a catalog database plus a directory of Parquet files, which DuckDB opens as it is.
 //
-//   dotnet run --project examples/DuckLake.Quickstart [directory]
+//   dotnet run --project examples/DuckLake.Quickstart [directory] [postgres connection string]
 //
-// Then, in DuckDB (with the ducklake and sqlite extensions):
-//   ATTACH 'ducklake:sqlite:<directory>/catalog.sqlite' AS lake;
-//   SELECT * FROM lake.shop.orders;
+// With a directory only, the catalog is a SQLite file in it; with an Npgsql connection string (to an empty database),
+// the catalog is PostgreSQL. The program prints the ATTACH statement DuckDB opens the lake with.
 using Iceberg.Net.DuckLake;
 using Iceberg.Net.Expressions;
 using Iceberg.Net.IO;
-using Microsoft.Data.Sqlite;
 
 var root = Path.GetFullPath(args.Length > 0 ? args[0] : Path.Combine(Path.GetTempPath(), "ducklake-quickstart-" + Guid.NewGuid().ToString("N")[..8]));
 Directory.CreateDirectory(root);
 var catalogFile = Path.Combine(root, "catalog.sqlite");
-SqliteConnection Connect() => new($"Data Source={catalogFile};Pooling=False");
+var store = args.Length > 1 ? DuckLakeStore.PostgreSql(args[1]) : DuckLakeStore.Sqlite($"Data Source={catalogFile};Pooling=False");
 
-// 1. Create the catalog: the 28 DuckLake tables, snapshot 0 and the "main" schema.
-var lake = File.Exists(catalogFile)
-    ? await DuckLakeCatalog.OpenAsync(Connect, new LocalFileIO())
-    : await DuckLakeCatalog.CreateAsync(Connect, new LocalFileIO(), Path.Combine(root, "data") + "/");
-Console.WriteLine($"DuckLake at {root} (data path {lake.DataPath})");
+// 1. Create the catalog (format 1.1): the DuckLake tables, snapshot 0 and the "main" schema.
+DuckLakeCatalog lake;
+try
+{
+    lake = await DuckLakeCatalog.OpenAsync(store, new LocalFileIO());
+}
+catch (Exception e) when (e is Microsoft.EntityFrameworkCore.DbUpdateException or System.Data.Common.DbException)
+{
+    lake = await DuckLakeCatalog.CreateAsync(store, new LocalFileIO(), Path.Combine(root, "data") + "/");
+}
+Console.WriteLine($"DuckLake {lake.Version} on {store.Dialect} at {root} (data path {lake.DataPath})");
 
 // 2. One snapshot: a schema, a partitioned table with nested columns, and its first rows.
 await using (var tx = lake.BeginTransaction(author: "quickstart", commitMessage: "create shop.orders"))
@@ -81,4 +85,8 @@ Console.WriteLine("\nsnapshots:");
 foreach (var s in await lake.ListSnapshotsAsync())
     Console.WriteLine($"  {s.SnapshotId,2}  {s.Time:u}  schema v{s.SchemaVersion}  {string.Join(", ", s.Changes)}  {s.CommitMessage}");
 
-Console.WriteLine($"\nOpen it in DuckDB:\n  ATTACH 'ducklake:sqlite:{catalogFile}' AS lake;\n  SELECT * FROM lake.shop.orders;");
+// 6. Check the whole lake: the catalog's invariants, and every live file against what the catalog records.
+var problems = await DuckLakeValidator.ValidateAsync(lake, new DuckLakeValidationOptions { Deep = true });
+Console.WriteLine($"\nvalidation: {(problems.Count == 0 ? "OK" : string.Join("; ", problems))}");
+
+Console.WriteLine($"\nOpen it in DuckDB:\n  ATTACH '{store.DuckDbAttach()}' AS lake;\n  SELECT * FROM lake.shop.orders;");
