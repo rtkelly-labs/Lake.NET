@@ -1,4 +1,5 @@
 using Iceberg.Net.Expressions;
+using Iceberg.Net.DuckLake.TestSupport;
 using Iceberg.Net.TestSupport;
 
 namespace Iceberg.Net.DuckLake.Tests;
@@ -7,9 +8,18 @@ namespace Iceberg.Net.DuckLake.Tests;
 /// DuckDB's <c>ducklake</c> extension reads what this library writes, and this library reads what DuckDB writes, on
 /// the same SQLite catalog and data directory.
 /// </summary>
-public sealed class CrossEngineTests : IDisposable
+public abstract class CrossEngineTests : IDisposable
 {
-    private readonly TestLake _lake = new();
+    private readonly TestLake _lake;
+
+    protected CrossEngineTests(CatalogBackend backend, string version)
+    {
+        Oracle = DuckLakeOracle.For(version);
+        _lake = new TestLake(backend, version);
+    }
+
+    /// <summary>The DuckDB whose ducklake extension writes this class's format version.</summary>
+    private DuckLakeOracle Oracle { get; }
 
     public void Dispose() => _lake.Dispose();
 
@@ -54,7 +64,7 @@ public sealed class CrossEngineTests : IDisposable
     [Spec("ducklake: Data Types")]
     public async Task DuckDB_reads_every_type_this_library_writes()
     {
-        DuckLakeOracle.Require();
+        Oracle.Require();
         var catalog = await _lake.CreateAsync();
         await using (var tx = catalog.BeginTransaction("tests", "create"))
         {
@@ -66,7 +76,7 @@ public sealed class CrossEngineTests : IDisposable
         var table = await catalog.LoadTableAsync("s", "all_types");
         var ours = await catalog.ReadAsync(table);
         Assert.Equal(21, ours.Count);
-        var theirs = await DuckLakeOracle.RowsAsync(_lake, "SELECT * FROM lake.s.all_types");
+        var theirs = await Oracle.RowsAsync(_lake, "SELECT * FROM lake.s.all_types");
         LakeJson.AssertSameRows(theirs, LakeJson.Rows(table.Columns, ours));
     }
 
@@ -76,7 +86,7 @@ public sealed class CrossEngineTests : IDisposable
     [Spec("ducklake: ducklake_delete_file")]
     public async Task DuckDB_reads_deletes_and_updates_and_counts_match()
     {
-        DuckLakeOracle.Require();
+        Oracle.Require();
         var catalog = await _lake.CreateAsync();
         await using (var tx = catalog.BeginTransaction())
         {
@@ -103,18 +113,18 @@ public sealed class CrossEngineTests : IDisposable
         var table = await catalog.LoadTableAsync("main", "t");
         var ours = await catalog.ReadAsync(table);
         Assert.Equal(85, ours.Count);
-        LakeJson.AssertSameRows(await DuckLakeOracle.RowsAsync(_lake, "SELECT * FROM lake.t"), LakeJson.Rows(table.Columns, ours));
-        Assert.Equal(["[85]"], await DuckLakeOracle.RowsAsync(_lake, "SELECT count(*) FROM lake.t"));
-        Assert.Equal(["[\"updated\"]"], await DuckLakeOracle.RowsAsync(_lake, "SELECT v FROM lake.t WHERE id = 99"));
+        LakeJson.AssertSameRows(await Oracle.RowsAsync(_lake, "SELECT * FROM lake.t"), LakeJson.Rows(table.Columns, ours));
+        Assert.Equal(["[85]"], await Oracle.RowsAsync(_lake, "SELECT count(*) FROM lake.t"));
+        Assert.Equal(["[\"updated\"]"], await Oracle.RowsAsync(_lake, "SELECT v FROM lake.t WHERE id = 99"));
         // DuckDB's own filtered reads (its pruning uses the statistics written here) agree.
-        Assert.Equal(["[40]"], await DuckLakeOracle.RowsAsync(_lake, "SELECT count(*) FROM lake.t WHERE id >= 10 AND id < 55"));
+        Assert.Equal(["[40]"], await Oracle.RowsAsync(_lake, "SELECT count(*) FROM lake.t WHERE id >= 10 AND id < 55"));
     }
 
     [SkippableFact]
     [Spec("ducklake: ducklake_snapshot")]
     public async Task Time_travel_agrees_with_DuckDB_at_every_snapshot()
     {
-        DuckLakeOracle.Require();
+        Oracle.Require();
         var catalog = await _lake.CreateAsync();
         await using (var tx = catalog.BeginTransaction())
         {
@@ -137,7 +147,7 @@ public sealed class CrossEngineTests : IDisposable
             if (snapshot.SnapshotId < 1) continue;
             var table = await catalog.LoadTableAsync("main", "t", snapshot.SnapshotId);
             var ours = LakeJson.Rows(table.Columns, await catalog.ReadAsync(table));
-            Assert.Equal(ours, await DuckLakeOracle.RowsAsync(_lake, $"SELECT * FROM lake.t AT (VERSION => {snapshot.SnapshotId})"));
+            Assert.Equal(ours, await Oracle.RowsAsync(_lake, $"SELECT * FROM lake.t AT (VERSION => {snapshot.SnapshotId})"));
         }
     }
 
@@ -145,7 +155,7 @@ public sealed class CrossEngineTests : IDisposable
     [Spec("ducklake: ducklake_column")]
     public async Task Schema_evolution_written_here_reads_the_same_in_DuckDB()
     {
-        DuckLakeOracle.Require();
+        Oracle.Require();
         var catalog = await _lake.CreateAsync();
         await using (var tx = catalog.BeginTransaction())
         {
@@ -168,7 +178,7 @@ public sealed class CrossEngineTests : IDisposable
         var table = await catalog.LoadTableAsync("main", "t");
         Assert.Equal(["id", "renamed", "added"], table.Columns.Select(c => c.Name));
         var ours = await catalog.ReadAsync(table);
-        LakeJson.AssertSameRows(await DuckLakeOracle.RowsAsync(_lake, "SELECT * FROM lake.t"), LakeJson.Rows(table.Columns, ours));
+        LakeJson.AssertSameRows(await Oracle.RowsAsync(_lake, "SELECT * FROM lake.t"), LakeJson.Rows(table.Columns, ours));
         Assert.Equal(["[1,\"a\",null]", "[2,\"b\",null]", "[3,\"c\",3.5]"], LakeJson.Rows(table.Columns, ours));
     }
 
@@ -177,7 +187,7 @@ public sealed class CrossEngineTests : IDisposable
     [Spec("ducklake: ducklake_file_partition_value")]
     public async Task Partitioned_writes_read_the_same_in_DuckDB()
     {
-        DuckLakeOracle.Require();
+        Oracle.Require();
         var catalog = await _lake.CreateAsync();
         await using (var tx = catalog.BeginTransaction())
         {
@@ -192,8 +202,8 @@ public sealed class CrossEngineTests : IDisposable
         var table = await catalog.LoadTableAsync("main", "events");
         Assert.Equal(6, (await catalog.PlanScanAsync(table)).Files.Count);
         var ours = await catalog.ReadAsync(table);
-        LakeJson.AssertSameRows(await DuckLakeOracle.RowsAsync(_lake, "SELECT * FROM lake.events"), LakeJson.Rows(table.Columns, ours));
-        Assert.Equal(["[5]"], await DuckLakeOracle.RowsAsync(_lake, "SELECT count(*) FROM lake.events WHERE region = 'eu' AND year(day) = 2024"));
+        LakeJson.AssertSameRows(await Oracle.RowsAsync(_lake, "SELECT * FROM lake.events"), LakeJson.Rows(table.Columns, ours));
+        Assert.Equal(["[5]"], await Oracle.RowsAsync(_lake, "SELECT count(*) FROM lake.events WHERE region = 'eu' AND year(day) = 2024"));
     }
 
     [SkippableFact]
@@ -203,8 +213,8 @@ public sealed class CrossEngineTests : IDisposable
     [Spec("ducklake: ALTER TABLE Support")]
     public async Task This_library_reads_what_DuckDB_writes_including_inlined_rows_deletes_and_alters()
     {
-        DuckLakeOracle.Require();
-        await DuckLakeOracle.RunAsync(_lake,
+        Oracle.Require();
+        await Oracle.RunAsync(_lake,
             "CREATE SCHEMA lake.s",
             "CREATE TABLE lake.s.t (id BIGINT, name VARCHAR, score DOUBLE, day DATE, ts TIMESTAMPTZ, amount DECIMAL(9,3), tags INT[], p STRUCT(a INT, b VARCHAR))",
             // Large enough to go to Parquet...
@@ -219,19 +229,19 @@ public sealed class CrossEngineTests : IDisposable
         var catalog = await _lake.OpenAsync();
         var table = await catalog.LoadTableAsync("s", "t");
         var ours = await catalog.ReadAsync(table);
-        var theirs = await DuckLakeOracle.RowsAsync(_lake, "SELECT * FROM lake.s.t");
+        var theirs = await Oracle.RowsAsync(_lake, "SELECT * FROM lake.s.t");
         LakeJson.AssertSameRows(theirs, LakeJson.Rows(table.Columns, ours));
 
         // Pruned scans return exactly the filtered rows.
         var filtered = await catalog.ReadAsync(table, Expr.And(Expr.GreaterThanOrEqual("id", 100L), Expr.LessThan("id", 120L)));
-        LakeJson.AssertSameRows(await DuckLakeOracle.RowsAsync(_lake, "SELECT * FROM lake.s.t WHERE id >= 100 AND id < 120"), LakeJson.Rows(table.Columns, filtered));
+        LakeJson.AssertSameRows(await Oracle.RowsAsync(_lake, "SELECT * FROM lake.s.t WHERE id >= 100 AND id < 120"), LakeJson.Rows(table.Columns, filtered));
     }
 
     [SkippableFact]
     [Spec("ducklake: Conflict Resolution")]
     public async Task Both_engines_write_to_the_same_lake_in_turn()
     {
-        DuckLakeOracle.Require();
+        Oracle.Require();
         var catalog = await _lake.CreateAsync();
         await using (var tx = catalog.BeginTransaction())
         {
@@ -239,7 +249,7 @@ public sealed class CrossEngineTests : IDisposable
             await tx.InsertAsync("main", "t", Enumerable.Range(0, 50).Select(i => new object?[] { (long)i, "dotnet" }));
             await tx.CommitAsync();
         }
-        await DuckLakeOracle.RunAsync(_lake,
+        await Oracle.RunAsync(_lake,
             "CALL lake.set_option('data_inlining_row_limit', 0)",
             "INSERT INTO lake.t SELECT i, 'duckdb' FROM range(50, 100) r(i)",
             "DELETE FROM lake.t WHERE id % 7 = 0");
@@ -250,10 +260,10 @@ public sealed class CrossEngineTests : IDisposable
             await tx.InsertAsync("main", "t", [[1000L, "dotnet-again"]]);
             await tx.CommitAsync();
         }
-        await DuckLakeOracle.RunAsync(_lake, "UPDATE lake.t SET who = 'duckdb-updated' WHERE id = 51");
+        await Oracle.RunAsync(_lake, "UPDATE lake.t SET who = 'duckdb-updated' WHERE id = 51");
         var table = await catalog.LoadTableAsync("main", "t");
         var ours = await catalog.ReadAsync(table);
-        LakeJson.AssertSameRows(await DuckLakeOracle.RowsAsync(_lake, "SELECT * FROM lake.t"), LakeJson.Rows(table.Columns, ours));
+        LakeJson.AssertSameRows(await Oracle.RowsAsync(_lake, "SELECT * FROM lake.t"), LakeJson.Rows(table.Columns, ours));
         Assert.Equal(44, ours.Count);
         var rowIds = new List<long>();
         await foreach (var r in catalog.ReadRowsAsync(table)) rowIds.Add(r.RowId);
@@ -264,13 +274,13 @@ public sealed class CrossEngineTests : IDisposable
     [Spec("ducklake: ducklake_metadata")]
     public async Task DuckDB_attaches_a_catalog_created_here_and_this_library_opens_one_DuckDB_created()
     {
-        DuckLakeOracle.Require();
+        Oracle.Require();
         await _lake.CreateAsync();
-        var schemas = await DuckLakeOracle.RowsAsync(_lake, "SELECT schema_name FROM duckdb_schemas() WHERE database_name = 'lake'");
+        var schemas = await Oracle.RowsAsync(_lake, "SELECT schema_name FROM duckdb_schemas() WHERE database_name = 'lake'");
         Assert.Contains("[\"main\"]", schemas);
 
-        using var other = new TestLake();
-        await DuckLakeOracle.RunAsync(other, "CREATE TABLE lake.x (a INT)");
+        using var other = new TestLake(_lake.Backend, _lake.Version);
+        await Oracle.RunAsync(other, "CREATE TABLE lake.x (a INT)");
         var catalog = await other.OpenAsync();
         Assert.Equal(["main"], await catalog.ListSchemasAsync());
         Assert.Equal(["x"], await catalog.ListTablesAsync("main"));
@@ -283,8 +293,8 @@ public sealed class CrossEngineTests : IDisposable
     [Spec("ducklake: Compaction")]
     public async Task Time_travel_agrees_with_DuckDB_across_its_inlining_flush_and_merge()
     {
-        DuckLakeOracle.Require();
-        await DuckLakeOracle.RunAsync(_lake,
+        Oracle.Require();
+        await Oracle.RunAsync(_lake,
             "CALL lake.set_option('data_inlining_row_limit', 10)",
             "CREATE TABLE lake.t (a INT, s VARCHAR)",
             "INSERT INTO lake.t SELECT i, 's' || i FROM range(100) r(i)",        // Parquet
@@ -298,17 +308,11 @@ public sealed class CrossEngineTests : IDisposable
             "INSERT INTO lake.t SELECT i, 'more' FROM range(300, 320) r(i)",
             "CALL ducklake_merge_adjacent_files('lake')");                     // merged file with per-row snapshots
         // The state under test exists: partial data and delete files, and inlined deletions.
-        await using (var c = _lake.Connect())
-        {
-            await c.OpenAsync();
-            await using var cmd = c.CreateCommand();
-            cmd.CommandText = "SELECT (SELECT count(*) FROM ducklake_data_file WHERE partial_max IS NOT NULL), " +
-                              "(SELECT count(*) FROM ducklake_delete_file WHERE partial_max IS NOT NULL), " +
-                              "(SELECT count(*) FROM sqlite_master WHERE name = 'ducklake_inlined_delete_1')";
-            await using var r = await cmd.ExecuteReaderAsync();
-            await r.ReadAsync();
-            Assert.True(r.GetInt64(0) > 0 && r.GetInt64(1) > 0 && r.GetInt64(2) == 1, $"partial data {r.GetInt64(0)}, partial delete {r.GetInt64(1)}, inlined delete table {r.GetInt64(2)}");
-        }
+        var partials = (await _lake.SqlAsync("SELECT (SELECT count(*) FROM ducklake_data_file WHERE partial_max IS NOT NULL), " +
+                                              "(SELECT count(*) FROM ducklake_delete_file WHERE partial_max IS NOT NULL)"))[0];
+        var inlinedDeletes = await _lake.TableCountAsync("ducklake_inlined_delete_");
+        Assert.True((long)partials[0]! > 0 && (long)partials[1]! > 0 && inlinedDeletes == 1,
+            $"partial data {partials[0]}, partial delete {partials[1]}, inlined delete tables {inlinedDeletes}");
         var catalog = await _lake.OpenAsync();
         var compared = 0;
         foreach (var snapshot in await catalog.ListSnapshotsAsync())
@@ -316,7 +320,7 @@ public sealed class CrossEngineTests : IDisposable
             if (snapshot.SnapshotId < 2) continue;
             compared++;
             var table = await catalog.LoadTableAsync("main", "t", snapshot.SnapshotId);
-            LakeJson.AssertSameRows(await DuckLakeOracle.RowsAsync(_lake, $"SELECT * FROM lake.t AT (VERSION => {snapshot.SnapshotId})"),
+            LakeJson.AssertSameRows(await Oracle.RowsAsync(_lake, $"SELECT * FROM lake.t AT (VERSION => {snapshot.SnapshotId})"),
                 LakeJson.Rows(table.Columns, await catalog.ReadAsync(table)));
         }
         Assert.True(compared >= 10, $"{compared} snapshots compared");
@@ -327,7 +331,7 @@ public sealed class CrossEngineTests : IDisposable
             await tx.CommitAsync();
         }
         var now = await catalog.LoadTableAsync("main", "t");
-        LakeJson.AssertSameRows(await DuckLakeOracle.RowsAsync(_lake, "SELECT * FROM lake.t"), LakeJson.Rows(now.Columns, await catalog.ReadAsync(now)));
+        LakeJson.AssertSameRows(await Oracle.RowsAsync(_lake, "SELECT * FROM lake.t"), LakeJson.Rows(now.Columns, await catalog.ReadAsync(now)));
     }
 
     [SkippableFact]
@@ -335,8 +339,8 @@ public sealed class CrossEngineTests : IDisposable
     [Spec("ducklake: SELECT with File Pruning")]
     public async Task This_library_reads_and_prunes_DuckDB_partitioned_tables()
     {
-        DuckLakeOracle.Require();
-        await DuckLakeOracle.RunAsync(_lake,
+        Oracle.Require();
+        await Oracle.RunAsync(_lake,
             "CALL lake.set_option('data_inlining_row_limit', 0)",
             "CREATE TABLE lake.p (id INT, region VARCHAR, ts TIMESTAMP)",
             "ALTER TABLE lake.p SET PARTITIONED BY (region, year(ts), month(ts))",
@@ -344,11 +348,11 @@ public sealed class CrossEngineTests : IDisposable
         var catalog = await _lake.OpenAsync();
         var table = await catalog.LoadTableAsync("main", "p");
         Assert.Equal(["identity", "year", "month"], table.PartitionKeys.Select(k => k.Transform));
-        LakeJson.AssertSameRows(await DuckLakeOracle.RowsAsync(_lake, "SELECT * FROM lake.p"), LakeJson.Rows(table.Columns, await catalog.ReadAsync(table)));
+        LakeJson.AssertSameRows(await Oracle.RowsAsync(_lake, "SELECT * FROM lake.p"), LakeJson.Rows(table.Columns, await catalog.ReadAsync(table)));
         var filter = Expr.Equal("region", "eu");
         var plan = await catalog.PlanScanAsync(table, filter);
         Assert.True(plan.PrunedFiles > plan.Files.Count, $"{plan.PrunedFiles} pruned, {plan.Files.Count} read");
-        LakeJson.AssertSameRows(await DuckLakeOracle.RowsAsync(_lake, "SELECT * FROM lake.p WHERE region = 'eu'"),
+        LakeJson.AssertSameRows(await Oracle.RowsAsync(_lake, "SELECT * FROM lake.p WHERE region = 'eu'"),
             LakeJson.Rows(table.Columns, await catalog.ReadAsync(table, filter)));
     }
 
@@ -357,7 +361,7 @@ public sealed class CrossEngineTests : IDisposable
     [Spec("ducklake: Data")]
     public async Task A_commit_retries_over_DuckDB_inserts_and_refuses_over_DuckDB_deletes()
     {
-        DuckLakeOracle.Require();
+        Oracle.Require();
         var catalog = await _lake.CreateAsync();
         await using (var tx = catalog.BeginTransaction())
         {
@@ -367,14 +371,19 @@ public sealed class CrossEngineTests : IDisposable
         }
         var retried = catalog.BeginTransaction();
         await retried.InsertAsync("main", "t", [[10L]]);
-        await DuckLakeOracle.RunAsync(_lake, "INSERT INTO lake.t VALUES (20)");
+        await Oracle.RunAsync(_lake, "INSERT INTO lake.t VALUES (20)");
         var snapshot = await retried.CommitAsync();
         Assert.Equal(3, snapshot.SnapshotId);
 
         var refused = catalog.BeginTransaction();
         await refused.InsertAsync("main", "t", [[30L]]);
-        await DuckLakeOracle.RunAsync(_lake, "DELETE FROM lake.t WHERE id = 1");
+        await Oracle.RunAsync(_lake, "DELETE FROM lake.t WHERE id = 1");
         await Assert.ThrowsAsync<DuckLakeConflictException>(() => refused.CommitAsync());
-        Assert.Equal(["[10]", "[20]", "[2]"], await DuckLakeOracle.RowsAsync(_lake, "SELECT id FROM lake.t"));
+        Assert.Equal(["[10]", "[20]", "[2]"], await Oracle.RowsAsync(_lake, "SELECT id FROM lake.t"));
     }
 }
+
+public sealed class SqliteCrossEngineTests10() : CrossEngineTests(CatalogBackend.Sqlite, DuckLakeCatalog.FormatVersion10);
+public sealed class PostgresCrossEngineTests10() : CrossEngineTests(CatalogBackend.Postgres, DuckLakeCatalog.FormatVersion10);
+public sealed class SqliteCrossEngineTests11() : CrossEngineTests(CatalogBackend.Sqlite, DuckLakeCatalog.FormatVersion11);
+public sealed class PostgresCrossEngineTests11() : CrossEngineTests(CatalogBackend.Postgres, DuckLakeCatalog.FormatVersion11);

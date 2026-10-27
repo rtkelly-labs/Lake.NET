@@ -24,5 +24,6 @@ duckdb = [
   "duckdb-extensions==1.5.5",
   "duckdb-extension-ducklake==1.5.5",
   "duckdb-extension-sqlite-scanner==1.5.5",
+  "duckdb-extension-postgres-scanner==1.5.5",
   "duckdb-extension-parquet==1.5.5",
 ]

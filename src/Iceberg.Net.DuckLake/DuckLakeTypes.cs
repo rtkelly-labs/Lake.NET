@@ -25,6 +25,8 @@ public abstract record DuckLakeType
     public static readonly DuckLakePrimitive Json = new("json");
     public static readonly DuckLakePrimitive Blob = new("blob");
     public static readonly DuckLakePrimitive Uuid = new("uuid");
+    /// <summary>1.1: a column whose values are all NULL until it is given a type (<c>"NULL"</c> in DuckDB SQL).</summary>
+    public static readonly DuckLakePrimitive Null = new("null");
 
     public static DuckLakePrimitive Decimal(int precision, int scale) => new($"decimal({precision},{scale})");
     public static DuckLakeList List(DuckLakeType element) => new(element);
@@ -130,6 +132,8 @@ public static class DuckLakeTypes
         "varchar" or "json" => PrimitiveType.String,
         "blob" => PrimitiveType.Binary,
         "uuid" => PrimitiveType.Uuid,
+        // Iceberg's v3 "unknown" is the same idea: always null, never stored in data files.
+        "null" => PrimitiveType.Unknown,
         var d when d.StartsWith("decimal(", StringComparison.Ordinal) => ParseDecimal(d),
         var other => throw new NotSupportedException($"DuckLake type '{other}' is not supported by Iceberg.Net.DuckLake"),
     };

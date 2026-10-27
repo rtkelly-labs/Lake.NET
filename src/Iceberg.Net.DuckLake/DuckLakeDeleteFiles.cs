@@ -3,6 +3,7 @@ using System.Globalization;
 using Iceberg.Net.Data;
 using Iceberg.Net.IO;
 using Iceberg.Net.Types;
+using Microsoft.EntityFrameworkCore;
 
 namespace Iceberg.Net.DuckLake;
 
@@ -74,25 +75,30 @@ public static class DuckLakeDeleteFiles
 /// </summary>
 internal static class DuckLakeInlinedData
 {
-    public static async Task<List<(long RowId, object?[] Values)>> ReadAsync(DbConnection c, DuckLakeTable table, string inlinedTable, CancellationToken ct)
+    /// <summary>The system columns of inlined data tables: renamed with a <c>_ducklake_</c> prefix in 1.1.</summary>
+    internal static (string RowId, string Begin, string End) SystemColumns(bool v11) =>
+        v11 ? ("_ducklake_row_id", "_ducklake_begin_snapshot", "_ducklake_end_snapshot") : ("row_id", "begin_snapshot", "end_snapshot");
+
+    public static async Task<List<(long RowId, object?[] Values)>> ReadAsync(DuckLakeDbContext db, DuckLakeTable table, string inlinedTable, CancellationToken ct)
     {
         // The columns of the schema version the inlined table was created for, to map its columns to column IDs.
-        var version = await Db.QueryAsync(c, null, "SELECT schema_version FROM ducklake_inlined_data_tables WHERE table_id = @p0 AND table_name = @p1",
-            r => Db.ReqLong(r, 0), ct, null, table.TableId, inlinedTable);
-        if (version.Count == 0) return [];
-        var begin = await Db.QueryAsync(c, null, "SELECT min(begin_snapshot) FROM ducklake_schema_versions WHERE table_id = @p0 AND schema_version = @p1",
-            r => Db.Long(r, 0), ct, null, table.TableId, version[0]);
-        var at = begin.FirstOrDefault()
-            ?? (await Db.QueryAsync(c, null, "SELECT min(snapshot_id) FROM ducklake_snapshot WHERE schema_version = @p0", r => Db.Long(r, 0), ct, null, version[0])).FirstOrDefault()
-            ?? throw new InvalidDataException($"{inlinedTable}: no snapshot has schema version {version[0]}");
-        var then = await DuckLakeCatalog.ColumnsAsync(c, null, table.TableId, at, ct);
+        var version = await db.InlinedDataTables.Where(i => i.TableId == table.TableId && i.TableName == inlinedTable).Select(i => (long?)i.SchemaVersion)
+            .FirstOrDefaultAsync(ct);
+        if (version is null) return [];
+        var at = await db.SchemaVersions.Where(v => v.TableId == table.TableId && v.SchemaVersion == version).MinAsync(v => (long?)v.BeginSnapshot, ct)
+            ?? await db.Snapshots.Where(s => s.SchemaVersion == version).MinAsync(s => (long?)s.SnapshotId, ct)
+            ?? throw new InvalidDataException($"{inlinedTable}: no snapshot has schema version {version}");
+        var then = await DuckLakeCatalog.ColumnsAsync(db, table.TableId, at, ct);
 
         // Current column position of each column ID the inlined table has (dropped columns are skipped).
         var positionById = table.Columns.Select((col, i) => (col.Id, i)).ToDictionary(x => x.Id, x => x.i);
         var mapped = then.Where(col => positionById.ContainsKey(col.Id)).ToList();
-        var select = string.Join(", ", mapped.Select(col => Db.Quote(col.Name)).Prepend("row_id"));
-        var sql = $"SELECT {select} FROM {Db.Quote(inlinedTable)} WHERE {Db.Live} ORDER BY row_id";
-        return await Db.QueryAsync(c, null, sql, r =>
+        var (rowId, begin, end) = SystemColumns(db.Is11);
+        var select = string.Join(", ", mapped.Select(col => Db.Quote(col.Name)).Prepend(rowId));
+        var sql = $"SELECT {select} FROM {Db.Quote(inlinedTable)} WHERE @s >= {begin} AND ({end} IS NULL OR @s < {end}) ORDER BY {rowId}";
+        await db.Database.OpenConnectionAsync(ct);
+        var (c, t) = db.Raw();
+        return await Db.QueryAsync(c, t, sql, r =>
         {
             var values = new object?[table.Columns.Count];
             for (var i = 0; i < values.Length; i++) values[i] = Default(table.Columns[i]);
@@ -111,6 +117,8 @@ internal static class DuckLakeInlinedData
     private static object? Convert(DuckLakeColumn column, object? raw, string table)
     {
         if (raw is null) return null;
+        // PostgreSQL catalogs hold inlined VARCHAR and JSON as BYTEA (spec "Type Encoding for Data Inlining").
+        if (raw is byte[] utf8 && !(column.Type is DuckLakePrimitive { Name: "blob" })) raw = System.Text.Encoding.UTF8.GetString(utf8);
         if (column.Type is not DuckLakePrimitive p)
         {
             var nested = raw as string ?? throw new InvalidDataException($"{table}: nested column {column.Name} holds a {raw.GetType().Name}");
@@ -127,6 +135,10 @@ internal static class DuckLakeInlinedData
                 return DuckLakeValues.Normalize(p, raw, column.Name);
             case bool b when p.Name == "boolean":
                 return b;
+            // Native types of catalogs that have them (PostgreSQL UUID, NUMERIC, DATE/TIME/TIMESTAMP).
+            case Guid or DateTime or DateTimeOffset or DateOnly or TimeOnly or TimeSpan when p.Name is not ("varchar" or "json"):
+                try { return DuckLakeValues.Normalize(p, raw, column.Name); }
+                catch (ArgumentException e) { throw new InvalidDataException($"{table}: column {column.Name}: {e.Message}", e); }
         }
         var text = System.Convert.ToString(raw, CultureInfo.InvariantCulture)!;
         if (p.Name is "varchar" or "json") return text;

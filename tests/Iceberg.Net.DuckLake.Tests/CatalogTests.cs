@@ -1,32 +1,28 @@
 using Iceberg.Net.Expressions;
 using Iceberg.Net.TestSupport;
-using Microsoft.Data.Sqlite;
+using Iceberg.Net.DuckLake.TestSupport;
 
 namespace Iceberg.Net.DuckLake.Tests;
 
-/// <summary>The catalog rows each operation writes (spec "Writing Data"), reads at a snapshot, and commit conflicts. No other engine.</summary>
-public sealed class CatalogTests : IDisposable
+/// <summary>
+/// The catalog rows each operation writes (spec "Writing Data"), reads at a snapshot, and commit conflicts, on every
+/// catalog database and format version (the subclasses at the end). No other engine.
+/// </summary>
+public abstract class CatalogTests : IDisposable
 {
-    private readonly TestLake _lake = new();
+    private readonly TestLake _lake;
+
+    protected CatalogTests(CatalogBackend backend, string version) => _lake = new TestLake(backend, version);
+
+    private bool Is11 => _lake.Version != DuckLakeCatalog.FormatVersion10;
+    private bool Sqlite => _lake.Backend == CatalogBackend.Sqlite;
+    /// <summary>A boolean literal in the catalog database's SQL (DuckDB's SQLite catalogs keep booleans as BIGINT).</summary>
+    private string True => Sqlite ? "1" : "TRUE";
+    private string False => Sqlite ? "0" : "FALSE";
 
     public void Dispose() => _lake.Dispose();
 
-    private async Task<List<object?[]>> SqlAsync(string sql)
-    {
-        await using var c = _lake.Connect();
-        await c.OpenAsync();
-        await using var cmd = c.CreateCommand();
-        cmd.CommandText = sql;
-        await using var r = await cmd.ExecuteReaderAsync();
-        var rows = new List<object?[]>();
-        while (await r.ReadAsync())
-        {
-            var row = new object?[r.FieldCount];
-            for (var i = 0; i < row.Length; i++) row[i] = r.IsDBNull(i) ? null : r.GetValue(i);
-            rows.Add(row);
-        }
-        return rows;
-    }
+    private Task<List<object?[]>> SqlAsync(string sql) => _lake.SqlAsync(sql);
 
     private async Task<DuckLakeCatalog> WithTableAsync(int rows = 10, string table = "t")
     {
@@ -38,7 +34,7 @@ public sealed class CatalogTests : IDisposable
         return catalog;
     }
 
-    [Fact]
+    [SkippableFact]
     [Spec("ducklake: ducklake_metadata")]
     [Spec("ducklake: Get Current Snapshot")]
     public async Task A_new_catalog_has_snapshot_0_and_the_main_schema()
@@ -49,24 +45,25 @@ public sealed class CatalogTests : IDisposable
         Assert.Equal([new DuckLakeChange("created_schema", "\"main\"")], snapshot.Changes);
         Assert.Equal(["main"], await catalog.ListSchemasAsync());
         var meta = (await SqlAsync("SELECT \"key\", \"value\" FROM ducklake_metadata")).ToDictionary(r => (string)r[0]!, r => (string)r[1]!);
-        Assert.Equal("1.0", meta["version"]);
+        Assert.Equal(_lake.Version, meta["version"]);
         Assert.Equal(_lake.DataPath, meta["data_path"]);
-        Assert.Equal(28, (await SqlAsync("SELECT count(*) FROM sqlite_master WHERE type = 'table' AND name LIKE 'ducklake_%'"))[0][0] is long n ? n : -1);
+        Assert.Equal(Is11 ? 29 : 28, await _lake.TableCountAsync("ducklake_"));
+        Assert.Equal(Is11 ? "1.1" : "1.0", catalog.Version);
     }
 
-    [Fact]
+    [SkippableFact]
     [Spec("ducklake: ducklake_metadata")]
     public async Task Opening_refuses_other_format_versions_and_encrypted_catalogs()
     {
         await _lake.CreateAsync();
         await SqlAsync("UPDATE ducklake_metadata SET \"value\" = '0.3' WHERE \"key\" = 'version'");
         await Assert.ThrowsAsync<NotSupportedException>(() => _lake.OpenAsync());
-        await SqlAsync("UPDATE ducklake_metadata SET \"value\" = '1.0' WHERE \"key\" = 'version'");
+        await SqlAsync($"UPDATE ducklake_metadata SET \"value\" = '{_lake.Version}' WHERE \"key\" = 'version'");
         await SqlAsync("UPDATE ducklake_metadata SET \"value\" = 'true' WHERE \"key\" = 'encrypted'");
         await Assert.ThrowsAsync<NotSupportedException>(() => _lake.OpenAsync());
     }
 
-    [Fact]
+    [SkippableFact]
     [Spec("ducklake: Snapshot Creation")]
     [Spec("ducklake: CREATE SCHEMA")]
     [Spec("ducklake: CREATE TABLE")]
@@ -105,7 +102,7 @@ public sealed class CatalogTests : IDisposable
         Assert.Equal(table.TableId, (await catalog.LoadTableAsync("SALES", "Orders")).TableId);
     }
 
-    [Fact]
+    [SkippableFact]
     [Spec("ducklake: INSERT")]
     [Spec("ducklake: ducklake_data_file")]
     [Spec("ducklake: ducklake_file_column_stats")]
@@ -146,7 +143,7 @@ public sealed class CatalogTests : IDisposable
         Assert.Equal(2L, (await catalog.CurrentSnapshotAsync()).NextFileId);
     }
 
-    [Fact]
+    [SkippableFact]
     [Spec("ducklake: Nested Types-2")]
     [Spec("ducklake: ducklake_file_column_stats")]
     public async Task Nested_columns_have_statistics_on_their_children_as_in_the_spec_example()
@@ -173,7 +170,7 @@ public sealed class CatalogTests : IDisposable
         Assert.Equal(new List<object?> { 4, 5, 6 }, rows[1][0]);
     }
 
-    [Fact]
+    [SkippableFact]
     [Spec("ducklake: SELECT with File Pruning")]
     [Spec("ducklake: ducklake_file_column_stats")]
     public async Task File_statistics_prune_and_the_residual_filter_is_exact()
@@ -198,7 +195,7 @@ public sealed class CatalogTests : IDisposable
         Assert.Equal(2, (await catalog.PlanScanAsync(table, Expr.LessThan("id", 150L))).Files.Count);
     }
 
-    [Fact]
+    [SkippableFact]
     [Spec("ducklake: DELETE")]
     [Spec("ducklake: ducklake_delete_file")]
     public async Task Deletes_replace_the_files_delete_file_and_remove_emptied_files()
@@ -233,7 +230,7 @@ public sealed class CatalogTests : IDisposable
         Assert.Equal(9, (await catalog.ReadAsync(before)).Count);
     }
 
-    [Fact]
+    [SkippableFact]
     [Spec("ducklake: UPDATE")]
     public async Task Update_is_a_delete_and_an_insert_in_one_snapshot()
     {
@@ -249,7 +246,7 @@ public sealed class CatalogTests : IDisposable
         Assert.Equal(["n0", "n1", "n2", "changed", "changed"], rows.OrderBy(r => (long)r[0]!).Select(r => (string)r[1]!));
     }
 
-    [Fact]
+    [SkippableFact]
     [Spec("ducklake: DROP TABLE")]
     [Spec("ducklake: DROP SCHEMA")]
     public async Task Drops_end_rows_and_old_snapshots_still_read()
@@ -278,7 +275,7 @@ public sealed class CatalogTests : IDisposable
         Assert.Equal(3, (await catalog.ReadAsync(await catalog.LoadTableAsync("main", "t", 2))).Count);
     }
 
-    [Fact]
+    [SkippableFact]
     [Spec("ducklake: ducklake_column")]
     [Spec("ducklake: Show the Structure of a Table")]
     public async Task Schema_evolution_versions_columns_by_snapshot()
@@ -313,7 +310,7 @@ public sealed class CatalogTests : IDisposable
         Assert.Equal([2L, 3L], (await catalog.ListSnapshotsAsync()).Skip(2).Select(s => s.SchemaVersion));
     }
 
-    [Fact]
+    [SkippableFact]
     [Spec("ducklake: ducklake_partition_column")]
     [Spec("ducklake: ducklake_file_partition_value")]
     public async Task Partitioned_inserts_write_one_file_per_partition()
@@ -341,7 +338,7 @@ public sealed class CatalogTests : IDisposable
         Assert.Throws<ArgumentException>(() => DuckLakePartitioning.Validate(DuckLakeType.Date, "hour"));
     }
 
-    [Fact]
+    [SkippableFact]
     [Spec("ducklake: Note on Paths")]
     public async Task Absolute_and_relative_paths_resolve_through_schema_and_table()
     {
@@ -349,15 +346,15 @@ public sealed class CatalogTests : IDisposable
         var elsewhere = Path.Combine(_lake.Root, "moved") + "/";
         Directory.CreateDirectory(elsewhere);
         File.Move(Directory.EnumerateFiles(_lake.DataPath + "main/t/").Single(), elsewhere + "f.parquet");
-        await SqlAsync($"UPDATE ducklake_table SET path = '{elsewhere}', path_is_relative = 0");
+        await SqlAsync($"UPDATE ducklake_table SET path = '{elsewhere}', path_is_relative = {False}");
         await SqlAsync("UPDATE ducklake_data_file SET path = 'f.parquet'");
         Assert.Equal(2, (await catalog.ReadAsync(await catalog.LoadTableAsync("main", "t"))).Count);
-        await SqlAsync($"UPDATE ducklake_data_file SET path = '{elsewhere}f.parquet', path_is_relative = 0");
-        await SqlAsync("UPDATE ducklake_table SET path = 'nowhere/', path_is_relative = 1");
+        await SqlAsync($"UPDATE ducklake_data_file SET path = '{elsewhere}f.parquet', path_is_relative = {False}");
+        await SqlAsync($"UPDATE ducklake_table SET path = 'nowhere/', path_is_relative = {True}");
         Assert.Equal(2, (await catalog.ReadAsync(await catalog.LoadTableAsync("main", "t"))).Count);
     }
 
-    [Fact]
+    [SkippableFact]
     [Spec("ducklake: Conflict Resolution")]
     [Spec("ducklake: Data")]
     public async Task Concurrent_inserts_both_commit_after_a_metadata_retry()
@@ -374,7 +371,7 @@ public sealed class CatalogTests : IDisposable
         Assert.Equal(2, (await catalog.ReadAsync(await catalog.LoadTableAsync("main", "t"))).Count);
     }
 
-    [Fact]
+    [SkippableFact]
     [Spec("ducklake: Data")]
     public async Task An_insert_conflicting_with_a_concurrent_delete_fails_and_cleans_up_its_files()
     {
@@ -392,7 +389,7 @@ public sealed class CatalogTests : IDisposable
         Assert.Equal(4, (await catalog.ReadAsync(await catalog.LoadTableAsync("main", "t"))).Count);
     }
 
-    [Fact]
+    [SkippableFact]
     [Spec("ducklake: Data")]
     public async Task Deletes_conflict_only_on_the_same_data_file()
     {
@@ -415,7 +412,7 @@ public sealed class CatalogTests : IDisposable
         Assert.Equal([0L, 2L, 3L, 4L, 10L, 11L, 13L, 14L], rows.Select(r => (long)r[0]!).Order());
     }
 
-    [Fact]
+    [SkippableFact]
     [Spec("ducklake: Tables / Views")]
     public async Task Concurrent_creation_of_the_same_table_conflicts()
     {
@@ -428,7 +425,7 @@ public sealed class CatalogTests : IDisposable
         await Assert.ThrowsAsync<DuckLakeConflictException>(() => b.CommitAsync());
     }
 
-    [Fact]
+    [SkippableFact]
     [Spec("ducklake: ducklake_table_column_stats")]
     [Spec("ducklake: Snapshot Validity")]
     public async Task Table_statistics_only_widen()
@@ -449,7 +446,7 @@ public sealed class CatalogTests : IDisposable
         Assert.Equal([[1L, 0L, "1", "6"], [2L, 1L, null, null]], await SqlAsync("SELECT column_id, contains_null, min_value, max_value FROM ducklake_table_column_stats ORDER BY column_id"));
     }
 
-    [Fact]
+    [SkippableFact]
     [Spec("ducklake: ducklake_snapshot")]
     public async Task Time_travel_by_timestamp_and_unknown_snapshots()
     {
@@ -462,7 +459,7 @@ public sealed class CatalogTests : IDisposable
         await Assert.ThrowsAsync<DuckLakeNotFoundException>(() => catalog.LoadTableAsync("main", "t", 0)); // before it existed
     }
 
-    [Fact]
+    [SkippableFact]
     public async Task Abandoned_transactions_delete_their_files_and_commit_is_single_use()
     {
         var catalog = await WithTableAsync(rows: 1);
@@ -480,7 +477,7 @@ public sealed class CatalogTests : IDisposable
         await Assert.ThrowsAsync<InvalidOperationException>(() => catalog.BeginTransaction().CommitAsync()); // nothing staged
     }
 
-    [Fact]
+    [SkippableFact]
     public async Task Rows_are_validated_against_the_table()
     {
         var catalog = await _lake.CreateAsync();
@@ -492,12 +489,13 @@ public sealed class CatalogTests : IDisposable
         await Assert.ThrowsAsync<ArgumentException>(() => tx.InsertAsync("main", "v", [[1, "not a number"]]));  // type
     }
 
-    [Fact]
+    [SkippableFact]
     [Spec("ducklake: SELECT")]
     public async Task Untrusted_catalog_rows_fail_as_format_errors()
     {
         var catalog = await WithTableAsync(rows: 2);
-        await SqlAsync("INSERT INTO ducklake_delete_file VALUES (90, 1, 1, NULL, 0, 'a.parquet', 1, 'parquet', 1, 1, 1, NULL, NULL), (91, 1, 1, NULL, 0, 'b.parquet', 1, 'parquet', 1, 1, 1, NULL, NULL)");
+        await SqlAsync("INSERT INTO ducklake_delete_file (delete_file_id, table_id, begin_snapshot, end_snapshot, data_file_id, path, path_is_relative, format, delete_count, file_size_bytes, footer_size) " +
+                       $"VALUES (90, 1, 1, NULL, 0, 'a.parquet', {True}, 'parquet', 1, 1, 1), (91, 1, 1, NULL, 0, 'b.parquet', {True}, 'parquet', 1, 1, 1)");
         var table = await catalog.LoadTableAsync("main", "t");
         // The Corruption contract: a format error (never a NullReference, cast or index exception).
         async Task FormatError(Func<Task> action) => Assert.True(Corruption.IsFormatError((await Record.ExceptionAsync(action))!));
@@ -506,15 +504,20 @@ public sealed class CatalogTests : IDisposable
         await SqlAsync("UPDATE ducklake_snapshot_changes SET changes_made = 'created_table:\"unterminated' WHERE snapshot_id = 1");
         await FormatError(() => catalog.ListSnapshotsAsync());
         await SqlAsync("UPDATE ducklake_snapshot_changes SET changes_made = NULL");
-        await SqlAsync("UPDATE ducklake_snapshot SET snapshot_time = 'yesterday'");
-        await FormatError(() => catalog.ListSnapshotsAsync());
+        if (Sqlite)
+        {
+            // Text where SQLite catalogs keep TIMESTAMPTZ (PostgreSQL's native type cannot hold a malformed value).
+            await SqlAsync("UPDATE ducklake_snapshot SET snapshot_time = 'yesterday'");
+            await FormatError(() => catalog.ListSnapshotsAsync());
+            await SqlAsync("UPDATE ducklake_snapshot SET snapshot_time = '2026-01-01 00:00:00+00'");
+        }
         await SqlAsync("UPDATE ducklake_column SET parent_column = 99 WHERE column_id = 2");
         await FormatError(() => catalog.LoadTableAsync("main", "t"));
         await SqlAsync("UPDATE ducklake_column SET parent_column = NULL, column_type = NULL WHERE column_id = 2");
         await FormatError(() => catalog.LoadTableAsync("main", "t"));
     }
 
-    [Fact]
+    [SkippableFact]
     [Spec("ducklake: ducklake_data_file")]
     public async Task Files_this_library_cannot_read_correctly_are_refused()
     {
@@ -528,12 +531,33 @@ public sealed class CatalogTests : IDisposable
         await Assert.ThrowsAsync<NotSupportedException>(() => catalog.ReadAsync(table));
     }
 
-    [Fact]
-    public async Task The_sqlite_dialect_matches_the_schema_DuckDB_creates()
+    [SkippableFact]
+    [Spec("ducklake: Full Schema Creation Script")]
+    public async Task The_dialect_matches_the_schema_DuckDB_creates()
     {
         await _lake.CreateAsync();
-        var columns = await SqlAsync("SELECT sql FROM sqlite_master WHERE name = 'ducklake_snapshot'");
-        Assert.Equal("CREATE TABLE ducklake_snapshot(snapshot_id BIGINT PRIMARY KEY, snapshot_time VARCHAR, schema_version BIGINT, next_catalog_id BIGINT, next_file_id BIGINT)", columns[0][0]);
-        SqliteConnection.ClearAllPools();
+        if (Sqlite)
+        {
+            var columns = await SqlAsync("SELECT sql FROM sqlite_master WHERE name = 'ducklake_snapshot'");
+            Assert.Equal("CREATE TABLE ducklake_snapshot(snapshot_id BIGINT PRIMARY KEY, snapshot_time VARCHAR, schema_version BIGINT, next_catalog_id BIGINT, next_file_id BIGINT)", columns[0][0]);
+            return;
+        }
+        // The column types DuckDB 1.5.5 creates in PostgreSQL 16 (information_schema.columns.udt_name).
+        async Task<string> Columns(string table) => string.Join(" ", (await SqlAsync(
+                "SELECT column_name || ':' || udt_name FROM information_schema.columns " +
+                $"WHERE table_schema = current_schema() AND table_name = '{table}' ORDER BY ordinal_position")).Select(r => (string)r[0]!));
+        Assert.Equal("snapshot_id:int8 snapshot_time:timestamptz schema_version:int8 next_catalog_id:int8 next_file_id:int8", await Columns("ducklake_snapshot"));
+        Assert.Equal("schema_id:int8 schema_uuid:uuid begin_snapshot:int8 end_snapshot:int8 schema_name:varchar path:varchar path_is_relative:bool"
+                     + (Is11 ? " parent_schema_id:int8" : ""), await Columns("ducklake_schema"));
+        Assert.Equal("table_id:int8 column_id:int8 contains_null:bool contains_nan:bool min_value:varchar max_value:varchar extra_stats:varchar"
+                     + (Is11 ? " min_is_exact:bool max_is_exact:bool" : ""), await Columns("ducklake_table_column_stats"));
+        var keys = (await SqlAsync("SELECT conrelid::regclass::text FROM pg_constraint WHERE contype = 'p' AND connamespace = current_schema()::regnamespace ORDER BY 1"))
+            .Select(r => (string)r[0]!);
+        Assert.Equal(["ducklake_data_file", "ducklake_delete_file", "ducklake_schema", "ducklake_snapshot", "ducklake_snapshot_changes"], keys);
     }
 }
+
+public sealed class SqliteCatalogTests10() : CatalogTests(CatalogBackend.Sqlite, DuckLakeCatalog.FormatVersion10);
+public sealed class SqliteCatalogTests11() : CatalogTests(CatalogBackend.Sqlite, DuckLakeCatalog.FormatVersion11);
+public sealed class PostgresCatalogTests10() : CatalogTests(CatalogBackend.Postgres, DuckLakeCatalog.FormatVersion10);
+public sealed class PostgresCatalogTests11() : CatalogTests(CatalogBackend.Postgres, DuckLakeCatalog.FormatVersion11);

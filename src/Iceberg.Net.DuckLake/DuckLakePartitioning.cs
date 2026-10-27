@@ -6,7 +6,7 @@ namespace Iceberg.Net.DuckLake;
 /// Partitioned writes (spec <c>ducklake_partition_column</c>, <c>ducklake_file_partition_value</c>): rows are split by
 /// their partition key, each part is written to its own file, and each file records one value per key. Values are
 /// written as statistics text; <c>year</c>/<c>month</c>/<c>day</c>/<c>hour</c> are the calendar fields (2023, 1–12,
-/// 1–31, 0–23), not Iceberg's offsets from the epoch, and are taken in UTC.
+/// 1–31, 0–23), taken in UTC, and the 1.1 <c>epoch_*</c> transforms are Iceberg's offsets from the epoch.
 /// </summary>
 public static class DuckLakePartitioning
 {
@@ -18,9 +18,10 @@ public static class DuckLakePartitioning
         var ok = transform switch
         {
             "identity" => DuckLakeValues.Format(type, Sample(type)) is not null,
-            "year" or "month" or "day" => temporal,
-            "hour" => temporal && type.Name != "date",
-            _ => throw new NotSupportedException($"Partition transform '{transform}' is not supported (identity, year, month, day, hour)"),
+            "year" or "month" or "day" or "epoch_year" or "epoch_month" or "epoch_day" => temporal,
+            "hour" or "epoch_hour" => temporal && type.Name != "date",
+            _ => throw new NotSupportedException(
+                $"Partition transform '{transform}' is not supported (identity, year, month, day, hour, epoch_year, epoch_month, epoch_day, epoch_hour)"),
         };
         if (!ok) throw new ArgumentException($"Transform {transform} does not apply to {type}");
     }
@@ -49,10 +50,21 @@ public static class DuckLakePartitioning
             "month" => utc.Month,
             "day" => utc.Day,
             "hour" => utc.Hour,
+            // 1.1: Iceberg's convention, units since 1970-01-01 (the values Iceberg writes for the same data).
+            "epoch_year" or "epoch_month" or "epoch_day" or "epoch_hour" =>
+                Convert.ToInt64(EpochTransform(transform).Apply(DuckLakeTypes.ToIceberg(type), value), System.Globalization.CultureInfo.InvariantCulture),
             _ => throw new NotSupportedException(transform),
         };
         return field.ToString(System.Globalization.CultureInfo.InvariantCulture);
     }
+
+    private static Iceberg.Net.Transforms.Transform EpochTransform(string name) => name switch
+    {
+        "epoch_year" => Iceberg.Net.Transforms.Transform.Year,
+        "epoch_month" => Iceberg.Net.Transforms.Transform.Month,
+        "epoch_day" => Iceberg.Net.Transforms.Transform.Day,
+        _ => Iceberg.Net.Transforms.Transform.Hour,
+    };
 
     internal static List<(IReadOnlyList<string?> Values, List<object?[]> Rows)> Split(IReadOnlyList<DuckLakeColumn> columns,
         IReadOnlyList<DuckLakePartitionKey> keys, List<object?[]> rows)

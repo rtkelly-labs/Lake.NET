@@ -5,12 +5,12 @@ using Iceberg.Net.Types;
 namespace Iceberg.Net.DuckLake;
 
 /// <summary>
-/// How the catalog database stores the types DuckLake's tables declare. The spec only requires "transactions and
-/// primary key constraints"; databases differ in how they hold <c>BOOLEAN</c>, <c>UUID</c> and <c>TIMESTAMPTZ</c>.
-/// <see cref="Sqlite"/> matches the schema DuckDB's <c>ducklake</c> extension creates in SQLite, so either side can
-/// create the catalog and the other attach to it.
+/// How a catalog database stores the types DuckLake's tables declare. The spec only requires "transactions and primary
+/// key constraints"; databases differ in how they hold <c>BOOLEAN</c>, <c>UUID</c> and <c>TIMESTAMPTZ</c>. Each dialect
+/// matches the schema DuckDB's <c>ducklake</c> extension creates in that database, so either side can create the catalog
+/// and the other attach to it.
 /// </summary>
-public sealed record DuckLakeDialect
+public sealed class DuckLakeDialect
 {
     /// <summary>SQLite: booleans as <c>BIGINT</c> 0/1, UUIDs and timestamps as <c>VARCHAR</c> text (as DuckDB writes them).</summary>
     public static readonly DuckLakeDialect Sqlite = new()
@@ -19,24 +19,60 @@ public sealed record DuckLakeDialect
         BooleanType = "BIGINT",
         UuidType = "VARCHAR",
         TimestampTzType = "VARCHAR",
-        Uuid = g => g.ToString("D"),
-        TimestampTz = t => t.UtcDateTime.ToString("yyyy-MM-dd HH:mm:ss.ffffff", CultureInfo.InvariantCulture) + "+00",
         TableExistsSql = "SELECT count(*) FROM sqlite_master WHERE type = 'table' AND name = @p0",
+    };
+
+    /// <summary>PostgreSQL: native <c>BOOLEAN</c>, <c>UUID</c> and <c>TIMESTAMP WITH TIME ZONE</c>, tables in the connection's current schema.</summary>
+    public static readonly DuckLakeDialect PostgreSql = new()
+    {
+        Name = "postgresql",
+        BooleanType = "BOOLEAN",
+        UuidType = "UUID",
+        TimestampTzType = "TIMESTAMP WITH TIME ZONE",
+        TableExistsSql = "SELECT count(*) FROM information_schema.tables WHERE table_schema = current_schema() AND table_name = @p0",
     };
 
     public required string Name { get; init; }
     public required string BooleanType { get; init; }
     public required string UuidType { get; init; }
     public required string TimestampTzType { get; init; }
-    /// <summary>Parameter value for a UUID column.</summary>
-    public required Func<Guid, object> Uuid { get; init; }
-    /// <summary>Parameter value for a TIMESTAMPTZ column.</summary>
-    public required Func<DateTimeOffset, object> TimestampTz { get; init; }
     /// <summary>Counts tables named <c>@p0</c> (for the tables DuckDB creates on demand, which no catalog table lists).</summary>
-    public string TableExistsSql { get; init; } = "SELECT count(*) FROM information_schema.tables WHERE table_name = @p0";
+    public required string TableExistsSql { get; init; }
 
-    /// <summary>The 28 catalog tables of DuckLake 1.0 (spec "Tables", full schema creation script).</summary>
-    internal IReadOnlyList<string> Ddl() =>
+    public override string ToString() => Name;
+
+    /// <summary>A TIMESTAMPTZ as DuckDB writes it into text columns: <c>2026-10-27 10:41:25.208586+00</c>.</summary>
+    public string FormatTimestampTz(DateTimeOffset t) =>
+        t.UtcDateTime.ToString("yyyy-MM-dd HH:mm:ss.ffffff", CultureInfo.InvariantCulture) + "+00";
+
+    public static DateTimeOffset ParseTimestampTz(string text) =>
+        DuckLakeValues.TryParse(DuckLakeType.TimestampTz, text, out var micros)
+            ? new DateTimeOffset(IcebergTime.Epoch.AddTicks((long)micros! * 10))
+            : throw new InvalidDataException($"'{text}' is not a timestamp with time zone");
+
+    /// <summary>
+    /// The catalog tables of a format version (spec "Tables", full schema creation script): 28 in 1.0; 1.1 adds
+    /// <c>ducklake_view_column_tag</c>, <c>parent_schema_id</c>, <c>row_group_count</c> and the exactness flags of bounds.
+    /// </summary>
+    internal IReadOnlyList<string> Ddl(string version)
+    {
+        var v11 = version != DuckLakeCatalog.FormatVersion10;
+        var tables = Ddl10();
+        if (!v11) return tables;
+        string Add(string table, string columns) => tables.Single(t => t.StartsWith($"CREATE TABLE {table}(", StringComparison.Ordinal))[..^1] + ", " + columns + ")";
+        return
+        [
+            .. tables.Select(t => t.StartsWith("CREATE TABLE ducklake_schema(", StringComparison.Ordinal) ? Add("ducklake_schema", "parent_schema_id BIGINT")
+                : t.StartsWith("CREATE TABLE ducklake_data_file(", StringComparison.Ordinal) ? Add("ducklake_data_file", "row_group_count BIGINT")
+                : t.StartsWith("CREATE TABLE ducklake_delete_file(", StringComparison.Ordinal) ? Add("ducklake_delete_file", "row_group_count BIGINT")
+                : t.StartsWith("CREATE TABLE ducklake_file_column_stats(", StringComparison.Ordinal) ? Add("ducklake_file_column_stats", $"min_is_exact {BooleanType}, max_is_exact {BooleanType}")
+                : t.StartsWith("CREATE TABLE ducklake_table_column_stats(", StringComparison.Ordinal) ? Add("ducklake_table_column_stats", $"min_is_exact {BooleanType}, max_is_exact {BooleanType}")
+                : t),
+            "CREATE TABLE ducklake_view_column_tag(view_id BIGINT, column_name VARCHAR, begin_snapshot BIGINT, end_snapshot BIGINT, \"key\" VARCHAR, \"value\" VARCHAR)",
+        ];
+    }
+
+    private List<string> Ddl10() =>
     [
         $"CREATE TABLE ducklake_metadata(\"key\" VARCHAR NOT NULL, \"value\" VARCHAR NOT NULL, \"scope\" VARCHAR, scope_id BIGINT)",
         $"CREATE TABLE ducklake_snapshot(snapshot_id BIGINT PRIMARY KEY, snapshot_time {TimestampTzType}, schema_version BIGINT, next_catalog_id BIGINT, next_file_id BIGINT)",

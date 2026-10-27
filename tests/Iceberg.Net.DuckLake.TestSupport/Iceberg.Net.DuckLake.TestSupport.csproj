@@ -1,0 +1,17 @@
+<Project Sdk="Microsoft.NET.Sdk">
+  <!-- Shared by the DuckLake test projects: lakes on each catalog database and format version, and DuckDB's ducklake
+       extension as the oracle. Kept apart from Iceberg.Net.TestSupport so Iceberg's tests never depend on DuckLake. -->
+  <PropertyGroup>
+    <IsPackable>false</IsPackable>
+    <RootNamespace>Iceberg.Net.DuckLake.TestSupport</RootNamespace>
+  </PropertyGroup>
+  <ItemGroup>
+    <PackageReference Include="xunit" />
+    <PackageReference Include="Xunit.SkippableFact" />
+    <PackageReference Include="Microsoft.Data.Sqlite" />
+  </ItemGroup>
+  <ItemGroup>
+    <ProjectReference Include="../../src/Iceberg.Net.DuckLake/Iceberg.Net.DuckLake.csproj" />
+    <ProjectReference Include="../Iceberg.Net.TestSupport/Iceberg.Net.TestSupport.csproj" />
+  </ItemGroup>
+</Project>

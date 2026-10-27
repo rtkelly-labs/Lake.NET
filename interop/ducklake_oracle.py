@@ -1,12 +1,13 @@
 """DuckDB's `ducklake` extension (the DuckLake reference implementation) as the oracle for Iceberg.Net.DuckLake.
 
-    ducklake_oracle.py probe            {"available": true, "duckdb": ..., "ducklake": ...} or {"available": false, "reason": ...}
+    ducklake_oracle.py probe            {"available": true, "duckdb": ..., "ducklake": ..., "format": "1.0"|"1.1"}
+                                        or {"available": false, "reason": ...}
     ducklake_oracle.py run <job.json>   [{"columns": [...], "rows": [[...], ...]} | {"error": ...}, ...]
 
-A job is {"catalog": <SQLite catalog file>, "data_path": <path or null>, "statements": [<sql>, ...]}. The catalog is
-attached as `lake` (`ATTACH 'ducklake:sqlite:<catalog>' AS lake`, with DATA_PATH when given, which creates the
-catalog if the file is new) and the statements run in order, each reporting its result; the first failure is
-reported and stops the job. Values are made JSON the way duckdb_oracle.py does (timestamps as epoch microseconds, dates
+A job is {"attach": "ducklake:sqlite:<file>" | "ducklake:postgres:<libpq connection string>", "data_path": <path or
+null>, "statements": [<sql>, ...]}. The catalog is attached as `lake` (with DATA_PATH when given, which creates the
+catalog if it is new) and the statements run in order, each reporting its result; the first failure is reported and
+stops the job. "format" is the DuckLake version a new catalog gets: 1.0 up to DuckDB 1.5, 1.1 from DuckDB 2.0. Values are made JSON the way duckdb_oracle.py does (timestamps as epoch microseconds, dates
 ISO, blobs hex, decimals and UUIDs as strings).
 
 Output is the JSON document after the last @@ORACLE@@ marker on stdout. Extensions (parquet, sqlite_scanner,
@@ -27,7 +28,7 @@ import uuid
 from typing import Any
 
 MARKER = "@@ORACLE@@"
-EXTENSIONS = ("parquet", "sqlite_scanner", "ducklake")
+EXTENSIONS = ("parquet", "sqlite_scanner", "postgres_scanner", "ducklake")
 
 
 def emit(document: Any) -> None:
@@ -97,7 +98,13 @@ def cmd_probe() -> dict[str, Any]:
         import duckdb
 
         _, ducklake = connect()
-        return {"available": True, "duckdb": duckdb.__version__, "ducklake": ducklake}
+        major = int(duckdb.__version__.split(".")[0])
+        return {
+            "available": True,
+            "duckdb": duckdb.__version__,
+            "ducklake": ducklake,
+            "format": "1.1" if major >= 2 else "1.0",
+        }
     except Exception as e:  # noqa: BLE001 - the reason is the answer
         return {"available": False, "reason": f"{type(e).__name__}: {e}"}
 
@@ -106,7 +113,7 @@ def cmd_run(job_path: str) -> list[dict[str, Any]]:
     with open(job_path, encoding="utf-8") as f:
         job = json.load(f)
     con, _ = connect()
-    attach = f"ATTACH {literal('ducklake:sqlite:' + job['catalog'])} AS lake"
+    attach = f"ATTACH {literal(job['attach'])} AS lake"
     if job.get("data_path"):
         attach += f" (DATA_PATH {literal(job['data_path'])})"
     results: list[dict[str, Any]] = []

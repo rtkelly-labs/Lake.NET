@@ -2,8 +2,9 @@ using System.Collections;
 using System.Globalization;
 using System.Text.Json.Nodes;
 using Iceberg.Net.Types;
+using Xunit;
 
-namespace Iceberg.Net.DuckLake.Tests;
+namespace Iceberg.Net.DuckLake.TestSupport;
 
 /// <summary>Physical values as the JSON interop/ducklake_oracle.py makes of DuckDB's Python values, for comparing rows across engines.</summary>
 public static class LakeJson
