@@ -36,7 +36,8 @@ Self-contained C# port of Apache Iceberg. Keep it that way: no references to cod
 | L0 spec tests | `dotnet test tests/Iceberg.Net.Spec.Tests` |
 | Typed layer (LINQ) | `dotnet test tests/Iceberg.Net.Linq.Tests` |
 | EF Core provider | `dotnet test tests/Iceberg.Net.EntityFrameworkCore.Tests` |
-| DuckLake (unit; plus the DuckDB `ducklake` oracle when the Python is set) | `ICEBERG_DUCKDB_PYTHON=<python with the interop duckdb group> dotnet test tests/Iceberg.Net.DuckLake.Tests` |
+| DuckLake (unit; plus the DuckDB `ducklake` oracle when the Python is set, PostgreSQL catalogs when the server is) | `ICEBERG_DUCKDB_PYTHON=<python with the interop duckdb group> ICEBERG_DUCKLAKE_POSTGRES=<npgsql connection string> dotnet test tests/Iceberg.Net.DuckLake.Tests` |
+| DuckLake BDD specification | same variables, `dotnet test tests/Iceberg.Net.DuckLake.Behaviour.Tests` |
 | DuckLake walk-through | `dotnet run --project examples/DuckLake.Quickstart [directory]` |
 | Ecosystem (telemetry, Spark/Athena helpers, Spark + DuckDB oracles) | `ICEBERG_DUCKDB_PYTHON=<python with the interop duckdb group> dotnet test tests/Iceberg.Net.Ecosystem.Tests` |
 | BDD specification (Reqnroll) | `ICEBERG_PYTHON=<python with interop deps> dotnet test tests/Iceberg.Net.Behaviour.Tests` |
