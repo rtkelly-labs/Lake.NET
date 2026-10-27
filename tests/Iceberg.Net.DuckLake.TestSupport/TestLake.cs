@@ -112,6 +112,17 @@ public sealed class TestLake : IDisposable
         ? $"SELECT count(*) FROM sqlite_master WHERE type = 'table' AND name LIKE '{prefix}%'"
         : $"SELECT count(*) FROM information_schema.tables WHERE table_schema = current_schema() AND table_name LIKE '{prefix}%'"))[0][0]!;
 
+    /// <summary>Set by tests that corrupt the catalog on purpose: <see cref="ValidateAsync"/> then skips it.</summary>
+    public bool Corrupted { get; set; }
+
+    /// <summary>Deep-validate the lake (<see cref="DuckLakeValidator"/>) if a catalog was created and not corrupted on purpose.</summary>
+    public async Task ValidateAsync()
+    {
+        if (Corrupted || !CatalogExists || _store is null) return;
+        var catalog = await OpenAsync();
+        await DuckLakeValidator.AssertValidAsync(catalog, new DuckLakeValidationOptions { Deep = true });
+    }
+
     public IEnumerable<string> Files() => Directory.Exists(DataPath) ? Directory.EnumerateFiles(DataPath, "*", SearchOption.AllDirectories) : [];
 
     private static readonly Lazy<string?> PostgresSkip = new(ProbePostgres);

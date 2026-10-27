@@ -8,7 +8,7 @@ namespace Iceberg.Net.DuckLake.Tests;
 /// The catalog rows each operation writes (spec "Writing Data"), reads at a snapshot, and commit conflicts, on every
 /// catalog database and format version (the subclasses at the end). No other engine.
 /// </summary>
-public abstract class CatalogTests : IDisposable
+public abstract class CatalogTests : IAsyncLifetime
 {
     private readonly TestLake _lake;
 
@@ -20,7 +20,14 @@ public abstract class CatalogTests : IDisposable
     private string True => Sqlite ? "1" : "TRUE";
     private string False => Sqlite ? "0" : "FALSE";
 
-    public void Dispose() => _lake.Dispose();
+    public Task InitializeAsync() => Task.CompletedTask;
+
+    /// <summary>Whatever a test did, the lake must still pass a deep validation.</summary>
+    public async Task DisposeAsync()
+    {
+        try { await _lake.ValidateAsync(); }
+        finally { _lake.Dispose(); }
+    }
 
     private Task<List<object?[]>> SqlAsync(string sql) => _lake.SqlAsync(sql);
 
@@ -55,6 +62,7 @@ public abstract class CatalogTests : IDisposable
     [Spec("ducklake: ducklake_metadata")]
     public async Task Opening_refuses_other_format_versions_and_encrypted_catalogs()
     {
+        _lake.Corrupted = true;
         await _lake.CreateAsync();
         await SqlAsync("UPDATE ducklake_metadata SET \"value\" = '0.3' WHERE \"key\" = 'version'");
         await Assert.ThrowsAsync<NotSupportedException>(() => _lake.OpenAsync());
@@ -175,6 +183,7 @@ public abstract class CatalogTests : IDisposable
     [Spec("ducklake: ducklake_file_column_stats")]
     public async Task File_statistics_prune_and_the_residual_filter_is_exact()
     {
+        _lake.Corrupted = true;
         var catalog = await WithTableAsync(rows: 0);
         for (var f = 0; f < 4; f++)
         {
@@ -342,6 +351,7 @@ public abstract class CatalogTests : IDisposable
     [Spec("ducklake: Note on Paths")]
     public async Task Absolute_and_relative_paths_resolve_through_schema_and_table()
     {
+        _lake.Corrupted = true;
         var catalog = await WithTableAsync(rows: 2);
         var elsewhere = Path.Combine(_lake.Root, "moved") + "/";
         Directory.CreateDirectory(elsewhere);
@@ -493,6 +503,7 @@ public abstract class CatalogTests : IDisposable
     [Spec("ducklake: SELECT")]
     public async Task Untrusted_catalog_rows_fail_as_format_errors()
     {
+        _lake.Corrupted = true;
         var catalog = await WithTableAsync(rows: 2);
         await SqlAsync("INSERT INTO ducklake_delete_file (delete_file_id, table_id, begin_snapshot, end_snapshot, data_file_id, path, path_is_relative, format, delete_count, file_size_bytes, footer_size) " +
                        $"VALUES (90, 1, 1, NULL, 0, 'a.parquet', {True}, 'parquet', 1, 1, 1), (91, 1, 1, NULL, 0, 'b.parquet', {True}, 'parquet', 1, 1, 1)");
@@ -521,6 +532,7 @@ public abstract class CatalogTests : IDisposable
     [Spec("ducklake: ducklake_data_file")]
     public async Task Files_this_library_cannot_read_correctly_are_refused()
     {
+        _lake.Corrupted = true;
         var catalog = await WithTableAsync(rows: 2);
         var table = await catalog.LoadTableAsync("main", "t");
         await SqlAsync("UPDATE ducklake_data_file SET encryption_key = 'k'");

@@ -17,5 +17,6 @@
   <ItemGroup>
     <InternalsVisibleTo Include="Iceberg.Net.DuckLake.Tests" />
     <InternalsVisibleTo Include="Iceberg.Net.Fuzz" />
+    <InternalsVisibleTo Include="Iceberg.Net.DuckLake.Behaviour.Tests" />
   </ItemGroup>
 </Project>

@@ -24,6 +24,7 @@
   </Folder>
   <Folder Name="/tests/">
     <Project Path="tests/Iceberg.Net.Behaviour.Tests/Iceberg.Net.Behaviour.Tests.csproj" />
+    <Project Path="tests/Iceberg.Net.DuckLake.Behaviour.Tests/Iceberg.Net.DuckLake.Behaviour.Tests.csproj" />
     <Project Path="tests/Iceberg.Net.DuckLake.Tests/Iceberg.Net.DuckLake.Tests.csproj" />
     <Project Path="tests/Iceberg.Net.DuckLake.TestSupport/Iceberg.Net.DuckLake.TestSupport.csproj" />
     <Project Path="tests/Iceberg.Net.Ecosystem.Tests/Iceberg.Net.Ecosystem.Tests.csproj" />
