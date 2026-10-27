@@ -17,6 +17,8 @@
   </ItemGroup>
   <ItemGroup>
     <ProjectReference Include="../../src/Iceberg.Net.RestServer/Iceberg.Net.RestServer.csproj" />
+    <!-- So that the suite can run on Parquet.Net too (ICEBERG_PARQUET_BACKEND=parquet-net). -->
+    <ProjectReference Include="../../src/Iceberg.Net.Data.ParquetNet/Iceberg.Net.Data.ParquetNet.csproj" />
     <ProjectReference Include="../../src/Iceberg.Net.Data/Iceberg.Net.Data.csproj" />
   </ItemGroup>
   <ItemGroup>
