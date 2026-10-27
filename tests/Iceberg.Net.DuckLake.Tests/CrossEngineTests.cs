@@ -431,14 +431,14 @@ public abstract class CrossEngineTests : IAsyncLifetime
             JOIN ducklake_column c ON c.column_id = n.target_field_id AND c.table_id = f.table_id
             JOIN ducklake_table t ON t.table_id = f.table_id WHERE t.table_name = '{table}'
             """)).Select(r => string.Join("|", r.Select(v => v is bool b ? (b ? 1 : 0) : v))).Order(StringComparer.Ordinal).ToList();
-        Assert.Equal(await Mapping("theirs"), await Mapping("ours"));
+        LakeJson.AssertSameRows(await Mapping("theirs"), await Mapping("ours"));
         async Task<List<string>> Stats(string table) => (await _lake.SqlAsync($"""
             SELECT f.path, c.column_name, s.value_count, s.null_count, s.min_value, s.max_value
             FROM ducklake_file_column_stats s JOIN ducklake_data_file f ON f.data_file_id = s.data_file_id
             JOIN ducklake_column c ON c.column_id = s.column_id AND c.table_id = s.table_id
             JOIN ducklake_table t ON t.table_id = s.table_id WHERE t.table_name = '{table}'
             """)).Select(r => string.Join("|", r)).Order(StringComparer.Ordinal).ToList();
-        Assert.Equal(await Stats("theirs"), await Stats("ours"));
+        LakeJson.AssertSameRows(await Stats("theirs"), await Stats("ours")); // reports the first differing row in full
 
         // Each engine reads both tables, with the same rows.
         foreach (var name in new[] { "theirs", "ours" })
