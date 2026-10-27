@@ -503,6 +503,8 @@ public abstract class CrossEngineTests : IAsyncLifetime
         {
             await tx.CreateTableAsync("main", "t", [new("id", DuckLakeType.Int64), new("v", DuckLakeType.Varchar)]);
             await tx.InsertAsync("main", "t", Enumerable.Range(0, 20).Select(i => new object?[] { (long)i, $"v{i}" }));
+            await tx.CreateTableAsync("main", "fresh", [new("id", DuckLakeType.Int64)]);
+            await tx.InsertAsync("main", "fresh", Enumerable.Range(0, 5).Select(i => new object?[] { (long)i }));
             await tx.CommitAsync();
         }
         await using (var tx = catalog.BeginTransaction())
@@ -527,7 +529,9 @@ public abstract class CrossEngineTests : IAsyncLifetime
             ("DuckDB reads every row this library wrote", await Probe("SELECT sum(id) FROM lake.t")),
             ("DuckDB writes its own encrypted table", await Probe("CREATE TABLE lake.d AS SELECT range AS x FROM range(5)")),
             ("DuckDB inserts into this library's table", await Probe("INSERT INTO lake.t VALUES (100, 'duckdb')")),
-            ("DuckDB deletes from this library's file", await Probe("DELETE FROM lake.t WHERE id = 10")),
+            ("DuckDB deletes from this library's file that has no delete file", await Probe("DELETE FROM lake.fresh WHERE id = 1")),
+            ("DuckDB deletes twice from its own file", await Probe("DELETE FROM lake.d WHERE x = 1") ?? await Probe("DELETE FROM lake.d WHERE x = 2")),
+            ("DuckDB deletes from this library's file that has this library's delete file", await Probe("DELETE FROM lake.t WHERE id = 10")),
         };
         string? ours;
         try
