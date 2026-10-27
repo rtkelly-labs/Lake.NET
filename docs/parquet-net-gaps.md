@@ -46,7 +46,23 @@ Zstd, footer statistics both read alike, and Parquet modular encryption. `Parque
 that each reads the other's files (every Iceberg type, nested shapes, DuckLake annotations, encryption), that both
 declare the same schema and statistics, and that their statistics prune the same row groups. CI's `parquet-net` job
 runs the unit suite and the DuckLake suites (DuckDB 1.5 and 2.0 as oracles, SQLite and PostgreSQL catalogs) on
-Parquet.Net; locally, Spec 826 passed and DuckLake 544 passed / 50 skipped on each backend.
+Parquet.Net; locally, on each backend: Spec 826 passed, EF Core 33, LINQ 84, REST catalog behaviour 89, DuckLake 544
+passed / 50 skipped and the DuckLake BDD specification 95 / 16 (DuckDB 1.5 oracle, SQLite and PostgreSQL catalogs).
+
+Through `ParquetFiles` (`tools/ParquetBackendBench`, Release, best of three after a warm-up; the flat table is `long`,
+`timestamptz`, a string of 1,000 distinct values with 10% nulls, `decimal(12,2)`, `double` and `uuid`, the nested one a
+list of strings, a map and a struct; row groups of 250,000 rows; Zstd):
+
+| Backend | Table | Write | Read | Size |
+|---|---|---|---|---|
+| ParquetSharp | flat, 1,000,000 rows | 2,730 ms | 1,194 ms | 33.6 MB |
+| Parquet.Net | flat, 1,000,000 rows | 2,245 ms | 1,509 ms | 29.0 MB |
+| ParquetSharp | nested, 250,000 rows | 771 ms | 955 ms | 4.5 MB |
+| Parquet.Net | nested, 250,000 rows | 710 ms | 996 ms | 3.5 MB |
+
+Parquet.Net writes faster and smaller (its dictionary and Zstd settings differ); it reads the flat table about a
+quarter slower, the nested one about as fast. Most of the time on either side is the data layer's own row assembly
+(boxing every value into `object?[]` rows), not the library.
 
 ## Gaps
 
