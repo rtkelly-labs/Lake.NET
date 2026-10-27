@@ -376,7 +376,15 @@ public sealed class DuckLakeTransaction : IAsyncDisposable
     /// Write <paramref name="rows"/> (values in table column order, see <see cref="DuckLakeValues"/>) as Parquet files —
     /// one per partition when the table is partitioned — and stage their registration.
     /// </summary>
-    public async Task InsertAsync(string schema, string table, IEnumerable<object?[]> rows, CancellationToken ct = default)
+    public Task InsertAsync(string schema, string table, IEnumerable<object?[]> rows, CancellationToken ct = default) =>
+        InsertAsync(schema, table, rows.Select(r => (r, (long?)null)), ct);
+
+    /// <summary>
+    /// Insert rows, each optionally with the row ID it keeps (an UPDATE's new row versions): those are written to the
+    /// file's <c>_ducklake_internal_row_id</c> column, which takes precedence over <c>row_id_start</c> (spec
+    /// <c>ducklake_data_file</c>), as DuckDB does.
+    /// </summary>
+    private async Task InsertAsync(string schema, string table, IEnumerable<(object?[] Row, long? RowId)> rows, CancellationToken ct)
     {
         PendingTable t;
         await using (var db = await BeginAsync(ct)) t = await TableAsync(db, schema, table, ct);
@@ -384,22 +392,36 @@ public sealed class DuckLakeTransaction : IAsyncDisposable
         var normalizers = columns.Select(c => DuckLakeValues.Normalizer(c.Type, c.Name)).ToArray();
         var required = columns.Select(c => !c.Nullable).ToArray();
         var normalized = new List<object?[]>(rows.TryGetNonEnumeratedCount(out var n) ? n : 0);
-        foreach (var r in rows)
+        var keepsRowIds = false;
+        foreach (var (r, rowId) in rows)
         {
             if (r.Length != columns.Count) throw new ArgumentException($"Row has {r.Length} values; {t.Schema.Name}.{t.Name} has {columns.Count} columns");
-            var values = new object?[r.Length];
+            // A kept row ID rides along after the values (partitioning and statistics read values by column index).
+            var values = new object?[rowId is null ? r.Length : r.Length + 1];
             for (var i = 0; i < r.Length; i++)
             {
                 values[i] = normalizers[i](r[i]);
                 if (values[i] is null && required[i]) throw new ArgumentException($"Column {columns[i].Name} is NOT NULL");
             }
+            if (rowId is { } id)
+            {
+                values[^1] = id;
+                keepsRowIds = true;
+            }
             normalized.Add(values);
         }
         if (normalized.Count == 0) return;
+        if (keepsRowIds && normalized.Any(v => v.Length == columns.Count)) throw new ArgumentException("Either every row keeps a row ID or none does");
         // Columns of the null type hold no data: they are left out of the file (and read back as null).
         var stored = columns.Select((c, i) => (c, i)).Where(x => x.c.Type is not DuckLakePrimitive { Name: "null" }).ToList();
-        var allStored = stored.Count == columns.Count;
+        var allStored = stored.Count == columns.Count && !keepsRowIds;
         var fileSchema = DuckLakeTypes.ToIceberg(stored.Select(x => x.c).ToList());
+        if (keepsRowIds)
+        {
+            fileSchema = new Schema(0, fileSchema.Columns.Append(
+                NestedField.Optional(DuckLakeCatalog.RowIdFieldId, "_ducklake_internal_row_id", PrimitiveType.Long)));
+            stored.Add((null!, columns.Count)); // the row ID, after the values
+        }
         var groups = t.PartitionKeys.Count == 0
             ? [(Values: (IReadOnlyList<string?>)[], Rows: normalized)]
             : DuckLakePartitioning.Split(columns, t.PartitionKeys, normalized);
@@ -485,10 +507,12 @@ public sealed class DuckLakeTransaction : IAsyncDisposable
             var t = await TableAsync(db, schema, table, ct);
             loaded = await _catalog.LoadTableAsync(db, t.Schema.Name, t.Name, _base!.Value, ct);
         }
-        var matched = await _catalog.ReadAsync(loaded, filter, ct);
+        var matched = new List<DuckLakeRow>();
+        await foreach (var r in _catalog.ReadRowsAsync(loaded, filter, ct)) matched.Add(r);
         var deleted = await DeleteAsync(schema, table, filter, ct);
         if (deleted != matched.Count) throw new InvalidOperationException($"Matched {matched.Count} rows but staged {deleted} deletes");
-        await InsertAsync(schema, table, matched.Select(r => update((object?[])r.Clone())), ct);
+        // The new versions keep their rows' IDs (spec "Row Lineage"; DuckDB does the same).
+        await InsertAsync(schema, table, matched.Select(r => (update((object?[])r.Values.Clone()), (long?)r.RowId)), ct);
         return deleted;
     }
 
