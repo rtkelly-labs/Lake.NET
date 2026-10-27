@@ -553,9 +553,36 @@ public abstract class CrossEngineTests : IAsyncLifetime
         }
         catch (Exception e) { ours = $"{e.GetType().Name}: {e.Message}"; }
         probes.Add(("This library reads DuckDB's encrypted files", ours));
+        // DuckDB (1.5.5 and 2.0) fails any filtered read of a Parquet file encrypted by parquet-cpp (ParquetSharp), with
+        // or without DuckLake: unfiltered scans work, a WHERE clause fails the GCM tag check (docs/ducklake.md). Those
+        // probes must fail with exactly that error, so this test flags the day DuckDB fixes it; everything else must work.
+        static bool DuckDbFilters(string what) => what.StartsWith("DuckDB filters", StringComparison.Ordinal) || what.StartsWith("DuckDB deletes from this library's", StringComparison.Ordinal);
         var report = string.Join("\n", probes.Select(p => $"{(p.Error is null ? "ok  " : "FAIL")} {p.What}{(p.Error is null ? "" : ": " + p.Error)}"));
-        Assert.True(probes.All(p => p.Error is null), report);
+        Assert.True(probes.All(p => DuckDbFilters(p.What)
+            ? p.Error?.Contains("Computed AES tag differs from read AES tag", StringComparison.Ordinal) == true
+            : p.Error is null), report);
         await AssertSameHistoryAsync(await _lake.OpenAsync());
+    }
+
+    /// <summary>
+    /// The DuckDB limitation behind the encrypted-lake test, without DuckLake: a file encrypted by parquet-cpp
+    /// (footer key, AES-GCM) reads in DuckDB until a filter is applied. Needs no httpfs (reading only).
+    /// </summary>
+    [SkippableFact]
+    public async Task DuckDB_reads_encrypted_parquet_written_here_but_not_with_a_filter()
+    {
+        Oracle.Require();
+        await _lake.CreateAsync();
+        var key = new byte[32];
+        new Random(7).NextBytes(key);
+        var path = Path.Combine(_lake.Root, "encrypted.parquet");
+        await Data.ParquetFiles.WriteAsync(_lake.IO, path, new Types.Schema(0, [Types.NestedField.Optional(1, "id", Types.PrimitiveType.Long)]), 0, [],
+            Enumerable.Range(0, 5).Select(i => new object?[] { (long)i }).ToList(), Data.ParquetWriteOptions.Default with { EncryptionKey = key });
+        var source = $"read_parquet('{path}', encryption_config = {{footer_key: 'k'}})";
+        string?[] errors = (await Task.WhenAll(new[] { $"SELECT sum(id) FROM {source}", $"SELECT id FROM {source} WHERE id = 1" }.Select(async q =>
+            (await Oracle.TryRunAsync(_lake, $"PRAGMA add_parquet_key('k', '{Convert.ToBase64String(key)}')", q)).Select(r => r["error"]?.ToString()).FirstOrDefault(e => e is not null))));
+        Assert.Null(errors[0]);
+        Assert.Contains("Computed AES tag differs from read AES tag", errors[1]); // flips when DuckDB fixes its filtered path
     }
 
     [SkippableFact]
