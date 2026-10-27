@@ -20,6 +20,7 @@
     <ProjectReference Include="../../src/Iceberg.Net.Data/Iceberg.Net.Data.csproj" />
     <ProjectReference Include="../../src/Iceberg.Net.DuckLake/Iceberg.Net.DuckLake.csproj" />
     <ProjectReference Include="../Iceberg.Net.TestSupport/Iceberg.Net.TestSupport.csproj" />
+    <ProjectReference Include="../Iceberg.Net.DuckLake.TestSupport/Iceberg.Net.DuckLake.TestSupport.csproj" />
   </ItemGroup>
   <ItemGroup>
     <Using Include="Xunit" />

@@ -692,6 +692,21 @@ wheels = [
 ]
 
 [[package]]
+name = "duckdb-extension-postgres-scanner"
+version = "1.5.5"
+source = { registry = "https://pypi.org/simple" }
+dependencies = [
+    { name = "duckdb" },
+]
+wheels = [
+    { url = "https://files.pythonhosted.org/packages/17/92/99ddd1a228bc5cb16f87dc6b5e0f7e8aaef749c9ff5f25e9521862130935/duckdb_extension_postgres_scanner-1.5.5-py3-none-macosx_11_0_arm64.whl", hash = "sha256:053b9ee8abf30f1880a244c9396323273ec99cf4d72a658e702cf536848b7e5c", size = 10225736, upload-time = "2026-08-10T20:09:48.019Z" },
+    { url = "https://files.pythonhosted.org/packages/5f/29/6a90da80a59c752961189f29a9e21637cac7ef8762edbe166a42d683e289/duckdb_extension_postgres_scanner-1.5.5-py3-none-macosx_11_0_x86_64.whl", hash = "sha256:797acdb64f10280303b66fb56c3537d3a7c82eab7cf6dfb4c71307c81c3e7b0d", size = 11001707, upload-time = "2026-08-10T20:09:50.915Z" },
+    { url = "https://files.pythonhosted.org/packages/67/69/1fc7c230644c6d2644df31e1bc6493ff8db4484962cc308038190fe4f736/duckdb_extension_postgres_scanner-1.5.5-py3-none-manylinux2014_aarch64.whl", hash = "sha256:5b50d53ecb192fca381c79ebd70da43b98fefe28a5781162081777f65efc8268", size = 13513294, upload-time = "2026-08-10T20:09:54.079Z" },
+    { url = "https://files.pythonhosted.org/packages/eb/e8/e722cafafea80348567368db31a144afd4a08967876b4d52e3fffd310937/duckdb_extension_postgres_scanner-1.5.5-py3-none-manylinux2014_x86_64.whl", hash = "sha256:fea9413d1b5bded7ead650aff91b3d7578c5149d832f666100b362f64404bf18", size = 14574595, upload-time = "2026-08-10T20:09:57.15Z" },
+    { url = "https://files.pythonhosted.org/packages/03/bd/70d96d071fab38448750b0963aa6bdf315bd3e675fac8a8abd560a37b7a9/duckdb_extension_postgres_scanner-1.5.5-py3-none-win_amd64.whl", hash = "sha256:41fe1e2600059198300c40a0228b3a179586d197d33872a0849c7edd91426f78", size = 10123266, upload-time = "2026-08-10T20:10:00.433Z" },
+]
+
+[[package]]
 name = "duckdb-extension-sqlite-scanner"
 version = "1.5.5"
 source = { registry = "https://pypi.org/simple" }
@@ -870,6 +885,7 @@ duckdb = [
     { name = "duckdb" },
     { name = "duckdb-extension-ducklake" },
     { name = "duckdb-extension-parquet" },
+    { name = "duckdb-extension-postgres-scanner" },
     { name = "duckdb-extension-sqlite-scanner" },
     { name = "duckdb-extensions" },
 ]
@@ -887,6 +903,7 @@ duckdb = [
     { name = "duckdb", specifier = "==1.5.5" },
     { name = "duckdb-extension-ducklake", specifier = "==1.5.5" },
     { name = "duckdb-extension-parquet", specifier = "==1.5.5" },
+    { name = "duckdb-extension-postgres-scanner", specifier = "==1.5.5" },
     { name = "duckdb-extension-sqlite-scanner", specifier = "==1.5.5" },
     { name = "duckdb-extensions", specifier = "==1.5.5" },
 ]

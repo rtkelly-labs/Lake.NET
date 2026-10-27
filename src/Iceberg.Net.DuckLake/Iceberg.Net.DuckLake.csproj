@@ -10,6 +10,11 @@
     <ProjectReference Include="../Iceberg.Net.Data/Iceberg.Net.Data.csproj" />
   </ItemGroup>
   <ItemGroup>
+    <PackageReference Include="Microsoft.EntityFrameworkCore.Relational" />
+    <PackageReference Include="Microsoft.EntityFrameworkCore.Sqlite" />
+    <PackageReference Include="Npgsql.EntityFrameworkCore.PostgreSQL" />
+  </ItemGroup>
+  <ItemGroup>
     <InternalsVisibleTo Include="Iceberg.Net.DuckLake.Tests" />
     <InternalsVisibleTo Include="Iceberg.Net.Fuzz" />
   </ItemGroup>

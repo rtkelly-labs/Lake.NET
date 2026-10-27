@@ -51,6 +51,7 @@ public static class DuckLakeValues
 
     private static object NormalizePrimitive(DuckLakePrimitive p, object v) => p.Name switch
     {
+        "null" => throw new ArgumentException("a column of type null holds only NULL"),
         "boolean" => (bool)v,
         "int8" => (int)checked((sbyte)Convert.ToInt64(v, CultureInfo.InvariantCulture)),
         "int16" => (int)checked((short)Convert.ToInt64(v, CultureInfo.InvariantCulture)),
