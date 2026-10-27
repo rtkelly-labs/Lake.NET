@@ -309,8 +309,8 @@ dropped afterwards, and validates the lake when the test ends. Environment:
 | `ICEBERG_DUCKLAKE11_PYTHON` / `ICEBERG_DUCKLAKE11_REQUIRED=1` | The 1.1 oracle: a Python with `duckdb==2.0.0` (downloads the extension) |
 | `ICEBERG_PBT_RUNS` / `ICEBERG_PBT_SEED` | Model-based test: number of cases, and a replay seed printed by a failure |
 
-In CI (both databases, both oracles): 588 of the 590 tests (the two format-1.0 runs of the deletion-vector cross-engine test skip by design) and all 111 BDD scenarios pass. Locally without
-the 1.1 oracle: 542 and 95 pass, the 48 and 16 others skip (the encrypted-lake test because DuckDB cannot download httpfs here). The projects are in the `cross-engine` CI suite, which starts the emulation stack's
+In CI (both databases, both oracles): 592 of the 594 tests (the two format-1.0 runs of the deletion-vector cross-engine test skip by design) and all 111 BDD scenarios pass. Locally without
+the 1.1 oracle: 544 and 95 pass, the 50 and 16 others skip (DuckDB 2.0 cases, and the encrypted-lake test because DuckDB cannot download httpfs here). The projects are in the `cross-engine` CI suite, which starts the emulation stack's
 PostgreSQL, installs both oracles and requires all three. The oracle is `interop/ducklake_oracle.py`: it attaches the
 test's catalog (SQLite or PostgreSQL) in DuckDB and runs SQL against it.
 
