@@ -1,7 +1,7 @@
 <Project Sdk="Microsoft.NET.Sdk">
   <PropertyGroup>
     <RootNamespace>Iceberg.Net.DuckLake</RootNamespace>
-    <Description>DuckLake 1.0 tables: a SQL catalog database (any ADO.NET provider) over the same Parquet data plane as Iceberg.Net.Data.</Description>
+    <Description>DuckLake 1.0 and 1.1 tables: a catalog database (SQLite or PostgreSQL, through EF Core) over the same Parquet data plane as Iceberg.Net.Data.</Description>
     <PackageTags>$(PackageTags);ducklake;duckdb</PackageTags>
     <!-- Not released yet: the DuckLake layer is an evaluation build-out (docs/ducklake.md). -->
     <IsPackable>false</IsPackable>
