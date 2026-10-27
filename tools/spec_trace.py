@@ -161,8 +161,6 @@ NOT_IMPLEMENTED = {
     **{
         f"ducklake:{k}": reason
         for k, reason in {
-            "ducklake_column_mapping": "files added without field IDs (name mapping) are rejected",
-            "ducklake_name_mapping": "files added without field IDs (name mapping) are rejected",
             "ducklake_file_variant_stats": "variant type not implemented",
             "semi-structured-types": "variant type not implemented",
             "geometry-types": "geometry type not implemented",

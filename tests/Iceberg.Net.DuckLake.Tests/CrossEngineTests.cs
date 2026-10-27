@@ -383,6 +383,84 @@ public abstract class CrossEngineTests : IAsyncLifetime
         Assert.Equal(new DuckLakeInterval(1, 2, 3_004_000), ours.Single(r => (long)r[0]! == 1)[10]);
     }
 
+    private const string AddedColumns = "id BIGINT, name VARCHAR, s STRUCT(a BIGINT, b VARCHAR), l BIGINT[], m MAP(VARCHAR, BIGINT), region VARCHAR";
+
+    /// <summary>Parquet files written by DuckDB's COPY (no field IDs): nested columns, a Hive partition directory, a file missing columns.</summary>
+    private async Task<(string Nested, string Partitioned, string Narrow)> ExternalFilesAsync()
+    {
+        var dir = Path.Combine(_lake.Root, "external");
+        Directory.CreateDirectory(dir);
+        await Oracle.RunAsync(_lake,
+            $"COPY (SELECT i AS id, 'n' || i AS name, {{'a': i, 'b': 'x' || i}} AS s, [i, NULL, i + 1] AS l, MAP {{'k' || i: i}} AS m, 'us' AS region FROM range(5) r(i)) TO '{dir}/nested.parquet'",
+            $"COPY (SELECT i + 10 AS id, 'p' AS name, 'eu' AS region FROM range(3) r(i)) TO '{dir}/hive' (FORMAT parquet, PARTITION_BY (region))",
+            $"COPY (SELECT 'only-name' AS name, (i + 20)::INT AS id FROM range(2) r(i)) TO '{dir}/narrow.parquet'");
+        return (Path.Combine(dir, "nested.parquet"), Directory.GetFiles(Path.Combine(dir, "hive", "region=eu"), "*.parquet").Single(), Path.Combine(dir, "narrow.parquet"));
+    }
+
+    [SkippableFact]
+    [Spec("ducklake: ducklake_column_mapping")]
+    [Spec("ducklake: ducklake_name_mapping")]
+    public async Task Files_added_here_and_by_DuckDB_get_the_same_mapping_and_both_engines_read_both()
+    {
+        Oracle.Require();
+        var catalog = await _lake.CreateAsync();
+        var (nested, partitioned, narrow) = await ExternalFilesAsync();
+        await Oracle.RunAsync(_lake,
+            $"CREATE TABLE lake.theirs ({AddedColumns})",
+            $"CREATE TABLE lake.ours ({AddedColumns})",
+            $"CALL ducklake_add_data_files('lake', 'theirs', '{nested}')",
+            $"CALL ducklake_add_data_files('lake', 'theirs', '{partitioned}', hive_partitioning => true, allow_missing => true)",
+            $"CALL ducklake_add_data_files('lake', 'theirs', '{narrow}', allow_missing => true)");
+        catalog = await _lake.OpenAsync();
+        foreach (var (file, options) in new[]
+                 {
+                     (nested, new DuckLakeAddFileOptions()),
+                     (partitioned, new DuckLakeAddFileOptions { HivePartitioning = true, AllowMissing = true }),
+                     (narrow, new DuckLakeAddFileOptions { AllowMissing = true }),
+                 })
+        {
+            await using var tx = catalog.BeginTransaction();
+            await tx.AddDataFilesAsync("main", "ours", [file], options);
+            await tx.CommitAsync();
+        }
+
+        // The same name mapping rows and file statistics (columns differ by table, so compare by column name).
+        async Task<List<string>> Mapping(string table) => (await _lake.SqlAsync($"""
+            SELECT f.path, n.column_id, n.source_name, c.column_name, n.parent_column, n.is_partition
+            FROM ducklake_data_file f JOIN ducklake_name_mapping n ON n.mapping_id = f.mapping_id
+            JOIN ducklake_column c ON c.column_id = n.target_field_id AND c.table_id = f.table_id
+            JOIN ducklake_table t ON t.table_id = f.table_id WHERE t.table_name = '{table}'
+            """)).Select(r => string.Join("|", r.Select(v => v is bool b ? (b ? 1 : 0) : v))).Order(StringComparer.Ordinal).ToList();
+        Assert.Equal(await Mapping("theirs"), await Mapping("ours"));
+        async Task<List<string>> Stats(string table) => (await _lake.SqlAsync($"""
+            SELECT f.path, c.column_name, s.value_count, s.null_count, s.min_value, s.max_value
+            FROM ducklake_file_column_stats s JOIN ducklake_data_file f ON f.data_file_id = s.data_file_id
+            JOIN ducklake_column c ON c.column_id = s.column_id AND c.table_id = s.table_id
+            JOIN ducklake_table t ON t.table_id = s.table_id WHERE t.table_name = '{table}'
+            """)).Select(r => string.Join("|", r)).Order(StringComparer.Ordinal).ToList();
+        Assert.Equal(await Stats("theirs"), await Stats("ours"));
+
+        // Each engine reads both tables, with the same rows.
+        foreach (var name in new[] { "theirs", "ours" })
+        {
+            var table = await catalog.LoadTableAsync("main", name);
+            LakeJson.AssertSameRows(await Oracle.RowsAsync(_lake, $"SELECT * FROM lake.{name}"), LakeJson.Rows(table.Columns, await catalog.ReadAsync(table)));
+            Assert.Equal(10, (await catalog.ReadAsync(table)).Count);
+        }
+        // And DuckDB changes what this library added, and the reverse.
+        await Oracle.RunAsync(_lake, "DELETE FROM lake.ours WHERE id = 1", "UPDATE lake.ours SET name = 'upd' WHERE id = 11");
+        await using (var tx = catalog.BeginTransaction())
+        {
+            await tx.DeleteAsync("main", "theirs", Expr.Equal("id", 1L));
+            await tx.CommitAsync();
+        }
+        foreach (var name in new[] { "theirs", "ours" })
+        {
+            var table = await catalog.LoadTableAsync("main", name);
+            LakeJson.AssertSameRows(await Oracle.RowsAsync(_lake, $"SELECT * FROM lake.{name}"), LakeJson.Rows(table.Columns, await catalog.ReadAsync(table)));
+        }
+    }
+
     [SkippableFact]
     [Spec("ducklake: Flushing Inlined Data")]
     public async Task Each_engine_flushes_what_the_other_inlined()

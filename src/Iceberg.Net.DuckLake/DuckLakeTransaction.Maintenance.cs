@@ -175,7 +175,13 @@ public sealed partial class DuckLakeTransaction
         var width = table.Columns.Count;
         var options = new DataFileReadOptions { FileSize = file.FileSizeBytes };
         var fromFile = DuckLakeValues.FileRowConverter(table.Columns, toFile: false);
-        await foreach (var batch in ParquetFiles.ReadBatchesAsync(_catalog.IO, location, DuckLakeCatalog.FileProjection(table), null, options, ct))
+        DuckLakeNameMap? mapping = null;
+        if (file.MappingId is { } mappingId)
+        {
+            await using var db = _catalog.Context(_stage);
+            mapping = (await DuckLakeNameMap.LoadAsync(db, [mappingId], ct))[mappingId];
+        }
+        await foreach (var batch in _catalog.ReadDataFileAsync(table, location, mapping, DuckLakeCatalog.FileProjection(table), options, ct))
         {
             for (var i = 0; i < batch.Rows.Count; i++)
             {
