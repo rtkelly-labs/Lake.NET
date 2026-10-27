@@ -446,10 +446,14 @@ public sealed class DuckLakeTransaction : IAsyncDisposable
         foreach (var (fileId, positions) in byFile)
         {
             var task = plan.Files.Single(x => x.DataFileId == fileId);
+            // The replacement delete file holds its predecessor's positions and the new ones. Positions deleted by DuckDB's
+            // deletion inlining stay in ducklake_inlined_delete_{table} and out of the file: readers apply both, and
+            // DuckDB counts rows (record_count - delete_count - inlined deletions) assuming the two never overlap.
             var all = new HashSet<long>(positions);
-            if (await _catalog.DeletedPositionsAsync(plan, task, loaded.SnapshotId, ct) is { } earlier) all.UnionWith(earlier);
+            if (task.DeleteFileLocation is { } previous) all.UnionWith(await DuckLakeDeleteFiles.ReadPositionsAsync(_catalog.IO, previous, loaded.SnapshotId, ct));
+            var inlinedDeleted = plan.InlinedDeletions.TryGetValue(fileId, out var inl) ? inl.Count : 0;
             WrittenDelete? written = null;
-            if (all.Count < task.RecordCount)
+            if (all.Count + inlinedDeleted < task.RecordCount)
             {
                 var relative = $"ducklake-{Guid.CreateVersion7()}-delete.parquet";
                 var location = t.Location + relative;

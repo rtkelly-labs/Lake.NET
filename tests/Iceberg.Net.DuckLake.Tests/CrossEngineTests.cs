@@ -8,7 +8,7 @@ namespace Iceberg.Net.DuckLake.Tests;
 /// DuckDB's <c>ducklake</c> extension reads what this library writes, and this library reads what DuckDB writes, on
 /// the same SQLite catalog and data directory.
 /// </summary>
-public abstract class CrossEngineTests : IDisposable
+public abstract class CrossEngineTests : IAsyncLifetime
 {
     private readonly TestLake _lake;
 
@@ -21,7 +21,14 @@ public abstract class CrossEngineTests : IDisposable
     /// <summary>The DuckDB whose ducklake extension writes this class's format version.</summary>
     private DuckLakeOracle Oracle { get; }
 
-    public void Dispose() => _lake.Dispose();
+    public Task InitializeAsync() => Task.CompletedTask;
+
+    /// <summary>Whatever both engines did, the lake must still pass a deep validation.</summary>
+    public async Task DisposeAsync()
+    {
+        try { await _lake.ValidateAsync(); }
+        finally { _lake.Dispose(); }
+    }
 
     internal static readonly DuckLakeColumnDefinition[] AllTypes =
     [

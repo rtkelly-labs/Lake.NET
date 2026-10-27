@@ -1,0 +1,21 @@
+<Project Sdk="Microsoft.NET.Sdk">
+  <PropertyGroup>
+    <IsPackable>false</IsPackable>
+    <IsTestProject>true</IsTestProject>
+    <!-- The CI job that runs this project (tools/test-projects.sh; registry: Iceberg.Net.slnx) -->
+    <CiSuite>cross-engine</CiSuite>
+    <RootNamespace>Iceberg.Net.DuckLake.Behaviour.Tests</RootNamespace>
+    <Description>Executable specifications (Gherkin, Reqnroll) of DuckLake tables on each catalog database and format version, with DuckDB as the other engine.</Description>
+  </PropertyGroup>
+  <ItemGroup>
+    <PackageReference Include="Microsoft.NET.Test.Sdk" />
+    <PackageReference Include="xunit" />
+    <PackageReference Include="xunit.runner.visualstudio" PrivateAssets="all" />
+    <PackageReference Include="Xunit.SkippableFact" />
+    <PackageReference Include="Reqnroll.xUnit" />
+  </ItemGroup>
+  <ItemGroup>
+    <ProjectReference Include="../../src/Iceberg.Net.DuckLake/Iceberg.Net.DuckLake.csproj" />
+    <ProjectReference Include="../Iceberg.Net.DuckLake.TestSupport/Iceberg.Net.DuckLake.TestSupport.csproj" />
+  </ItemGroup>
+</Project>
