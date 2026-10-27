@@ -86,7 +86,7 @@ internal static class WideTypes
     /// <summary>The same columns from DuckDB, cast so Python returns them losslessly.</summary>
     public const string Select = """
         SELECT id, u8, u16, u32, u64::VARCHAR, i8, i16, epoch_us(ts_s), epoch_us(ts_ms), ttz::VARCHAR, iv::VARCHAR, u32s,
-               list_transform(ivs, x -> x::VARCHAR),
+               list_transform(ivs, lambda x: x::VARCHAR),
                CASE WHEN pair IS NULL THEN NULL ELSE {'t': pair.t::VARCHAR, 'n': pair.n::VARCHAR} END
         FROM lake.t
         """;
