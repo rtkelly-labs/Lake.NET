@@ -131,7 +131,10 @@ public sealed partial class DuckLakeTransaction : IAsyncDisposable
     /// <summary>Rows written into the table's inlined data table (data inlining), each with the row ID it keeps or a new one.</summary>
     private sealed record InlineInsertOp(PendingTable Table, IReadOnlyList<(object?[] Values, long? RowId)> Rows) : Op;
 
-    private sealed record WrittenDelete(string RelativePath, long Count, long Size, long FooterSize);
+    private sealed record WrittenDelete(string RelativePath, long Count, long Size, long FooterSize)
+    {
+        public string Format { get; init; } = "parquet";
+    }
 
     private async Task<DuckLakeDbContext> BeginAsync(CancellationToken ct)
     {
@@ -539,11 +542,26 @@ public sealed partial class DuckLakeTransaction : IAsyncDisposable
             WrittenDelete? written = null;
             if (all.Count + inlinedDeleted < task.RecordCount)
             {
-                var relative = $"ducklake-{Guid.CreateVersion7()}-delete.parquet";
-                var location = t.Location + relative;
-                _written.Add(location);
-                var (size, footer) = await DuckLakeDeleteFiles.WriteAsync(_catalog.IO, location, task.Location, all, ct);
-                written = new WrittenDelete(relative, all.Count, size, footer);
+                if (await WritesDeletionVectorsAsync(t, ct))
+                {
+                    // A bare vector: its snapshot is the delete file's begin_snapshot (spec ducklake_delete_file).
+                    var relative = $"ducklake-{Guid.CreateVersion7()}-delete.puffin";
+                    var location = t.Location + relative;
+                    _written.Add(location);
+                    var bitmap = new Puffin.RoaringPositionBitmap();
+                    bitmap.AddRange(all);
+                    var bytes = Puffin.DeletionVector.Encode(bitmap);
+                    await _catalog.IO.WriteAsync(location, bytes, overwrite: false, ct);
+                    written = new WrittenDelete(relative, all.Count, bytes.Length, 0) { Format = "puffin" };
+                }
+                else
+                {
+                    var relative = $"ducklake-{Guid.CreateVersion7()}-delete.parquet";
+                    var location = t.Location + relative;
+                    _written.Add(location);
+                    var (size, footer) = await DuckLakeDeleteFiles.WriteAsync(_catalog.IO, location, task.Location, all, ct);
+                    written = new WrittenDelete(relative, all.Count, size, footer);
+                }
             }
             files.Add(new FileDelete(fileId, oldDeleteFile, positions.Count, task.RecordCount, written));
         }
@@ -1165,8 +1183,8 @@ public sealed partial class DuckLakeTransaction : IAsyncDisposable
                     rows.DeleteFiles.Add(new DeleteFileEntity
                     {
                         DeleteFileId = fileId++, TableId = tableId, BeginSnapshot = snapshotId, DataFileId = f.DataFileId, Path = f.NewFile.RelativePath,
-                        PathIsRelative = true, Format = "parquet", DeleteCount = f.NewFile.Count, FileSizeBytes = f.NewFile.Size, FooterSize = f.NewFile.FooterSize,
-                        RowGroupCount = v11 ? 1 : null,
+                        PathIsRelative = true, Format = f.NewFile.Format, DeleteCount = f.NewFile.Count, FileSizeBytes = f.NewFile.Size, FooterSize = f.NewFile.FooterSize,
+                        RowGroupCount = v11 && f.NewFile.Format == "parquet" ? 1 : null,
                     });
                 }
                 var (rowIdColumn, beginColumn, endColumn) = DuckLakeInlinedData.SystemColumns(v11);

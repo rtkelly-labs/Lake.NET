@@ -56,10 +56,19 @@ public static class DuckLakeDeleteFiles
         return (written.File.FileSizeInBytes, written.FooterSize);
     }
 
-    /// <summary>Every deleted position of a delete file, with the snapshot that deleted it when the file records one (partial delete files).</summary>
+    /// <summary>Every deleted position of a delete file, with the snapshot that deleted it when the file records one (partial delete files, Puffin vectors).</summary>
     public static async Task<List<(long Position, long? Snapshot)>> ReadEntriesAsync(IFileIO io, string location, CancellationToken ct = default)
     {
         var result = new List<(long, long?)>();
+        if (await VectorsAsync(io, location, ct) is { } vectors)
+        {
+            // Cumulative vectors: a position was deleted by the earliest vector holding it.
+            var seen = new HashSet<long>();
+            foreach (var (snapshot, bitmap) in vectors)
+                foreach (var pos in bitmap.Positions())
+                    if (seen.Add(pos)) result.Add((pos, snapshot));
+            return result;
+        }
         foreach (var row in await ParquetFiles.ReadAsync(io, location, ReadSchema, ct))
         {
             var pos = row[1] ?? row[3] ?? throw new InvalidDataException($"Delete file {location} has a row without a position");
@@ -71,10 +80,17 @@ public static class DuckLakeDeleteFiles
     /// <summary>
     /// The deleted positions in effect at <paramref name="snapshot"/>. A partial delete file (spec <c>partial_max</c>)
     /// records the snapshot of each deletion in <c>_ducklake_internal_snapshot_id</c>; later ones are not yet in effect.
+    /// A Puffin file's vector is the one with the greatest <c>ducklake-snapshot-id</c> not after the snapshot.
     /// </summary>
     public static async Task<HashSet<long>> ReadPositionsAsync(IFileIO io, string location, long snapshot = long.MaxValue, CancellationToken ct = default)
     {
         var positions = new HashSet<long>();
+        if (await VectorsAsync(io, location, ct) is { } vectors)
+        {
+            var current = vectors.LastOrDefault(v => v.Snapshot is null || v.Snapshot <= snapshot);
+            if (current.Positions is not null) positions.UnionWith(current.Positions.Positions());
+            return positions;
+        }
         foreach (var row in await ParquetFiles.ReadAsync(io, location, ReadSchema, ct))
         {
             var pos = row[1] ?? row[3] ?? throw new InvalidDataException($"Delete file {location} has a row without a position");
@@ -82,6 +98,39 @@ public static class DuckLakeDeleteFiles
             positions.Add((long)pos);
         }
         return positions;
+    }
+
+    /// <summary>The Iceberg <c>deletion-vector-v1</c> blob type, and DuckLake's per-vector snapshot property (format 1.1).</summary>
+    public const string DeletionVectorBlob = "deletion-vector-v1";
+    public const string SnapshotProperty = "ducklake-snapshot-id";
+
+    /// <summary>
+    /// A delete file's deletion vectors (spec <c>ducklake_delete_file</c>, format <c>puffin</c>), oldest first, each with
+    /// its snapshot (null for a bare vector: the file's <c>begin_snapshot</c>); null for a Parquet delete file. Detected
+    /// from the content: Parquet starts with <c>PAR1</c>, a Puffin container with <c>PFA1</c>, a bare vector with neither.
+    /// </summary>
+    internal static async Task<List<(long? Snapshot, Puffin.RoaringPositionBitmap Positions)>?> VectorsAsync(IFileIO io, string location, CancellationToken ct)
+    {
+        var head = await io.ReadRangeAsync(location, 0, 4, ct);
+        if (head.AsSpan().SequenceEqual("PAR1"u8)) return null;
+        var bytes = await io.ReadAllAsync(location, ct);
+        try
+        {
+            if (!head.AsSpan().SequenceEqual(Puffin.PuffinFile.Magic)) return [(null, Puffin.DeletionVector.Decode(bytes))];
+            var contents = Puffin.PuffinFile.Read(bytes);
+            var vectors = new List<(long? Snapshot, Puffin.RoaringPositionBitmap Positions)>();
+            foreach (var blob in contents.Blobs.Where(b => b.Type == DeletionVectorBlob))
+            {
+                long? snapshot = blob.Properties is { } props && props.TryGetValue(SnapshotProperty, out var text)
+                    ? long.Parse(text, NumberStyles.Integer, CultureInfo.InvariantCulture) : null;
+                vectors.Add((snapshot, Puffin.DeletionVector.Decode(contents.Payload(blob))));
+            }
+            return vectors.OrderBy(v => v.Snapshot ?? long.MinValue).ToList();
+        }
+        catch (FormatException e)
+        {
+            throw new InvalidDataException($"Delete file {location} is not a Parquet delete file or a valid deletion vector: {e.Message}", e);
+        }
     }
 }
 

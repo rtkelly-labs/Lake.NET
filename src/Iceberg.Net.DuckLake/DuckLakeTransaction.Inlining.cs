@@ -18,16 +18,28 @@ public sealed partial class DuckLakeTransaction
     private async Task<int> InliningLimitAsync(PendingTable t, CancellationToken ct)
     {
         if (_inliningLimits.TryGetValue(t, out var cached)) return cached;
-        await using var db = _catalog.Context(_stage);
-        var rows = await db.Metadata.Where(m => m.Key == "data_inlining_row_limit").ToListAsync(ct);
-        string? Scoped(string? scope, long? id) => rows.LastOrDefault(r => r.Scope == scope && (scope is null || r.ScopeId == id))?.Value;
-        var text = (t.TableId is { } tableId ? Scoped("table", tableId) : null)
-                   ?? (t.Schema.SchemaId is { } schemaId ? Scoped("schema", schemaId) : null)
-                   ?? Scoped(null, null);
+        var text = await SettingAsync(t, "data_inlining_row_limit", ct);
         var limit = text is not null && int.TryParse(text, System.Globalization.NumberStyles.Integer, System.Globalization.CultureInfo.InvariantCulture, out var persisted)
             ? persisted : _catalog.Options.DataInliningRowLimit;
         return _inliningLimits[t] = Math.Max(0, limit);
     }
+
+    /// <summary>A <c>ducklake_metadata</c> option for a table: table scope, then schema, then catalog (as DuckDB resolves them).</summary>
+    private async Task<string?> SettingAsync(PendingTable t, string key, CancellationToken ct)
+    {
+        await using var db = _catalog.Context(_stage);
+        var rows = await db.Metadata.Where(m => m.Key == key).ToListAsync(ct);
+        string? Scoped(string? scope, long? id) => rows.LastOrDefault(r => r.Scope == scope && (scope is null || r.ScopeId == id))?.Value;
+        return (t.TableId is { } tableId ? Scoped("table", tableId) : null)
+               ?? (t.Schema.SchemaId is { } schemaId ? Scoped("schema", schemaId) : null)
+               ?? Scoped(null, null);
+    }
+
+    /// <summary>Whether deletes from a table are written as deletion vectors (<c>write_deletion_vectors</c>, format 1.1 only).</summary>
+    private async Task<bool> WritesDeletionVectorsAsync(PendingTable t, CancellationToken ct) =>
+        _catalog.Is11 && (await SettingAsync(t, "write_deletion_vectors", ct) is { } text
+            ? text.Equals("true", StringComparison.OrdinalIgnoreCase)
+            : _catalog.Options.WriteDeletionVectors);
 
     /// <summary>
     /// Inlined rows moved to Parquet (DuckDB's <c>ducklake_flush_inlined_data</c>). Each inlined data table becomes one

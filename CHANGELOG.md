@@ -26,7 +26,7 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
   `timestamp_s`/`timestamp_ms`, `timetz` and `interval`, stored with DuckDB's Parquet annotations and inlining encodings.
   Registering existing Parquet files under a name mapping (`AddDataFilesAsync`, as `ducklake_add_data_files`), and
   reading files DuckDB registered that way. Typed reads: `ReadClrAsync` (natural CLR values) and `ReadAsync<T>` (rows bound to
-  records by column name). DuckDB's `ducklake` extension is the cross-engine oracle in both
+  records by column name). Format 1.1's Puffin deletion vectors, read and (under `write_deletion_vectors`) written. DuckDB's `ducklake` extension is the cross-engine oracle in both
   directions on both databases, with a BDD specification and model-based property tests; DuckLake spec sections are
   pinned and traced like Iceberg's ([docs/ducklake.md](docs/ducklake.md)).
 
