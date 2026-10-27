@@ -150,7 +150,7 @@ public sealed class DuckLakeCatalog
         return new DuckLakeCatalog(store, io, options, dataPath, version);
     }
 
-    internal DuckLakeDbContext Context() => Store.Context(Version);
+    internal DuckLakeDbContext Context(DuckLakeTelemetry.Scope? scope = null) => Store.Context(Version, scope);
 
     /// <summary>
     /// Catalog reads under the <see cref="Corruption"/> contract: a row the provider cannot materialise (a NULL in a
@@ -348,8 +348,20 @@ public sealed class DuckLakeCatalog
     /// <summary>Plan a scan: the live data files of the table's snapshot, minus those whose file statistics rule out <paramref name="filter"/>.</summary>
     public async Task<DuckLakeScanPlan> PlanScanAsync(DuckLakeTable table, Expression? filter = null, CancellationToken ct = default)
     {
-        await using var db = Context();
-        return await PlanScanAsync(db, table, filter, ct);
+        using var scope = DuckLakeTelemetry.Start("ducklake.scan.plan", this, table.ToString());
+        scope.Snapshot(table.SnapshotId);
+        try
+        {
+            await using var db = Context(scope);
+            var plan = await PlanScanAsync(db, table, filter, ct);
+            scope.Succeeded();
+            return plan;
+        }
+        catch (Exception e)
+        {
+            scope.Failed(e);
+            throw;
+        }
     }
 
     internal static async Task<Dictionary<long, DeleteFileEntity>> DeleteFilesAsync(DuckLakeDbContext db, long tableId, long snapshot, CancellationToken ct)
@@ -406,6 +418,7 @@ public sealed class DuckLakeCatalog
             tasks.Add(new DuckLakeFileTask(f.DataFileId, location, f.RecordCount, f.FileSizeBytes, deleteLocation, f.RowIdStart) { RowGroupCount = f.RowGroupCount });
         }
         var inlined = await db.InlinedDataTables.Where(i => i.TableId == table.TableId).OrderBy(i => i.SchemaVersion).Select(i => i.TableName).ToListAsync(ct);
+        db.Scope?.Planned(tasks.Count, pruned);
         return new DuckLakeScanPlan(tasks, pruned, inlined) { InlinedDeletions = await InlinedDeletionsAsync(db, table.TableId, table.SnapshotId, ct) };
     }
 
@@ -518,8 +531,45 @@ public sealed class DuckLakeCatalog
 
     internal async IAsyncEnumerable<ScannedRow> ScanAsync(DuckLakeTable table, Expression? filter, [EnumeratorCancellation] CancellationToken ct)
     {
+        // Disposed when the rows are read or the caller stops early (the iterator's finally runs on DisposeAsync).
+        using var scope = DuckLakeTelemetry.Start("ducklake.scan", this, table.ToString());
+        scope.Snapshot(table.SnapshotId);
+        long returned = 0;
+        var failed = false;
+        await using var rows = ScanRowsAsync(table, filter, scope, ct).GetAsyncEnumerator(ct);
+        try
+        {
+            while (true)
+            {
+                bool more;
+                try
+                {
+                    more = await rows.MoveNextAsync();
+                }
+                catch (Exception e)
+                {
+                    failed = true;
+                    scope.Failed(e);
+                    throw;
+                }
+                if (!more) break;
+                returned++;
+                yield return rows.Current;
+            }
+        }
+        finally
+        {
+            // A caller that stops early has not failed.
+            if (!failed) scope.Succeeded();
+            scope.Rows(returned);
+        }
+    }
+
+    private async IAsyncEnumerable<ScannedRow> ScanRowsAsync(DuckLakeTable table, Expression? filter, DuckLakeTelemetry.Scope scope,
+        [EnumeratorCancellation] CancellationToken ct)
+    {
         DuckLakeScanPlan plan;
-        await using (var db = Context()) plan = await PlanScanAsync(db, table, filter, ct);
+        await using (var db = Context(scope)) plan = await PlanScanAsync(db, table, filter, ct);
         var bound = filter is null or AlwaysTrue ? null : Binder.Bind(table.Schema, filter);
         var residual = bound is null ? null : RowEvaluator.Compile(bound);
         var width = table.Columns.Count;
@@ -550,7 +600,7 @@ public sealed class DuckLakeCatalog
         foreach (var name in plan.InlinedTables)
         {
             List<(long RowId, object?[] Values)> rows;
-            await using (var db = Context()) rows = await DuckLakeInlinedData.ReadAsync(db, table, name, ct);
+            await using (var db = Context(scope)) rows = await DuckLakeInlinedData.ReadAsync(db, table, name, ct);
             foreach (var (rowId, values) in rows)
             {
                 if (residual is not null && !residual(values)) continue;
