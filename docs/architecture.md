@@ -7,12 +7,20 @@ flowchart TD
   App["C# producer / consumer"] --> Data["Iceberg.Net.Data<br/>TableWriter · SnapshotProducer · TableScan · Maintenance"]
   Data --> Catalog["Iceberg.Net.Catalog<br/>ICatalog · MetastoreCatalog · Glue · REST · InMemory"]
   Data --> Avro["Iceberg.Net.Avro<br/>container codec · ManifestCodec"]
-  Data --> Parquet["ParquetSharp<br/>(Arrow C++ parquet)"]
+  Data --> Parquet["ParquetSharp<br/>(Arrow C++ parquet, default)"]
+  Data -.-> ParquetNet["Iceberg.Net.Data.ParquetNet<br/>Parquet.Net fork (managed), opt-in"]
   Catalog --> Core["Iceberg.Net.Core<br/>types · transforms · TableMetadata · updates/requirements · JSON"]
   Avro --> Core
   Catalog --> IO["Iceberg.Net.IO<br/>IFileIO · Local · S3"]
   Data --> IO
 ```
+
+Parquet files go through a small backend interface (`IParquetBackend`, `ParquetModel.cs`): the schema tree, column
+chunk statistics, and each leaf column as its levels plus its values. The data layer (`ParquetFiles`, `NestedColumns`,
+`ParquetInspection`, `ParquetImport`) is written once over it; ParquetSharp is the default backend and Parquet.Net
+(`external/parquet-dotnet`, a git submodule) the other, chosen with `ParquetNet.UseAsDefault()` or
+`ICEBERG_PARQUET_BACKEND=parquet-net`. Both write the same files and CI runs the suites on both
+([parquet-net-gaps.md](parquet-net-gaps.md)).
 
 `Core` has no dependencies at all (BCL only) and is where the spec lives. Everything that talks to the
 outside world (AWS SDK, HTTP, Parquet) sits above it, so the spec layer can be tested in microseconds.

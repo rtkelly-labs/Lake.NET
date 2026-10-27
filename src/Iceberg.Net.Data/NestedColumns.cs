@@ -1,14 +1,11 @@
 using System.Collections;
-using System.Runtime.InteropServices;
-using ParquetSharp;
-using ParquetSharp.Schema;
 using Iceberg.Net.Types;
 
 namespace Iceberg.Net.Data;
 
 /// <summary>
 /// Struct, list and map columns in Parquet, shredded into definition/repetition levels and reassembled (Dremel) over
-/// ParquetSharp's physical column API, in the layout Iceberg's spec and Java/Spark/PyIceberg use: structs are groups,
+/// the physical column data of either Parquet backend (<see cref="IPqReader"/>, <see cref="IPqWriter"/>), in the layout Iceberg's spec and Java/Spark/PyIceberg use: structs are groups,
 /// lists are <c>&lt;group (LIST)&gt; { repeated group list { element } }</c>, maps
 /// <c>&lt;group (MAP)&gt; { repeated group key_value { required key; value } }</c>, with field IDs on every element,
 /// key and value. Values are <c>object?[]</c> for structs (aligned to the struct's fields), <c>List&lt;object?&gt;</c>
@@ -30,11 +27,15 @@ internal static class NestedColumns
     internal sealed class Leaf : PNode
     {
         public required int Column { get; init; }
-        public required PhysicalType Physical { get; init; }
+        public required PqPhysical Physical { get; init; }
         public int TypeLength { get; init; }
         public IcebergType? Type { get; init; } // write side only
         public ParquetAnnotation? Annotation { get; init; } // write side only
+        /// <summary>Highest repetition level (lists and maps around the leaf); write side only.</summary>
+        public int MaxRep { get; init; }
         public ParquetFiles.Decoding Decoding { get; init; } // read side only
+        /// <summary>A byte array column annotated as text: read as strings.</summary>
+        public bool Strings { get; init; } // read side only
         // Column data for one row group: levels plus the defined values in order.
         public List<short> Defs { get; } = [];
         public List<short> Reps { get; } = [];
@@ -61,32 +62,30 @@ internal static class NestedColumns
 
     // ---------- schema ----------
 
-    public static Node ToNode(NestedField f, IReadOnlyDictionary<int, ParquetAnnotation>? annotations) => ToNode(f.Name, f.Type, f.Required, f.Id, annotations);
+    public static PqNode ToPq(NestedField f, IReadOnlyDictionary<int, ParquetAnnotation>? annotations) => ToPq(f.Name, f.Type, f.Required, f.Id, annotations);
 
-    private static Node ToNode(string name, IcebergType type, bool required, int id, IReadOnlyDictionary<int, ParquetAnnotation>? annotations)
+    private static PqNode ToPq(string name, IcebergType type, bool required, int id, IReadOnlyDictionary<int, ParquetAnnotation>? annotations)
     {
-        var rep = required ? Repetition.Required : Repetition.Optional;
+        var rep = required ? PqRepetition.Required : PqRepetition.Optional;
         switch (type)
         {
             case StructType s:
-                return new GroupNode(name, rep, s.Fields.Select(f => ToNode(f, annotations)).ToArray(), null, id);
+                return new PqNode { Name = name, Repetition = rep, FieldId = id, Children = s.Fields.Select(f => ToPq(f, annotations)).ToList() };
             case ListType l:
             {
-                using var element = ToNode("element", l.ElementType, l.ElementRequired, l.ElementId, annotations);
-                using var list = new GroupNode("list", Repetition.Repeated, [element]);
-                using var logical = LogicalType.List();
-                return new GroupNode(name, rep, [list], logical, id);
+                var element = ToPq("element", l.ElementType, l.ElementRequired, l.ElementId, annotations);
+                var list = new PqNode { Name = "list", Repetition = PqRepetition.Repeated, Children = [element] };
+                return new PqNode { Name = name, Repetition = rep, FieldId = id, Logical = PqLogical.List, Children = [list] };
             }
             case MapType m:
             {
-                using var key = ToNode("key", m.KeyType, true, m.KeyId, annotations);
-                using var value = ToNode("value", m.ValueType, m.ValueRequired, m.ValueId, annotations);
-                using var kv = new GroupNode("key_value", Repetition.Repeated, [key, value]);
-                using var logical = LogicalType.Map();
-                return new GroupNode(name, rep, [kv], logical, id);
+                var key = ToPq("key", m.KeyType, true, m.KeyId, annotations);
+                var value = ToPq("value", m.ValueType, m.ValueRequired, m.ValueId, annotations);
+                var kv = new PqNode { Name = "key_value", Repetition = PqRepetition.Repeated, Children = [key, value] };
+                return new PqNode { Name = name, Repetition = rep, FieldId = id, Logical = PqLogical.Map, Children = [kv] };
             }
             default:
-                return ParquetFiles.ToNode(new NestedField(id, name, type, required), annotations);
+                return ParquetFiles.ToPq(new NestedField(id, name, type, required), annotations);
         }
     }
 
@@ -126,10 +125,10 @@ internal static class NestedColumns
             }
             default:
             {
-                using var p = (PrimitiveNode)ParquetFiles.ToNode(new NestedField(id, name, type, !optional), annotations);
+                var p = ParquetFiles.ToPq(new NestedField(id, name, type, !optional), annotations);
                 ParquetAnnotation? annotation = annotations is not null && annotations.TryGetValue(id, out var a) ? a : null;
                 var leaf = new Leaf { Optional = optional, Def = def, FieldId = id, Name = name, Column = column++, Physical = p.PhysicalType, TypeLength = p.TypeLength, Type = type,
-                    Annotation = annotation };
+                    Annotation = annotation, MaxRep = parentRep };
                 leaf.Leaves.Add(leaf);
                 return leaf;
             }
@@ -154,36 +153,32 @@ internal static class NestedColumns
     /// The level tree of a nested column read from a file. Three-level lists and maps as written by Iceberg engines are
     /// read, as are two-level lists whose repeated field is the element itself (older Parquet writers).
     /// </summary>
-    public static PNode FromFile(Node n, ref int column, int parentDef = 0, int parentRep = 0, bool ignoreIds = false)
+    public static PNode FromFile(PqNode n, ref int column, int parentDef = 0, int parentRep = 0, bool ignoreIds = false)
     {
-        var optional = n.Repetition == Repetition.Optional;
+        var optional = n.Repetition == PqRepetition.Optional;
         var def = parentDef + (optional ? 1 : 0);
-        if (n is PrimitiveNode p)
+        if (!n.IsGroup)
         {
-            if (n.Repetition == Repetition.Repeated) throw new NotSupportedException($"Repeated primitive {n.Name} outside a LIST group");
-            var leaf = new Leaf { Optional = optional, Def = def, FieldId = ignoreIds ? -1 : n.FieldId, Name = n.Name, Column = column++, Physical = p.PhysicalType, TypeLength = p.TypeLength, Decoding = DecodingOf(p) };
-            leaf.Leaves.Add(leaf);
-            return leaf;
+            if (n.Repetition == PqRepetition.Repeated) throw new NotSupportedException($"Repeated primitive {n.Name} outside a LIST group");
+            return LeafOf(n, optional, def, ref column, ignoreIds);
         }
-        var g = (GroupNode)n;
-        using var logical = g.LogicalType;
         PNode node;
-        if (logical is ListLogicalType || logical is MapLogicalType || g.Fields.Length == 1 && g.Fields[0].Repetition == Repetition.Repeated)
+        var logical = n.Logical.Kind;
+        if (logical is PqLogicalKind.List or PqLogicalKind.Map || n.Children.Count == 1 && n.Children[0].Repetition == PqRepetition.Repeated)
         {
-            var repeated = g.Fields.Single();
-            if (repeated.Repetition != Repetition.Repeated) throw new NotSupportedException($"LIST/MAP group {n.Name} without a repeated child");
+            var repeated = n.Children.Count == 1 ? n.Children[0] : throw new NotSupportedException($"LIST/MAP group {n.Name} has {n.Children.Count} children");
+            if (repeated.Repetition != PqRepetition.Repeated) throw new NotSupportedException($"LIST/MAP group {n.Name} without a repeated child");
             var elementDef = def + 1;
             var rep = parentRep + 1;
-            if (logical is MapLogicalType || repeated is GroupNode { Fields.Length: 2 } && logical is not ListLogicalType)
+            if (logical == PqLogicalKind.Map || repeated is { IsGroup: true, Children.Count: 2 } && logical != PqLogicalKind.List)
             {
-                var kv = (GroupNode)repeated;
-                var key = FromFile(kv.Fields[0], ref column, elementDef, rep, ignoreIds);
-                var value = FromFile(kv.Fields[1], ref column, elementDef, rep, ignoreIds);
+                var key = FromFile(repeated.Children[0], ref column, elementDef, rep, ignoreIds);
+                var value = FromFile(repeated.Children[1], ref column, elementDef, rep, ignoreIds);
                 node = new Repeated { Optional = optional, Def = def, FieldId = ignoreIds ? -1 : n.FieldId, Name = n.Name, ElementDef = elementDef, Rep = rep, Element = key, Value = value };
             }
-            else if (repeated is GroupNode { Fields.Length: 1 } rg && rg.Name is not "array" && !rg.Name.EndsWith("_tuple", StringComparison.Ordinal))
+            else if (repeated is { IsGroup: true, Children.Count: 1 } && repeated.Name is not "array" && !repeated.Name.EndsWith("_tuple", StringComparison.Ordinal))
             {
-                var element = FromFile(rg.Fields[0], ref column, elementDef, rep, ignoreIds);
+                var element = FromFile(repeated.Children[0], ref column, elementDef, rep, ignoreIds);
                 node = new Repeated { Optional = optional, Def = def, FieldId = ignoreIds ? -1 : n.FieldId, Name = n.Name, ElementDef = elementDef, Rep = rep, Element = element };
             }
             else
@@ -196,25 +191,31 @@ internal static class NestedColumns
         else
         {
             var children = new List<PNode>();
-            foreach (var c in g.Fields) children.Add(FromFile(c, ref column, def, parentRep, ignoreIds));
+            foreach (var c in n.Children) children.Add(FromFile(c, ref column, def, parentRep, ignoreIds));
             node = new Struct { Optional = optional, Def = def, FieldId = ignoreIds ? -1 : n.FieldId, Name = n.Name, Children = children };
         }
         CollectLeaves(node);
         return node;
     }
 
-    private static PNode FromFileAsRequired(Node repeated, ref int column, int def, int rep, bool ignoreIds)
+    private static Leaf LeafOf(PqNode p, bool optional, int def, ref int column, bool ignoreIds)
     {
-        if (repeated is PrimitiveNode p)
+        var leaf = new Leaf
         {
-            var leaf = new Leaf { Optional = false, Def = def, FieldId = ignoreIds ? -1 : p.FieldId, Name = p.Name, Column = column++, Physical = p.PhysicalType, TypeLength = p.TypeLength, Decoding = DecodingOf(p) };
-            leaf.Leaves.Add(leaf);
-            return leaf;
-        }
-        var g = (GroupNode)repeated;
+            Optional = optional, Def = def, FieldId = ignoreIds ? -1 : p.FieldId, Name = p.Name, Column = column++, Physical = p.PhysicalType,
+            TypeLength = p.TypeLength, Decoding = ParquetFiles.DecodingOf(p.Logical),
+            Strings = p.PhysicalType == PqPhysical.ByteArray && p.Logical.Kind is PqLogicalKind.String or PqLogicalKind.Enum or PqLogicalKind.Json,
+        };
+        leaf.Leaves.Add(leaf);
+        return leaf;
+    }
+
+    private static PNode FromFileAsRequired(PqNode repeated, ref int column, int def, int rep, bool ignoreIds)
+    {
+        if (!repeated.IsGroup) return LeafOf(repeated, false, def, ref column, ignoreIds);
         var children = new List<PNode>();
-        foreach (var c in g.Fields) children.Add(FromFile(c, ref column, def, rep, ignoreIds));
-        var node = new Struct { Optional = false, Def = def, FieldId = ignoreIds ? -1 : g.FieldId, Name = g.Name, Children = children };
+        foreach (var c in repeated.Children) children.Add(FromFile(c, ref column, def, rep, ignoreIds));
+        var node = new Struct { Optional = false, Def = def, FieldId = ignoreIds ? -1 : repeated.FieldId, Name = repeated.Name, Children = children };
         CollectLeaves(node);
         return node;
     }
@@ -290,12 +291,6 @@ internal static class NestedColumns
         }
     }
 
-    private static ParquetFiles.Decoding DecodingOf(PrimitiveNode p)
-    {
-        using var logical = p.LogicalType;
-        return ParquetFiles.DecodingOf(logical);
-    }
-
     private static object ToPhysical(Leaf leaf, object v)
     {
         if (leaf.Annotation is { } annotation and not (ParquetAnnotation.TimeUtc or ParquetAnnotation.Interval)) return ParquetFiles.Encode(annotation, v);
@@ -306,8 +301,8 @@ internal static class NestedColumns
             PrimitiveType { TypeId: TypeId.Uuid } => ((Guid)v).ToByteArray(bigEndian: true),
             DecimalType d => leaf.Physical switch
             {
-                PhysicalType.Int32 => (object)(int)Unscaled(d, v),
-                PhysicalType.Int64 => (long)Unscaled(d, v),
+                PqPhysical.Int32 => (object)(int)Unscaled(d, v),
+                PqPhysical.Int64 => (long)Unscaled(d, v),
                 _ => ParquetFiles.FixedDecimal(Unscaled(d, v), leaf.TypeLength),
             },
             PrimitiveType { TypeId: TypeId.Long or TypeId.Time or TypeId.Timestamp or TypeId.TimestampTz or TypeId.TimestampNs or TypeId.TimestampTzNs } => Convert.ToInt64(v, System.Globalization.CultureInfo.InvariantCulture),
@@ -326,104 +321,48 @@ internal static class NestedColumns
         _ => throw new ArgumentException($"Expected a decimal for {d}, got {v.GetType().Name}"),
     };
 
-    /// <summary>Write one leaf's levels and values to its column chunk.</summary>
-    public static void WriteLeaf(ColumnWriter col, Leaf leaf)
+    /// <summary>One leaf's levels and values, as a backend writes them to its column chunk.</summary>
+    public static PqLeafData ToLeafData(Leaf leaf)
     {
-        var defs = leaf.Defs.ToArray();
-        var reps = leaf.Reps.ToArray();
-        switch (leaf.Physical)
+        var defs = leaf.Def > 0 ? leaf.Defs.ToArray() : null;
+        var reps = leaf.MaxRep > 0 ? leaf.Reps.ToArray() : null;
+        Array values = leaf.Physical switch
         {
-            case PhysicalType.Boolean: ((ColumnWriter<bool>)col).WriteBatch(defs.Length, defs, reps, leaf.Values.Cast<bool>().ToArray()); break;
-            case PhysicalType.Int32: ((ColumnWriter<int>)col).WriteBatch(defs.Length, defs, reps, leaf.Values.Cast<int>().ToArray()); break;
-            case PhysicalType.Int64: ((ColumnWriter<long>)col).WriteBatch(defs.Length, defs, reps, leaf.Values.Cast<long>().ToArray()); break;
-            case PhysicalType.Float: ((ColumnWriter<float>)col).WriteBatch(defs.Length, defs, reps, leaf.Values.Cast<float>().ToArray()); break;
-            case PhysicalType.Double: ((ColumnWriter<double>)col).WriteBatch(defs.Length, defs, reps, leaf.Values.Cast<double>().ToArray()); break;
-            case PhysicalType.ByteArray or PhysicalType.FixedLenByteArray:
-            {
-                var bytes = leaf.Values.Cast<byte[]>().ToList();
-                if (leaf.Physical == PhysicalType.FixedLenByteArray && bytes.Any(b => b.Length != leaf.TypeLength))
-                    throw new ArgumentException($"Field {leaf.Name} expects {leaf.TypeLength}-byte values");
-                var buffer = new byte[Math.Max(1, bytes.Sum(b => b.Length))];
-                var offsets = new int[bytes.Count];
-                for (int i = 0, at = 0; i < bytes.Count; at += bytes[i].Length, i++) { offsets[i] = at; bytes[i].CopyTo(buffer, at); }
-                var handle = GCHandle.Alloc(buffer, GCHandleType.Pinned);
-                try
-                {
-                    var start = handle.AddrOfPinnedObject();
-                    if (leaf.Physical == PhysicalType.ByteArray)
-                        ((ColumnWriter<ByteArray>)col).WriteBatch(defs.Length, defs, reps, bytes.Select((b, i) => new ByteArray(start + offsets[i], b.Length)).ToArray());
-                    else
-                        ((ColumnWriter<FixedLenByteArray>)col).WriteBatch(defs.Length, defs, reps, bytes.Select((_, i) => new FixedLenByteArray(start + offsets[i])).ToArray());
-                }
-                finally
-                {
-                    handle.Free();
-                }
-                break;
-            }
-            default: throw new NotSupportedException(leaf.Physical.ToString());
-        }
+            PqPhysical.Boolean => leaf.Values.Cast<bool>().ToArray(),
+            PqPhysical.Int32 => leaf.Values.Cast<int>().ToArray(),
+            PqPhysical.Int64 => leaf.Values.Cast<long>().ToArray(),
+            PqPhysical.Float => leaf.Values.Cast<float>().ToArray(),
+            PqPhysical.Double => leaf.Values.Cast<double>().ToArray(),
+            PqPhysical.ByteArray or PqPhysical.FixedLenByteArray => leaf.Values.Cast<byte[]>().ToArray(),
+            _ => throw new NotSupportedException(leaf.Physical.ToString()),
+        };
+        if (leaf.Physical == PqPhysical.FixedLenByteArray && ((byte[][])values).Any(b => b.Length != leaf.TypeLength))
+            throw new ArgumentException($"Field {leaf.Name} expects {leaf.TypeLength}-byte values");
+        return new PqLeafData(leaf.Defs.Count, defs, reps, values);
     }
 
     // ---------- read: assembly ----------
 
     /// <summary>Load every leaf of <paramref name="node"/> from one row group.</summary>
-    public static void Load(RowGroupReader group, PNode node)
+    public static async ValueTask LoadAsync(IPqReader reader, int rowGroup, PNode node, CancellationToken ct)
     {
         foreach (var leaf in node.Leaves)
         {
             leaf.Defs.Clear(); leaf.Reps.Clear(); leaf.Values.Clear();
             leaf.Position = leaf.ValuePosition = 0;
-            using var col = group.Column(leaf.Column);
-            switch (leaf.Physical)
+            var data = await reader.ReadLeafAsync(rowGroup, leaf.Column, leaf.Strings, ct);
+            for (var i = 0; i < data.Levels; i++)
             {
-                case PhysicalType.Boolean: ReadAll<bool>(col, leaf, v => v); break;
-                case PhysicalType.Int32 when leaf.Decoding != ParquetFiles.Decoding.None: ReadAll<int>(col, leaf, v => ParquetFiles.Decode(leaf.Decoding, v)); break;
-                case PhysicalType.Int32: ReadAll<int>(col, leaf, v => v); break;
-                case PhysicalType.Int64 when leaf.Decoding != ParquetFiles.Decoding.None: ReadAll<long>(col, leaf, v => ParquetFiles.Decode(leaf.Decoding, v)); break;
-                case PhysicalType.Int64: ReadAll<long>(col, leaf, v => v); break;
-                case PhysicalType.Float: ReadAll<float>(col, leaf, v => v); break;
-                case PhysicalType.Double: ReadAll<double>(col, leaf, v => v); break;
-                case PhysicalType.ByteArray:
-                    ReadAll<ByteArray>(col, leaf, v =>
-                    {
-                        var b = new byte[v.Length];
-                        if (v.Length > 0) Marshal.Copy(v.Pointer, b, 0, v.Length);
-                        return b;
-                    });
-                    break;
-                case PhysicalType.FixedLenByteArray:
-                    ReadAll<FixedLenByteArray>(col, leaf, v =>
-                    {
-                        var b = new byte[leaf.TypeLength];
-                        Marshal.Copy(v.Pointer, b, 0, b.Length);
-                        return b;
-                    });
-                    break;
-                default: throw new NotSupportedException(leaf.Physical.ToString());
+                leaf.Defs.Add(data.Defs?[i] ?? 0);
+                leaf.Reps.Add(data.Reps?[i] ?? 0);
             }
-        }
-    }
-
-    private static void ReadAll<T>(ColumnReader col, Leaf leaf, Func<T, object> copy) where T : unmanaged
-    {
-        var reader = (ColumnReader<T>)col;
-        const int batch = 4096;
-        var defs = new short[batch];
-        var reps = new short[batch];
-        var values = new T[batch];
-        var maxDef = col.ColumnDescriptor.MaxDefinitionLevel;
-        var maxRep = col.ColumnDescriptor.MaxRepetitionLevel;
-        while (reader.HasNext)
-        {
-            var levels = reader.ReadBatch(batch, defs, reps, values, out var valuesRead);
-            if (levels == 0) break;
-            for (var i = 0; i < levels; i++)
+            var decoding = leaf.Decoding;
+            switch (data.Values)
             {
-                leaf.Defs.Add(maxDef == 0 ? (short)0 : defs[i]);
-                leaf.Reps.Add(maxRep == 0 ? (short)0 : reps[i]);
+                case int[] ints when decoding != ParquetFiles.Decoding.None: foreach (var v in ints) leaf.Values.Add(ParquetFiles.Decode(decoding, v)); break;
+                case long[] longs when decoding != ParquetFiles.Decoding.None: foreach (var v in longs) leaf.Values.Add(ParquetFiles.Decode(decoding, v)); break;
+                default: foreach (var v in data.Values) leaf.Values.Add(v!); break;
             }
-            for (var i = 0; i < valuesRead; i++) leaf.Values.Add(copy(values[i])); // copy now: buffers are reused by the next batch
         }
     }
 
@@ -472,7 +411,7 @@ internal static class NestedColumns
     /// File-shape value → the projected Iceberg type: struct fields matched by field ID (by name if the file has none),
     /// missing fields read as their initial default, primitives converted (with int→long, float→double promotion).
     /// </summary>
-    public static object? Project(object? v, PNode file, IcebergType target, Func<IcebergType, PhysicalType, int, object, object> primitive)
+    public static object? Project(object? v, PNode file, IcebergType target, Func<IcebergType, PqPhysical, int, object, object> primitive)
     {
         if (v is null) return null;
         switch (target)

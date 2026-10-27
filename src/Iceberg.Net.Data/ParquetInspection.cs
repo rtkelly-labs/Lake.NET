@@ -1,6 +1,3 @@
-using ParquetSharp;
-using ParquetSharp.IO;
-using ParquetSharp.Schema;
 using Iceberg.Net.IO;
 using Iceberg.Net.Manifests;
 using Iceberg.Net.Types;
@@ -56,24 +53,22 @@ public static class ParquetInspection
         if (tail[4] != 'P' || tail[5] != 'A' || tail[6] != 'R' || tail[7] != '1') throw new InvalidDataException($"{location} is not a Parquet file (no PAR1 trailer)");
         var footer = System.Buffers.Binary.BinaryPrimitives.ReadUInt32LittleEndian(tail);
         stream.Position = 0;
-        using var input = new ManagedRandomAccessFile(stream);
-        using var reader = new ParquetFileReader(input);
-        using var meta = reader.FileMetaData;
-        var schema = meta.Schema;
+        using var reader = await ParquetFiles.Backend.OpenAsync(stream, null, ct);
+        var schema = reader.Schema;
         var column = 0;
-        var tops = new List<(Node Node, ParquetField Field, int FirstColumn)>();
-        foreach (var node in schema.GroupNode.Fields)
+        var tops = new List<(PqNode Node, ParquetField Field, int FirstColumn)>();
+        foreach (var node in schema.Children)
         {
             var first = column;
             tops.Add((node, Describe(node, ref column), first));
         }
-        var facts = new ParquetFileFacts(meta.NumRows, length, footer, meta.NumRowGroups, tops.Select(t => t.Field).ToList());
+        var facts = new ParquetFileFacts(reader.NumRows, length, footer, reader.RowGroups, tops.Select(t => t.Field).ToList());
         if (projection is null) return facts;
 
         var stats = new Dictionary<int, ColumnStats>();
         var incompatible = new Dictionary<int, string>();
         var missing = new List<int>();
-        void Match(NestedField f, Node? node, ref int leaf)
+        void Match(NestedField f, PqNode? node, ref int leaf)
         {
             if (node is null)
             {
@@ -82,14 +77,14 @@ public static class ParquetInspection
             }
             switch (f.Type)
             {
-                case StructType st when node is GroupNode g && KindOf(g) == ParquetFieldKind.Struct:
+                case StructType st when node.IsGroup && KindOf(node) == ParquetFieldKind.Struct:
                 {
                     var start = leaf;
-                    var offsets = new Dictionary<string, (Node Node, int Leaf)>(StringComparer.Ordinal);
-                    foreach (var c in g.Fields)
+                    var offsets = new Dictionary<string, (PqNode Node, int Leaf)>(StringComparer.Ordinal);
+                    foreach (var c in node.Children)
                     {
                         offsets.TryAdd(c.Name, (c, start));
-                        start += CountLeaves(c);
+                        start += c.LeafCount;
                     }
                     foreach (var child in st.Fields)
                     {
@@ -103,30 +98,29 @@ public static class ParquetInspection
                     leaf = start;
                     return;
                 }
-                case ListType lt when node is GroupNode g && KindOf(g) == ParquetFieldKind.List:
+                case ListType lt when node.IsGroup && KindOf(node) == ParquetFieldKind.List:
                 {
-                    var element = ElementOf(g);
+                    var element = ElementOf(node);
                     Match(new NestedField(lt.ElementId, "element", lt.ElementType, lt.ElementRequired), element, ref leaf);
                     return;
                 }
-                case MapType mt when node is GroupNode g && KindOf(g) == ParquetFieldKind.Map:
+                case MapType mt when node.IsGroup && KindOf(node) == ParquetFieldKind.Map:
                 {
-                    var kv = (GroupNode)g.Fields[0];
-                    Match(new NestedField(mt.KeyId, "key", mt.KeyType, true), kv.Fields[0], ref leaf);
-                    Match(new NestedField(mt.ValueId, "value", mt.ValueType, mt.ValueRequired), kv.Fields[1], ref leaf);
+                    var kv = node.Children[0];
+                    Match(new NestedField(mt.KeyId, "key", mt.KeyType, true), kv.Children[0], ref leaf);
+                    Match(new NestedField(mt.ValueId, "value", mt.ValueType, mt.ValueRequired), kv.Children[1], ref leaf);
                     return;
                 }
-                case PrimitiveType or DecimalType or FixedType when node is PrimitiveNode:
+                case PrimitiveType or DecimalType or FixedType when !node.IsGroup:
                 {
-                    var descr = schema.Column(leaf);
-                    if (!Readable(descr, f.Type)) incompatible[f.Id] = Describe(descr);
-                    else stats[f.Id] = Statistics(meta, reader, descr, leaf, f);
+                    if (!Readable(node, f.Type)) incompatible[f.Id] = node.Describe();
+                    else stats[f.Id] = Statistics(reader, node, leaf, f);
                     leaf++;
                     return;
                 }
                 default:
-                    incompatible[f.Id] = node is PrimitiveNode p ? p.PhysicalType.ToString() : KindOf((GroupNode)node).ToString().ToLowerInvariant();
-                    leaf += CountLeaves(node);
+                    incompatible[f.Id] = node.IsGroup ? KindOf(node).ToString().ToLowerInvariant() : node.PhysicalType.ToString();
+                    leaf += node.LeafCount;
                     return;
             }
         }
@@ -141,7 +135,7 @@ public static class ParquetInspection
             }
         }
 
-        var byName = new Dictionary<string, (Node Node, int FirstColumn)>(StringComparer.Ordinal);
+        var byName = new Dictionary<string, (PqNode Node, int FirstColumn)>(StringComparer.Ordinal);
         foreach (var (node, _, first) in tops) byName.TryAdd(node.Name, (node, first));
         var matched = new HashSet<string>(StringComparer.Ordinal);
         foreach (var f in projection.Columns)
@@ -161,109 +155,95 @@ public static class ParquetInspection
         };
     }
 
-    private static ParquetField Describe(Node node, ref int column)
+    private static ParquetField Describe(PqNode node, ref int column)
     {
-        if (node is PrimitiveNode p)
+        if (!node.IsGroup)
         {
             column++;
-            return new ParquetField(p.Name, p.FieldId >= 0 ? p.FieldId : null, ParquetFieldKind.Primitive, []) { PhysicalType = DescribeNode(p) };
+            return new ParquetField(node.Name, node.FieldId >= 0 ? node.FieldId : null, ParquetFieldKind.Primitive, []) { PhysicalType = node.Describe() };
         }
-        var g = (GroupNode)node;
-        var kind = KindOf(g);
+        var kind = KindOf(node);
         var children = new List<ParquetField>();
         switch (kind)
         {
             case ParquetFieldKind.List:
             {
-                var repeated = g.Fields[0];
-                var element = ElementOf(g);
+                var repeated = node.Children[0];
+                var element = ElementOf(node);
                 var described = Describe(element, ref column);
                 // A three-level list's element is named after its repeated group ("list"), as DuckDB maps it.
                 children.Add(ReferenceEquals(repeated, element) ? described : described with { Name = repeated.Name });
                 break;
             }
             case ParquetFieldKind.Map:
-                foreach (var c in ((GroupNode)g.Fields[0]).Fields) children.Add(Describe(c, ref column));
+                foreach (var c in node.Children[0].Children) children.Add(Describe(c, ref column));
                 break;
             default:
-                foreach (var c in g.Fields) children.Add(Describe(c, ref column));
+                foreach (var c in node.Children) children.Add(Describe(c, ref column));
                 break;
         }
-        return new ParquetField(g.Name, g.FieldId >= 0 ? g.FieldId : null, kind, children);
+        return new ParquetField(node.Name, node.FieldId >= 0 ? node.FieldId : null, kind, children);
     }
 
-    private static ParquetFieldKind KindOf(GroupNode g)
+    private static ParquetFieldKind KindOf(PqNode g)
     {
-        using var logical = g.LogicalType;
-        if (logical is MapLogicalType || g.Fields.Length == 1 && g.Fields[0] is GroupNode { Repetition: Repetition.Repeated, Fields.Length: 2 } && logical is not ListLogicalType)
+        var logical = g.Logical.Kind;
+        if (logical == PqLogicalKind.Map || g.Children.Count == 1 && g.Children[0] is { IsGroup: true, Repetition: PqRepetition.Repeated, Children.Count: 2 } && logical != PqLogicalKind.List)
             return ParquetFieldKind.Map;
-        if (logical is ListLogicalType || g.Fields.Length == 1 && g.Fields[0].Repetition == Repetition.Repeated) return ParquetFieldKind.List;
+        if (logical == PqLogicalKind.List || g.Children.Count == 1 && g.Children[0].Repetition == PqRepetition.Repeated) return ParquetFieldKind.List;
         return ParquetFieldKind.Struct;
     }
 
     /// <summary>A list's element: the single child of its repeated group (three-level), or the repeated field itself.</summary>
-    private static Node ElementOf(GroupNode list)
+    private static PqNode ElementOf(PqNode list)
     {
-        var repeated = list.Fields[0];
-        return repeated is GroupNode { Fields.Length: 1 } rg && rg.Name is not "array" && !rg.Name.EndsWith("_tuple", StringComparison.Ordinal) ? rg.Fields[0] : repeated;
-    }
-
-    private static int CountLeaves(Node n) => n is GroupNode g ? g.Fields.Sum(CountLeaves) : 1;
-
-    private static string DescribeNode(PrimitiveNode p)
-    {
-        using var logical = p.LogicalType;
-        return logical.Type == LogicalTypeEnum.None ? p.PhysicalType.ToString() : $"{p.PhysicalType} ({logical})";
-    }
-
-    private static string Describe(ColumnDescriptor d)
-    {
-        using var logical = d.LogicalType;
-        return logical.Type == LogicalTypeEnum.None ? d.PhysicalType.ToString() : $"{d.PhysicalType} ({logical})";
+        var repeated = list.Children[0];
+        return repeated is { IsGroup: true, Children.Count: 1 } && repeated.Name is not "array" && !repeated.Name.EndsWith("_tuple", StringComparison.Ordinal)
+            ? repeated.Children[0] : repeated;
     }
 
     /// <summary>Whether the reader decodes this column as <paramref name="type"/> (the conversions it implements, no others).</summary>
-    internal static bool Readable(ColumnDescriptor d, IcebergType type)
+    internal static bool Readable(PqNode d, IcebergType type)
     {
-        using var logical = d.LogicalType;
+        var logical = d.Logical;
+        var kind = logical.Kind;
         var decoding = ParquetFiles.DecodingOf(logical);
         return (d.PhysicalType, type) switch
         {
-            (PhysicalType.Boolean, PrimitiveType { TypeId: TypeId.Boolean }) => true,
-            (PhysicalType.Int32, PrimitiveType { TypeId: TypeId.Int }) => logical is NoneLogicalType or IntLogicalType { BitWidth: < 32 } or IntLogicalType { IsSigned: true },
-            (PhysicalType.Int32, PrimitiveType { TypeId: TypeId.Long }) => logical is NoneLogicalType or IntLogicalType,
-            (PhysicalType.Int64, PrimitiveType { TypeId: TypeId.Long }) => logical is NoneLogicalType or IntLogicalType { IsSigned: true },
-            (PhysicalType.Int32, PrimitiveType { TypeId: TypeId.Date }) => logical is DateLogicalType,
-            (PhysicalType.Int64, PrimitiveType { TypeId: TypeId.Time }) => logical is TimeLogicalType { TimeUnit: TimeUnit.Micros },
-            (PhysicalType.Int64, PrimitiveType { TypeId: TypeId.Timestamp or TypeId.TimestampTz }) =>
-                logical is TimestampLogicalType { TimeUnit: TimeUnit.Micros or TimeUnit.Millis },
-            (PhysicalType.Int64, PrimitiveType { TypeId: TypeId.TimestampNs or TypeId.TimestampTzNs }) => logical is TimestampLogicalType { TimeUnit: TimeUnit.Nanos },
-            (PhysicalType.Float, PrimitiveType { TypeId: TypeId.Float or TypeId.Double }) => true,
-            (PhysicalType.Double, PrimitiveType { TypeId: TypeId.Double }) => true,
-            (PhysicalType.ByteArray, PrimitiveType { TypeId: TypeId.String }) => logical is NoneLogicalType or StringLogicalType or JsonLogicalType or EnumLogicalType,
-            (PhysicalType.ByteArray, PrimitiveType { TypeId: TypeId.Binary }) => logical is NoneLogicalType or BsonLogicalType,
-            (PhysicalType.FixedLenByteArray, PrimitiveType { TypeId: TypeId.Uuid }) => d.TypeLength == 16,
-            (PhysicalType.FixedLenByteArray, FixedType f) => d.TypeLength == f.Length,
-            (PhysicalType.Int64, DecimalType { Scale: 0 }) when decoding == ParquetFiles.Decoding.UInt64 => true,
-            (PhysicalType.Int32 or PhysicalType.Int64 or PhysicalType.FixedLenByteArray or PhysicalType.ByteArray, DecimalType t) =>
-                logical is DecimalLogicalType dl && dl.Scale == t.Scale && dl.Precision <= t.Precision,
+            (PqPhysical.Boolean, PrimitiveType { TypeId: TypeId.Boolean }) => true,
+            (PqPhysical.Int32, PrimitiveType { TypeId: TypeId.Int }) => kind == PqLogicalKind.None || kind == PqLogicalKind.Int && (logical.BitWidth < 32 || logical.Signed),
+            (PqPhysical.Int32, PrimitiveType { TypeId: TypeId.Long }) => kind is PqLogicalKind.None or PqLogicalKind.Int,
+            (PqPhysical.Int64, PrimitiveType { TypeId: TypeId.Long }) => kind == PqLogicalKind.None || kind == PqLogicalKind.Int && logical.Signed,
+            (PqPhysical.Int32, PrimitiveType { TypeId: TypeId.Date }) => kind == PqLogicalKind.Date,
+            (PqPhysical.Int64, PrimitiveType { TypeId: TypeId.Time }) => kind == PqLogicalKind.Time && logical.Unit == PqTimeUnit.Micros,
+            (PqPhysical.Int64, PrimitiveType { TypeId: TypeId.Timestamp or TypeId.TimestampTz }) =>
+                kind == PqLogicalKind.Timestamp && logical.Unit is PqTimeUnit.Micros or PqTimeUnit.Millis,
+            (PqPhysical.Int64, PrimitiveType { TypeId: TypeId.TimestampNs or TypeId.TimestampTzNs }) => kind == PqLogicalKind.Timestamp && logical.Unit == PqTimeUnit.Nanos,
+            (PqPhysical.Float, PrimitiveType { TypeId: TypeId.Float or TypeId.Double }) => true,
+            (PqPhysical.Double, PrimitiveType { TypeId: TypeId.Double }) => true,
+            (PqPhysical.ByteArray, PrimitiveType { TypeId: TypeId.String }) => kind is PqLogicalKind.None or PqLogicalKind.String or PqLogicalKind.Json or PqLogicalKind.Enum,
+            (PqPhysical.ByteArray, PrimitiveType { TypeId: TypeId.Binary }) => kind is PqLogicalKind.None or PqLogicalKind.Bson,
+            (PqPhysical.FixedLenByteArray, PrimitiveType { TypeId: TypeId.Uuid }) => d.TypeLength == 16,
+            (PqPhysical.FixedLenByteArray, FixedType f) => d.TypeLength == f.Length,
+            (PqPhysical.Int64, DecimalType { Scale: 0 }) when decoding == ParquetFiles.Decoding.UInt64 => true,
+            (PqPhysical.Int32 or PqPhysical.Int64 or PqPhysical.FixedLenByteArray or PqPhysical.ByteArray, DecimalType t) =>
+                kind == PqLogicalKind.Decimal && logical.Scale == t.Scale && logical.Precision <= t.Precision,
             _ => false,
         };
     }
 
-    private static ColumnStats Statistics(FileMetaData meta, ParquetFileReader reader, ColumnDescriptor descr, int leaf, NestedField f)
+    private static ColumnStats Statistics(IPqReader reader, PqNode node, int leaf, NestedField f)
     {
         long size = 0, values = 0;
         long? nulls = 0;
         object? lower = null, upper = null;
         var bounded = true;
-        for (var rg = 0; rg < meta.NumRowGroups; rg++)
+        for (var rg = 0; rg < reader.RowGroups; rg++)
         {
-            using var group = reader.RowGroup(rg);
-            using var chunk = group.MetaData.GetColumnChunkMetaData(leaf);
+            var chunk = reader.Chunk(rg, leaf);
             size += chunk.TotalCompressedSize;
             values += chunk.NumValues;
-            var s = RowGroupStatistics.For(group.MetaData, descr, leaf, f.Id, f.Type, chunk.NumValues);
+            var s = RowGroupStatistics.For(chunk, node, f.Id, f.Type, chunk.NumValues);
             nulls = s?.NullValueCount is { } n && nulls is { } total ? total + n : null;
             if (s?.LowerBound is null || s.UpperBound is null)
             {

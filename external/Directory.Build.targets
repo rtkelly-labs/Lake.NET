@@ -1,0 +1,8 @@
+<Project>
+  <!-- After the submodules' own project files: never packed or packed on build from here, whatever they set. -->
+  <PropertyGroup>
+    <IsPackable>false</IsPackable>
+    <GeneratePackageOnBuild>false</GeneratePackageOnBuild>
+    <TreatWarningsAsErrors>false</TreatWarningsAsErrors>
+  </PropertyGroup>
+</Project>

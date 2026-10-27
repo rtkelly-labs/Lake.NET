@@ -1,0 +1,4 @@
+[submodule "external/parquet-dotnet"]
+	path = external/parquet-dotnet
+	url = https://github.com/rtkelly-labs/parquet-dotnet.git
+	branch = ccr-87fadcf9-bxi9wr

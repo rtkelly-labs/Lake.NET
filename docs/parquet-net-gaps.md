@@ -1,10 +1,14 @@
-# Parquet.Net gaps: why the data plane uses ParquetSharp
+# Parquet backends, and what upstream Parquet.Net lacks
 
-Iceberg.NET reads and writes Parquet through **ParquetSharp** (a wrapper over Apache Arrow's C++ `parquet-cpp`). A
-pure-managed **Parquet.Net** would remove the native dependency: no per-platform native binaries, and it would work
-wherever .NET runs (WASM, mobile, trimmed or AOT apps). This page lists what Iceberg.NET and DuckLake need that
-Parquet.Net cannot do yet. Each item is a candidate to upstream, or to carry in the fork
-([rtkelly-labs/parquet-dotnet](https://github.com/rtkelly-labs/parquet-dotnet)) until it lands.
+Iceberg.NET reads and writes Parquet through one of two libraries:
+
+- **ParquetSharp** (a wrapper over Apache Arrow's C++ `parquet-cpp`), the default;
+- **Parquet.Net**, fully managed (no per-platform native binaries, so it runs wherever .NET does: WASM, mobile, trimmed
+  or AOT apps), from the fork [rtkelly-labs/parquet-dotnet](https://github.com/rtkelly-labs/parquet-dotnet) carried
+  as the `external/parquet-dotnet` git submodule ([Backends](#backends)).
+
+Upstream Parquet.Net could not do what Iceberg.NET and DuckLake need. This page lists those gaps, what the fork does
+about each, and the upstream bugs found on the way: each is a candidate to upstream, by hand.
 
 Checked against Parquet.Net `master` at `658e1ca` (2026-10-26). "Confirmed" means a program run against that source
 showed it; the others come from reading the source (paths are relative to `src/Parquet/`).
@@ -14,16 +18,35 @@ showed it; the others come from reading the source (paths are relative to `src/P
 > is notes for a person to work from. Issues and PRs upstream have to be written by hand. The policy does not cover a
 > fork: the fork can carry machine-assisted changes, which is not true of contributions sent upstream.
 
-## Where ParquetSharp is used
+## Backends
 
-Everything is in `Iceberg.Net.Data`:
+`Iceberg.Net.Data` talks to Parquet through a small interface (`IParquetBackend`, in `ParquetModel.cs`): a file's
+schema tree (physical types, annotations, field IDs), its column chunks (sizes, value counts, statistics as physical
+values), and each leaf column of a row group as its definition and repetition levels plus its defined values, typed.
+Everything else is written once over it:
 
-| File | What it does with ParquetSharp |
+| File | What it does |
 |---|---|
 | `ParquetFiles.cs` | Writes data files (schema with field IDs, logical annotations, Zstd, row groups, optional statistics, encryption) and reads them in batches (field-ID projection, physical-value readers, footer statistics for row-group pruning, ranged reads) |
 | `NestedColumns.cs` | Shreds and assembles lists, maps and structs with explicit definition and repetition levels (physical column readers and writers) |
 | `ParquetInspection.cs` | Reads only the footer of an existing file: fields, sizes, per-column statistics and type compatibility (DuckLake `AddDataFilesAsync`) |
 | `ParquetImport.cs` | Iceberg `add_files`-style import of existing files (footer metrics) |
+| `ParquetSharpBackend.cs` | The interface over ParquetSharp's physical column readers and writers |
+| `Iceberg.Net.Data.ParquetNet` | The interface over the Parquet.Net fork: `RawDataField` columns declared exactly as stored, raw level reads and writes, `ParquetOptions.Encryption` (not packed until the fork is published) |
+
+Which backend is used:
+
+- ParquetSharp, unless one of the below.
+- `ParquetNet.UseAsDefault()` (process-wide), or `using (ParquetNet.Scope()) { … }` for the current async flow only.
+- `ICEBERG_PARQUET_BACKEND=parquet-net`, read once; the `Iceberg.Net.Data.ParquetNet` assembly must be present (the
+  test projects reference it, so any suite runs on Parquet.Net this way).
+
+Both backends write the same files: the same schema (types, annotations and converted types, field IDs, repetition),
+Zstd, footer statistics both read alike, and Parquet modular encryption. `ParquetBackendTests` (Spec suite) checks
+that each reads the other's files (every Iceberg type, nested shapes, DuckLake annotations, encryption), that both
+declare the same schema and statistics, and that their statistics prune the same row groups. CI's `parquet-net` job
+runs the unit suite and the DuckLake suites (DuckDB 1.5 and 2.0 as oracles, SQLite and PostgreSQL catalogs) on
+Parquet.Net; locally, Spec 826 passed and DuckLake 544 passed / 50 skipped on each backend.
 
 ## Gaps
 
@@ -62,7 +85,7 @@ Already covered by Parquet.Net, so not a blocker:
 ## Fork status
 
 Branch `ccr-87fadcf9-bxi9wr` of [rtkelly-labs/parquet-dotnet](https://github.com/rtkelly-labs/parquet-dotnet), each
-change with its own tests (fork suite: 753 passed, 3 skipped, none failing, with `pyarrow` installed for its Arrow interop test).
+change with its own tests (fork suite: 768 passed, 3 skipped, none failing, with `pyarrow` installed for its Arrow interop test).
 
 | Gap | Fork commit | What changed |
 |---|---|---|
@@ -73,6 +96,7 @@ change with its own tests (fork suite: 753 passed, 3 skipped, none failing, with
 | 4 encryption | `344675a` | `ParquetOptions.Encryption`/`Decryption`: AES_GCM_V1 and AES_GCM_CTR_V1, encrypted (`PARE`) or signed plaintext footers, the footer key for every column or separate column keys, key metadata and a key retriever, AAD prefixes stored or supplied. AES from the BCL, no new dependency. Interop both ways with parquet-cpp in all five modes (fixtures written by ParquetSharp are in the fork's tests); DuckDB 1.5.5 reads the GCM files in full scans. 2M rows: write 477 ms plain / 482 ms GCM, read 781 / 921 ms |
 | 6 typed statistics | `35bd5c1` | `DataColumnStatistics.SortOrder` (signed, unsigned, unknown, from the type and the file's column orders), `HasMinMax`, `MinBytes`/`MaxBytes`, `PhysicalMin`/`PhysicalMax`, exactness, `NanCount`; the deprecated `min`/`max` used only for signed numeric columns, nothing for unknown orders |
 | 9 physical schema | `da1574b` | `ParquetReader.Columns`: a descriptor per leaf column (path, ordinal, physical type, FLBA length, logical and converted types, field ID, max levels, sort order), and `ParquetReader.FooterLength` |
+| (backend) raw columns | `f12c75b`, `02925d8`, `326b529` | `RawDataField`: a column declared by its exact physical type, logical and converted type and length, read and written as physical values (text columns also as strings, so dictionary encoding applies) |
 | 7 legacy lists | `ff03dcc` | Backward-compatibility rules 2 and 3 (a repeated group with several fields, or named `array` or `<list>_tuple`, is a struct element); rules 1 and the bare repeated field already worked. Tested on files written by parquet-cpp. Legacy maps (`MAP_KEY_VALUE`, any group name) already worked |
 
 Bugs found on the way, also fixed in the fork. These are worth reporting upstream on their own, by hand:
@@ -92,6 +116,17 @@ Bugs found on the way, also fixed in the fork. These are worth reporting upstrea
   page instead. Readers tolerate it, but encrypted readers need the dictionary page's offset to pick its AAD.
 - **`DATA_PAGE_V2` pages of repeated columns throw** `NotImplementedException` (`bfd86da`), and the values section of
   compressed v2 pages was decompressed to the whole page's size. Tested on v2 files written by parquet-cpp.
+- **No `column_orders` in the footer** (`792c737`). Without them, parquet-cpp (so pyarrow and DuckDB) and parquet-mr
+  trust the min/max of unsigned-order columns only from writers they know: every string and binary bound Parquet.Net
+  wrote was ignored for pruning. pyarrow reports `has_min_max: False` for such a file, and `True` once the footer says
+  `TYPE_ORDER`.
+- **Statistics in the wrong order** (`f12c75b`): unsigned columns written as their signed bits compared signed; UUIDs
+  compared with `Guid.CompareTo` (mixed-endian fields) rather than as bytes; strings compared by UTF-16 code unit,
+  which puts U+E000–U+FFFF after supplementary characters, unlike UTF-8 byte order; float bounds could be NaN, and
+  zero bounds were not written as -0.0/+0.0. Byte-array columns (binary, fixed) got no bounds at all, and boolean
+  columns none either (`229f9d7`).
+- **Required maps are written `OPTIONAL`** (`02925d8`): the levels are computed as required, so the file's levels
+  disagree with its own schema.
 - **Legacy-named list groups deserialize as null** (`ff03dcc`). When a file's list groups are named differently from
   the class schema's (`array`, `bag`, `<name>_tuple`), the serializer found no column for the property and silently
   left it null. It now falls back to matching on field names.
@@ -129,10 +164,15 @@ Two things got it there. Parquet.Net dictionary-encodes a string column only whe
 decompression copied each page twice (fixed in `cbcc43d`): reads went from 399 to about 180 ms. Without
 compression the fork is ahead (write 173 vs 360 ms, read 81 vs 111 ms).
 
-Every gap in the table is now closed in the fork. The next step is a Parquet.Net backend for `ParquetFiles` behind its existing API, run against the Spec, DuckLake
-and cross-engine suites alongside ParquetSharp. The fork's GitHub Actions workflow is not enabled (dispatching it
-returns 404, the default for forks), so its suite has only been run locally; enabling Actions on the fork would let
-it run on Linux, Windows and macOS.
+Every gap in the table is closed in the fork, and the [Parquet.Net backend](#backends) runs on it. A bug of the fork's
+own, not upstream's, was found by the backend's parallel reads and fixed in `12b2856`: the Zstd decompressor cache
+(`cbcc43d`) was taken before an `await`, so concurrent reads could share one decompressor ("Data corruption
+detected"). `12b2856` also adds `ParquetOptions.ValidateHeaderMagic`, which the backend turns off over ranged storage
+(parquet-cpp does not read the first four bytes either).
+
+The fork's own GitHub Actions workflow is not enabled (dispatching it returns 404, the default for forks), so its suite
+runs locally and through Iceberg.NET's CI, which builds it from the submodule and runs the backend's suites on Linux.
+Enabling Actions on the fork would add its Windows and macOS matrix.
 
 ## Suggested order
 

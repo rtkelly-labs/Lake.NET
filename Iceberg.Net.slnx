@@ -7,12 +7,18 @@
   <Folder Name="/examples/">
     <Project Path="examples/DuckLake.Quickstart/DuckLake.Quickstart.csproj" />
   </Folder>
+  <Folder Name="/external/" />
+  <Folder Name="/external/parquet-dotnet/" />
+  <Folder Name="/external/parquet-dotnet/src/">
+    <Project Path="external/parquet-dotnet/src/Parquet/Parquet.csproj" />
+  </Folder>
   <Folder Name="/src/">
     <Project Path="src/Iceberg.Net.Arrow/Iceberg.Net.Arrow.csproj" />
     <Project Path="src/Iceberg.Net.Athena/Iceberg.Net.Athena.csproj" />
     <Project Path="src/Iceberg.Net.Avro/Iceberg.Net.Avro.csproj" />
     <Project Path="src/Iceberg.Net.Catalog/Iceberg.Net.Catalog.csproj" />
     <Project Path="src/Iceberg.Net.Core/Iceberg.Net.Core.csproj" />
+    <Project Path="src/Iceberg.Net.Data.ParquetNet/Iceberg.Net.Data.ParquetNet.csproj" />
     <Project Path="src/Iceberg.Net.Data/Iceberg.Net.Data.csproj" />
     <Project Path="src/Iceberg.Net.DuckLake/Iceberg.Net.DuckLake.csproj" />
     <Project Path="src/Iceberg.Net.EntityFrameworkCore/Iceberg.Net.EntityFrameworkCore.csproj" />
@@ -41,6 +47,7 @@
   </Folder>
   <Folder Name="/tools/">
     <Project Path="tools/DuckLakeBench/DuckLakeBench.csproj" />
+    <Project Path="tools/ParquetBackendBench/ParquetBackendBench.csproj" />
     <Project Path="tools/ShadowCompare/ShadowCompare.csproj" />
   </Folder>
 </Solution>

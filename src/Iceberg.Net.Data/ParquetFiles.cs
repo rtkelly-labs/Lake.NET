@@ -1,12 +1,9 @@
 using System.Runtime.CompilerServices;
 using ParquetSharp;
-using ParquetSharp.IO;
-using ParquetSharp.Schema;
 using Iceberg.Net.Expressions;
 using Iceberg.Net.Manifests;
 using Iceberg.Net.IO;
 using Iceberg.Net.Types;
-using TimeUnit = ParquetSharp.TimeUnit;
 
 namespace Iceberg.Net.Data;
 
@@ -81,61 +78,102 @@ public sealed record ParquetWriteResult(DataFile File, long FooterSize, int RowG
 /// columns, holding physical Iceberg values (int days for date, long micros for time/timestamp, long nanos
 /// for timestamp_ns, string, byte[], bool, int, long, float, double).
 /// <see cref="IcebergDecimal"/> for decimal and <see cref="Guid"/> for uuid.
-/// Scope: flat schemas; nested and fixed columns are rejected, decimals are written with precision ≤ 18.
+/// Files are read and written through ParquetSharp by default, or through Parquet.Net
+/// (<c>Iceberg.Net.Data.ParquetNet</c>, or <c>ICEBERG_PARQUET_BACKEND=parquet-net</c>); both produce the same files.
 /// </summary>
 public static class ParquetFiles
 {
-    internal static Node ToNode(NestedField f, IReadOnlyDictionary<int, ParquetAnnotation>? annotations = null)
+    private static IParquetBackend? _backend;
+    private static readonly AsyncLocal<IParquetBackend?> Scoped = new();
+
+    /// <summary>
+    /// The Parquet library in use: one chosen for the current async flow (<see cref="Use"/>), else the process-wide one:
+    /// ParquetSharp unless <c>ICEBERG_PARQUET_BACKEND</c> names <c>parquet-net</c> (which needs the
+    /// <c>Iceberg.Net.Data.ParquetNet</c> assembly) or the Parquet.Net backend was installed.
+    /// </summary>
+    internal static IParquetBackend Backend
     {
-        if (!f.Type.IsPrimitive) return NestedColumns.ToNode(f, annotations);
-        var rep = f.Required ? Repetition.Required : Repetition.Optional;
+        get => Scoped.Value ?? (_backend ??= FromEnvironment());
+        set => _backend = value;
+    }
+
+    /// <summary>Uses <paramref name="backend"/> in the current async flow until the result is disposed.</summary>
+    internal static IDisposable Use(IParquetBackend backend)
+    {
+        var previous = Scoped.Value;
+        Scoped.Value = backend;
+        return new Restore(previous);
+    }
+
+    private sealed class Restore(IParquetBackend? previous) : IDisposable
+    {
+        public void Dispose() => Scoped.Value = previous;
+    }
+
+    /// <summary>The name of the Parquet library in use (<c>ParquetSharp</c> or <c>Parquet.Net</c>).</summary>
+    public static string BackendName => Backend.Name;
+
+    private static IParquetBackend FromEnvironment()
+    {
+        var name = Environment.GetEnvironmentVariable("ICEBERG_PARQUET_BACKEND");
+        if (string.IsNullOrEmpty(name) || name.Equals("parquetsharp", StringComparison.OrdinalIgnoreCase)) return ParquetSharpBackend.Instance;
+        if (!name.Equals("parquet-net", StringComparison.OrdinalIgnoreCase))
+            throw new InvalidOperationException($"ICEBERG_PARQUET_BACKEND={name}: expected parquetsharp or parquet-net");
+        var type = Type.GetType("Iceberg.Net.Data.ParquetNet.ParquetNetBackend, Iceberg.Net.Data.ParquetNet")
+            ?? throw new InvalidOperationException("ICEBERG_PARQUET_BACKEND=parquet-net needs the Iceberg.Net.Data.ParquetNet assembly");
+        return (IParquetBackend)Activator.CreateInstance(type, nonPublic: true)!;
+    }
+
+    internal static PqNode ToPq(NestedField f, IReadOnlyDictionary<int, ParquetAnnotation>? annotations = null)
+    {
+        if (!f.Type.IsPrimitive) return NestedColumns.ToPq(f, annotations);
+        var rep = f.Required ? PqRepetition.Required : PqRepetition.Optional;
         if (annotations is not null && annotations.TryGetValue(f.Id, out var annotation)) return Annotated(f, rep, annotation);
+        PqNode Leaf(PqPhysical physical, PqLogical? logical = null, int length = 0) =>
+            new() { Name = f.Name, Repetition = rep, FieldId = f.Id, Physical = physical, Logical = logical ?? PqLogical.None, TypeLength = length };
         return f.Type.TypeId switch
         {
-            TypeId.Boolean => new PrimitiveNode(f.Name, rep, LogicalType.None(), PhysicalType.Boolean, fieldId: f.Id),
-            TypeId.Int => new PrimitiveNode(f.Name, rep, LogicalType.None(), PhysicalType.Int32, fieldId: f.Id),
-            TypeId.Long => new PrimitiveNode(f.Name, rep, LogicalType.None(), PhysicalType.Int64, fieldId: f.Id),
-            TypeId.Float => new PrimitiveNode(f.Name, rep, LogicalType.None(), PhysicalType.Float, fieldId: f.Id),
-            TypeId.Double => new PrimitiveNode(f.Name, rep, LogicalType.None(), PhysicalType.Double, fieldId: f.Id),
-            TypeId.Date => new PrimitiveNode(f.Name, rep, LogicalType.Date(), PhysicalType.Int32, fieldId: f.Id),
-            TypeId.Time => new PrimitiveNode(f.Name, rep, LogicalType.Time(false, TimeUnit.Micros), PhysicalType.Int64, fieldId: f.Id),
-            TypeId.Timestamp => new PrimitiveNode(f.Name, rep, LogicalType.Timestamp(false, TimeUnit.Micros), PhysicalType.Int64, fieldId: f.Id),
-            TypeId.TimestampTz => new PrimitiveNode(f.Name, rep, LogicalType.Timestamp(true, TimeUnit.Micros), PhysicalType.Int64, fieldId: f.Id),
-            TypeId.TimestampNs => new PrimitiveNode(f.Name, rep, LogicalType.Timestamp(false, TimeUnit.Nanos), PhysicalType.Int64, fieldId: f.Id),
-            TypeId.TimestampTzNs => new PrimitiveNode(f.Name, rep, LogicalType.Timestamp(true, TimeUnit.Nanos), PhysicalType.Int64, fieldId: f.Id),
-            TypeId.String => new PrimitiveNode(f.Name, rep, LogicalType.String(), PhysicalType.ByteArray, fieldId: f.Id),
-            TypeId.Binary => new PrimitiveNode(f.Name, rep, LogicalType.None(), PhysicalType.ByteArray, fieldId: f.Id),
-            TypeId.Uuid => new PrimitiveNode(f.Name, rep, LogicalType.Uuid(), PhysicalType.FixedLenByteArray, 16, f.Id),
+            TypeId.Boolean => Leaf(PqPhysical.Boolean),
+            TypeId.Int => Leaf(PqPhysical.Int32),
+            TypeId.Long => Leaf(PqPhysical.Int64),
+            TypeId.Float => Leaf(PqPhysical.Float),
+            TypeId.Double => Leaf(PqPhysical.Double),
+            TypeId.Date => Leaf(PqPhysical.Int32, PqLogical.Date),
+            TypeId.Time => Leaf(PqPhysical.Int64, PqLogical.Time(false, PqTimeUnit.Micros)),
+            TypeId.Timestamp => Leaf(PqPhysical.Int64, PqLogical.Timestamp(false, PqTimeUnit.Micros)),
+            TypeId.TimestampTz => Leaf(PqPhysical.Int64, PqLogical.Timestamp(true, PqTimeUnit.Micros)),
+            TypeId.TimestampNs => Leaf(PqPhysical.Int64, PqLogical.Timestamp(false, PqTimeUnit.Nanos)),
+            TypeId.TimestampTzNs => Leaf(PqPhysical.Int64, PqLogical.Timestamp(true, PqTimeUnit.Nanos)),
+            TypeId.String => Leaf(PqPhysical.ByteArray, PqLogical.String),
+            TypeId.Binary => Leaf(PqPhysical.ByteArray),
+            TypeId.Uuid => Leaf(PqPhysical.FixedLenByteArray, PqLogical.Uuid, 16),
             // Iceberg (Appendix A): decimals with precision ≤ 9 as INT32, ≤ 18 as INT64, larger as the smallest fixed.
-            TypeId.Decimal when f.Type is DecimalType { Precision: <= 9 } d => new PrimitiveNode(f.Name, rep, LogicalType.Decimal(d.Precision, d.Scale), PhysicalType.Int32, fieldId: f.Id),
-            TypeId.Decimal when f.Type is DecimalType { Precision: <= 18 } d => new PrimitiveNode(f.Name, rep, LogicalType.Decimal(d.Precision, d.Scale), PhysicalType.Int64, fieldId: f.Id),
-            TypeId.Decimal when f.Type is DecimalType d => new PrimitiveNode(f.Name, rep, LogicalType.Decimal(d.Precision, d.Scale), PhysicalType.FixedLenByteArray, DecimalBytes(d.Precision), f.Id),
-            TypeId.Fixed when f.Type is FixedType x => new PrimitiveNode(f.Name, rep, LogicalType.None(), PhysicalType.FixedLenByteArray, x.Length, f.Id),
-            _ => throw new NotSupportedException($"Column {f.Name}: {f.Type} is not supported by the phase-0 Parquet writer"),
+            TypeId.Decimal when f.Type is DecimalType { Precision: <= 9 } d => Leaf(PqPhysical.Int32, PqLogical.Decimal(d.Precision, d.Scale)),
+            TypeId.Decimal when f.Type is DecimalType { Precision: <= 18 } d => Leaf(PqPhysical.Int64, PqLogical.Decimal(d.Precision, d.Scale)),
+            TypeId.Decimal when f.Type is DecimalType d => Leaf(PqPhysical.FixedLenByteArray, PqLogical.Decimal(d.Precision, d.Scale), DecimalBytes(d.Precision)),
+            TypeId.Fixed when f.Type is FixedType x => Leaf(PqPhysical.FixedLenByteArray, length: x.Length),
+            _ => throw new NotSupportedException($"Column {f.Name}: {f.Type} is not supported by the Parquet writer"),
         };
     }
 
-    private static PrimitiveNode Annotated(NestedField f, Repetition rep, ParquetAnnotation annotation)
+    private static PqNode Annotated(NestedField f, PqRepetition rep, ParquetAnnotation annotation)
     {
         var (expected, logical, physical, length) = annotation switch
         {
-            ParquetAnnotation.Int8 => (f.Type.TypeId == TypeId.Int, LogicalType.Int(8, true), PhysicalType.Int32, -1),
-            ParquetAnnotation.Int16 => (f.Type.TypeId == TypeId.Int, LogicalType.Int(16, true), PhysicalType.Int32, -1),
-            ParquetAnnotation.UInt8 => (f.Type.TypeId == TypeId.Int, LogicalType.Int(8, false), PhysicalType.Int32, -1),
-            ParquetAnnotation.UInt16 => (f.Type.TypeId == TypeId.Int, LogicalType.Int(16, false), PhysicalType.Int32, -1),
-            ParquetAnnotation.UInt32 => (f.Type.TypeId == TypeId.Long, LogicalType.Int(32, false), PhysicalType.Int32, -1),
-            ParquetAnnotation.UInt64 => (f.Type is DecimalType { Precision: 20, Scale: 0 }, LogicalType.Int(64, false), PhysicalType.Int64, -1),
+            ParquetAnnotation.Int8 => (f.Type.TypeId == TypeId.Int, PqLogical.Int(8, true), PqPhysical.Int32, 0),
+            ParquetAnnotation.Int16 => (f.Type.TypeId == TypeId.Int, PqLogical.Int(16, true), PqPhysical.Int32, 0),
+            ParquetAnnotation.UInt8 => (f.Type.TypeId == TypeId.Int, PqLogical.Int(8, false), PqPhysical.Int32, 0),
+            ParquetAnnotation.UInt16 => (f.Type.TypeId == TypeId.Int, PqLogical.Int(16, false), PqPhysical.Int32, 0),
+            ParquetAnnotation.UInt32 => (f.Type.TypeId == TypeId.Long, PqLogical.Int(32, false), PqPhysical.Int32, 0),
+            ParquetAnnotation.UInt64 => (f.Type is DecimalType { Precision: 20, Scale: 0 }, PqLogical.Int(64, false), PqPhysical.Int64, 0),
             ParquetAnnotation.TimestampMillis => (f.Type.TypeId is TypeId.Timestamp or TypeId.TimestampTz,
-                LogicalType.Timestamp(f.Type.TypeId == TypeId.TimestampTz, TimeUnit.Millis), PhysicalType.Int64, -1),
-            ParquetAnnotation.TimeUtc => (f.Type.TypeId == TypeId.Time, LogicalType.Time(true, TimeUnit.Micros), PhysicalType.Int64, -1),
-            ParquetAnnotation.Interval => (f.Type is FixedType { Length: 12 }, LogicalType.Interval(), PhysicalType.FixedLenByteArray, 12),
+                PqLogical.Timestamp(f.Type.TypeId == TypeId.TimestampTz, PqTimeUnit.Millis), PqPhysical.Int64, 0),
+            ParquetAnnotation.TimeUtc => (f.Type.TypeId == TypeId.Time, PqLogical.Time(true, PqTimeUnit.Micros), PqPhysical.Int64, 0),
+            ParquetAnnotation.Interval => (f.Type is FixedType { Length: 12 }, PqLogical.Interval, PqPhysical.FixedLenByteArray, 12),
             _ => throw new ArgumentOutOfRangeException(nameof(annotation), annotation, null),
         };
-        using (logical)
-        {
-            if (!expected) throw new ArgumentException($"Column {f.Name}: annotation {annotation} does not apply to {f.Type}");
-            return new PrimitiveNode(f.Name, rep, logical, physical, length, f.Id);
-        }
+        if (!expected) throw new ArgumentException($"Column {f.Name}: annotation {annotation} does not apply to {f.Type}");
+        return new PqNode { Name = f.Name, Repetition = rep, FieldId = f.Id, Physical = physical, Logical = logical, TypeLength = length };
     }
 
     /// <summary>A value of an annotated column as its stored physical value (unsigned bits, milliseconds).</summary>
@@ -153,11 +191,11 @@ public static class ParquetFiles
     /// <summary>How a stored value of a column is decoded, from the column's own annotation.</summary>
     internal enum Decoding { None, UInt32, UInt64, Millis }
 
-    internal static Decoding DecodingOf(LogicalType logical) => logical switch
+    internal static Decoding DecodingOf(PqLogical logical) => logical switch
     {
-        IntLogicalType { IsSigned: false, BitWidth: 32 } => Decoding.UInt32,
-        IntLogicalType { IsSigned: false, BitWidth: 64 } => Decoding.UInt64,
-        TimestampLogicalType { TimeUnit: TimeUnit.Millis } => Decoding.Millis,
+        { Kind: PqLogicalKind.Int, Signed: false, BitWidth: 32 } => Decoding.UInt32,
+        { Kind: PqLogicalKind.Int, Signed: false, BitWidth: 64 } => Decoding.UInt64,
+        { Kind: PqLogicalKind.Timestamp, Unit: PqTimeUnit.Millis } => Decoding.Millis,
         _ => Decoding.None,
     };
 
@@ -224,79 +262,52 @@ public static class ParquetFiles
         CancellationToken ct = default)
     {
         var columns = schema.Columns;
-        using var root = new GroupNode("table", Repetition.Required, columns.Select(c => ToNode(c, options.Annotations)).ToArray());
-        using var builder = new WriterPropertiesBuilder().Compression(Compression.Zstd);
-        if (!options.Statistics) builder.DisableStatistics();
-        if (!options.Dictionary) builder.DisableDictionary();
-        FileEncryptionProperties? encryption = null;
-        if (options.EncryptionKey is { } key)
-        {
-            using var encryptionBuilder = new FileEncryptionPropertiesBuilder(key);
-            encryption = encryptionBuilder.Build();
-            builder.Encryption(encryption);
-        }
-        using var encryptionScope = encryption;
-        using var props = builder.Build();
+        var root = new PqNode { Name = "table", Repetition = PqRepetition.Required, Children = columns.Select(c => ToPq(c, options.Annotations)).ToList() };
+        var backend = Backend;
         var groupRows = options.RowGroupRows is > 0 and var g ? g : int.MaxValue;
         var leafIds = new List<int>(); // field ID of each Parquet leaf column, in file order
         byte[] bytes;
-        using (var ms = new MemoryStream())
+        using (var writer = backend.Create(root, new PqWriteSettings(options.Statistics, options.Dictionary, options.EncryptionKey)))
         {
-            using (var output = new ManagedOutputStream(ms, leaveOpen: true))
-            using (var writer = new ParquetFileWriter(output, root, props))
+            // One row group per RowGroupRows rows (at least one, so an empty file still has a schema'd group).
+            for (var start = 0; start == 0 || start < rows.Count; start += groupRows)
             {
-                // One row group per RowGroupRows rows (at least one, so an empty file still has a schema'd group).
-                for (var start = 0; start == 0 || start < rows.Count; start += groupRows)
+                ct.ThrowIfCancellationRequested();
+                var count = Math.Min(groupRows, rows.Count - start);
+                var first = start == 0;
+                var leaves = new List<PqLeafData>();
+                for (var c = 0; c < columns.Count; c++)
                 {
-                    var slice = rows.Skip(start).Take(groupRows).ToList();
-                    var first = start == 0;
-                    using var rg = writer.AppendRowGroup();
-                    var leafCount = 0;
-                    for (var c = 0; c < columns.Count; c++)
+                    var values = new object?[count];
+                    for (var r = 0; r < count; r++) values[r] = rows[start + r][c];
+                    if (columns[c].Type.IsPrimitive)
                     {
-                        if (columns[c].Type.IsPrimitive)
-                        {
-                            using var col = rg.NextColumn();
-                            WriteColumn(col, columns[c], slice.Select(r => r[c]).ToArray(), options.Annotations);
-                            if (first) leafIds.Add(columns[c].Id);
-                            leafCount++;
-                            continue;
-                        }
-                        var plan = NestedColumns.Plan(columns[c], leafCount, options.Annotations);
-                        NestedColumns.Shred(plan, slice.Select(r => r[c]));
-                        foreach (var leaf in plan.Leaves)
-                        {
-                            using var col = rg.NextColumn();
-                            NestedColumns.WriteLeaf(col, leaf);
-                            if (first) leafIds.Add(leaf.FieldId);
-                            leafCount++;
-                        }
+                        leaves.Add(FlatLeaf(columns[c], values, options.Annotations));
+                        if (first) leafIds.Add(columns[c].Id);
+                        continue;
                     }
-                    if (rows.Count == 0) break;
+                    var plan = NestedColumns.Plan(columns[c], leaves.Count, options.Annotations);
+                    NestedColumns.Shred(plan, values);
+                    foreach (var leaf in plan.Leaves)
+                    {
+                        leaves.Add(NestedColumns.ToLeafData(leaf));
+                        if (first) leafIds.Add(leaf.FieldId);
+                    }
                 }
-                writer.Close();
+                await writer.WriteRowGroupAsync(leaves, ct);
+                if (rows.Count == 0) break;
             }
-            bytes = ms.ToArray();
+            bytes = await writer.FinishAsync(ct);
         }
 
-        long[] chunkSizes;
+        var chunkSizes = new long[leafIds.Count];
         int rowGroups;
-        using (var input = new ManagedRandomAccessFile(new MemoryStream(bytes)))
-        using (var readerProps = ParquetWriteOptions.ReaderProperties(options.EncryptionKey))
-        using (var check = new ParquetFileReader(input, readerProps))
+        using (var check = await backend.OpenAsync(new MemoryStream(bytes), options.EncryptionKey, ct))
         {
-            chunkSizes = new long[leafIds.Count];
-            using var meta = check.FileMetaData;
-            rowGroups = meta.NumRowGroups;
-            for (var rg = 0; rg < meta.NumRowGroups; rg++)
-            {
-                using var group = check.RowGroup(rg);
+            rowGroups = check.RowGroups;
+            for (var rg = 0; rg < rowGroups; rg++)
                 for (var i = 0; i < leafIds.Count; i++)
-                {
-                    using var chunk = group.MetaData.GetColumnChunkMetaData(i);
-                    chunkSizes[i] += chunk.TotalCompressedSize;
-                }
-            }
+                    chunkSizes[i] += check.Chunk(rg, i).TotalCompressedSize;
         }
         await io.WriteAsync(location, bytes, overwrite: false, ct);
 
@@ -317,123 +328,79 @@ public static class ParquetFiles
             UpperBounds = metrics?.Upper,
             SplitOffsets = [4],
         };
-        // The footer length is the 4-byte little-endian integer before the closing "PAR1".
+        // The footer length is the 4-byte little-endian integer before the closing "PAR1" (or "PARE").
         var footer = System.Buffers.Binary.BinaryPrimitives.ReadUInt32LittleEndian(bytes.AsSpan(bytes.Length - 8, 4));
         return new ParquetWriteResult(file, footer, rowGroups);
     }
 
-    private static void WriteColumn(ColumnWriter col, NestedField f, object?[] values, IReadOnlyDictionary<int, ParquetAnnotation>? annotations)
+    /// <summary>A top-level primitive column's values as its leaf: definition levels when optional, the defined values typed.</summary>
+    private static PqLeafData FlatLeaf(NestedField f, object?[] values, IReadOnlyDictionary<int, ParquetAnnotation>? annotations)
     {
-        if (annotations is not null && annotations.TryGetValue(f.Id, out var annotation) && annotation is not (ParquetAnnotation.TimeUtc or ParquetAnnotation.Interval))
+        short[]? defs = null;
+        var present = values.Length;
+        if (!f.Required)
         {
-            var stored = values.Select(v => v is null ? null : Encode(annotation, v)).ToArray();
-            if (annotation is ParquetAnnotation.UInt64 or ParquetAnnotation.TimestampMillis) Write<long>(col, f, stored);
-            else Write<int>(col, f, stored);
-            return;
+            defs = new short[values.Length];
+            present = 0;
+            for (var i = 0; i < values.Length; i++)
+                if (values[i] is not null) { defs[i] = 1; present++; }
         }
-        switch (f.Type.TypeId)
-        {
-            case TypeId.Boolean: Write<bool>(col, f, values); break;
-            case TypeId.Int or TypeId.Date: Write<int>(col, f, values); break;
-            case TypeId.Long or TypeId.Time or TypeId.Timestamp or TypeId.TimestampTz or TypeId.TimestampNs or TypeId.TimestampTzNs: Write<long>(col, f, values); break;
-            case TypeId.Float: Write<float>(col, f, values); break;
-            case TypeId.Double: Write<double>(col, f, values); break;
-            case TypeId.String:
-                using (var w = col.LogicalWriter<string?>()) w.WriteBatch(values.Select(v => (string?)v).ToArray());
-                break;
-            case TypeId.Binary:
-                using (var w = col.LogicalWriter<byte[]?>()) w.WriteBatch(values.Select(v => (byte[]?)v).ToArray());
-                break;
-            case TypeId.Uuid when f.Required:
-                using (var w = col.LogicalWriter<Guid>()) w.WriteBatch(values.Select(v => v is Guid g ? g : throw new ArgumentException($"Required column {f.Name} contains nulls")).ToArray());
-                break;
-            case TypeId.Uuid:
-                using (var w = col.LogicalWriter<Guid?>()) w.WriteBatch(values.Select(v => (Guid?)v).ToArray());
-                break;
-            case TypeId.Decimal:
-                var scale = ((DecimalType)f.Type).Scale;
-                var unscaled = values.Select(v => v is IcebergDecimal d
-                    ? d.Scale == scale ? (object)d.Unscaled : throw new ArgumentException($"Column {f.Name}: value scale {d.Scale} != {scale}")
-                    : null).ToArray();
-                var precision = ((DecimalType)f.Type).Precision;
-                if (precision <= 9) Write<int>(col, f, unscaled.Select(u => u is null ? null : (object)(int)(System.Numerics.BigInteger)u).ToArray());
-                else if (precision <= 18) Write<long>(col, f, unscaled.Select(u => u is null ? null : (object)(long)(System.Numerics.BigInteger)u).ToArray());
-                else WriteBytes(col, f, unscaled.Select(u => u is null ? null : FixedDecimal((System.Numerics.BigInteger)u, DecimalBytes(precision))).ToArray());
-                break;
-            case TypeId.Fixed:
-                var length = ((FixedType)f.Type).Length;
-                WriteBytes(col, f, values.Select(v => v is null ? null : v is byte[] b && b.Length == length ? b : throw new ArgumentException($"Column {f.Name}: fixed[{length}] needs {length}-byte values")).ToArray());
-                break;
-            default: throw new NotSupportedException(f.Type.ToString());
-        }
-    }
+        else if (values.Any(v => v is null)) throw new ArgumentException($"Required column {f.Name} contains nulls");
 
-    /// <summary>
-    /// FIXED_LEN_BYTE_ARRAY through the physical writer (ParquetSharp's logical writers do not take raw bytes for it):
-    /// values are packed into one pinned buffer and passed as pointers.
-    /// </summary>
-    private static void WriteBytes(ColumnWriter col, NestedField f, byte[]?[] values)
-    {
-        if (f.Required && values.Any(v => v is null)) throw new ArgumentException($"Required column {f.Name} contains nulls");
-        var writer = (ColumnWriter<FixedLenByteArray>)col;
-        var present = values.Where(v => v is not null).ToList();
-        var width = present.Count == 0 ? 0 : present[0]!.Length;
-        var buffer = new byte[Math.Max(1, present.Count * width)];
-        for (var i = 0; i < present.Count; i++) present[i]!.CopyTo(buffer, i * width);
-        var handle = System.Runtime.InteropServices.GCHandle.Alloc(buffer, System.Runtime.InteropServices.GCHandleType.Pinned);
-        try
+        T[] Typed<T>(Func<object, T> convert)
         {
-            var start = handle.AddrOfPinnedObject();
-            var pointers = Enumerable.Range(0, present.Count).Select(i => new FixedLenByteArray(start + i * width)).ToArray();
-            if (f.Required) writer.WriteBatch(pointers);
-            else writer.WriteBatch(values.Length, values.Select(v => (short)(v is null ? 0 : 1)).ToArray(), ReadOnlySpan<short>.Empty, pointers);
+            var result = new T[present];
+            var j = 0;
+            foreach (var v in values)
+                if (v is not null) result[j++] = convert(v);
+            return result;
         }
-        finally
-        {
-            handle.Free();
-        }
-    }
+        static T To<T>(object v) => v is T t ? t : (T)Convert.ChangeType(v, typeof(T), System.Globalization.CultureInfo.InvariantCulture);
 
-    /// <summary>Raw FIXED_LEN_BYTE_ARRAY values (null where undefined), copied out of the reader's buffers.</summary>
-    private static byte[]?[] ReadFixed(ColumnReader col, int n)
-    {
-        var reader = (ColumnReader<FixedLenByteArray>)col;
-        var width = col.ColumnDescriptor.TypeLength;
-        var optional = col.ColumnDescriptor.MaxDefinitionLevel > 0;
-        var result = new byte[]?[n];
-        var defs = new short[Math.Max(1, n)];
-        var values = new FixedLenByteArray[Math.Max(1, n)];
-        var row = 0;
-        while (row < n)
+        Array typed;
+        if (annotations is not null && annotations.TryGetValue(f.Id, out var annotation))
         {
-            var levels = reader.ReadBatch(n - row, defs, Span<short>.Empty, values, out var valuesRead);
-            if (levels == 0) break;
-            var v = 0;
-            for (var i = 0; i < levels; i++, row++)
+            typed = annotation switch
             {
-                if (optional && defs[i] == 0) continue;
-                var bytes = new byte[width];
-                System.Runtime.InteropServices.Marshal.Copy(values[v++].Pointer, bytes, 0, width);
-                result[row] = bytes;
-            }
+                ParquetAnnotation.UInt64 or ParquetAnnotation.TimestampMillis => Typed(v => (long)Encode(annotation, v)),
+                ParquetAnnotation.TimeUtc => Typed(To<long>),
+                ParquetAnnotation.Interval => Typed(v => FixedBytes(f, v, 12)),
+                _ => Typed(v => (int)Encode(annotation, v)),
+            };
+            return new PqLeafData(values.Length, defs, null, typed);
         }
-        return result;
+        typed = f.Type.TypeId switch
+        {
+            TypeId.Boolean => Typed(To<bool>),
+            TypeId.Int or TypeId.Date => Typed(To<int>),
+            TypeId.Long or TypeId.Time or TypeId.Timestamp or TypeId.TimestampTz or TypeId.TimestampNs or TypeId.TimestampTzNs => Typed(To<long>),
+            TypeId.Float => Typed(To<float>),
+            TypeId.Double => Typed(To<double>),
+            TypeId.String => Typed(v => (string)v),
+            TypeId.Binary => Typed(v => (byte[])v),
+            TypeId.Uuid => Typed(v => ((Guid)v).ToByteArray(bigEndian: true)),
+            TypeId.Decimal when f.Type is DecimalType d => d.Precision switch
+            {
+                <= 9 => Typed(v => (int)Unscaled(f, d, v)),
+                <= 18 => Typed(v => (long)Unscaled(f, d, v)),
+                _ => Typed(v => FixedDecimal(Unscaled(f, d, v), DecimalBytes(d.Precision))),
+            },
+            TypeId.Fixed when f.Type is FixedType x => Typed(v => FixedBytes(f, v, x.Length)),
+            _ => throw new NotSupportedException(f.Type.ToString()),
+        };
+        return new PqLeafData(values.Length, defs, null, typed);
     }
 
-    private static void Write<T>(ColumnWriter col, NestedField f, object?[] values) where T : struct
+    private static System.Numerics.BigInteger Unscaled(NestedField f, DecimalType d, object v) => v switch
     {
-        if (f.Required)
-        {
-            if (values.Any(v => v is null)) throw new ArgumentException($"Required column {f.Name} contains nulls");
-            using var w = col.LogicalWriterOverride<T>();
-            w.WriteBatch(values.Select(v => (T)Convert.ChangeType(v!, typeof(T), System.Globalization.CultureInfo.InvariantCulture)).ToArray());
-        }
-        else
-        {
-            using var w = col.LogicalWriterOverride<T?>();
-            w.WriteBatch(values.Select(v => v is null ? (T?)null : (T)Convert.ChangeType(v, typeof(T), System.Globalization.CultureInfo.InvariantCulture)).ToArray());
-        }
-    }
+        IcebergDecimal x when x.Scale == d.Scale => x.Unscaled,
+        IcebergDecimal x => throw new ArgumentException($"Column {f.Name}: value scale {x.Scale} != {d.Scale}"),
+        decimal m => IcebergDecimal.FromDecimal(m, d.Scale).Unscaled,
+        _ => throw new ArgumentException($"Column {f.Name}: expected a decimal, got {v.GetType().Name}"),
+    };
+
+    private static byte[] FixedBytes(NestedField f, object v, int length) =>
+        v is byte[] b && b.Length == length ? b : throw new ArgumentException($"Column {f.Name}: fixed[{length}] needs {length}-byte values");
 
     /// <summary>
     /// Read a data file projected onto <paramref name="projection"/>. Columns are matched by Parquet
@@ -477,28 +444,25 @@ public static class ParquetFiles
             await ranged.PrefetchAsync(length <= WholeFileBelow ? 0 : length - FooterPrefetch, length, ct);
         }
         else source = new MemoryStream(await io.ReadAllAsync(location, ct));
-        using var input = new ManagedRandomAccessFile(source);
-        using var readerProps = ParquetWriteOptions.ReaderProperties(options?.DecryptionKey);
-        using var reader = new ParquetFileReader(input, readerProps);
-        using var meta = reader.FileMetaData;
-        var layout = FileLayout.Of(meta, projection, mapping, options?.MatchByName ?? false);
+        using var reader = await Backend.OpenAsync(source, options?.DecryptionKey, ct);
+        var leafCount = reader.Schema.LeafCount;
+        var layout = FileLayout.Of(reader.Schema, projection, mapping, options?.MatchByName ?? false);
         var evaluator = options?.Filter is { } filter && filter is not AlwaysTrue ? new MetricsEvaluator(filter) : null;
-        if (ranged is not null && evaluator is null && layout.LeafCount == meta.NumColumns) await ranged.PrefetchAsync(0, ranged.Length, ct);
+        if (ranged is not null && evaluator is null && layout.LeafCount == leafCount) await ranged.PrefetchAsync(0, ranged.Length, ct);
         var metrics = options?.Metrics;
-        var groups = meta.NumRowGroups;
+        var groups = reader.RowGroups;
         long position = 0;
         for (var rg = 0; rg < groups; rg++)
         {
             ct.ThrowIfCancellationRequested();
-            using var group = reader.RowGroup(rg);
-            var groupMeta = group.MetaData;
-            var n = checked((int)groupMeta.NumRows);
-            if (evaluator is not null && !evaluator.MightMatch(n, (id, type) => layout.StatisticsFor(groupMeta, id, type, n)))
+            var n = checked((int)reader.RowGroupRows(rg));
+            if (evaluator is not null && !evaluator.MightMatch(n, (id, type) => layout.StatisticsFor(reader, rg, id, type, n)))
             {
                 metrics?.RowGroupSkipped(n);
                 position += n;
                 continue;
             }
+            if (ranged is not null) await PrefetchChunksAsync(ranged, reader, rg, layout, ct);
             var rows = new object?[n][];
             for (var r = 0; r < n; r++) rows[r] = new object?[projection.Columns.Count];
             for (var c = 0; c < projection.Columns.Count; c++)
@@ -511,13 +475,13 @@ public static class ParquetFiles
                         break;
                     case ColumnSource.Leaf l:
                     {
-                        using var col = group.Column(l.Column);
-                        var values = ReadColumn(col, f.Type, n);
+                        var data = await reader.ReadLeafAsync(rg, l.Column, f.Type.TypeId == TypeId.String, ct);
+                        var values = ReadColumn(data, layout.Leaves[l.Column], f.Type, n);
                         for (var r = 0; r < n; r++) rows[r][c] = values[r];
                         break;
                     }
                     case ColumnSource.Nested nested:
-                        NestedColumns.Load(group, nested.Tree);
+                        await NestedColumns.LoadAsync(reader, rg, nested.Tree, ct);
                         for (var r = 0; r < n; r++) rows[r][c] = NestedColumns.Project(NestedColumns.Assemble(nested.Tree), nested.Tree, f.Type, FromPhysical);
                         break;
                 }
@@ -525,6 +489,28 @@ public static class ParquetFiles
             metrics?.RowGroupRead(n);
             yield return new DataFileBatch(position, rows);
             position += n;
+        }
+    }
+
+    /// <summary>
+    /// Fetches the column chunks a row group's read decodes, adjacent ones in one request, for a library that reads a
+    /// chunk page by page (Parquet.Net) rather than in one request of its own (parquet-cpp, which reports no offsets).
+    /// </summary>
+    private static async Task PrefetchChunksAsync(RangeReadStream stream, IPqReader reader, int rowGroup, FileLayout layout, CancellationToken ct)
+    {
+        var ranges = new List<(long Start, long End)>();
+        foreach (var leaf in layout.LeafColumns)
+        {
+            var chunk = reader.Chunk(rowGroup, leaf);
+            if (chunk.Offset is not { } start) return;
+            ranges.Add((start, start + chunk.TotalCompressedSize));
+        }
+        ranges.Sort();
+        for (var i = 0; i < ranges.Count;)
+        {
+            var (start, end) = ranges[i++];
+            while (i < ranges.Count && ranges[i].Start <= end + stream.MinimumFetch) end = Math.Max(end, ranges[i++].End);
+            await stream.PrefetchAsync(start, Math.Min(end, stream.Length) - start, ct);
         }
     }
 
@@ -536,45 +522,64 @@ public static class ParquetFiles
         public sealed record Nested(NestedColumns.PNode Tree) : ColumnSource;
     }
 
+    /// <summary>The file's leaves in order, with their dotted paths and levels.</summary>
+    internal sealed record LeafInfo(PqNode Node, string Path, int MaxDef, int MaxRep);
+
+    internal static List<LeafInfo> LeavesOf(PqNode root)
+    {
+        var result = new List<LeafInfo>();
+        void Walk(PqNode n, string prefix, int def, int rep)
+        {
+            var d = def + (n.Repetition == PqRepetition.Required ? 0 : 1);
+            var r = rep + (n.Repetition == PqRepetition.Repeated ? 1 : 0);
+            var path = prefix.Length == 0 ? n.Name : prefix + "." + n.Name;
+            if (!n.IsGroup) result.Add(new LeafInfo(n, path, d, r));
+            else foreach (var c in n.Children) Walk(c, path, d, r);
+        }
+        foreach (var c in root.Children) Walk(c, "", 0, 0);
+        return result;
+    }
+
     private sealed class FileLayout
     {
         public required ColumnSource[] Sources { get; init; }
         /// <summary>Field ID → leaf column index, for leaves outside lists and maps (one value per row).</summary>
         public required Dictionary<int, int> StatsLeaves { get; init; }
-        public required SchemaDescriptor Descriptor { get; init; }
-        /// <summary>How many distinct leaf columns of the file the projection decodes.</summary>
-        public int LeafCount => Sources.SelectMany(s => s switch
+        public required List<LeafInfo> Leaves { get; init; }
+        /// <summary>The distinct leaf columns of the file the projection decodes.</summary>
+        public IReadOnlyList<int> LeafColumns => Sources.SelectMany(s => s switch
         {
             ColumnSource.Leaf l => [l.Column],
             ColumnSource.Nested n => n.Tree.Leaves.Select(x => x.Column),
             _ => [],
-        }).Distinct().Count();
+        }).Distinct().ToList();
 
-        public static FileLayout Of(FileMetaData meta, Schema projection, NameMapping? mapping, bool matchByName = false)
+        public int LeafCount => LeafColumns.Count;
+
+        public static FileLayout Of(PqNode root, Schema projection, NameMapping? mapping, bool matchByName = false)
         {
-            var schema = meta.Schema;
+            var leaves = LeavesOf(root);
             var byFieldId = new Dictionary<int, int>();
             var byName = new Dictionary<string, int>();
             var statsLeaves = new Dictionary<int, int>();
-            for (var i = 0; i < meta.NumColumns; i++)
+            for (var i = 0; i < leaves.Count; i++)
             {
-                var descr = schema.Column(i);
-                using var node = descr.SchemaNode;
-                if (node.FieldId >= 0 && !matchByName)
+                var leaf = leaves[i];
+                if (leaf.Node.FieldId >= 0 && !matchByName)
                 {
-                    byFieldId[node.FieldId] = i;
-                    if (descr.MaxRepetitionLevel == 0) statsLeaves[node.FieldId] = i;
+                    byFieldId[leaf.Node.FieldId] = i;
+                    if (leaf.MaxRep == 0) statsLeaves[leaf.Node.FieldId] = i;
                 }
-                byName[descr.Path.ToDotString()] = i;
+                byName[leaf.Path] = i;
             }
             var hasIds = byFieldId.Count > 0;
             // Top-level fields (nested columns span several leaves), with the index of their first leaf column.
-            var topLevel = new List<(Node Node, int FirstColumn)>();
+            var topLevel = new List<(PqNode Node, int FirstColumn)>();
             var column = 0;
-            foreach (var child in schema.GroupNode.Fields)
+            foreach (var child in root.Children)
             {
                 topLevel.Add((child, column));
-                column += CountLeaves(child);
+                column += child.LeafCount;
             }
 
             IReadOnlyList<string> NamesOf(NestedField f) => mapping?.NamesFor(f.Id) is { Count: > 0 } ns ? ns : [f.Name];
@@ -605,67 +610,63 @@ public static class ParquetFiles
                     continue;
                 }
                 sources[c] = new ColumnSource.Leaf(colIndex);
-                if (!hasIds && schema.Column(colIndex).MaxRepetitionLevel == 0) statsLeaves[f.Id] = colIndex;
+                if (!hasIds && leaves[colIndex].MaxRep == 0) statsLeaves[f.Id] = colIndex;
             }
-            return new FileLayout { Sources = sources, StatsLeaves = statsLeaves, Descriptor = schema };
+            return new FileLayout { Sources = sources, StatsLeaves = statsLeaves, Leaves = leaves };
         }
 
         /// <summary>A row group's statistics for one field, or null when the file has none usable for it.</summary>
-        public ColumnStats? StatisticsFor(RowGroupMetaData group, int fieldId, IcebergType type, long rows) =>
-            StatsLeaves.TryGetValue(fieldId, out var leaf) ? RowGroupStatistics.For(group, Descriptor.Column(leaf), leaf, fieldId, type, rows) : null;
+        public ColumnStats? StatisticsFor(IPqReader reader, int rowGroup, int fieldId, IcebergType type, long rows) =>
+            StatsLeaves.TryGetValue(fieldId, out var leaf) ? RowGroupStatistics.For(reader.Chunk(rowGroup, leaf), Leaves[leaf].Node, fieldId, type, rows) : null;
     }
 
-    private static object?[] ReadColumn(ColumnReader col, IcebergType type, int n)
+    /// <summary>A flat leaf's values as Iceberg values of <paramref name="type"/>, one per row (null where undefined).</summary>
+    private static object?[] ReadColumn(PqLeafData data, LeafInfo leaf, IcebergType type, int n)
     {
-        Decoding decoding;
-        using (var logical = col.ColumnDescriptor.LogicalType) decoding = DecodingOf(logical);
-        return (decoding, type.TypeId) switch
+        var node = leaf.Node;
+        var decoding = DecodingOf(node.Logical);
+        var physical = node.PhysicalType;
+        var result = new object?[n];
+        var defs = data.Defs;
+        var max = leaf.MaxDef;
+        void Fill<T>(T[] values, Func<T, object> convert)
         {
-            (Decoding.UInt32, TypeId.Long) =>
-                col.LogicalReaderOverride<int?>().ReadAll(n).Select(v => v is null ? null : (object?)(long)unchecked((uint)v.Value)).ToArray(),
-            (Decoding.UInt64, TypeId.Decimal) => col.LogicalReaderOverride<long?>().ReadAll(n)
-                .Select(v => v is null ? null : (object?)new IcebergDecimal(unchecked((ulong)v.Value), ((DecimalType)type).Scale)).ToArray(),
-            (Decoding.Millis, TypeId.Timestamp or TypeId.TimestampTz) =>
-                col.LogicalReaderOverride<long?>().ReadAll(n).Select(v => v is null ? null : (object?)checked(v.Value * 1000)).ToArray(),
-            _ => ReadPlain(col, type, n),
-        };
+            var v = 0;
+            for (var r = 0; r < n; r++)
+                if (defs is null || defs[r] == max) result[r] = convert(values[v++]);
+        }
+        var scale = type is DecimalType d ? d.Scale : 0;
+        switch (data.Values)
+        {
+            case bool[] b when type.TypeId == TypeId.Boolean: Fill(b, x => x); break;
+            case int[] i when decoding == Decoding.UInt32 && type.TypeId == TypeId.Long: Fill(i, x => (long)unchecked((uint)x)); break;
+            case int[] i when type.TypeId is TypeId.Int or TypeId.Date: Fill(i, x => x); break;
+            case int[] i when type.TypeId == TypeId.Long: Fill(i, x => (long)x); break; // int -> long promotion: an old file may still store INT32
+            case int[] i when type is DecimalType: Fill(i, x => new IcebergDecimal(x, scale)); break;
+            case long[] l when decoding == Decoding.UInt64 && type is DecimalType: Fill(l, x => new IcebergDecimal(unchecked((ulong)x), scale)); break;
+            case long[] l when decoding == Decoding.Millis && type.TypeId is TypeId.Timestamp or TypeId.TimestampTz: Fill(l, x => checked(x * 1000)); break;
+            case long[] l when type.TypeId is TypeId.Long or TypeId.Time or TypeId.Timestamp or TypeId.TimestampTz or TypeId.TimestampNs or TypeId.TimestampTzNs: Fill(l, x => x); break;
+            case long[] l when type is DecimalType: Fill(l, x => new IcebergDecimal(x, scale)); break;
+            case float[] fl when type.TypeId == TypeId.Float: Fill(fl, x => x); break;
+            case float[] fl when type.TypeId == TypeId.Double: Fill(fl, x => (double)x); break;
+            case double[] db when type.TypeId == TypeId.Double: Fill(db, x => x); break;
+            case string[] s when type.TypeId == TypeId.String: Fill(s, x => x); break;
+            case byte[][] s when type.TypeId == TypeId.String: Fill(s, x => System.Text.Encoding.UTF8.GetString(x)); break;
+            case byte[][] bytes when type.TypeId is TypeId.Binary or TypeId.Fixed: Fill(bytes, x => x); break;
+            case byte[][] bytes when type.TypeId == TypeId.Uuid: Fill(bytes, x => new Guid(x, bigEndian: true)); break;
+            // FIXED (or BINARY) decimals, any precision: big-endian two's-complement unscaled value.
+            case byte[][] bytes when type is DecimalType:
+                Fill(bytes, x => new IcebergDecimal(new System.Numerics.BigInteger(x, isUnsigned: false, isBigEndian: true), scale));
+                break;
+            default: throw new NotSupportedException($"Reading {type} from a {physical} column is not supported");
+        }
+        return result;
     }
-
-    private static object?[] ReadPlain(ColumnReader col, IcebergType type, int n) => type.TypeId switch
-    {
-        TypeId.Boolean => col.LogicalReaderOverride<bool?>().ReadAll(n).Select(v => (object?)v).ToArray(),
-        TypeId.Int or TypeId.Date => col.LogicalReaderOverride<int?>().ReadAll(n).Select(v => (object?)v).ToArray(),
-        // int -> long promotion: an old file may still store the column as INT32.
-        TypeId.Long when col.ColumnDescriptor.PhysicalType == PhysicalType.Int32 =>
-            col.LogicalReaderOverride<int?>().ReadAll(n).Select(v => v is null ? null : (object?)(long)v).ToArray(),
-        TypeId.Long or TypeId.Time or TypeId.Timestamp or TypeId.TimestampTz or TypeId.TimestampNs or TypeId.TimestampTzNs =>
-            col.LogicalReaderOverride<long?>().ReadAll(n).Select(v => (object?)v).ToArray(),
-        TypeId.Float => col.LogicalReaderOverride<float?>().ReadAll(n).Select(v => (object?)v).ToArray(),
-        TypeId.Double when col.ColumnDescriptor.PhysicalType == PhysicalType.Float =>
-            col.LogicalReaderOverride<float?>().ReadAll(n).Select(v => v is null ? null : (object?)(double)v).ToArray(),
-        TypeId.Double => col.LogicalReaderOverride<double?>().ReadAll(n).Select(v => (object?)v).ToArray(),
-        TypeId.String => col.LogicalReader<string?>().ReadAll(n).Select(v => (object?)v).ToArray(),
-        TypeId.Binary => col.LogicalReader<byte[]?>().ReadAll(n).Select(v => (object?)v).ToArray(),
-        TypeId.Uuid => ReadStruct<Guid>(col, n),
-        TypeId.Decimal when col.ColumnDescriptor.PhysicalType == PhysicalType.Int32 =>
-            col.LogicalReaderOverride<int?>().ReadAll(n).Select(v => v is null ? null : (object?)new IcebergDecimal(v.Value, ((DecimalType)type).Scale)).ToArray(),
-        TypeId.Decimal when col.ColumnDescriptor.PhysicalType == PhysicalType.Int64 =>
-            col.LogicalReaderOverride<long?>().ReadAll(n).Select(v => v is null ? null : (object?)new IcebergDecimal(v.Value, ((DecimalType)type).Scale)).ToArray(),
-        // FIXED (or BINARY) decimals, any precision: big-endian two's-complement unscaled value.
-        TypeId.Decimal when col.ColumnDescriptor.PhysicalType == PhysicalType.FixedLenByteArray => ReadFixed(col, n)
-            .Select(v => v is null ? null : (object?)new IcebergDecimal(new System.Numerics.BigInteger(v, isUnsigned: false, isBigEndian: true), ((DecimalType)type).Scale)).ToArray(),
-        TypeId.Decimal => col.LogicalReaderOverride<byte[]?>().ReadAll(n) // BINARY-backed decimals
-            .Select(v => v is null ? null : (object?)new IcebergDecimal(new System.Numerics.BigInteger(v, isUnsigned: false, isBigEndian: true), ((DecimalType)type).Scale)).ToArray(),
-        TypeId.Fixed => ReadFixed(col, n).Select(v => (object?)v).ToArray(),
-        _ => throw new NotSupportedException($"Reading {type} is not supported yet"),
-    };
-
-    private static int CountLeaves(Node n) => n is GroupNode g ? g.Fields.Sum(CountLeaves) : 1;
 
     /// <summary>A raw physical value of a nested leaf as an Iceberg value of <paramref name="type"/>.</summary>
-    private static object FromPhysical(IcebergType type, PhysicalType physical, int typeLength, object raw) => type switch
+    private static object FromPhysical(IcebergType type, PqPhysical physical, int typeLength, object raw) => type switch
     {
-        PrimitiveType { TypeId: TypeId.String } => System.Text.Encoding.UTF8.GetString((byte[])raw),
+        PrimitiveType { TypeId: TypeId.String } => raw as string ?? System.Text.Encoding.UTF8.GetString((byte[])raw),
         PrimitiveType { TypeId: TypeId.Uuid } => new Guid((byte[])raw, bigEndian: true),
         DecimalType d => new IcebergDecimal(raw switch
         {
@@ -679,12 +680,6 @@ public static class ParquetFiles
         PrimitiveType { TypeId: TypeId.Double } when raw is float x => (double)x,
         _ => raw,
     };
-
-    /// <summary>ParquetSharp's non-override logical readers require <c>T</c> for required columns and <c>T?</c> for optional ones.</summary>
-    private static object?[] ReadStruct<T>(ColumnReader col, int n) where T : struct =>
-        col.ColumnDescriptor.MaxDefinitionLevel == 0
-            ? col.LogicalReader<T>().ReadAll(n).Select(v => (object?)v).ToArray()
-            : col.LogicalReader<T?>().ReadAll(n).Select(v => (object?)v).ToArray();
 }
 
 /// <summary>
@@ -705,21 +700,18 @@ internal static class RowGroupStatistics
 {
     private static readonly System.Text.UTF8Encoding StrictUtf8 = new(encoderShouldEmitUTF8Identifier: false, throwOnInvalidBytes: true);
 
-    public static ColumnStats? For(RowGroupMetaData group, ColumnDescriptor descr, int leaf, int fieldId, IcebergType type, long rows)
+    public static ColumnStats? For(PqColumnChunk chunk, PqNode leaf, int fieldId, IcebergType type, long rows)
     {
-        using var chunk = group.GetColumnChunkMetaData(leaf);
-        if (!chunk.IsStatsSet) return null;
-        using var stats = chunk.Statistics;
-        if (stats is null) return null;
+        if (chunk.Statistics is not { } stats) return null;
         var hasMinMax = stats.HasMinMax;
         long? nulls = hasMinMax || stats.NullCount > 0 ? stats.NullCount : null;
         object? lower = null, upper = null;
-        if (hasMinMax && Comparable(descr, type))
+        if (hasMinMax && Comparable(leaf, type))
         {
             try
             {
-                lower = Convert(stats, min: true, descr, type);
-                upper = Convert(stats, min: false, descr, type);
+                lower = Convert(stats.Min!, leaf, type);
+                upper = Convert(stats.Max!, leaf, type);
             }
             catch (Exception e) when (e is ArgumentException or InvalidCastException or OverflowException or NotSupportedException)
             {
@@ -731,51 +723,36 @@ internal static class RowGroupStatistics
     }
 
     /// <summary>Whether the file's ordering for this column is the one Iceberg compares values with.</summary>
-    private static bool Comparable(ColumnDescriptor descr, IcebergType type) => (descr.PhysicalType, type.TypeId) switch
+    private static bool Comparable(PqNode leaf, IcebergType type) => (leaf.PhysicalType, type.TypeId) switch
     {
-        (PhysicalType.Boolean, TypeId.Boolean) => true,
-        (PhysicalType.Int32, TypeId.Int or TypeId.Date or TypeId.Long or TypeId.Decimal) => descr.SortOrder == SortOrder.Signed,
-        (PhysicalType.Int64, TypeId.Long or TypeId.Time or TypeId.Timestamp or TypeId.TimestampTz or TypeId.TimestampNs or TypeId.TimestampTzNs or TypeId.Decimal) =>
-            descr.SortOrder == SortOrder.Signed,
-        (PhysicalType.Float, TypeId.Float or TypeId.Double) or (PhysicalType.Double, TypeId.Double) => descr.SortOrder == SortOrder.Signed,
-        (PhysicalType.ByteArray, TypeId.String or TypeId.Binary) => descr.SortOrder == SortOrder.Unsigned,
-        (PhysicalType.FixedLenByteArray, TypeId.Fixed) => descr.SortOrder == SortOrder.Unsigned,
+        (PqPhysical.Boolean, TypeId.Boolean) => true,
+        (PqPhysical.Int32, TypeId.Int or TypeId.Date or TypeId.Long or TypeId.Decimal) => leaf.SortOrder == PqSortOrder.Signed,
+        (PqPhysical.Int64, TypeId.Long or TypeId.Time or TypeId.Timestamp or TypeId.TimestampTz or TypeId.TimestampNs or TypeId.TimestampTzNs or TypeId.Decimal) =>
+            leaf.SortOrder == PqSortOrder.Signed,
+        (PqPhysical.Float, TypeId.Float or TypeId.Double) or (PqPhysical.Double, TypeId.Double) => leaf.SortOrder == PqSortOrder.Signed,
+        (PqPhysical.ByteArray, TypeId.String or TypeId.Binary) => leaf.SortOrder == PqSortOrder.Unsigned,
+        (PqPhysical.FixedLenByteArray, TypeId.Fixed) => leaf.SortOrder == PqSortOrder.Unsigned,
         _ => false,
     };
 
-    private static object? Convert(Statistics stats, bool min, ColumnDescriptor descr, IcebergType type)
+    private static object? Convert(object value, PqNode leaf, IcebergType type)
     {
-        switch (stats)
+        switch (value)
         {
-            case Statistics<bool> b: return min ? b.Min : b.Max;
-            case Statistics<int> i:
-            {
-                var v = min ? i.Min : i.Max;
+            case bool b: return b;
+            case int i:
                 return type switch
                 {
-                    DecimalType d => new IcebergDecimal(v, d.Scale),
-                    PrimitiveType { TypeId: TypeId.Long } => (long)v,
-                    _ => v,
+                    DecimalType d => new IcebergDecimal(i, d.Scale),
+                    PrimitiveType { TypeId: TypeId.Long } => (long)i,
+                    _ => i,
                 };
-            }
-            case Statistics<long> l:
-            {
-                var v = min ? l.Min : l.Max;
-                using (var logical = descr.LogicalType)
-                    if (ParquetFiles.DecodingOf(logical) == ParquetFiles.Decoding.Millis) return checked(v * 1000);
-                return type is DecimalType d ? new IcebergDecimal(v, d.Scale) : v;
-            }
-            case Statistics<float> f:
-            {
-                var v = min ? f.Min : f.Max;
-                return type.TypeId == TypeId.Double ? (double)v : v;
-            }
-            case Statistics<double> d: return min ? d.Min : d.Max;
-            case Statistics<ByteArray> ba:
-            {
-                var v = min ? ba.Min : ba.Max;
-                var bytes = new byte[v.Length];
-                if (v.Length > 0) System.Runtime.InteropServices.Marshal.Copy(v.Pointer, bytes, 0, v.Length);
+            case long l:
+                if (ParquetFiles.DecodingOf(leaf.Logical) == ParquetFiles.Decoding.Millis) return checked(l * 1000);
+                return type is DecimalType dl ? new IcebergDecimal(l, dl.Scale) : l;
+            case float f: return type.TypeId == TypeId.Double ? (double)f : f;
+            case double d: return d;
+            case byte[] bytes when leaf.PhysicalType == PqPhysical.ByteArray:
                 if (type.TypeId != TypeId.String) return bytes;
                 try
                 {
@@ -785,14 +762,7 @@ internal static class RowGroupStatistics
                 {
                     return null; // e.g. a max truncated inside a multi-byte character: no bound
                 }
-            }
-            case Statistics<FixedLenByteArray> fl:
-            {
-                var v = min ? fl.Min : fl.Max;
-                var bytes = new byte[descr.TypeLength];
-                System.Runtime.InteropServices.Marshal.Copy(v.Pointer, bytes, 0, bytes.Length);
-                return bytes;
-            }
+            case byte[] bytes: return bytes.Length == leaf.TypeLength ? bytes : null;
             default: return null;
         }
     }

@@ -11,6 +11,12 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 ## [Unreleased]
 
 ### Added
+- `Iceberg.Net.Data.ParquetNet` (not yet packed): Parquet.Net, fully managed (no native binaries), as the Parquet
+  library of `Iceberg.Net.Data`, from the `rtkelly-labs/parquet-dotnet` fork at `external/parquet-dotnet` (a git
+  submodule). `ParquetNet.UseAsDefault()`, or `ICEBERG_PARQUET_BACKEND=parquet-net`, switches every read and write;
+  ParquetSharp stays the default. Both backends write the same files (schema, field IDs, annotations, statistics,
+  Zstd, encryption) and CI runs the unit and DuckLake suites (with DuckDB's oracles) on Parquet.Net too.
+  `ParquetFiles.BackendName` reports the one in use; `tools/ParquetBackendBench` compares them.
 - `Iceberg.Net.Data`: `ParquetWriteOptions.Annotations` writes columns narrower than their Iceberg type (unsigned and
   narrow integers, millisecond timestamps, UTC times, INTERVAL); the reader decodes unsigned and millisecond columns
   (values and footer statistics) from any writer's annotations. `ParquetInspection.InspectAsync` reads an existing
@@ -31,6 +37,10 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
   modular encryption with a key per write in `encryption_key`, as DuckDB's `ENCRYPTED`). DuckDB's `ducklake` extension is the cross-engine oracle in both
   directions on both databases, with a BDD specification and model-based property tests; DuckLake spec sections are
   pinned and traced like Iceberg's ([docs/ducklake.md](docs/ducklake.md)).
+
+### Fixed
+- `ParquetFiles`: a top-level decimal column given `System.Decimal` values wrote them as nulls; they are written as
+  nested decimal fields already were (at the column's scale), and anything else is refused.
 
 ## [0.0.1-alpha.1] - 2026-10-25
 

@@ -29,6 +29,8 @@ jobs:
       contents: read
     steps:
       - uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0 # v7.0.0
+        with:
+          submodules: true  # external/parquet-dotnet (the Parquet.Net backend)
 
       - name: Lint file extensions and naming conventions
         uses: ls-lint/action@a87c5eb4fb26d7af1bd0adba203dd1e76f7e94eb # v2.3.2
@@ -78,6 +80,8 @@ jobs:
       contents: read
     steps:
       - uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0 # v7.0.0
+        with:
+          submodules: true  # external/parquet-dotnet (the Parquet.Net backend)
       - uses: actions/setup-dotnet@a98b56852c35b8e3190ac28c8c2271da59106c68 # v6
         with:
           global-json-file: global.json
@@ -124,6 +128,8 @@ jobs:
       contents: read
     steps:
       - uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0 # v7.0.0
+        with:
+          submodules: true  # external/parquet-dotnet (the Parquet.Net backend)
       - uses: actions/setup-dotnet@a98b56852c35b8e3190ac28c8c2271da59106c68 # v6
         with:
           global-json-file: global.json
@@ -148,12 +154,58 @@ jobs:
         if: failure()
         run: docker compose -f emulation/docker-compose.yml --profile trino --profile polaris --profile gravitino --profile nessie --profile lakekeeper logs --tail 200
 
+  # The same suites on the other Parquet library: Iceberg.Net.Data reads and writes every file through Parquet.Net
+  # (external/parquet-dotnet) instead of ParquetSharp. The unit suite, and DuckLake with DuckDB 1.5 and 2.0 reading
+  # the files these write (and writing the files these read), on SQLite and PostgreSQL catalogs.
+  parquet-net:
+    name: parquet-net
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    permissions:
+      contents: read
+    env:
+      ICEBERG_PARQUET_BACKEND: parquet-net
+    steps:
+      - uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0 # v7.0.0
+        with:
+          submodules: true  # external/parquet-dotnet (the Parquet.Net backend)
+      - uses: actions/setup-dotnet@a98b56852c35b8e3190ac28c8c2271da59106c68 # v6
+        with:
+          global-json-file: global.json
+      - uses: astral-sh/setup-uv@e58605a9b6da7c637471fab8847a5e5a6b8df081 # v5
+        with:
+          enable-cache: true
+
+      - name: Start PostgreSQL for DuckLake catalogs
+        run: docker compose -f emulation/docker-compose.yml up -d --wait ducklake-db
+
+      - name: Install the DuckDB oracles (DuckLake 1.0 and 1.1)
+        run: |
+          uv sync --project interop --group duckdb
+          uv venv --python 3.12 "$RUNNER_TEMP/ducklake11"
+          uv pip install --python "$RUNNER_TEMP/ducklake11/bin/python" duckdb==2.0.0 pytz
+
+      - name: Unit suite on Parquet.Net
+        run: ./tools/test-projects.sh test unit
+
+      - name: DuckLake suites on Parquet.Net
+        env:
+          ICEBERG_DUCKDB_PYTHON: ${{ github.workspace }}/interop/.venv/bin/python
+          ICEBERG_DUCKDB_REQUIRED: "1"
+          ICEBERG_DUCKLAKE11_PYTHON: ${{ runner.temp }}/ducklake11/bin/python
+          ICEBERG_DUCKLAKE11_REQUIRED: "1"
+          ICEBERG_DUCKLAKE_POSTGRES: Host=localhost;Port=5434;Username=postgres;Password=postgres
+          ICEBERG_DUCKLAKE_POSTGRES_REQUIRED: "1"
+        run: |
+          dotnet test tests/Iceberg.Net.DuckLake.Tests --nologo
+          dotnet test tests/Iceberg.Net.DuckLake.Behaviour.Tests --nologo
+
   # The one required check. Branch protection matches on this name, so it stays `ci` whatever
   # the jobs above are called or however they are split.
   ci:
     name: ci
     runs-on: ubuntu-latest
-    needs: [unit, cross-engine, regression]
+    needs: [unit, cross-engine, regression, parquet-net]
     # `always()`, so this reports a verdict when a job fails rather than being skipped: a skipped
     # required check is indistinguishable from one still running, and blocks the PR either way.
     if: always()
