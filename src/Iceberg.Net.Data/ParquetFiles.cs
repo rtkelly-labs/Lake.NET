@@ -34,6 +34,8 @@ public sealed record ParquetWriteOptions
     /// (AES-GCM, encrypted-footer mode). Readers need the same key (<see cref="DataFileReadOptions.DecryptionKey"/>).
     /// </summary>
     public byte[]? EncryptionKey { get; init; }
+    /// <summary>Dictionary-encode columns where it pays (Parquet's default); off writes every page plain.</summary>
+    public bool Dictionary { get; init; } = true;
 
     internal static ReaderProperties ReaderProperties(byte[]? key)
     {
@@ -225,6 +227,7 @@ public static class ParquetFiles
         using var root = new GroupNode("table", Repetition.Required, columns.Select(c => ToNode(c, options.Annotations)).ToArray());
         using var builder = new WriterPropertiesBuilder().Compression(Compression.Zstd);
         if (!options.Statistics) builder.DisableStatistics();
+        if (!options.Dictionary) builder.DisableDictionary();
         FileEncryptionProperties? encryption = null;
         if (options.EncryptionKey is { } key)
         {
