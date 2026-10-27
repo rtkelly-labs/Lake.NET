@@ -39,10 +39,13 @@ public abstract class DuckLakeModelBasedTests(CatalogBackend backend, int defaul
     public sealed record Compact : Op;
     /// <summary>Expire the oldest <paramref name="Count"/> snapshots (never the latest) and delete their files.</summary>
     public sealed record Expire(int Count) : Op;
+    /// <summary>Move inlined rows and deletions to Parquet: changes no row and no row ID.</summary>
+    public sealed record Flush : Op;
 
-    public sealed record Case(string Version, Op[] Ops)
+    /// <summary>A format version, a data inlining row limit (0: off) and the operations.</summary>
+    public sealed record Case(string Version, int Inlining, Op[] Ops)
     {
-        public override string ToString() => $"{Version}: " + string.Join(" ; ", (IEnumerable<Op>)Ops);
+        public override string ToString() => $"{Version}, inlining {Inlining}: " + string.Join(" ; ", (IEnumerable<Op>)Ops);
     }
 
     private static readonly Gen<Row> RowGen =
@@ -60,13 +63,15 @@ public abstract class DuckLakeModelBasedTests(CatalogBackend backend, int defaul
         (2, Ids.SelectMany(i => Gen.Elements("x", "y").Select(n => (Op)new Rename(i, n)))),
         (1, Gen.Elements(true, false).Select(on => (Op)new PartitionByDay(on))),
         (1, Gen.Constant((Op)new Compact())),
-        (1, Gen.Choose(1, 3).Select(n => (Op)new Expire(n))));
+        (1, Gen.Choose(1, 3).Select(n => (Op)new Expire(n))),
+        (1, Gen.Constant((Op)new Flush())));
 
     private static readonly Gen<Case> CaseGen =
         from v in Gen.Elements(DuckLakeCatalog.FormatVersion10, DuckLakeCatalog.FormatVersion11)
+        from inlining in Gen.Elements(0, 3)
         from n in Gen.Choose(1, 8)
         from ops in Gen.ArrayOf(OpGen, n)
-        select new Case(v, ops);
+        select new Case(v, inlining, ops);
 
     /// <summary>For the DuckDB variant: the version the available oracle writes.</summary>
     private Gen<Case> Cases => duckDb ? CaseGen.Select(c => c with { Version = DuckLakeCatalog.FormatVersion10 }) : CaseGen;
@@ -99,7 +104,7 @@ public abstract class DuckLakeModelBasedTests(CatalogBackend backend, int defaul
     private async Task<bool> Run(Case c)
     {
         using var lake = new TestLake(backend, c.Version);
-        var catalog = await lake.CreateAsync();
+        var catalog = await lake.CreateAsync(new DuckLakeOptions { DataInliningRowLimit = c.Inlining });
         await using (var tx = catalog.BeginTransaction())
         {
             await tx.CreateTableAsync("main", "t", [new("id", DuckLakeType.Int64), new("name", DuckLakeType.Varchar), new("day", DuckLakeType.Date)]);
@@ -129,7 +134,7 @@ public abstract class DuckLakeModelBasedTests(CatalogBackend backend, int defaul
             }
             // An UPDATE keeps the row IDs of the rows it rewrites (spec "Row Lineage"), and maintenance keeps every row
             // ID: no ID appears or disappears.
-            if (op is Rename or Compact or Expire && !rows.Select(r => r.RowId).ToHashSet().SetEquals(rowIds.Keys))
+            if (op is Rename or Compact or Expire or Flush && !rows.Select(r => r.RowId).ToHashSet().SetEquals(rowIds.Keys))
                 throw new InvalidOperationException($"step {step} ({op}): the update changed the set of row IDs");
             rowIds = rows.ToDictionary(r => r.RowId, r => Row.From(r.Values));
             history[table.SnapshotId] = Canon(model);
@@ -190,6 +195,10 @@ public abstract class DuckLakeModelBasedTests(CatalogBackend backend, int defaul
             case Compact:
                 await catalog.MergeAdjacentFilesAsync();
                 await catalog.RewriteDataFilesAsync(deleteThreshold: 0.3);
+                changed = false;
+                break;
+            case Flush:
+                await catalog.FlushInlinedDataAsync();
                 changed = false;
                 break;
             case Expire x:

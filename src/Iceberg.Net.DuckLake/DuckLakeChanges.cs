@@ -117,12 +117,20 @@ internal sealed class ChangeSet
     public HashSet<long> DeletedTables { get; } = [];
     public HashSet<long> MergedTables { get; } = [];
     public HashSet<long> RewrittenTables { get; } = [];
+    public HashSet<long> InlinedInsertTables { get; } = [];
+    public HashSet<long> InlinedDeleteTables { get; } = [];
+    public HashSet<long> FlushedTables { get; } = [];
 
     public bool IsEmpty => CreatedSchemas.Count + DroppedSchemas.Count + CreatedTables.Count + DroppedTables.Count
-        + AlteredTables.Count + InsertedTables.Count + DeletedTables.Count + MergedTables.Count + RewrittenTables.Count == 0;
+        + AlteredTables.Count + InsertedTables.Count + DeletedTables.Count + MergedTables.Count + RewrittenTables.Count
+        + InlinedInsertTables.Count + InlinedDeleteTables.Count + FlushedTables.Count == 0;
 
     private IEnumerable<long> Touched =>
-        DroppedTables.Concat(AlteredTables).Concat(InsertedTables).Concat(DeletedTables).Concat(MergedTables).Concat(RewrittenTables);
+        DroppedTables.Concat(AlteredTables).Concat(Inserted).Concat(Deleted).Concat(MergedTables).Concat(RewrittenTables).Concat(FlushedTables);
+
+    /// <summary>Inserts and deletes for conflict purposes, whether to files or inlined.</summary>
+    private IEnumerable<long> Inserted => InsertedTables.Concat(InlinedInsertTables);
+    private IEnumerable<long> Deleted => DeletedTables.Concat(InlinedDeleteTables);
 
     /// <summary>
     /// The first conflict between this transaction and a concurrent snapshot's changes, or null.
@@ -145,9 +153,12 @@ internal sealed class ChangeSet
                     && (CreatedTables.Any(t => t.Schema == schema && t.Name == name) || DroppedSchemas.ContainsValue(schema))
                     => $"concurrent {c}",
                 DuckLakeChange.DroppedTable when id is { } t && Touched.Contains(t) => $"table {t} was dropped",
-                DuckLakeChange.AlteredTable when id is { } t && (AlteredTables.Contains(t) || InsertedTables.Contains(t) || DeletedTables.Contains(t)) => $"table {t} was altered",
-                DuckLakeChange.InsertedIntoTable or DuckLakeChange.InlinedInsert when id is { } t && DeletedTables.Contains(t) => $"table {t} was inserted into while deleting from it",
-                DuckLakeChange.DeletedFromTable or DuckLakeChange.InlinedDelete when id is { } t && InsertedTables.Contains(t) => $"table {t} was deleted from while inserting into it",
+                DuckLakeChange.AlteredTable when id is { } t && (AlteredTables.Contains(t) || Inserted.Contains(t) || Deleted.Contains(t)) => $"table {t} was altered",
+                DuckLakeChange.InsertedIntoTable or DuckLakeChange.InlinedInsert when id is { } t && Deleted.Contains(t) => $"table {t} was inserted into while deleting from it",
+                DuckLakeChange.DeletedFromTable or DuckLakeChange.InlinedDelete when id is { } t && Inserted.Contains(t) => $"table {t} was deleted from while inserting into it",
+                // Flushing conflicts with another flush of the table and with concurrent inlined deletions (spec, Data).
+                DuckLakeChange.InlineFlush or DuckLakeChange.InlinedDelete when id is { } t && FlushedTables.Contains(t) => $"table {t}'s inlined data changed while flushing it",
+                DuckLakeChange.InlineFlush when id is { } t && InlinedDeleteTables.Contains(t) => $"table {t} was flushed while deleting inlined rows from it",
                 DuckLakeChange.CompactedTable or DuckLakeChange.InlineFlush when id is { } t && DeletedTables.Contains(t) => $"table {t} was compacted while deleting from it",
                 DuckLakeChange.CreatedSchema or DuckLakeChange.DroppedSchema or DuckLakeChange.CreatedTable or DuckLakeChange.CreatedView
                     or DuckLakeChange.DroppedTable or DuckLakeChange.AlteredTable or DuckLakeChange.InsertedIntoTable or DuckLakeChange.InlinedInsert
@@ -182,6 +193,9 @@ internal sealed class ChangeSet
         foreach (var t in InsertedTables) yield return DuckLakeChange.Of(DuckLakeChange.InsertedIntoTable, t);
         foreach (var t in DeletedTables) yield return DuckLakeChange.Of(DuckLakeChange.DeletedFromTable, t);
         foreach (var t in AlteredTables) yield return DuckLakeChange.Of(DuckLakeChange.AlteredTable, t);
+        foreach (var t in InlinedInsertTables) yield return DuckLakeChange.Of(DuckLakeChange.InlinedInsert, t);
+        foreach (var t in InlinedDeleteTables) yield return DuckLakeChange.Of(DuckLakeChange.InlinedDelete, t);
+        foreach (var t in FlushedTables) yield return DuckLakeChange.Of(DuckLakeChange.InlineFlush, t);
         foreach (var t in MergedTables) yield return DuckLakeChange.Of(DuckLakeChange.MergeAdjacent, t);
         foreach (var t in RewrittenTables) yield return DuckLakeChange.Of(DuckLakeChange.RewriteDelete, t);
         foreach (var t in DroppedTables) yield return DuckLakeChange.Of(DuckLakeChange.DroppedTable, t);

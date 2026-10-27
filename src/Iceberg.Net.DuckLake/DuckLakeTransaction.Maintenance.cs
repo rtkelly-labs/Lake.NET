@@ -84,7 +84,7 @@ public sealed partial class DuckLakeTransaction
                 await foreach (var (_, rowId, snapshot, values) in ReadFileAsync(loaded, f, deleted: null, ct))
                     rows.Add((values, rowId, snapshot));
             var directory = group[0].Path is { } p && p.LastIndexOf('/') is var slash and >= 0 ? p[..(slash + 1)] : "";
-            var file = await WriteCompactedAsync(t, loaded, directory, rows, keepSnapshots: true, partitionValues.GetValueOrDefault(group[0].DataFileId, []), ct);
+            var file = await WriteCompactedAsync(t, loaded.Columns, directory, rows, keepSnapshots: true, partitionValues.GetValueOrDefault(group[0].DataFileId, []), ct);
             _ops.Add(new MergeOp(t, group.Select(f => f.DataFileId).ToList(), file, group.Min(f => f.BeginSnapshot),
                 group.Max(f => f.PartialMax ?? f.BeginSnapshot), group.Any(f => f.RowIdStart is null) ? null : group.Min(f => f.RowIdStart), group[0].PartitionId));
         }
@@ -154,7 +154,7 @@ public sealed partial class DuckLakeTransaction
             if (rows.Count == 0) continue; // every row was deleted: the inputs just end
             var first = fileRows[group.First().Task.DataFileId];
             var directory = first.Path is { } p && p.LastIndexOf('/') is var slash and >= 0 ? p[..(slash + 1)] : "";
-            outputs.Add((await WriteCompactedAsync(t, loaded, directory, rows, keepSnapshots: false, partitionValues.GetValueOrDefault(first.DataFileId, []), ct),
+            outputs.Add((await WriteCompactedAsync(t, loaded.Columns, directory, rows, keepSnapshots: false, partitionValues.GetValueOrDefault(first.DataFileId, []), ct),
                 group.Key.PartitionId));
         }
         _ops.Add(new RewriteOp(t, candidates.Select(c => (c.Task.DataFileId, deleteRows.TryGetValue(c.Task.DataFileId, out var d) ? d.DeleteFileId : (long?)null)).ToList(), outputs));
@@ -189,10 +189,10 @@ public sealed partial class DuckLakeTransaction
     }
 
     /// <summary>Write compacted rows with their row IDs (and, for a partial file, the snapshot of each row) in the table's current layout.</summary>
-    private async Task<WrittenFile> WriteCompactedAsync(PendingTable t, DuckLakeTable table, string directory, List<(object?[] Values, long RowId, long Snapshot)> rows,
+    private async Task<WrittenFile> WriteCompactedAsync(PendingTable t, IReadOnlyList<DuckLakeColumn> columns, string directory, List<(object?[] Values, long RowId, long Snapshot)> rows,
         bool keepSnapshots, IReadOnlyList<string?> partitionValues, CancellationToken ct)
     {
-        var stored = table.Columns.Select((c, i) => (c, i)).Where(x => x.c.Type is not DuckLakePrimitive { Name: "null" }).ToList();
+        var stored = columns.Select((c, i) => (c, i)).Where(x => x.c.Type is not DuckLakePrimitive { Name: "null" }).ToList();
         var fields = DuckLakeTypes.ToIceberg(stored.Select(x => x.c).ToList()).Columns
             .Append(NestedField.Optional(DuckLakeCatalog.RowIdFieldId, "_ducklake_internal_row_id", PrimitiveType.Long));
         if (keepSnapshots) fields = fields.Append(NestedField.Optional(DuckLakeCatalog.SnapshotIdFieldId, "_ducklake_internal_snapshot_id", PrimitiveType.Long));
@@ -208,7 +208,7 @@ public sealed partial class DuckLakeTransaction
         var location = t.Location + relative;
         _written.Add(location);
         var written = await ParquetFiles.WriteFileAsync(_catalog.IO, location, new Schema(0, fields), 0, [], fileRows, _catalog.Options.Parquet with { Metrics = false }, ct);
-        var stats = new StatsCollector(table.Columns);
+        var stats = new StatsCollector(columns);
         foreach (var r in rows) stats.Add(r.Values);
         return new WrittenFile(relative, rows.Count, written.File.FileSizeInBytes, written.FooterSize, written.RowGroups, stats.Result(written.File.ColumnSizes), partitionValues);
     }

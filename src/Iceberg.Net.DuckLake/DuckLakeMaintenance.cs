@@ -37,8 +37,16 @@ public sealed partial class DuckLakeCatalog
         int? maxCompactedFiles = null, CancellationToken ct = default) =>
         await CompactAsync(schema, table, (tx, s, t) => tx.RewriteDataFilesAsync(s, t, deleteThreshold, maxCompactedFiles, ct), ct);
 
-    private async Task<IReadOnlyList<DuckLakeCompaction>> CompactAsync(string? schema, string? table,
-        Func<DuckLakeTransaction, string, string, Task<DuckLakeCompaction?>> stage, CancellationToken ct)
+    /// <summary>
+    /// Move inlined rows and inlined deletions of one table, or of every table, to Parquet (DuckDB's
+    /// <c>ducklake_flush_inlined_data</c>; one snapshot, <c>inline_flush:{table}</c>). Every snapshot reads exactly what it
+    /// did before. Returns how many inlined rows each table had.
+    /// </summary>
+    public async Task<IReadOnlyList<DuckLakeFlush>> FlushInlinedDataAsync(string? schema = null, string? table = null, CancellationToken ct = default) =>
+        await CompactAsync(schema, table, (tx, s, t) => tx.FlushInlinedDataAsync(s, t, ct), ct);
+
+    private async Task<IReadOnlyList<T>> CompactAsync<T>(string? schema, string? table, Func<DuckLakeTransaction, string, string, Task<T?>> stage, CancellationToken ct)
+        where T : class
     {
         if (schema is not null && table is null) throw new ArgumentException("A schema needs a table name", nameof(table));
         List<(string Schema, string Table)> targets;
@@ -51,7 +59,7 @@ public sealed partial class DuckLakeCatalog
             targets = (await TablesAsync(db, s, ct)).Where(t => schemas.ContainsKey(t.SchemaId)).Select(t => (schemas[t.SchemaId].Name, t.Name)).ToList();
         }
         await using var tx = BeginTransaction();
-        var done = new List<DuckLakeCompaction>();
+        var done = new List<T>();
         foreach (var (s, t) in targets)
             if (await stage(tx, s, t) is { } result) done.Add(result);
         if (done.Count > 0) await tx.CommitAsync(ct);

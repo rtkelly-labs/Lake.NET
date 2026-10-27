@@ -88,6 +88,8 @@ def jsonable(value: Any) -> Any:
         return str(value)
     if isinstance(value, float) and math.isnan(value):
         return "NaN"
+    if isinstance(value, float) and math.isinf(value):
+        return "Infinity" if value > 0 else "-Infinity"
     return value
 
 
