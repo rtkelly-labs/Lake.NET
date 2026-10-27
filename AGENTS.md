@@ -24,13 +24,13 @@ Self-contained C# port of Apache Iceberg. Keep it that way: no references to cod
 | Deletes, deletion vectors, Puffin, statistics | [docs/puffin.md](docs/puffin.md) |
 | Adopting files from other Parquet writers (Parquet.SourceGenerator) | [docs/parquet-sourcegenerator.md](docs/parquet-sourcegenerator.md) |
 | DuckLake tables (`Iceberg.Net.DuckLake`), and where DuckDB and the DuckLake spec differ | [docs/ducklake.md](docs/ducklake.md) — behaviour DuckDB can observe needs a case in `CrossEngineTests` (oracle: DuckDB's `ducklake` extension); tag tests `[Spec("ducklake: …")]` |
-| The two Parquet backends (ParquetSharp, and Parquet.Net through the `external/parquet-dotnet` submodule), and what upstream Parquet.Net lacks | [docs/parquet-net-gaps.md](docs/parquet-net-gaps.md) — upstream Parquet.Net refuses LLM-written issues and PRs; changes go to the fork (`rtkelly-labs/parquet-dotnet`) or are written by hand |
+| The two Parquet backends (ParquetSharp, and Parquet.Net through the `external/parquet-dotnet` submodule), and what upstream Parquet.Net lacks | [docs/parquet-net-gaps.md](docs/parquet-net-gaps.md) — upstream Parquet.Net refuses LLM-written issues and PRs; changes go to the fork (`rtkelly-labs/parquet-dotnet`, published as Lake.Parquet) or are written by hand |
 
 ## Commands
 
 | What | Command |
 |---|---|
-| Build | `git submodule update --init` once (the Parquet.Net fork), then `dotnet build` (the solution is `Iceberg.Net.slnx`; add a project with `dotnet sln Iceberg.Net.slnx add <csproj>`) |
+| Build | `git submodule update --init` once (the Parquet.Net fork, Lake.Parquet), then `dotnet build` (the solution is `Iceberg.Net.slnx`; add a project with `dotnet sln Iceberg.Net.slnx add <csproj>`) |
 | Any suite on Parquet.Net instead of ParquetSharp | `ICEBERG_PARQUET_BACKEND=parquet-net dotnet test <project>` (CI's `parquet-net` job runs the unit and DuckLake suites this way) |
 | Compare the two Parquet backends (wall clock) | `dotnet run -c Release --project tools/ParquetBackendBench [rows]` |
 | Everything (L0, typed, EF, BDD, REST server, ecosystem, regression) | `./run-tests.sh emulation` |

@@ -2,7 +2,7 @@
   <PropertyGroup>
     <RootNamespace>Iceberg.Net.Data.ParquetNet</RootNamespace>
     <Description>Parquet.Net (managed, no native binaries) as the Parquet library of Iceberg.Net.Data.</Description>
-    <!-- Not packed until the Parquet.Net fork it builds on (external/parquet-dotnet) is published. -->
+    <!-- Not packed until Lake.Parquet, the Parquet.Net fork it builds on (external/parquet-dotnet), is on NuGet. -->
     <IsPackable>false</IsPackable>
     <!-- span-keyed dictionary lookups (Dictionary.GetAlternateLookup) need C# 13 -->
     <LangVersion>13.0</LangVersion>

@@ -4,8 +4,10 @@ Iceberg.NET reads and writes Parquet through one of two libraries:
 
 - **ParquetSharp** (a wrapper over Apache Arrow's C++ `parquet-cpp`), the default;
 - **Parquet.Net**, fully managed (no per-platform native binaries, so it runs wherever .NET does: WASM, mobile, trimmed
-  or AOT apps), from the fork [rtkelly-labs/parquet-dotnet](https://github.com/rtkelly-labs/parquet-dotnet) carried
-  as the `external/parquet-dotnet` git submodule ([Backends](#backends)).
+  or AOT apps), from the fork [rtkelly-labs/parquet-dotnet](https://github.com/rtkelly-labs/parquet-dotnet), carried as
+  the `external/parquet-dotnet` git submodule ([Backends](#backends)). The fork is published as **Lake.Parquet**
+  (built by Parquet.SourceGenerator from a pinned fork commit; namespace `Parquet` as upstream); the submodule
+  builds the same code under upstream's name.
 
 Upstream Parquet.Net could not do what Iceberg.NET and DuckLake need. This page lists those gaps, what the fork does
 about each, and the upstream bugs found on the way: each is a candidate to upstream, by hand.
@@ -108,6 +110,11 @@ Already covered by Parquet.Net, so not a blocker:
   use these types, and DuckLake's `variant` and `geometry` are unimplemented partly for this reason.
 
 ## Fork status
+
+The fork is published as **Lake.Parquet**, which replaces Parquet.Net (same API and namespace). The fork carries no
+Lake code: Parquet.SourceGenerator's `lake/` folder applies the package identity at build time. The fork follows
+upstream by merging each upstream release (`scripts/lake/sync-upstream.sh`, weekly in its CI) while its changes are
+proposed upstream one at a time; its `docs/lake/maintaining.md` describes both directions.
 
 Branch `ccr-87fadcf9-bxi9wr` of [rtkelly-labs/parquet-dotnet](https://github.com/rtkelly-labs/parquet-dotnet), each
 change with its own tests (fork suite: 772 passed, 3 skipped on net8.0 and net10.0, with `pyarrow` and `pandas` installed for its Arrow interop test;
