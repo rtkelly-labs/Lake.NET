@@ -489,7 +489,8 @@ public abstract class CrossEngineTests : IAsyncLifetime
         var v = await catalog.LoadViewAsync("main", "v2");
         Assert.Equal(["a", "b"], v.ColumnAliases);
         Assert.Equal("a view", v.Comment);
-        Assert.Contains("{DUCKLAKE_CATALOG}", v.Sql);
+        // DuckDB 1.5.5 (1.0) qualifies names with the placeholder; DuckDB 2.0 (1.1) stores them unqualified.
+        Assert.Contains(Oracle.Version == DuckLakeCatalog.FormatVersion10 ? "{DUCKLAKE_CATALOG}" : "FROM t", v.Sql);
         var add2 = await catalog.LoadMacroAsync("main", "add2");
         Assert.Equal(["a", "b"], add2.Implementations[0].Parameters.Select(p => p.Name));
         Assert.Equal("1", add2.Implementations[0].Parameters[1].Default);
