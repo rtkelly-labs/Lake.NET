@@ -251,7 +251,8 @@ public sealed class DuckLakeSteps(DuckLakeWorld world)
     public async Task DuckDbAnswers(string sql, string expected)
     {
         world.Oracle.Require();
-        Assert.Equal([$"[{expected}]"], await world.Oracle.RowsAsync(world.L, sql));
+        // The expected value is JSON (strings quoted), compared in the same canonical form as DuckDB's rows.
+        Assert.Equal([LakeJson.Canonical(System.Text.Json.Nodes.JsonNode.Parse($"[{expected}]"))!.ToJsonString()], await world.Oracle.RowsAsync(world.L, sql));
     }
 
     // ---- catalog objects -------------------------------------------------------------------------------------------

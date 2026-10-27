@@ -153,13 +153,12 @@ public sealed class EncodingTests
 
     [Theory]
     [Spec("ducklake: Primitive Types")]
-    [InlineData("uint8")]
     [InlineData("int128")]
-    [InlineData("interval")]
-    [InlineData("timetz")]
-    [InlineData("timestamp_s")]
+    [InlineData("uint128")]
+    [InlineData("time_ns")]
     [InlineData("variant")]
     [InlineData("geometry")]
+    [InlineData("hugeint")]
     public void Unsupported_types_fail_loudly(string type) =>
         Assert.Throws<NotSupportedException>(() => new DuckLakePrimitive(type));
 

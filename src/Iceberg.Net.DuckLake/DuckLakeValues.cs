@@ -80,6 +80,30 @@ public static class DuckLakeValues
         "int16" => (int)checked((short)Convert.ToInt64(v, CultureInfo.InvariantCulture)),
         "int32" => checked((int)Convert.ToInt64(v, CultureInfo.InvariantCulture)),
         "int64" => Convert.ToInt64(v, CultureInfo.InvariantCulture),
+        "uint8" => (int)Convert.ToByte(v, CultureInfo.InvariantCulture),
+        "uint16" => (int)Convert.ToUInt16(v, CultureInfo.InvariantCulture),
+        "uint32" => (long)Convert.ToUInt32(v, CultureInfo.InvariantCulture),
+        "uint64" => v switch
+        {
+            IcebergDecimal { Scale: 0 } d when d.Unscaled >= 0 && d.Unscaled <= ulong.MaxValue => d,
+            IcebergDecimal d => throw new OverflowException($"{d} is not a uint64"),
+            _ => new IcebergDecimal(Convert.ToUInt64(v, CultureInfo.InvariantCulture), 0),
+        },
+        "timestamp_s" or "timestamp_ms" => Truncate(NormalizePrimitive(DuckLakeType.Timestamp, v) is long micros ? micros : 0, p.Name == "timestamp_s" ? 1_000_000 : 1000),
+        "timetz" => v switch
+        {
+            DuckLakeTimeTz t => t,
+            DateTimeOffset dto => new DuckLakeTimeTz(dto.TimeOfDay.Ticks / 10, checked((int)(dto.Offset.Ticks / TimeSpan.TicksPerSecond))),
+            string text => DuckLakeTimeTz.Parse(text),
+            _ => throw new InvalidCastException(),
+        },
+        "interval" => v switch
+        {
+            DuckLakeInterval i => i,
+            TimeSpan ts => DuckLakeInterval.FromTimeSpan(ts),
+            string text => DuckLakeInterval.Parse(text),
+            _ => throw new InvalidCastException(),
+        },
         "float32" => Convert.ToSingle(v, CultureInfo.InvariantCulture),
         "float64" => Convert.ToDouble(v, CultureInfo.InvariantCulture),
         "date" => v switch
@@ -122,12 +146,61 @@ public static class DuckLakeValues
         _ => throw new NotSupportedException(p.Name),
     };
 
+    /// <summary>Microseconds truncated (towards negative infinity) to a multiple of <paramref name="unit"/>, as DuckDB's casts do.</summary>
+    private static long Truncate(long micros, long unit) => IcebergTime.FloorDiv(micros, unit) * unit;
+
+    /// <summary>A DuckLake value as its Parquet column holds it (<c>timetz</c> as UTC micros, <c>interval</c> as INTERVAL bytes).</summary>
+    internal static object? ToFile(DuckLakeType type, object? value) => value is null ? null : type switch
+    {
+        DuckLakePrimitive { Name: "timetz" } => ((DuckLakeTimeTz)value).UtcMicros,
+        DuckLakePrimitive { Name: "interval" } => ((DuckLakeInterval)value).ToParquet(),
+        DuckLakePrimitive => value,
+        DuckLakeList l => ((IEnumerable)value).Cast<object?>().Select(x => ToFile(l.Element, x)).ToList(),
+        DuckLakeMap m => ((IDictionary)value).Keys.Cast<object>().ToDictionary(k => ToFile(m.Key, k)!, k => ToFile(m.Value, ((IDictionary)value)[k])),
+        DuckLakeStruct s => s.Fields.Select((f, i) => ToFile(f.Type, ((IList)value)[i])).ToArray(),
+        _ => value,
+    };
+
+    /// <summary>
+    /// Converts the leading <paramref name="columns"/> of a row to (or from) their Parquet form, copying the row; null
+    /// when no column has a separate file form, so the common case costs nothing.
+    /// </summary>
+    internal static Func<object?[], object?[]>? FileRowConverter(IReadOnlyList<DuckLakeColumn> columns, bool toFile)
+    {
+        var converted = columns.Select((c, i) => (c.Type, i)).Where(x => DuckLakeTypes.HasFileForm(x.Type)).ToArray();
+        if (converted.Length == 0) return null;
+        return row =>
+        {
+            var copy = (object?[])row.Clone();
+            foreach (var (type, i) in converted) copy[i] = toFile ? ToFile(type, row[i]) : FromFile(type, row[i]);
+            return copy;
+        };
+    }
+
+    /// <summary>The inverse of <see cref="ToFile"/> (a <c>timetz</c> read from Parquet is at offset 0).</summary>
+    internal static object? FromFile(DuckLakeType type, object? value) => value is null ? null : type switch
+    {
+        DuckLakePrimitive { Name: "timetz" } => DuckLakeTimeTz.FromUtcMicros((long)value),
+        DuckLakePrimitive { Name: "interval" } => DuckLakeInterval.FromParquet((byte[])value),
+        DuckLakePrimitive => value,
+        DuckLakeList l => ((IEnumerable)value).Cast<object?>().Select(x => FromFile(l.Element, x)).ToList(),
+        DuckLakeMap m => ((IDictionary)value).Keys.Cast<object>().ToDictionary(k => FromFile(m.Key, k)!, k => FromFile(m.Value, ((IDictionary)value)[k])),
+        DuckLakeStruct s => s.Fields.Select((f, i) => FromFile(f.Type, ((IList)value)[i])).ToArray(),
+        _ => value,
+    };
+
     /// <summary>A value as statistics text (spec "Type Encoding for Statistics"); null for types without min/max.</summary>
     public static string? Format(DuckLakePrimitive type, object value) => type.Name switch
     {
         "boolean" => (bool)value ? "1" : "0",
         "int8" or "int16" or "int32" => ((int)value).ToString(CultureInfo.InvariantCulture),
-        "int64" => ((long)value).ToString(CultureInfo.InvariantCulture),
+        "int64" or "uint32" => ((long)value).ToString(CultureInfo.InvariantCulture),
+        "uint8" or "uint16" => ((int)value).ToString(CultureInfo.InvariantCulture),
+        "uint64" => ((IcebergDecimal)value).Unscaled.ToString(CultureInfo.InvariantCulture),
+        "timestamp_s" => FormatTimestamp((long)value, 6),
+        "timestamp_ms" => FormatTimestamp((long)value, 6) is { } ms && ms.Length > 19 ? ms[..^3] : FormatTimestamp((long)value, 6),
+        // timetz and interval have no min/max (DuckDB writes none: neither orders like its Parquet value).
+        "timetz" or "interval" => null,
         "float32" => FormatFloat((float)value),
         "float64" => FormatDouble((double)value),
         "date" => FormatDate((int)value),
@@ -155,6 +228,8 @@ public static class DuckLakeValues
         ("float32", float f) => float.IsNaN(f) ? "nan" : FormatFloat(f)!,
         ("float64", double d) => double.IsNaN(d) ? "nan" : FormatDouble(d)!,
         ("blob", byte[] bytes) => BlobText(bytes),
+        ("timetz", DuckLakeTimeTz t) => t.ToString(),
+        ("interval", DuckLakeInterval i) => i.ToString(),
         _ => Format(type, value) ?? throw new NotSupportedException($"Cannot inline a {type} value"),
     };
 
@@ -236,6 +311,13 @@ public static class DuckLakeValues
             case "int16": return (int)short.Parse(text, NumberStyles.Integer, inv);
             case "int32": return int.Parse(text, NumberStyles.Integer, inv);
             case "int64": return long.Parse(text, NumberStyles.Integer, inv);
+            case "uint8": return (int)byte.Parse(text, NumberStyles.Integer, inv);
+            case "uint16": return (int)ushort.Parse(text, NumberStyles.Integer, inv);
+            case "uint32": return (long)uint.Parse(text, NumberStyles.Integer, inv);
+            case "uint64": return new IcebergDecimal(ulong.Parse(text, NumberStyles.Integer, inv), 0);
+            case "timestamp_s" or "timestamp_ms": return ParseTimestamp(text, 6, allowOffset: false);
+            case "timetz": return DuckLakeTimeTz.Parse(text);
+            case "interval": return DuckLakeInterval.Parse(text);
             case "float32": return (float?)ParseDouble(text);
             case "float64": return ParseDouble(text);
             case "date": return IcebergTime.DaysFromDate(DateOnly.ParseExact(text, "yyyy-MM-dd", inv));
@@ -420,6 +502,7 @@ internal sealed class StatsCollector
                 if (value is null) { acc.Nulls++; return; }
                 acc.Values++;
                 if (ValueComparer.IsNaN(value)) { acc.Nan = true; return; }
+                if (value is DuckLakeTimeTz or DuckLakeInterval) return; // no min/max for these types
                 if (acc.Min is null || DuckLakeValues.Compare(value, acc.Min) < 0) acc.Min = value;
                 if (acc.Max is null || DuckLakeValues.Compare(value, acc.Max) > 0) acc.Max = value;
                 return;

@@ -14,11 +14,13 @@ public static class DuckLakePartitioning
 
     public static void Validate(DuckLakePrimitive type, string transform)
     {
-        var temporal = type.Name is "date" or "timestamp" or "timestamptz" or "timestamp_ns";
+        var temporal = type.Name is "date" or "timestamp" or "timestamptz" or "timestamp_ns" or "timestamp_s" or "timestamp_ms";
         if (BucketCount(transform) is { } n)
         {
             if (n <= 0) throw new ArgumentException($"{transform}: the bucket count must be positive");
-            if (DuckLakeTypes.ToIceberg(type).TypeId is TypeId.Boolean or TypeId.Float or TypeId.Double or TypeId.Unknown)
+            // Unsigned, second/millisecond timestamp, timetz and interval buckets: no hash agreed with other engines.
+            if (DuckLakeTypes.ToIceberg(type).TypeId is TypeId.Boolean or TypeId.Float or TypeId.Double or TypeId.Unknown
+                || type.Name is "uint8" or "uint16" or "uint32" or "uint64" or "timestamp_s" or "timestamp_ms" or "timetz" or "interval")
                 throw new ArgumentException($"Transform {transform} does not apply to {type}");
             return;
         }

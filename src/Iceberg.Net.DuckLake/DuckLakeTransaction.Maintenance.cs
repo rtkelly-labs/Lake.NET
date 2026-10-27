@@ -174,6 +174,7 @@ public sealed partial class DuckLakeTransaction
         var location = DuckLakeCatalog.Resolve(table.Location, file.Path ?? throw new InvalidDataException($"Data file {file.DataFileId} has no path"), file.PathIsRelative ?? true);
         var width = table.Columns.Count;
         var options = new DataFileReadOptions { FileSize = file.FileSizeBytes };
+        var fromFile = DuckLakeValues.FileRowConverter(table.Columns, toFile: false);
         await foreach (var batch in ParquetFiles.ReadBatchesAsync(_catalog.IO, location, DuckLakeCatalog.FileProjection(table), null, options, ct))
         {
             for (var i = 0; i < batch.Rows.Count; i++)
@@ -183,7 +184,8 @@ public sealed partial class DuckLakeTransaction
                 var full = batch.Rows[i];
                 var rowId = full[width] as long? ?? file.RowIdStart + pos
                     ?? throw new InvalidDataException($"Data file {file.DataFileId} has no row_id_start and no stored row IDs");
-                yield return (pos, rowId, full[width + 1] as long? ?? file.BeginSnapshot, full[..width]);
+                var values = full[..width];
+                yield return (pos, rowId, full[width + 1] as long? ?? file.BeginSnapshot, fromFile is null ? values : fromFile(values));
             }
         }
     }
@@ -196,10 +198,13 @@ public sealed partial class DuckLakeTransaction
         var fields = DuckLakeTypes.ToIceberg(stored.Select(x => x.c).ToList()).Columns
             .Append(NestedField.Optional(DuckLakeCatalog.RowIdFieldId, "_ducklake_internal_row_id", PrimitiveType.Long));
         if (keepSnapshots) fields = fields.Append(NestedField.Optional(DuckLakeCatalog.SnapshotIdFieldId, "_ducklake_internal_snapshot_id", PrimitiveType.Long));
+        var storedColumns = stored.Select(x => x.c).ToList();
+        var converted = storedColumns.Select((c, k) => DuckLakeTypes.HasFileForm(c.Type)).ToArray();
         var fileRows = rows.Select(r =>
         {
             var values = new object?[stored.Count + (keepSnapshots ? 2 : 1)];
-            for (var k = 0; k < stored.Count; k++) values[k] = r.Values[stored[k].i];
+            for (var k = 0; k < stored.Count; k++)
+                values[k] = converted[k] ? DuckLakeValues.ToFile(stored[k].c.Type, r.Values[stored[k].i]) : r.Values[stored[k].i];
             values[stored.Count] = r.RowId;
             if (keepSnapshots) values[stored.Count + 1] = r.Snapshot;
             return values;
@@ -207,7 +212,8 @@ public sealed partial class DuckLakeTransaction
         var relative = $"{directory}ducklake-{Guid.CreateVersion7()}.parquet";
         var location = t.Location + relative;
         _written.Add(location);
-        var written = await ParquetFiles.WriteFileAsync(_catalog.IO, location, new Schema(0, fields), 0, [], fileRows, _catalog.Options.Parquet with { Metrics = false }, ct);
+        var written = await ParquetFiles.WriteFileAsync(_catalog.IO, location, new Schema(0, fields), 0, [], fileRows,
+            _catalog.Options.Parquet with { Metrics = false, Annotations = DuckLakeTypes.Annotations(storedColumns) }, ct);
         var stats = new StatsCollector(columns);
         foreach (var r in rows) stats.Add(r.Values);
         return new WrittenFile(relative, rows.Count, written.File.FileSizeInBytes, written.FooterSize, written.RowGroups, stats.Result(written.File.ColumnSizes), partitionValues);

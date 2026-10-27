@@ -115,7 +115,7 @@ internal static class DuckLakeInlinedData
         var positionById = table.Columns.Select((col, i) => (col.Id, i)).ToDictionary(x => x.Id, x => x.i);
         var mapped = then.Where(col => positionById.ContainsKey(col.Id)).ToList();
         var (rowId, begin, end) = SystemColumns(db.Is11);
-        var select = string.Join(", ", mapped.Select(col => Db.Quote(col.Name)).Prepend(rowId));
+        var select = string.Join(", ", mapped.Select(col => SelectSql(db.Dialect, col)).Prepend(rowId));
         var sql = $"SELECT {select} FROM {Db.Quote(inlinedTable)} WHERE @s >= {begin} AND ({end} IS NULL OR @s < {end}) ORDER BY {rowId}";
         await db.Database.OpenConnectionAsync(ct);
         var (c, t) = db.Raw();
@@ -144,7 +144,7 @@ internal static class DuckLakeInlinedData
             ?? throw new InvalidDataException($"{inlinedTable}: no snapshot has schema version {schemaVersion}");
         var columns = await DuckLakeCatalog.ColumnsAsync(db, tableId, at, ct);
         var (rowId, begin, end) = SystemColumns(db.Is11);
-        var sql = $"SELECT {string.Join(", ", columns.Select(c => Db.Quote(c.Name)).Prepend(end).Prepend(begin).Prepend(rowId))} FROM {Db.Quote(inlinedTable)}";
+        var sql = $"SELECT {string.Join(", ", columns.Select(c => SelectSql(db.Dialect, c)).Prepend(end).Prepend(begin).Prepend(rowId))} FROM {Db.Quote(inlinedTable)}";
         await db.Database.OpenConnectionAsync(ct);
         var (c, t) = db.Raw();
         var rows = await Db.QueryAsync(c, t, sql, r =>
@@ -158,6 +158,13 @@ internal static class DuckLakeInlinedData
 
     // ---- writing (spec "Type Encoding for Data Inlining"; column types as DuckDB 1.5.5 creates them) ----------------
 
+    /// <summary>PostgreSQL's native TIMETZ and INTERVAL columns, which are read and written as text (DuckDB's text parses as both).</summary>
+    private static string? NativeTextType(DuckLakeDialect dialect, DuckLakeType type) =>
+        dialect == DuckLakeDialect.PostgreSql && type is DuckLakePrimitive { Name: "timetz" or "interval" } p ? SqlType(dialect, p) : null;
+
+    private static string SelectSql(DuckLakeDialect dialect, DuckLakeColumn c) =>
+        NativeTextType(dialect, c.Type) is null ? Db.Quote(c.Name) : $"CAST({Db.Quote(c.Name)} AS TEXT)";
+
     /// <summary>Whether rows of these columns can be inlined in the catalog database (otherwise they go to a file).</summary>
     internal static bool CanInline(DuckLakeDialect dialect, IReadOnlyList<DuckLakeColumn> columns) =>
         columns.All(c => c.Type is not DuckLakePrimitive p || p.Name is not ("variant" or "geometry")
@@ -170,7 +177,7 @@ internal static class DuckLakeInlinedData
         if (dialect == DuckLakeDialect.Sqlite)
             return p.Name switch
             {
-                "boolean" or "int8" or "int16" or "int32" or "int64" or "null" => "BIGINT",
+                "boolean" or "int8" or "int16" or "int32" or "int64" or "uint8" or "uint16" or "uint32" or "null" => "BIGINT",
                 "blob" => "BLOB",
                 _ => "VARCHAR",
             };
@@ -178,8 +185,11 @@ internal static class DuckLakeInlinedData
         {
             "boolean" => "BOOLEAN",
             "int8" or "int16" => "SMALLINT",
-            "int32" or "null" => "INTEGER",
-            "int64" => "BIGINT",
+            "int32" or "uint8" or "uint16" or "null" => "INTEGER",
+            "int64" or "uint32" => "BIGINT",
+            "timetz" => "TIME WITH TIME ZONE",
+            "uint64" => "VARCHAR", // DuckDB's choice, though NUMERIC(20,0) would hold it
+            "interval" => "INTERVAL",
             "float32" => "REAL",
             "float64" => "DOUBLE PRECISION",
             "uuid" => "UUID",
@@ -199,8 +209,8 @@ internal static class DuckLakeInlinedData
             return (p.Name, value) switch
             {
                 ("boolean", bool b) => b ? 1L : 0L,
-                ("int8" or "int16" or "int32", int i) => (long)i,
-                ("int64", long l) => l,
+                ("int8" or "int16" or "int32" or "uint8" or "uint16", int i) => (long)i,
+                ("int64" or "uint32", long l) => l,
                 ("blob", byte[] bytes) => bytes,
                 ("varchar" or "json", string text) => text,
                 _ => DuckLakeValues.InlineText(p, value),
@@ -209,14 +219,15 @@ internal static class DuckLakeInlinedData
         {
             ("boolean", bool b) => b,
             ("int8" or "int16", int i) => (short)i,
-            ("int32", int i) => i,
-            ("int64", long l) => l,
+            ("int32" or "uint8" or "uint16", int i) => i,
+            ("int64" or "uint32", long l) => l,
             ("float32", float f) => f,
             ("float64", double d) => d,
             ("uuid", Guid g) => g,
             ("time", long micros) => TimeSpan.FromTicks(micros * 10),
             ("varchar" or "json", string text) => System.Text.Encoding.UTF8.GetBytes(text),
             ("blob", byte[] bytes) => bytes,
+            ("uint64", IcebergDecimal d) => d.Unscaled.ToString(CultureInfo.InvariantCulture),
             (_, IcebergDecimal d) => d.ToDecimal(),
             _ => DuckLakeValues.InlineText(p, value),
         };
@@ -237,6 +248,7 @@ internal static class DuckLakeInlinedData
         var (rowId, begin, end) = SystemColumns(db.Is11);
         var width = columns.Count + 3;
         var head = $"INSERT INTO {Db.Quote(name)} ({string.Join(", ", columns.Select(c => Db.Quote(c.Name)).Prepend(end).Prepend(begin).Prepend(rowId))}) VALUES ";
+        var casts = columns.Select(c => NativeTextType(db.Dialect, c.Type)).ToArray();
         foreach (var chunk in rows.Chunk(Math.Max(1, Math.Min(1000, 30_000 / width))))
         {
             var args = new object?[chunk.Length * width];
@@ -249,7 +261,12 @@ internal static class DuckLakeInlinedData
                 args[r * width + 2] = e;
                 for (var c = 0; c < columns.Count; c++) args[r * width + 3 + c] = Encode(db.Dialect, columns[c].Type, values[c]);
                 sql.Append(r == 0 ? "(" : ", (");
-                for (var c = 0; c < width; c++) sql.Append(c == 0 ? "@p" : ", @p").Append((r * width + c).ToString(CultureInfo.InvariantCulture));
+                for (var c = 0; c < width; c++)
+                {
+                    var p = "@p" + (r * width + c).ToString(CultureInfo.InvariantCulture);
+                    if (c > 0) sql.Append(", ");
+                    sql.Append(c >= 3 && casts[c - 3] is { } cast ? $"CAST({p} AS {cast})" : p);
+                }
                 sql.Append(')');
             }
             await db.Database.OpenConnectionAsync(ct);
