@@ -28,6 +28,8 @@ Everything is in `Iceberg.Net.Data`:
 ## Gaps
 
 Priority: **P0** blocks switching, **P1** is needed for full feature parity, **P2** is a convenience or an optimisation.
+The table describes upstream `658e1ca`; the [fork status](#fork-status) section says which of these the fork now
+covers.
 
 | # | Need | ParquetSharp API used | Parquet.Net today | Priority |
 |---|---|---|---|---|
@@ -56,6 +58,36 @@ Already covered by Parquet.Net, so not a blocker:
 - **Ahead of ParquetSharp:** Parquet.Net's thrift model already has the `VARIANT`, `GEOMETRY` and `GEOGRAPHY`
   logical types (`Meta/Parquet.cs`); ParquetSharp 25.0.1.1 exposes no factory for them. Iceberg v3 and DuckLake both
   use these types, and DuckLake's `variant` and `geometry` are unimplemented partly for this reason.
+
+## Fork status
+
+Branch `ccr-87fadcf9-bxi9wr` of [rtkelly-labs/parquet-dotnet](https://github.com/rtkelly-labs/parquet-dotnet), each
+change with its own tests (fork suite: 722 passed; the one failure needs `pyarrow`, which the environment lacks).
+
+| Gap | Fork commit | What changed |
+|---|---|---|
+| 1, 2 field IDs | `927bf99` | `FieldId` moved from `DataField` to `Field`; decoded from `SchemaElement.field_id` for every field, and written on list, map and struct groups |
+| 3 physical values | `7ecfa00` | `DataField.PhysicalClrType` (`bool`, `int`, `long`, `float`, `double`, `ReadOnlyMemory<byte>`): `ReadRawAsync<T>`/`WriteAsync<T>` accept it for any column, with the logical annotation kept, so `TIMESTAMP(NANOS)` reads as `long` nanoseconds |
+| 5 `fixed[n]` | `54efd9a` | `DataField.FixedLength` writes `byte[]`/`ReadOnlyMemory<byte>` as `FIXED_LEN_BYTE_ARRAY(n)` (and is set on read) |
+| 8 no statistics | `54efd9a` | `ParquetOptions.WriteStatistics = false` leaves statistics out of column chunks and page headers |
+| 7 legacy lists | `ff03dcc` | Backward-compatibility rules 2 and 3 (a repeated group with several fields, or named `array` or `<list>_tuple`, is a struct element); rules 1 and the bare repeated field already worked. Tested on files written by parquet-cpp. Legacy maps (`MAP_KEY_VALUE`, any group name) already worked |
+
+Bugs found on the way, also fixed in the fork. These are worth reporting upstream on their own, by hand:
+
+- **Timestamp statistics in the wrong unit** (`7ecfa00`). Min/max of an `INT64` timestamp column were always encoded
+  as milliseconds, whatever the column's unit. A `TIMESTAMP(MICROS)` file written by Parquet.Net has min/max 1000×
+  too small, so engines that prune on statistics drop row groups they should keep: DuckDB returns **no rows** for
+  `WHERE ts > TIMESTAMP '1970-01-01 00:00:01'` on such a file, and the right rows once the statistics are fixed.
+- **UUID statistics in the wrong byte order** (`7ecfa00`). Min/max of a `UUID` column were `Guid.ToByteArray()`
+  (little-endian fields) rather than the big-endian RFC 4122 bytes the values themselves use.
+- **`List<T?>` deserialization loses data** (`ff03dcc`). `ParquetSerializer` read `[1, null, 2]` back as `[1, 2]` and
+  `[]` as `null`, for lists and arrays of nullable values, including files it wrote itself. The levels on disk were
+  right; the assembler created a list only at the item's definition level, one too deep for nullable items.
+- **Legacy-named list groups deserialize as null** (`ff03dcc`). When a file's list groups are named differently from
+  the class schema's (`array`, `bag`, `<name>_tuple`), the serializer found no column for the property and silently
+  left it null. It now falls back to matching on field names.
+
+Still open in the fork: encryption (4), typed statistics with sort order (6), and a typed physical-schema descriptor (9).
 
 ## Suggested order
 
