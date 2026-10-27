@@ -362,6 +362,92 @@ public abstract class CrossEngineTests : IAsyncLifetime
     }
 
     [SkippableFact]
+    [Spec("ducklake: ducklake_tag")]
+    [Spec("ducklake: ducklake_column_tag")]
+    [Spec("ducklake: ducklake_view")]
+    [Spec("ducklake: ducklake_macro")]
+    [Spec("ducklake: ducklake_sort_info")]
+    public async Task DuckDB_uses_the_comments_views_macros_and_sort_orders_written_here()
+    {
+        Oracle.Require();
+        var catalog = await _lake.CreateAsync();
+        await using (var tx = catalog.BeginTransaction())
+        {
+            await tx.CreateTableAsync("main", "t0", [new("id", DuckLakeType.Int64), new("name", DuckLakeType.Varchar)]);
+            await tx.InsertAsync("main", "t0", [[1L, "a"], [2L, "b"], [3L, "c"]]);
+            await tx.CommitAsync();
+        }
+        await using (var tx = catalog.BeginTransaction())
+        {
+            await tx.RenameTableAsync("main", "t0", "t");
+            await tx.CommitAsync();
+        }
+        await using (var tx = catalog.BeginTransaction())
+        {
+            await tx.SetCommentAsync("main", "t", "the table");
+            await tx.SetColumnCommentAsync("main", "t", "name", "a name");
+            await tx.SetSortOrderAsync("main", "t", [new("id", Descending: true)]);
+            await tx.CreateViewAsync("main", "v", "SELECT id, \"name\" AS n FROM {DUCKLAKE_CATALOG}.t WHERE (id > 1)");
+            await tx.CreateViewAsync("main", "v2", "SELECT id, \"name\" FROM {DUCKLAKE_CATALOG}.t", ["a", "b"]);
+            await tx.CreateMacroAsync("main", "add2", [new("(a + b)", [new("a"), new("b", Default: "1", DefaultType: "int32")])]);
+            // DuckDB resolves {DUCKLAKE_CATALOG} in views only; a macro body names the catalog as attached (as DuckDB stores its own).
+            await tx.CreateMacroAsync("main", "tm", [new("SELECT * FROM lake.t WHERE (id = x)", [new("x")], IsTableMacro: true)]);
+            await tx.CommitAsync();
+        }
+        Assert.Equal(["[\"the table\"]"], await Oracle.RowsAsync(_lake, "SELECT comment FROM duckdb_tables() WHERE database_name = 'lake' AND table_name = 't'"));
+        Assert.Equal(["[\"a name\"]"], await Oracle.RowsAsync(_lake, "SELECT comment FROM duckdb_columns() WHERE database_name = 'lake' AND table_name = 't' AND column_name = 'name'"));
+        Assert.Equal(["[2,\"b\"]", "[3,\"c\"]"], await Oracle.RowsAsync(_lake, "SELECT * FROM lake.v"));
+        Assert.Equal(["[1,\"a\"]"], await Oracle.RowsAsync(_lake, "SELECT a, b FROM lake.v2 WHERE a = 1"));
+        Assert.Equal(["[3]"], await Oracle.RowsAsync(_lake, "SELECT lake.main.add2(2)"));
+        Assert.Equal(["[2,\"b\"]"], await Oracle.RowsAsync(_lake, "SELECT * FROM lake.main.tm(2)"));
+        // DuckDB writes its own inserts in the sort order recorded here.
+        await Oracle.RunAsync(_lake, "CALL lake.set_option('data_inlining_row_limit', 0)", "INSERT INTO lake.t VALUES (10, 'x'), (30, 'z'), (20, 'y')");
+        var table = await catalog.LoadTableAsync("main", "t");
+        var last = (await catalog.PlanScanAsync(table)).Files.MaxBy(f => f.DataFileId)!;
+        Assert.Equal([30L, 20L, 10L], (await Iceberg.Net.Data.ParquetFiles.ReadAsync(catalog.IO, last.Location, table.Schema)).Select(r => (long)r[0]!));
+    }
+
+    [SkippableFact]
+    [Spec("ducklake: ducklake_tag")]
+    [Spec("ducklake: ducklake_view")]
+    [Spec("ducklake: ducklake_macro")]
+    [Spec("ducklake: ducklake_sort_expression")]
+    public async Task This_library_reads_DuckDBs_comments_views_macros_and_sort_orders()
+    {
+        Oracle.Require();
+        await Oracle.RunAsync(_lake,
+            "CREATE TABLE lake.t(id INT, name VARCHAR)",
+            "COMMENT ON TABLE lake.t IS 'the table'",
+            "COMMENT ON COLUMN lake.t.name IS 'a name'",
+            "CREATE VIEW lake.v2(a, b) AS SELECT id, name FROM lake.t",
+            "COMMENT ON VIEW lake.v2 IS 'a view'",
+            "CREATE MACRO lake.add2(a, b := 1) AS a + b",
+            "CREATE MACRO lake.tm(x) AS TABLE SELECT * FROM lake.t WHERE id = x",
+            "ALTER TABLE lake.t SET SORTED BY (id ASC, lower(name) DESC NULLS LAST)",
+            "ALTER TABLE lake.t RENAME TO t2");
+        var catalog = await _lake.OpenAsync();
+        var t = await catalog.LoadTableAsync("main", "t2");
+        Assert.Equal(("the table", "a name"), (t.Comment, t.ColumnComment("name")));
+        Assert.Equal([new DuckLakeSortKey("id"), new DuckLakeSortKey("lower(\"name\")", Descending: true)], t.SortKeys);
+        var v = await catalog.LoadViewAsync("main", "v2");
+        Assert.Equal(["a", "b"], v.ColumnAliases);
+        Assert.Equal("a view", v.Comment);
+        Assert.Contains("{DUCKLAKE_CATALOG}", v.Sql);
+        var add2 = await catalog.LoadMacroAsync("main", "add2");
+        Assert.Equal(["a", "b"], add2.Implementations[0].Parameters.Select(p => p.Name));
+        Assert.Equal("1", add2.Implementations[0].Parameters[1].Default);
+        Assert.True((await catalog.LoadMacroAsync("main", "tm")).IsTableMacro);
+        // And the reverse round trip: DuckDB still uses them after this library's own change to the table.
+        await using (var tx = catalog.BeginTransaction())
+        {
+            await tx.SetCommentAsync("main", "t2", "changed here");
+            await tx.CommitAsync();
+        }
+        Assert.Equal(["[\"changed here\"]"], await Oracle.RowsAsync(_lake, "SELECT comment FROM duckdb_tables() WHERE database_name = 'lake' AND table_name = 't2'"));
+        Assert.Equal(["[3]"], await Oracle.RowsAsync(_lake, "SELECT lake.main.add2(2)"));
+    }
+
+    [SkippableFact]
     [Spec("ducklake: ducklake_column")]
     public async Task Schema_evolution_written_here_reads_the_same_in_DuckDB()
     {

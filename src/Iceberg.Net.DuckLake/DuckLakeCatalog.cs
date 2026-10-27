@@ -68,6 +68,17 @@ public sealed class DuckLakeTable
     public required string Location { get; init; }
     public long? PartitionId { get; init; }
     public IReadOnlyList<DuckLakePartitionKey> PartitionKeys { get; init; } = [];
+    /// <summary>The table's tags (<c>ducklake_tag</c>); SQL comments are the <c>comment</c> key.</summary>
+    public IReadOnlyDictionary<string, string?> Tags { get; init; } = new Dictionary<string, string?>();
+    /// <summary>Tags of the table's columns, by column ID (<c>ducklake_column_tag</c>).</summary>
+    public IReadOnlyDictionary<long, IReadOnlyDictionary<string, string?>> ColumnTags { get; init; } = new Dictionary<long, IReadOnlyDictionary<string, string?>>();
+    /// <summary>The sort order new data is written in (<c>ducklake_sort_info</c>), empty when none is set.</summary>
+    public IReadOnlyList<DuckLakeSortKey> SortKeys { get; init; } = [];
+
+    public string? Comment => Tags.GetValueOrDefault("comment");
+
+    public string? ColumnComment(string column) =>
+        ColumnTags.TryGetValue(Column(column).Id, out var tags) ? tags.GetValueOrDefault("comment") : null;
 
     public DuckLakeColumn Column(string name) =>
         Columns.FirstOrDefault(c => c.Name == name) ?? throw new KeyNotFoundException($"Table {SchemaName}.{Name} has no column '{name}'");
@@ -343,6 +354,9 @@ public sealed partial class DuckLakeCatalog
             Location = Resolve(sc.Location, t.Path, t.Relative),
             PartitionId = partitions.Count == 1 ? partitions[0] : null,
             PartitionKeys = keys,
+            Tags = await TagsAsync(db, t.TableId, snapshot, ct),
+            ColumnTags = await ColumnTagsAsync(db, t.TableId, snapshot, ct),
+            SortKeys = await SortKeysAsync(db, t.TableId, snapshot, ct),
         };
     }
 
