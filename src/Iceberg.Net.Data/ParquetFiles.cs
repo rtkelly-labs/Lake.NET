@@ -18,7 +18,15 @@ public sealed record ParquetWriteOptions
     public int? RowGroupRows { get; init; }
     /// <summary>Write column-chunk min/max/null-count statistics (as other writers may not).</summary>
     public bool Statistics { get; init; } = true;
+    /// <summary>
+    /// Compute the Iceberg column metrics of the returned <see cref="DataFile"/> (value, null and NaN counts, bounds).
+    /// A caller that keeps its own statistics (DuckLake) turns this off and saves a pass over every value.
+    /// </summary>
+    public bool Metrics { get; init; } = true;
 }
+
+/// <summary>A written Parquet file: its Iceberg <see cref="DataFile"/> and the layout facts some catalogs record.</summary>
+public sealed record ParquetWriteResult(DataFile File, long FooterSize, int RowGroups);
 
 /// <summary>
 /// Parquet data files with Iceberg field IDs. Rows are <c>object?[]</c> aligned to the schema's top-level
@@ -97,6 +105,18 @@ public static class ParquetFiles
         IReadOnlyList<object?> partition,
         IReadOnlyList<object?[]> rows,
         ParquetWriteOptions options,
+        CancellationToken ct = default) =>
+        (await WriteFileAsync(io, location, schema, specId, partition, rows, options, ct)).File;
+
+    /// <summary>As <see cref="WriteAsync(IFileIO, string, Schema, int, IReadOnlyList{object?}, IReadOnlyList{object?[]}, ParquetWriteOptions, CancellationToken)"/>, also returning the footer size and row-group count.</summary>
+    public static async Task<ParquetWriteResult> WriteFileAsync(
+        IFileIO io,
+        string location,
+        Schema schema,
+        int specId,
+        IReadOnlyList<object?> partition,
+        IReadOnlyList<object?[]> rows,
+        ParquetWriteOptions options,
         CancellationToken ct = default)
     {
         var columns = schema.Columns;
@@ -147,11 +167,13 @@ public static class ParquetFiles
         }
 
         long[] chunkSizes;
+        int rowGroups;
         using (var input = new ManagedRandomAccessFile(new MemoryStream(bytes)))
         using (var check = new ParquetFileReader(input))
         {
             chunkSizes = new long[leafIds.Count];
             using var meta = check.FileMetaData;
+            rowGroups = meta.NumRowGroups;
             for (var rg = 0; rg < meta.NumRowGroups; rg++)
             {
                 using var group = check.RowGroup(rg);
@@ -164,8 +186,8 @@ public static class ParquetFiles
         }
         await io.WriteAsync(location, bytes, overwrite: false, ct);
 
-        var metrics = Metrics.Compute(schema, rows);
-        return new DataFile
+        var metrics = options.Metrics ? Metrics.Compute(schema, rows) : null;
+        var file = new DataFile
         {
             FilePath = location,
             FileFormat = "PARQUET",
@@ -174,13 +196,16 @@ public static class ParquetFiles
             RecordCount = rows.Count,
             FileSizeInBytes = bytes.Length,
             ColumnSizes = leafIds.Select((id, i) => (Id: id, chunkSizes[i])).Where(x => !RowLineage.IsReserved(x.Id)).ToDictionary(x => x.Id, x => x.Item2),
-            ValueCounts = metrics.ValueCounts,
-            NullValueCounts = metrics.NullCounts,
-            NanValueCounts = metrics.NanCounts.Count > 0 ? metrics.NanCounts : null,
-            LowerBounds = metrics.Lower,
-            UpperBounds = metrics.Upper,
+            ValueCounts = metrics?.ValueCounts,
+            NullValueCounts = metrics?.NullCounts,
+            NanValueCounts = metrics is { NanCounts.Count: > 0 } m ? m.NanCounts : null,
+            LowerBounds = metrics?.Lower,
+            UpperBounds = metrics?.Upper,
             SplitOffsets = [4],
         };
+        // The footer length is the 4-byte little-endian integer before the closing "PAR1".
+        var footer = System.Buffers.Binary.BinaryPrimitives.ReadUInt32LittleEndian(bytes.AsSpan(bytes.Length - 8, 4));
+        return new ParquetWriteResult(file, footer, rowGroups);
     }
 
     private static void WriteColumn(ColumnWriter col, NestedField f, object?[] values)

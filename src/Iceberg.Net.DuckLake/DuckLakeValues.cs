@@ -49,6 +49,29 @@ public static class DuckLakeValues
         }
     }
 
+    /// <summary>
+    /// <see cref="Normalize"/> for one column, chosen once: a value already in its physical form (a <c>long</c> for
+    /// <c>int64</c>, a <c>string</c> for <c>varchar</c>, …) passes through without a type switch or re-boxing.
+    /// </summary>
+    internal static Func<object?, object?> Normalizer(DuckLakeType type, string column)
+    {
+        // Narrow integers are range-checked and decimals rescaled, so only types whose physical form needs no check pass through.
+        Type? physical = type is DuckLakePrimitive p ? p.Name switch
+        {
+            "boolean" => typeof(bool),
+            "int32" or "date" => typeof(int),
+            "int64" or "time" or "timestamp" or "timestamptz" or "timestamp_ns" => typeof(long),
+            "float32" => typeof(float),
+            "float64" => typeof(double),
+            "varchar" or "json" => typeof(string),
+            "blob" => typeof(byte[]),
+            "uuid" => typeof(Guid),
+            _ => null,
+        } : null;
+        if (physical is null) return value => Normalize(type, value, column);
+        return value => value is null ? null : value.GetType() == physical ? value : Normalize(type, value, column);
+    }
+
     private static object NormalizePrimitive(DuckLakePrimitive p, object v) => p.Name switch
     {
         "null" => throw new ArgumentException("a column of type null holds only NULL"),

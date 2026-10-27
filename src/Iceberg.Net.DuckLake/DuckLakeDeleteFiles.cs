@@ -34,8 +34,8 @@ public static class DuckLakeDeleteFiles
         CancellationToken ct = default)
     {
         var rows = positions.Distinct().Order().Select(p => new object?[] { dataFileLocation, p }).ToList();
-        var file = await ParquetFiles.WriteAsync(io, location, WriteSchema, 0, [], rows, ct);
-        return (file.FileSizeInBytes, await FooterSizeAsync(io, location, file.FileSizeInBytes, ct));
+        var written = await ParquetFiles.WriteFileAsync(io, location, WriteSchema, 0, [], rows, ParquetWriteOptions.Default with { Metrics = false }, ct);
+        return (written.File.FileSizeInBytes, written.FooterSize);
     }
 
     /// <summary>
@@ -52,16 +52,6 @@ public static class DuckLakeDeleteFiles
             positions.Add((long)pos);
         }
         return positions;
-    }
-
-    /// <summary>The Parquet footer length (the 4 bytes before the trailing <c>PAR1</c>), as <c>footer_size</c> records it.</summary>
-    internal static async Task<long> FooterSizeAsync(IFileIO io, string location, long size, CancellationToken ct)
-    {
-        if (size < 12) throw new InvalidDataException($"{location} is too small to be Parquet");
-        var tail = await io.ReadRangeAsync(location, size - 8, 8, ct);
-        if (tail.Length != 8 || tail[4] != 'P' || tail[5] != 'A' || tail[6] != 'R' || tail[7] != '1')
-            throw new InvalidDataException($"{location} does not end in PAR1");
-        return System.Buffers.Binary.BinaryPrimitives.ReadUInt32LittleEndian(tail.AsSpan(0, 4));
     }
 }
 
