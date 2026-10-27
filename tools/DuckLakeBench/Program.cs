@@ -113,7 +113,12 @@ await Scenario("full scan", async lake =>
     var all = sw.Elapsed.TotalSeconds;
     sw.Restart();
     var hits = (await lake.ReadAsync(table, Expr.Equal("id", 4242L))).Count;
-    return $"{count:N0} rows in 10 files: {all:F2} s ({count / all:N0} rows/s); point lookup {sw.Elapsed.TotalMilliseconds:F0} ms ({hits} row)";
+    var lookup = sw.Elapsed.TotalMilliseconds;
+    sw.Restart();
+    long typed = 0;
+    await foreach (var _ in lake.ReadAsync<Order>(table)) typed++;
+    var typedSeconds = sw.Elapsed.TotalSeconds;
+    return $"{count:N0} rows in 10 files: {all:F2} s ({count / all:N0} rows/s); as records (ReadAsync<T>) {typedSeconds:F2} s ({typed / typedSeconds:N0} rows/s); point lookup {lookup:F0} ms ({hits} row)";
 });
 await Scenario("delete 10% across 20 files", async lake =>
 {
@@ -132,6 +137,81 @@ await Scenario("delete 10% across 20 files", async lake =>
         await tx.CommitAsync();
     }
     return $"{deleted:N0} of {rows:N0} rows in {sw.Elapsed.TotalSeconds:F2} s";
+});
+await Scenario("delete 10% across 20 files, deletion vectors (1.1)", async lake =>
+{
+    await Create(lake, "t");
+    var rows = n / 2;
+    await using (var tx = lake.BeginTransaction())
+    {
+        for (var f = 0; f < 20; f++) await tx.InsertAsync("main", "t", Enumerable.Range(f * (rows / 20), rows / 20).Select(i => Row(i)));
+        await tx.CommitAsync();
+    }
+    var sw = Stopwatch.StartNew();
+    long deleted;
+    await using (var tx = lake.BeginTransaction())
+    {
+        deleted = await tx.DeleteAsync("main", "t", Expr.Equal("day", 7));
+        await tx.CommitAsync();
+    }
+    var delete = sw.Elapsed.TotalSeconds;
+    sw.Restart();
+    long left = 0;
+    await foreach (var _ in lake.ReadRowsAsync(await lake.LoadTableAsync("main", "t"))) left++;
+    return $"{deleted:N0} of {rows:N0} rows in {delete:F2} s; reading the {left:N0} left {sw.Elapsed.TotalSeconds:F2} s";
+}, new DuckLakeOptions { WriteDeletionVectors = true }, DuckLakeCatalog.FormatVersion11);
+await Scenario("add 100 existing files", async lake =>
+{
+    await Create(lake, "t");
+    var external = Path.Combine(root, "external-" + results.Count);
+    Directory.CreateDirectory(external);
+    var io = new LocalFileIO();
+    Unsafe.NextId = 1;
+    var schema = new Iceberg.Net.Types.Schema(0, columns.Select((c, i) => DuckLakeTypes.ToIceberg(DuckLakeColumn.Assign(c.Name, c.Type, c.Nullable, ref Unsafe.NextId))));
+    var files = new List<string>();
+    var perFile = n / 100;
+    for (var f = 0; f < 100; f++)
+    {
+        var path = Path.Combine(external, $"part-{f}.parquet");
+        await Iceberg.Net.Data.ParquetFiles.WriteAsync(io, path, schema, 0, [], Enumerable.Range(f * perFile, perFile)
+            .Select(i => columns.Select((c, k) => DuckLakeValues.Normalize(c.Type, Row(i)[k])).ToArray()).ToList(), Iceberg.Net.Data.ParquetWriteOptions.Default);
+        files.Add(path);
+    }
+    var sw = Stopwatch.StartNew();
+    long added;
+    await using (var tx = lake.BeginTransaction())
+    {
+        added = await tx.AddDataFilesAsync("main", "t", files);
+        await tx.CommitAsync();
+    }
+    var register = sw.Elapsed.TotalSeconds;
+    sw.Restart();
+    long read = 0;
+    await foreach (var _ in lake.ReadRowsAsync(await lake.LoadTableAsync("main", "t"))) read++;
+    return $"{added:N0} rows registered in {register:F2} s (footers only); read through the name mapping in {sw.Elapsed.TotalSeconds:F2} s ({read / sw.Elapsed.TotalSeconds:N0} rows/s)";
+});
+await Scenario("insert unsigned, timetz and interval columns", async lake =>
+{
+    await using (var tx = lake.BeginTransaction())
+    {
+        await tx.CreateTableAsync("main", "w", [new("id", DuckLakeType.UInt64), new("ms", DuckLakeType.TimestampMs), new("tz", DuckLakeType.TimeTz), new("iv", DuckLakeType.Interval)]);
+        await tx.CommitAsync();
+    }
+    var rows = n / 2;
+    var sw = Stopwatch.StartNew();
+    await using (var tx = lake.BeginTransaction())
+    {
+        await tx.InsertAsync("main", "w", Enumerable.Range(0, rows).Select(i => new object?[]
+        {
+            (ulong)i, DateTime.UnixEpoch.AddMilliseconds(i), new DuckLakeTimeTz(i % 86_400 * 1_000_000L, 3600), new DuckLakeInterval(i % 12, i % 30, i % 1000 * 1000L),
+        }));
+        await tx.CommitAsync();
+    }
+    var write = sw.Elapsed.TotalSeconds;
+    sw.Restart();
+    long read = 0;
+    await foreach (var _ in lake.ReadRowsAsync(await lake.LoadTableAsync("main", "w"))) read++;
+    return $"{rows:N0} rows in {write:F2} s ({rows / write:N0} rows/s); read {sw.Elapsed.TotalSeconds:F2} s ({read / sw.Elapsed.TotalSeconds:N0} rows/s)";
 });
 await Scenario("4 concurrent writers", async lake =>
 {
@@ -157,7 +237,7 @@ foreach (var (scenario, result) in results) Console.WriteLine($"| {scenario} | {
 Directory.Delete(root, recursive: true);
 return;
 
-async Task Scenario(string name, Func<DuckLakeCatalog, Task<string>> run, DuckLakeOptions? options = null)
+async Task Scenario(string name, Func<DuckLakeCatalog, Task<string>> run, DuckLakeOptions? options = null, string version = DuckLakeCatalog.FormatVersion)
 {
     var dir = Path.Combine(root, results.Count.ToString(System.Globalization.CultureInfo.InvariantCulture));
     Directory.CreateDirectory(dir);
@@ -177,7 +257,7 @@ async Task Scenario(string name, Func<DuckLakeCatalog, Task<string>> run, DuckLa
     }
     try
     {
-        var lake = await DuckLakeCatalog.CreateAsync(store, new LocalFileIO(), Path.Combine(dir, "data") + "/", options);
+        var lake = await DuckLakeCatalog.CreateAsync(store, new LocalFileIO(), Path.Combine(dir, "data") + "/", options, version);
         Console.Error.WriteLine($"{name}...");
         results.Add((name, await run(lake)));
     }
@@ -223,3 +303,11 @@ static string Percentiles(List<double> ms)
 }
 
 string? Arg(string name) => args.SkipWhile(a => a != name).Skip(1).FirstOrDefault();
+
+/// <summary>A row of the benchmark table, for <c>ReadAsync&lt;T&gt;</c>.</summary>
+internal sealed record Order(long Id, string? Customer, decimal? Amount, DateTimeOffset? At, int? Day);
+
+internal static class Unsafe
+{
+    public static long NextId = 1;
+}

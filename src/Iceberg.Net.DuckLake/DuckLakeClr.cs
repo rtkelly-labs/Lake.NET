@@ -20,37 +20,56 @@ namespace Iceberg.Net.DuckLake;
 /// </summary>
 public static class DuckLakeClr
 {
-    public static object? ToClr(DuckLakeType type, object? value)
+    public static object? ToClr(DuckLakeType type, object? value) => value is null ? null : Converter(type)(value);
+
+    /// <summary>The conversion for one type, chosen once (per column, not per value).</summary>
+    internal static Func<object, object> Converter(DuckLakeType type)
     {
-        if (value is null) return null;
         switch (type)
         {
             case DuckLakeList l:
-                return ((IEnumerable)value).Cast<object?>().Select(x => ToClr(l.Element, x)).ToList();
+            {
+                var element = Converter(l.Element);
+                return v => ((IEnumerable)v).Cast<object?>().Select(x => x is null ? null : element(x)).ToList();
+            }
             case DuckLakeMap m:
-                var map = new Dictionary<object, object?>();
-                foreach (DictionaryEntry e in (IDictionary)value) map[ToClr(m.Key, e.Key)!] = ToClr(m.Value, e.Value);
-                return map;
+            {
+                var (key, val) = (Converter(m.Key), Converter(m.Value));
+                return v =>
+                {
+                    var map = new Dictionary<object, object?>();
+                    foreach (DictionaryEntry e in (IDictionary)v) map[key(e.Key)] = e.Value is null ? null : val(e.Value);
+                    return map;
+                };
+            }
             case DuckLakeStruct s:
-                var fields = (IList)value;
-                return s.Fields.Select((f, i) => (f.Name, Value: ToClr(f.Type, fields[i]))).ToDictionary(x => x.Name, x => x.Value, StringComparer.Ordinal);
+            {
+                var fields = s.Fields.Select(f => (f.Name, Convert: Converter(f.Type))).ToArray();
+                return v =>
+                {
+                    var values = (IList)v;
+                    var result = new Dictionary<string, object?>(fields.Length, StringComparer.Ordinal);
+                    for (var i = 0; i < fields.Length; i++) result[fields[i].Name] = values[i] is { } x ? fields[i].Convert(x) : null;
+                    return result;
+                };
+            }
         }
         var p = (DuckLakePrimitive)type;
         return p.Name switch
         {
-            "int8" => checked((sbyte)(int)value),
-            "int16" => checked((short)(int)value),
-            "uint8" => checked((byte)(int)value),
-            "uint16" => checked((ushort)(int)value),
-            "uint32" => checked((uint)(long)value),
-            "uint64" => checked((ulong)((IcebergDecimal)value).Unscaled),
-            "date" => IcebergTime.DateFromDays((int)value),
-            "time" => TimeSpan.FromTicks(checked((long)value * 10)),
-            "timestamp" or "timestamp_s" or "timestamp_ms" => DateTime.SpecifyKind(IcebergTime.Epoch.AddTicks(checked((long)value * 10)), DateTimeKind.Unspecified),
-            "timestamptz" => new DateTimeOffset(IcebergTime.Epoch.AddTicks(checked((long)value * 10)), TimeSpan.Zero),
-            "timestamp_ns" => DateTime.SpecifyKind(IcebergTime.Epoch.AddTicks(IcebergTime.FloorDiv((long)value, 100)), DateTimeKind.Unspecified),
-            _ when value is IcebergDecimal d => TryDecimal(d),
-            _ => value,
+            "int8" => v => checked((sbyte)(int)v),
+            "int16" => v => checked((short)(int)v),
+            "uint8" => v => checked((byte)(int)v),
+            "uint16" => v => checked((ushort)(int)v),
+            "uint32" => v => checked((uint)(long)v),
+            "uint64" => v => checked((ulong)((IcebergDecimal)v).Unscaled),
+            "date" => v => IcebergTime.DateFromDays((int)v),
+            "time" => v => TimeSpan.FromTicks(checked((long)v * 10)),
+            "timestamp" or "timestamp_s" or "timestamp_ms" => v => DateTime.SpecifyKind(IcebergTime.Epoch.AddTicks(checked((long)v * 10)), DateTimeKind.Unspecified),
+            "timestamptz" => v => new DateTimeOffset(IcebergTime.Epoch.AddTicks(checked((long)v * 10)), TimeSpan.Zero),
+            "timestamp_ns" => v => DateTime.SpecifyKind(IcebergTime.Epoch.AddTicks(IcebergTime.FloorDiv((long)v, 100)), DateTimeKind.Unspecified),
+            _ when p.Name.StartsWith("decimal", StringComparison.Ordinal) => v => TryDecimal((IcebergDecimal)v),
+            _ => v => v,
         };
     }
 
@@ -61,11 +80,18 @@ public static class DuckLakeClr
     }
 
     /// <summary>A row's values as CLR values, by column.</summary>
-    public static object?[] ToClr(IReadOnlyList<DuckLakeColumn> columns, object?[] row)
+    public static object?[] ToClr(IReadOnlyList<DuckLakeColumn> columns, object?[] row) => RowConverter(columns)(row);
+
+    /// <summary>Converts whole rows, with each column's conversion chosen once.</summary>
+    public static Func<object?[], object?[]> RowConverter(IReadOnlyList<DuckLakeColumn> columns)
     {
-        var result = new object?[columns.Count];
-        for (var i = 0; i < columns.Count; i++) result[i] = ToClr(columns[i].Type, row[i]);
-        return result;
+        var converters = columns.Select(c => Converter(c.Type)).ToArray();
+        return row =>
+        {
+            var result = new object?[converters.Length];
+            for (var i = 0; i < converters.Length; i++) result[i] = row[i] is { } v ? converters[i](v) : null;
+            return result;
+        };
     }
 
     /// <summary>
@@ -84,19 +110,29 @@ public static class DuckLakeClr
             .Where(c => c.GetParameters().All(p => p.Name is not null && index.ContainsKey(Key(p.Name))))
             .OrderByDescending(c => c.GetParameters().Length).FirstOrDefault()
             ?? throw new ArgumentException($"{typeof(T).Name} has no public constructor whose parameters all name columns ({string.Join(", ", columns.Select(c => c.Name))})");
-        var parameters = ctor.GetParameters().Select(p => (Index: index[Key(p.Name!)], p.ParameterType)).ToArray();
+        var parameters = ctor.GetParameters().Select(p => (Index: index[Key(p.Name!)], Type: p.ParameterType)).ToArray();
         var used = parameters.Select(p => p.Index).ToHashSet();
         var properties = typeof(T).GetProperties(BindingFlags.Public | BindingFlags.Instance)
             .Where(p => p.SetMethod is { IsPublic: true } && index.TryGetValue(Key(p.Name), out var i) && !used.Contains(i))
             .Select(p => (Index: index[Key(p.Name)], Property: p)).ToArray();
-        var types = columns.Select(c => c.Type).ToArray();
-        return row =>
+
+        // Compiled once: row => new T(Arg(row[i], ...)) { P = Arg(row[j]) }, where Arg converts the physical value to the
+        // member's type (a direct cast when the CLR value already has it).
+        var row = System.Linq.Expressions.Expression.Parameter(typeof(object?[]), "row");
+        System.Linq.Expressions.Expression Arg(int i, Type target)
         {
-            var args = parameters.Select(p => Convert(ToClr(types[p.Index], row[p.Index]), p.ParameterType, columns[p.Index].Name)).ToArray();
-            var result = (T)ctor.Invoke(args);
-            foreach (var (i, property) in properties) property.SetValue(result, Convert(ToClr(types[i], row[i]), property.PropertyType, columns[i].Name));
-            return result;
-        };
+            var convert = Converter(columns[i].Type);
+            var name = columns[i].Name;
+            Func<object?, object?> f = v => Convert(v is null ? null : convert(v), target, name);
+            var call = System.Linq.Expressions.Expression.Invoke(System.Linq.Expressions.Expression.Constant(f),
+                System.Linq.Expressions.Expression.ArrayIndex(row, System.Linq.Expressions.Expression.Constant(i)));
+            return System.Linq.Expressions.Expression.Convert(call, target);
+        }
+        var create = System.Linq.Expressions.Expression.New(ctor, parameters.Select(p => Arg(p.Index, p.Type)));
+        var body = properties.Length == 0 ? (System.Linq.Expressions.Expression)create
+            : System.Linq.Expressions.Expression.MemberInit(create, properties.Select(p =>
+                (System.Linq.Expressions.MemberBinding)System.Linq.Expressions.Expression.Bind(p.Property, Arg(p.Index, p.Property.PropertyType))));
+        return System.Linq.Expressions.Expression.Lambda<Func<object?[], T>>(body, row).Compile();
     }
 
     private static object? Convert(object? value, Type target, string column)
@@ -104,7 +140,7 @@ public static class DuckLakeClr
         var underlying = Nullable.GetUnderlyingType(target) ?? target;
         if (value is null)
             return underlying == target && target.IsValueType ? throw new InvalidCastException($"Column {column} is NULL; {target.Name} cannot hold it") : null;
-        if (target.IsInstanceOfType(value)) return value;
+        if (value.GetType() == underlying || target.IsInstanceOfType(value)) return value;
         try
         {
             return value switch
