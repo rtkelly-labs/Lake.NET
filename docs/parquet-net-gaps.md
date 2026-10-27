@@ -110,7 +110,10 @@ Already covered by Parquet.Net, so not a blocker:
 ## Fork status
 
 Branch `ccr-87fadcf9-bxi9wr` of [rtkelly-labs/parquet-dotnet](https://github.com/rtkelly-labs/parquet-dotnet), each
-change with its own tests (fork suite: 768 passed, 3 skipped, none failing, with `pyarrow` installed for its Arrow interop test).
+change with its own tests (fork suite: 772 passed, 3 skipped on net8.0 and net10.0, with `pyarrow` and `pandas` installed for its Arrow interop test;
+CI runs it on Linux, Windows and macOS). For upstreaming, the fork's `docs/upstream-review.md` splits it into review
+units, and `docs/upstream/` has units 1 to 10c as patches that apply to upstream `master` on their own, each verified
+(tests failing without it, the suite passing with it).
 
 | Gap | Fork commit | What changed |
 |---|---|---|
@@ -150,6 +153,9 @@ Bugs found on the way, also fixed in the fork. These are worth reporting upstrea
   which puts U+E000–U+FFFF after supplementary characters, unlike UTF-8 byte order; float bounds could be NaN, and
   zero bounds were not written as -0.0/+0.0. Byte-array columns (binary, fixed) got no bounds at all, and boolean
   columns none either (`229f9d7`).
+- **Statistics not what `TYPE_ORDER` requires** (`a28da59`): no `nan_count` on floating point columns (required once
+  the footer declares `TYPE_ORDER`), and the deprecated signed `min`/`max` written for strings and byte arrays too.
+  Columns written `BYTE_STREAM_SPLIT` got no min/max at all.
 - **Required maps are written `OPTIONAL`** (`02925d8`): the levels are computed as required, so the file's levels
   disagree with its own schema.
 - **Legacy-named list groups deserialize as null** (`ff03dcc`). When a file's list groups are named differently from
