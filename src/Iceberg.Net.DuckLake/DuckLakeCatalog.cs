@@ -595,7 +595,8 @@ public sealed partial class DuckLakeCatalog
     public async Task<List<object?[]>> ReadClrAsync(DuckLakeTable table, Expression? filter = null, CancellationToken ct = default)
     {
         var rows = new List<object?[]>();
-        await foreach (var r in ScanAsync(table, filter, ct)) rows.Add(DuckLakeClr.ToClr(table.Columns, r.Values));
+        var convert = DuckLakeClr.RowConverter(table.Columns);
+        await foreach (var r in ScanAsync(table, filter, ct)) rows.Add(convert(r.Values));
         return rows;
     }
 
