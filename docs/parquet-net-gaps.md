@@ -61,8 +61,7 @@ list of strings, a map and a struct; row groups of 250,000 rows; Zstd):
 | Parquet.Net | nested, 250,000 rows | 710 ms | 996 ms | 3.5 MB |
 
 Parquet.Net writes faster and smaller (its dictionary and Zstd settings differ); it reads the flat table about a
-quarter slower, the nested one about as fast. Most of the time on either side is the data layer's own row assembly
-(boxing every value into `object?[]` rows), not the library.
+quarter slower, the nested one about as fast. Where the read time goes on each side has not been profiled yet.
 
 ## Gaps
 
