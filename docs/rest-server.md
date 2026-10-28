@@ -402,6 +402,11 @@ long plus a minute. Clients only retry mutations when it is advertised. This lib
 commit whose response was lost with the same key, and gets the original answer instead of
 `CommitStateUnknownException` (`IdempotencyTests`).
 
+Without an advertised lifetime, `RestCatalog` does not replay the write. A higher-level snapshot producer can
+still resolve the outcome through read-only status checks when the attempted snapshot is positively identified.
+Absent evidence remains unknown, including when the request never reached the server. The REST tests check
+the number of commit requests as well as snapshot/row counts to distinguish status recovery from write replay.
+
 Keys are claimed in the store (see [Storage](#storage)), so server instances over one database share them: a retry
 that a load balancer sends to another instance is replayed there, and a duplicate waits for the first request even when
 another instance runs it (`SharedStateTests`, including a commit whose response is lost on one server and retried on
