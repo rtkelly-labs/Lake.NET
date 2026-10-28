@@ -28,6 +28,48 @@ public partial class GeneratedOrder
     public string? Description { get; set; }
 }
 
+[IcebergMappable]
+public partial class GeneratedUnannotatedPair
+{
+    public string A { get; set; } = "";
+    public string B { get; set; } = "";
+}
+
+[IcebergMappable]
+public partial record GeneratedPositionalWithExtra(int Id)
+{
+    public string Extra { get; init; } = "";
+}
+
+[IcebergMappable]
+public partial class GeneratedKeyedModel
+{
+    [IcebergKey]
+    public int KeyId { get; set; }
+
+    public string Value { get; set; } = "";
+}
+
+[IcebergMappable]
+public partial class GeneratedOverridesModel
+{
+    [IcebergField(1, Type = "decimal(18, 2)")]
+    public decimal Price { get; set; }
+
+    [IcebergField(2, Type = "date")]
+    public DateTime Birthday { get; set; }
+}
+
+[IcebergMappable]
+public partial class GeneratedScalarVarieties
+{
+    public int Id { get; set; }
+    public short Small { get; set; }
+    public uint Unsigned { get; set; }
+    public Status State { get; set; }
+    public TimeSpan Elapsed { get; set; }
+}
+
 public class SourceGeneratorTests : CatalogTest
 {
     [Fact]
@@ -116,7 +158,6 @@ public class SourceGeneratorTests : CatalogTest
     {
         var mapper = IcebergRowMappers.For<GeneratedCustomer>();
         Assert.NotNull(mapper);
-        // Ensure it is not the fallback ReflectionRowMapper
         Assert.DoesNotContain("ReflectionRowMapper", mapper.GetType().FullName!);
     }
 
@@ -166,5 +207,130 @@ public class SourceGeneratorTests : CatalogTest
         Assert.Equal(original.OrderId, reconstituted.OrderId);
         Assert.Equal(original.CustomerId, reconstituted.CustomerId);
         Assert.Equal(original.Description, reconstituted.Description);
+    }
+
+    [Fact]
+    public void UnannotatedMembers_ResolveCorrectlyAgainstDifferentColumnOrder()
+    {
+        // Table schema has 1: B, 2: A (reverse of declaration order)
+        var tableSchema = new Schema(0, [
+            NestedField.Require(1, "B", PrimitiveType.String),
+            NestedField.Require(2, "A", PrimitiveType.String)
+        ]);
+
+        var mapper = IcebergRowMappers.For<GeneratedUnannotatedPair>();
+        var binding = mapper.Bind(tableSchema);
+
+        var model = new GeneratedUnannotatedPair { A = "first", B = "second" };
+        var row = binding.ToRow(model);
+
+        // Position 0 is B, position 1 is A
+        Assert.Equal("second", row[0]);
+        Assert.Equal("first", row[1]);
+
+        var reader = binding.CreateReader(tableSchema);
+        var read = reader(row);
+
+        Assert.Equal("first", read.A);
+        Assert.Equal("second", read.B);
+    }
+
+    [Fact]
+    public void PositionalRecord_InitializesRemainingProperties()
+    {
+        var mapper = IcebergRowMappers.For<GeneratedPositionalWithExtra>();
+        var binding = mapper.Bind(GeneratedPositionalWithExtra.IcebergSchema);
+
+        var original = new GeneratedPositionalWithExtra(7) { Extra = "bonus" };
+        var row = binding.ToRow(original);
+
+        var reader = binding.CreateReader(GeneratedPositionalWithExtra.IcebergSchema);
+        var reconstituted = reader(row);
+
+        Assert.Equal(7, reconstituted.Id);
+        Assert.Equal("bonus", reconstituted.Extra);
+    }
+
+    [Fact]
+    public async Task KeyField_IncludedInIdentifierFieldIds_AndSupportsUpsert()
+    {
+        var schema = GeneratedKeyedModel.IcebergSchema;
+        Assert.Single(schema.IdentifierFieldIds);
+        Assert.Equal(1, schema.IdentifierFieldIds[0]);
+
+        var table = await Catalog.CreateTableAsync<GeneratedKeyedModel>(NewId());
+        Assert.Single(table.Schema.IdentifierFieldIds);
+
+        await table.UpsertAsync([
+            new GeneratedKeyedModel { KeyId = 1, Value = "v1" }
+        ]);
+
+        var items = await table.AsQueryable<GeneratedKeyedModel>().ToListAsync();
+        Assert.Single(items);
+        Assert.Equal("v1", items[0].Value);
+
+        // Update via upsert
+        await table.UpsertAsync([
+            new GeneratedKeyedModel { KeyId = 1, Value = "v2" }
+        ]);
+
+        items = await table.AsQueryable<GeneratedKeyedModel>().ToListAsync();
+        Assert.Single(items);
+        Assert.Equal("v2", items[0].Value);
+    }
+
+    [Fact]
+    public void TypeOverrides_PreservedInSchemaAndMapping()
+    {
+        var schema = GeneratedOverridesModel.IcebergSchema;
+        var priceCol = schema.Columns.First(c => c.Id == 1);
+        Assert.IsType<DecimalType>(priceCol.Type);
+        var dec = (DecimalType)priceCol.Type;
+        Assert.Equal(18, dec.Precision);
+        Assert.Equal(2, dec.Scale);
+
+        var bdayCol = schema.Columns.First(c => c.Id == 2);
+        Assert.Equal(PrimitiveType.Date, bdayCol.Type);
+
+        var mapper = IcebergRowMappers.For<GeneratedOverridesModel>();
+        var binding = mapper.Bind(schema);
+
+        var original = new GeneratedOverridesModel
+        {
+            Price = 45.50m,
+            Birthday = new DateTime(2000, 1, 15)
+        };
+        var row = binding.ToRow(original);
+        Assert.IsType<IcebergDecimal>(row[0]);
+        Assert.Equal(2, ((IcebergDecimal)row[0]!).Scale);
+        Assert.IsType<int>(row[1]); // date as days
+
+        var reader = binding.CreateReader(schema);
+        var read = reader(row);
+        Assert.Equal(original.Price, read.Price);
+        Assert.Equal(original.Birthday.Date, read.Birthday.Date);
+    }
+
+    [Fact]
+    public async Task VarietiesOfScalars_RoundTripSuccessfully()
+    {
+        var table = await Catalog.CreateTableAsync<GeneratedScalarVarieties>(NewId());
+        var item = new GeneratedScalarVarieties
+        {
+            Id = 10,
+            Small = 42,
+            Unsigned = 9999,
+            State = Status.Pending,
+            Elapsed = TimeSpan.FromMinutes(15)
+        };
+
+        await table.InsertAsync([item]);
+
+        var read = Assert.Single(await table.AsQueryable<GeneratedScalarVarieties>().ToListAsync());
+        Assert.Equal(item.Id, read.Id);
+        Assert.Equal(item.Small, read.Small);
+        Assert.Equal(item.Unsigned, read.Unsigned);
+        Assert.Equal(item.State, read.State);
+        Assert.Equal(item.Elapsed, read.Elapsed);
     }
 }
