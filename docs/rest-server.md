@@ -19,6 +19,9 @@ If the swap loses (another commit moved the pointer first), the server answers 4
 because nothing references it. If the swap fails any other way, the server answers 500 and keeps the file: the swap
 may have happened. Clients treat 500 on a commit as "outcome unknown", so they don't retry blindly.
 
+See [server-operations.md](server-operations.md) for deployment artifacts, shared configuration, bounded
+idempotency, credential recovery and backup/restore.
+
 ## Running it
 
 ```bash

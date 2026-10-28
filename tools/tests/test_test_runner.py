@@ -1,4 +1,5 @@
 """Exercise the documented runner with isolated command stubs; no Docker or SDK required."""
+
 import os
 from pathlib import Path
 import shutil
@@ -19,21 +20,38 @@ class TestRunner(unittest.TestCase):
         for script in ("emulation/up.sh", "tools/test-projects.sh"):
             p = self.root / script
             p.parent.mkdir(exist_ok=True)
-            p.write_text('#!/usr/bin/env bash\nprintf "%s|%s|%s|%s\\n" "$0 $*" "${ICEBERG_TEST_TARGET:-}" "${ICEBERG_REQUIRE_TARGET:-}" "${ICEBERG_WAREHOUSE:-}" >> "$TRACE"\nexit "${STUB_EXIT:-0}"\n')
+            p.write_text(
+                '#!/usr/bin/env bash\nprintf "%s|%s|%s|%s\\n" "$0 $*" "${ICEBERG_TEST_TARGET:-}" "${ICEBERG_REQUIRE_TARGET:-}" "${ICEBERG_WAREHOUSE:-}" >> "$TRACE"\nexit "${STUB_EXIT:-0}"\n'
+            )
             p.chmod(0o755)
         self.trace = self.root / "trace"
 
     def run_mode(self, mode, **extra):
         env = {k: v for k, v in os.environ.items() if not k.startswith("ICEBERG_")}
         env.update(TRACE=str(self.trace), **extra)
-        result = subprocess.run(["bash", "run-tests.sh", mode], cwd=self.root, env=env, capture_output=True, text=True, check=False)
-        return result, self.trace.read_text().splitlines() if self.trace.exists() else []
+        result = subprocess.run(
+            ["bash", "run-tests.sh", mode],
+            cwd=self.root,
+            env=env,
+            capture_output=True,
+            text=True,
+            check=False,
+        )
+        return (
+            result,
+            self.trace.read_text().splitlines() if self.trace.exists() else [],
+        )
 
     def test_emulators_start_before_any_test_and_all_suites_use_selected_target(self):
         result, calls = self.run_mode("emulation")
         self.assertEqual(result.returncode, 0, result.stderr)
-        self.assertIn("emulation/up.sh --spark --trino --polaris --gravitino --nessie --lakekeeper", calls[0])
-        for call, suite in zip(calls[1:], ("unit", "cross-engine", "regression"), strict=True):
+        self.assertIn(
+            "emulation/up.sh --spark --trino --polaris --gravitino --nessie --lakekeeper",
+            calls[0],
+        )
+        for call, suite in zip(
+            calls[1:], ("unit", "cross-engine", "regression"), strict=True
+        ):
             self.assertIn(f"test {suite}|emulation|1|", call)
 
     def test_dependency_failure_prevents_tests(self):

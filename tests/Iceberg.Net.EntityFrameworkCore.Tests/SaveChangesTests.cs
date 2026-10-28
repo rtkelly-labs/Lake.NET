@@ -1,11 +1,36 @@
 using Microsoft.EntityFrameworkCore;
 using Iceberg.Net.Data;
 using Iceberg.Net.Types;
+using Iceberg.Net.TestSupport;
 
 namespace Iceberg.Net.EntityFrameworkCore.Tests;
 
 public sealed class SaveChangesTests : EfTest
 {
+    [Spec("Default values")]
+    [Fact]
+    public async Task SaveChanges_defaults_unmapped_insert_columns_and_keeps_existing_unmapped_values()
+    {
+        await using (var setup = NewContext(o => o.FormatVersion(3)))
+        {
+            await setup.Database.EnsureCreatedAsync();
+            setup.Orders.Add(SampleOrders(1)[0]);
+            await setup.SaveChangesAsync();
+        }
+        var table = await TableAsync("orders");
+        await table.UpdateSchemaAsync(s => s.AddRequiredColumn("source_code", PrimitiveType.Int, initialDefault: 7));
+        await TableMutations.UpdateAsync(table, Iceberg.Net.Expressions.Expression.True, u => u.Set("source_code", 99));
+        await using (var db = NewContext())
+        {
+            (await db.Orders.SingleAsync(o => o.Id == 1)).Qty = 42;
+            db.Orders.Add(SampleOrders(2)[1]);
+            await db.SaveChangesAsync();
+        }
+        var rows = new List<object?[]>();
+        await foreach (var row in TableScan.ReadRowsAsync(await TableAsync("orders"), new ScanRequest { Columns = ["id", "source_code"] })) rows.Add(row);
+        Assert.Equal(new[] { (1L, 99), (2L, 7) }, rows.Select(r => ((long)r[0]!, (int)r[1]!)).OrderBy(r => r.Item1));
+    }
+
     private async Task<int> SnapshotsAsync(string table) => (await TableAsync(table)).Metadata.Snapshots.Count;
 
     [Fact]

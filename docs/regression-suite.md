@@ -126,11 +126,23 @@ and its runs. So the limits that stop a decoder allocating or looping on a claim
 | Deletion vector positions | the manifest entry's `record_count`; runs must match each container's declared cardinality | `DeleteFiles.ReadDeletionVectorAsync`, `RoaringPositionBitmap` |
 | Bound lengths | the type's width | `Conversions.FromBytes` |
 
+## Required integrations
+
+CI sets `ICEBERG_REQUIRED_INTEGRATIONS` to a comma-separated list (for example
+`spark,trino,pyiceberg,catalog:nessie,azurite`). A missing named integration fails its tests instead of skipping.
+`ICEBERG_REQUIRE_TARGET=1` still requires the primary target; DuckDB has its existing required flag. Unsupported
+capabilities such as a catalog's missing format version remain documented characterizations, not missing dependencies.
+The cross-engine/regression jobs retain TRX files with reasons for remaining skips. The cross-engine job fetches
+Azurite explicitly so Azure SAS checks run.
+
+CI also runs Windows/macOS native/typed/EF qualification, the public API snapshot check, the diagnostic resource
+workload, all eleven package consumers, and the published REST executable's client/restart smoke test.
+
 ## CI
 
 | Workflow | When | What |
 |---|---|---|
-| `ci.yml` | every PR, merge queue entry and push to `main` (its `ci` job is the required check, and fails unless every job below succeeds) | Three parallel jobs, one per `<CiSuite>` (`tools/test-projects.sh`): `unit` (L0, netstandard2.0, LINQ, EF Core, REST catalog behaviour, package smoke test, spec traceability matrix as an artifact; no Docker), `cross-engine` (all emulators + Spark + DuckDB: ecosystem, BDD, REST server) and `regression` (all emulators, `ICEBERG_REQUIRE_TARGET=1`: REST protocol, L1/L2) |
+| `ci.yml` | every PR, merge queue entry and push to `main` (its `ci` job is the required check, and fails unless every job below succeeds) | Three primary suites, one per `<CiSuite>` (`tools/test-projects.sh`): `unit` (L0, netstandard2.0, LINQ, EF Core, REST catalog behaviour, package smoke test, spec traceability matrix as an artifact; no Docker), `cross-engine` (all emulators + Spark + DuckDB: ecosystem, BDD, REST server) and `regression` (all emulators, required dependencies: REST protocol, L1/L2), plus Windows/macOS native/typed/EF qualification. Unit also checks API snapshots, packages and the published server |
 | `upkeep.yml` | when dispatched | spec drift vs apache/iceberg `main` (red only for upstream changes not yet reviewed with `tools/spec_trace.py drift --acknowledge`); the regression suite against `:latest` emulator images |
 | `aws.yml` | when dispatched, **dormant until `ICEBERG_AWS_ROLE_ARN` is set** | L1–L3 against AWS; shadow comparison of `ICEBERG_SHADOW_TABLES` |
 | `release.yml` | when dispatched (a dry run unless unticked) | Release build, the `unit` suite, pack, package smoke test, the commit's `ci` check; publishes the `CHANGELOG.md` version to NuGet (trusted publishing) |

@@ -1,7 +1,7 @@
 # Iceberg.NET
 
 A native .NET implementation of [Apache Iceberg](https://iceberg.apache.org/): create, write, read and maintain Iceberg
-tables from C#, through AWS Glue, any Iceberg REST catalog, a JDBC/SQL catalog or an in-memory catalog.
+tables from C#, through AWS Glue, compatible Iceberg REST catalogs, a JDBC/SQL catalog or an in-memory catalog.
 
 > **Early development.** The API and the capability set for `0.0.1` are still being formalised. The implemented paths are tested
 > against emulators (moto for S3 and Glue, the Iceberg REST fixture, Polaris, Nessie, Lakekeeper, Gravitino) and
@@ -18,6 +18,12 @@ tables from C#, through AWS Glue, any Iceberg REST catalog, a JDBC/SQL catalog o
 | `Iceberg.Net.Catalog` | Catalogs: in-memory, AWS Glue, Iceberg REST, JDBC/SQL |
 | `Iceberg.Net.Data` | Table operations: scans, appends, upserts, deletes, UPDATE/MERGE, maintenance |
 | `Iceberg.Net.Linq` | Typed rows and a LINQ provider that pushes filters and projections into scans |
+| `Iceberg.Net.Arrow` | Supported Arrow schemas, record batches and table I/O |
+| `Iceberg.Net.EntityFrameworkCore` | EF Core 10 provider, queries, tracked and bulk writes |
+| `Iceberg.Net.Spark` | Procedure SQL and experimental managed Spark job runners |
+| `Iceberg.Net.Athena` | SQL helpers and experimental Athena query runner |
+
+The REST server is a separate executable archive. See [the support contract](https://github.com/rtkelly-labs/Iceberg.NET/blob/main/docs/support-contract.md) for exact capability and operational boundaries.
 
 ## Example
 

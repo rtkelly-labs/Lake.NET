@@ -2,6 +2,10 @@
 
 | Doc | Read it for |
 |---|---|
+| [support-contract.md](support-contract.md) | Full-stack capability selection, exclusions, distribution and acceptance before 0.0.1 |
+| [server-operations.md](server-operations.md) | Server deployment, quotas, credentials, shared state, backup/recovery and operating limits |
+| [resource-envelope.md](resource-envelope.md) | Allocation boundaries, measured diagnostic workloads and platform qualification |
+| [api/README.md](api/README.md) | Regenerating and checking public API snapshots |
 | [capability-baseline.md](capability-baseline.md) | **Scope before 0.0.1:** all 12 projects, 40 capabilities, evidence boundaries, assessment findings and proposed acceptance criteria |
 | [handover.md](handover.md) | **Start here when picking the project up:** release and contribution workflow, test inventory, local setup, open items and next steps |
 | [spec-coverage.md](spec-coverage.md) | **The foundation.** Section-by-section status against the table spec (v1–v3), REST, Puffin and view specs, with the test that pins each item |

@@ -1,7 +1,7 @@
 # Public API snapshots
 
-The snapshots capture the exported type/member shape for all 12 source projects and both target frameworks of
-Core and Avro (14 files). They are generated from compiled assemblies using the Roslyn compiler shipped with the
+The snapshots capture the exported type/member shape for the solution's source projects and their declared
+target frameworks (currently 12 projects / 14 files). They are generated from compiled assemblies using the Roslyn compiler shipped with the
 SDK pinned in `global.json`. Parameter names/defaults, generic constraints, accessibility, modifiers and nullable
 reference types are included. This is an API review gate, not proof of behavioral or wire-format compatibility.
 

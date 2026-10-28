@@ -37,6 +37,10 @@ await db.Orders.Where(o => o.Id == 7).ExecuteUpdateAsync(s => s.SetProperty(o =>
 db.Orders.Where(o => o.Qty > 2).ToIcebergQueryString();     // scan filter, columns, residual, in-memory operators
 ```
 
+If both EF Core and `Iceberg.Net.Linq` query extensions are in scope, qualify ambiguous async terminals with
+`Microsoft.EntityFrameworkCore.EntityFrameworkQueryableExtensions`, or use separate namespace aliases. The package
+smoke consumer demonstrates EF Core calls without importing the competing LINQ extension namespace.
+
 The context does not own the catalog. Dispose the catalog yourself.
 
 ## Model

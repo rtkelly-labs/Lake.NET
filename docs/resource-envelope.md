@@ -27,6 +27,9 @@ dotnet run --project tools/ResourceProbe -- 10000 "$PWD/temp"
 dotnet run --project tools/ResourceProbe -- 100000 "$PWD/temp"
 ```
 
+The `iceberg.scan.bytes` telemetry counter reports sizes of opened files, not actual transferred range bytes.
+The probe's `scanReadBytes` counts the buffer-read APIs exercised by this workload, including metadata.
+
 The probe generates deterministic data (long IDs and 269-character payloads), inserts it, projects only IDs, checks
 the returned row count, and reports elapsed time, managed allocations, file sizes, buffer-read bytes and batch size.
 Working-set fields are null when the runtime does not expose the metric. Managed allocation totals exclude native

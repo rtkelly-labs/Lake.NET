@@ -46,6 +46,17 @@ public sealed class WriteDefaultTests : CatalogTest
     [Theory]
     [InlineData("parquet")]
     [InlineData("avro")]
+    public async Task Explicit_null_in_a_required_column_fails_without_committing(string format)
+    {
+        var table = await CreateAsync(format, required: true);
+        await Assert.ThrowsAsync<ArgumentException>(() => table.InsertAsync([new ExplicitValue { Id = 1, Extra = null }]));
+        await table.RefreshAsync();
+        Assert.Empty(table.Metadata.Snapshots);
+    }
+
+    [Theory]
+    [InlineData("parquet")]
+    [InlineData("avro")]
     public async Task Explicit_null_and_explicit_values_are_not_replaced_by_defaults(string format)
     {
         var table = await CreateAsync(format, required: false);

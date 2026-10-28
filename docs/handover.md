@@ -23,10 +23,10 @@ runner have been exercised against emulators; Athena SQL has unit and Trino chec
 path and NuGet trusted publishing. The capability set and acceptance criteria for `0.0.1` are being formalised;
 no new release is cut. Check NuGet and repository tags for publication status.
 
-The first package set is `Iceberg.Net.Core`, `Avro`, `Puffin`, `IO`, `Catalog`, `Data` and `Linq`.
-`EntityFrameworkCore`, `Spark`, `Athena` and `Arrow` remain `IsPackable=false` for a later preview. The REST
-server remains unpublished by choice; its storage-location checks are implemented. Run it from source using
-[rest-server.md](rest-server.md).
+The selected full-stack library set is `Iceberg.Net.Core`, `Avro`, `Puffin`, `IO`, `Catalog`, `Data`, `Linq`,
+`EntityFrameworkCore`, `Spark`, `Athena` and `Arrow`. The REST server is distributed as a framework-dependent
+executable archive, not a NuGet library. See the [support proposal](support-contract.md) and
+[server operating contract](server-operations.md).
 
 To release:
 
@@ -34,7 +34,7 @@ To release:
 2. Configure NuGet trusted publishing for repository `rtkelly-labs/Iceberg.NET`, workflow `release.yml`,
    environment `release`. The login user is `NUGET_USER`, or `rtk_13` when that secret is absent.
 3. After merging the cut, dispatch `.github/workflows/release.yml` from `main` with its default `dry_run=true`.
-   Check that exactly the seven packages above are packed and that the commit's `ci` check passed. Dry runs
+   Check that exactly the eleven libraries above and the server artifact are packed and that the commit's `ci` check passed. Dry runs
    report missing or failing CI as a warning, so inspect that verdict too.
 4. Obtain the owner's confirmation before dispatching a real NuGet publish with `dry_run=false`.
 
@@ -81,7 +81,7 @@ and [emulation.md](emulation.md) for engine flags and fidelity shims. Important 
   unreachable target. Check skips when claiming cross-engine verification.
 - Generated Reqnroll `*.feature.cs` files and `docs/spec-traceability.md` are gitignored. Run
   `python3 tools/spec_trace.py matrix --check` to validate section links; CI uploads the matrix as an artifact.
-- `tools/package-smoke.sh` packs the seven public libraries and builds consumers against a local feed.
+- `tools/package-smoke.sh` packs the eleven public libraries and builds consumers against a local feed.
 - CI sets `ICEBERG_SPARK_JAR` explicitly to the runtime downloaded by `emulation/up.sh --spark`; the REST
   server test output has its own `interop/` directory, which can confuse the default repository-root lookup.
 - Keep temporary files and worktrees in the gitignored `temp/` directory and local task tracking in `TODO.md`.
@@ -94,8 +94,6 @@ The [roadmap](roadmap.md) records the broader gaps. The immediate follow-ups aft
 
 - Regenerate fixtures that still embed the old fixture-root name; compressed Avro cannot be repaired by text replacement.
 - Add fuzz seeds for zstd Puffin blobs, Roaring run containers and zero-width Avro schemas.
-- Cap stored idempotent responses per principal in the REST server.
-- Configure Dependabot version updates (in addition to security updates).
 
 External setup remains necessary for the [AWS workflow](../.github/workflows/aws.yml): an OIDC role, S3 regression
 prefix with a three-day lifecycle, Glue access and an Athena v3 workgroup, plus the workflow's repository variables.

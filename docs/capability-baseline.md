@@ -4,6 +4,11 @@ Assessment date: 26 October 2026. Source baseline: `5582a0b` (main after #20), p
 repository capability assessment and proposed release contract, not a
 release announcement. No `0.0.1` version is cut. The existing `0.0.1-alpha.1` is a prerelease.
 
+Implementation follow-up: 28 October 2026, rebased onto `c599bc9` after #21/#23/#24. The concrete
+[full-stack support proposal](support-contract.md), [API snapshots](api/README.md),
+[server operating contract](server-operations.md) and [resource envelope](resource-envelope.md) now describe
+the intended delivery and boundaries. The original findings below remain the audit trail.
+
 ## Assessment
 
 The repository already implements a native Iceberg table engine, catalog clients, typed access, and a REST catalog
@@ -37,8 +42,9 @@ A green run with skipped integration cases is not verification of those integrat
 
 ## Source and package boundaries
 
-The current seven-package selection does not distribute the complete selected full-stack scope. A delivery path
-for the additional libraries and server must be agreed before `0.0.1`. All project paths below are
+The full-stack selection now packs eleven libraries and publishes a framework-dependent REST server archive.
+Package consumers exercise EF Core through that published server and verify persistence after restart.
+The version remains a development pack, not a `0.0.1` release cut. All project paths below are
 relative to [`src/`](../src).
 
 | Component | Purpose and public surface | Current distribution / runtime |
@@ -50,11 +56,11 @@ relative to [`src/`](../src).
 | [Puffin](../src/Iceberg.Net.Puffin) | Puffin, deletion vectors, Roaring, Theta, preparatory Mumbling codec | Packable; `net10.0` |
 | [Data](../src/Iceberg.Net.Data) | File I/O, scans, mutations, staged commits, maintenance, validation | Packable; `net10.0`; ParquetSharp native dependency |
 | [Linq](../src/Iceberg.Net.Linq) | Typed schema/mapping, queries and writes | Packable; `net10.0` |
-| [Arrow](../src/Iceberg.Net.Arrow) | Arrow schemas, batches and table reads/writes | Implemented; `IsPackable=false`; `net10.0` |
-| [EntityFrameworkCore](../src/Iceberg.Net.EntityFrameworkCore) | EF Core 10 provider over the typed layer | Implemented; `IsPackable=false`; `net10.0` |
-| [Spark](../src/Iceberg.Net.Spark) | Procedure SQL and EMR Serverless/Glue job runners | Implemented; `IsPackable=false`; `net10.0` |
-| [Athena](../src/Iceberg.Net.Athena) | Athena/Trino SQL generation and Athena query runner | Implemented; `IsPackable=false`; `net10.0` |
-| [RestServer](../src/Iceberg.Net.RestServer) | ASP.NET Core executable and hosting APIs | `IsPackable=false` by choice; run/publish from source; `net10.0` |
+| [Arrow](../src/Iceberg.Net.Arrow) | Arrow schemas, batches and table reads/writes | Packable; `net10.0` |
+| [EntityFrameworkCore](../src/Iceberg.Net.EntityFrameworkCore) | EF Core 10 provider over the typed layer | Packable; `net10.0` |
+| [Spark](../src/Iceberg.Net.Spark) | Procedure SQL and EMR Serverless/Glue job runners | Packable; `net10.0` |
+| [Athena](../src/Iceberg.Net.Athena) | Athena/Trino SQL generation and Athena query runner | Packable; `net10.0` |
+| [RestServer](../src/Iceberg.Net.RestServer) | ASP.NET Core executable and hosting APIs | Executable archive; `IsPackable=false` for NuGet; `net10.0` |
 
 `netstandard2.0` does not extend the complete read/write engine to .NET Framework: only Core and Avro target it.
 Its tests execute those assemblies on the current .NET runtime, not on .NET Framework. CI uses Ubuntu; this is not
@@ -110,10 +116,10 @@ Sources: [Parquet mappings](../src/Iceberg.Net.Data/ParquetFiles.cs), [Avro mapp
 
 | ID | Capability | Implemented scope and evidence boundary |
 |---|---|---|
-| C23 | Native catalog clients | In-memory, Glue, JDBC/SQL and REST. Shared CRUD/commit contract: [ICatalog](../src/Iceberg.Net.Catalog/Catalog.cs), regression `CatalogConformanceTests`. Namespace load/update-properties and credential-refresh endpoints are not exposed as a complete .NET client API |
+| C23 | Native catalog clients | In-memory, Glue, JDBC/SQL and REST. Shared CRUD/commit contract: [ICatalog](../src/Iceberg.Net.Catalog/Catalog.cs), regression `CatalogConformanceTests`. Namespace metadata/property operations remain incomplete in the .NET abstraction; credential refresh now has a REST client API |
 | C24 | Glue and AWS REST clients | Glue VersionId locking and single-level namespaces; SigV4 helpers for Glue REST/S3 Tables. SDK/emulator and signing-vector tests exist. Real AWS catalog/storage/workgroup verification remains pending |
 | C25 | SQL catalog | ADO.NET factory, V0/V1 JDBC layouts, optional views and multi-table transactions; tests prove SQLite. Treat PostgreSQL/MySQL/SQL Server portability as unverified; generic ADO.NET plumbing does not establish SQL-dialect compatibility |
-| C26 | REST client | Config/auth, paging, tables/views, idempotent retries, selected endpoint negotiation, remote signing and server-planned scans. Namespace properties, credential refresh, metrics submission and freshness-aware table loading remain client gaps |
+| C26 | REST client | Config/auth, paging, tables/views, idempotent retries, selected endpoint negotiation, remote signing and server-planned scans. Explicit `LoadCredentialsAsync` and replay recovery are implemented; namespace properties, metrics submission and freshness-aware table loading remain client gaps |
 | C27 | Views | v1 metadata, dialect SQL representations, create/load/replace/list/exists/rename/drop on in-memory/REST/JDBC V1; Glue lacks `IViewCatalog`. View SQL storage does not provide a .NET SQL query engine. `ViewTests` and regression `ViewConformanceTests` |
 | C28 | Native FileIO | Local and S3, including ranges, listing, conditional create, credentials and request signing; `ResolvingFileIO` dispatches to those. No native Azure/GCS data FileIO is supplied; server vending for external clients is separate. [FileIO](../src/Iceberg.Net.IO/FileIO.cs), `ThrottlingTests`, `EmulatorFidelityTests` |
 | C29 | Engine interoperability | Spark/Java, PyIceberg, Trino and DuckDB oracles exist. Support is a set of tested combinations, not every engine × format × delete mode: pinned PyIceberg refuses equality deletes; pinned Trino cannot read DVs; Spark changelog comparison cannot validate histories with delete files. [Regression tests](../tests/Iceberg.Net.Regression.Tests), [oracles](../interop) |
@@ -133,12 +139,12 @@ every commercial REST endpoint. The pinned versions and table-format support mus
 | C34 | EF Core 10 | Model creation, queries, time travel, bulk writes, tracked `SaveChanges`, concurrency tokens and atomic saves where catalog supports them. Without transactions, multi-table saves are sequential unless `RequireAtomicSaveChanges` is set. No migrations, explicit transactions, compiled queries, relationships, inheritance, complex/owned or collection columns, converters or global query filters | [provider](../src/Iceberg.Net.EntityFrameworkCore), [tests](../tests/Iceberg.Net.EntityFrameworkCore.Tests), REST server `EfCoreTransactionTests` |
 | C35 | REST catalog server | Tables/namespaces/views, staged creates, transactions, plans/tasks/incremental scans, ETags, unregister, metrics endpoint and generated OpenAPI. Metrics reports are accepted/discarded; not stored. Functions and register-view absent; one warehouse per server | [routes](../src/Iceberg.Net.RestServer/Endpoints.cs), [protocol tests](../tests/Iceberg.Net.RestProtocol.Tests), [behavior specs](../tests/Iceberg.Net.RestCatalogBehaviour.Tests/Features) |
 | C36 | Server auth and storage delegation | Bearer/client credentials/token exchange, grants, table-location constraints, S3 signing, STS/Azure SAS/GCS tokens. S3 signing only; real GCS downscoping and ADLS directory-SAS validation remain outstanding. Do not infer native .NET Azure/GCS data access | [server](../src/Iceberg.Net.RestServer), `AuthorizationTests`, `LocationPolicyTests`, credential-vending and remote-signing tests |
-| C37 | Server shared state | SQL/in-memory pointer stores, shared idempotency and plan state; response retention/size limit and credential stripping. No per-principal retained-response quota; audit logging and metrics-report storage absent | `SharedStateTests`, `IdempotencyTests`, `ServerDefaultsTests`; [state](../src/Iceberg.Net.RestServer/ServerState.cs) |
+| C37 | Server shared state | SQL/in-memory pointer stores, shared idempotency and plan state; response retention/size limit and credential stripping. Per-principal bounded claims preserve replays and fail new keys with 429; audit logging and metrics-report storage absent | `SharedStateTests`, `IdempotencyTests`, `ServerDefaultsTests`; [state](../src/Iceberg.Net.RestServer/ServerState.cs) |
 | C38 | Spark helpers / managed jobs | Procedure SQL, generated driver, staging, EMR Serverless/Glue submission/polling/cancel; SQL oracle and SDK emulation tests. Not a Spark Connect client; real service execution pending | [Spark](../src/Iceberg.Net.Spark), ecosystem `SparkProcedureOracleTests`, `SparkJobRunnerTests`; regression `ManagedSparkJobTests` |
 | C39 | Athena helpers / query runner | DDL/maintenance/time-travel SQL and SDK submission/polling/paging/cancel; SQL unit tests, Trino query checks and moto runner. Real Athena DDL/OPTIMIZE/VACUUM and AWS execution remain pending | [Athena](../src/Iceberg.Net.Athena), ecosystem `AthenaSqlTests`; regression `AthenaRunnerEmulationTests`, `AthenaSqlOnTrinoTests` |
 | C40 | Telemetry | `IcebergTelemetry` ActivitySource/Meter for planning/scans/commits/catalog calls, outcomes/retries and counters; optional listener integration, not a bundled monitoring service | [instrumentation](../src/Iceberg.Net.Core/Diagnostics/IcebergTelemetry.cs), ecosystem `TelemetryTests` |
 
-The server OpenAPI comparison has **25 explicitly reviewed deviations**, including three missing operations;
+The server OpenAPI comparison has **40 explicitly reviewed deviations**, including three missing operations;
 see the [deviation ledger](spec/openapi-deviations.json) and `OpenApiConformanceTests`. An OpenAPI shape check and an
 operation-level protocol test are different evidence; neither alone establishes full server compliance.
 
@@ -147,22 +153,22 @@ operation-level protocol test are different evidence; neither alone establishes 
 | Mechanism | What is present | Qualification |
 |---|---|---|
 | Unit contract suites | Spec, netstandard assemblies, LINQ-to-Objects predicate matrix, EF Core, REST behavior | Run through solution/CiSuite registry; counts and results below |
-| Cross-engine / regression | Python, Docker reference servers, Spark, Trino, DuckDB, moto shims, managed-job emulation | Availability checks can skip capabilities; the required-target flag only hard-fails the primary target |
+| Cross-engine / regression | Python, Docker reference servers, Spark, Trino, DuckDB, moto shims, managed-job emulation | CI names required integrations, fails missing dependencies and retains TRX skip reasons; optional/unsupported capabilities remain qualified |
 | Fault / concurrency | Deterministic interleavings, injected IO and commit faults, random mutation models, contention soak | Strong correctness evidence; not production-duration load testing |
-| Decoder robustness | `Corruption.Guard`, size/count limits, mutation samples, SharpFuzz/libFuzzer harness | Harness has nine targets; fuzz workflow matrix runs eight and omits `mumbling` |
+| Decoder robustness | `Corruption.Guard`, size/count limits, mutation samples, SharpFuzz/libFuzzer harness | Harness and manually dispatched workflow cover nine targets including `mumbling` |
 | Mutation testing | Four Stryker configurations | Threshold `break=0`; measures survivors but does not enforce a minimum score |
 | Spec traceability | Generated matrix against pinned Apache 1.12.0 sections | 73/88 table+Puffin sections and 32/32 implemented REST operations linked; links are not execution or completeness coverage |
 | Upstream drift / upkeep | Pinned-spec comparison and latest-emulator workflow | Manual dispatch; not automatically weekly |
 | Cloud verification | AWS workflow with OIDC and variables; read-only shadow tool | Manual dispatch, AWS role-gated; no nightly schedule; real cloud evidence remains outstanding |
 | Release machinery | Changelog parser, exact package-count smoke test, CI-commit check, dry-run default, trusted publishing | Dry-run CI verdict can warn rather than fail; current latest cut section remains the already released alpha |
-| API / performance / portability | Public XML docs, integration tests and native dependency | No checked-in public API compatibility baseline or benchmark suite found; Ubuntu CI alone is not cross-platform certification |
+| API / performance / portability | Public XML docs, integration tests and native dependency | Checked-in API snapshots and a diagnostic resource probe now exist; Windows/macOS native/typed/EF qualification jobs are configured and require green CI |
 
 See [CI](../.github/workflows/ci.yml), [fuzz](../.github/workflows/fuzz.yml),
 [mutation](../.github/workflows/mutation.yml), [AWS](../.github/workflows/aws.yml),
 [upkeep](../.github/workflows/upkeep.yml), [test target selection](../tests/Iceberg.Net.TestSupport/TestEnvironment.cs),
 and [run-tests.sh](../run-tests.sh).
 
-## Findings to settle before calling the capability set formal
+## Original findings and completion criteria
 
 | Priority / ID | Finding and consequence | Concrete completion criterion |
 |---|---|---|
@@ -180,9 +186,24 @@ and [run-tests.sh](../run-tests.sh).
 | P2 F12 | Runtime/OS support and performance targets are not formal | List supported TFMs, OS/architectures/native requirements and data sizes; add only the corresponding build/runtime and benchmark checks |
 | P1 F13 | Confirmed write-default defect: unmapped typed columns are left null; optional fields silently lose the declared default, required fields fail | Apply declared defaults when a typed member is absent (while preserving explicit-null semantics); cover optional/required fields, supported formats and nested/default behavior, including a cross-engine scenario |
 
+This table records the initial findings; the implementation-status table below records their current disposition.
 P0/P1/P2 here rank work for formalising the contract. They are not vulnerability severities and do not mean every
 missing optional feature is a release blocker. ORC, full v4, a SQL query engine, all EF features and every cloud
 provider need not be built for a useful `0.0.1`; exclusions must be explicit.
+
+## Implementation status on 28 October
+
+| Finding | Follow-up |
+|---|---|
+| F01/F11 | Eleven library packages plus server executable selected; local `0.0.1-dev.1` packs consumed successfully, including EF over the published server and restart. No release cut |
+| F02/F05 | User-facing scope, native storage and SQL/provider claims aligned; support selection/exclusions are explicit in support-contract.md |
+| F03/F04 | Dependency startup precedes suites; five orchestration tests pass. CI requires named integrations, fetches Azurite, and retains test/skip artifacts. Final CI pending |
+| F06 | External dependency: no workflow role/warehouse variables or isolated cloud targets supplied. Cloud paths remain experimental pending real-service checks |
+| F07 | API shape snapshots/checker for the solution's source projects/TFMs, with deliberate-drift rejection and review instructions |
+| F08/F12 | Resource contracts and reproducible 10k/100k measurements recorded; Windows/macOS native/typed/EF CI qualification configured, awaiting results |
+| F09 | Nine fuzz workflow targets, accurate manual/informational check descriptions, weekly NuGet/Actions/uv dependency-update configuration |
+| F10/S06 | Atomic per-principal claim budgets in both stores, cross-instance replay tests, explicit credential refresh and replay recovery; restart/live-backup tests and operating runbook |
+| F13 | Mapper defaults only absent fields; preserves explicit nulls and unmapped MERGE/update values. Unit/EF/BDD cases added; cross-engine CI evidence pending |
 
 ## Proposed 0.0.1 acceptance record
 
@@ -192,14 +213,14 @@ before release preparation; implementation breadth alone does not satisfy these 
 | Decision / gate | Proposed evidence to retain | Current state |
 |---|---|---|
 | Supported users and workflows | Example: native .NET producer/reader; typed consumer; server operator, each with concrete success scenarios | **Full stack including REST server selected**; concrete scenarios pending |
-| Included capabilities | C01–C40 marked included/experimental/excluded, with their exact limitations | Inventory ready; selection pending |
-| Packages and platforms | Approved package list, TFMs, OS/architectures and native dependencies | Seven currently packable; full-stack distribution unresolved |
+| Included capabilities | C01–C40 marked included/experimental/excluded, with their exact limitations | Selection is explicit in support-contract.md; owner review pending |
+| Packages and platforms | Approved package list, TFMs, OS/architectures and native dependencies | Eleven libraries and a published-server archive selected; local package/server checks passed |
 | Compatibility claims | Engine/catalog/version × table format × delete strategy × data type combinations | Existing tests provide a base; assemble an approved matrix |
 | Commit/data safety | Required fault, corruption, concurrency, lineage and GC cases; unknown outcomes never cleaned up | Implemented tests; retain fresh required-suite results |
-| Verification completeness | Successful checks at exact release SHA, with no unexplained required-case skips | CI running; cloud/optional integrations remain qualified |
-| API and examples | Reviewed API snapshot and runnable examples from the packed artifacts | Package consumers exist; API agreement pending |
-| Resource envelope | Agreed row/file sizes, memory and latency expectations for scans, writes and maintenance | No formal benchmark baseline found |
-| Operational scope | Catalog/server permissions, storage location policy, recovery and observability expectations | Server included; deployment/recovery/credential-lifecycle contract pending |
+| Verification completeness | Successful checks at exact release SHA, with no unexplained required-case skips | Fresh required/platform CI pending for implementation follow-up; real cloud remains experimental |
+| API and examples | Reviewed API snapshot and runnable examples from the packed artifacts | API shape snapshots/checker and full-stack package/server consumers implemented; owner review pending |
+| Resource envelope | Agreed row/file sizes, memory and latency expectations for scans, writes and maintenance | 10k/100k diagnostic workloads recorded; no universal memory or latency SLA |
+| Operational scope | Catalog/server permissions, storage location policy, recovery and observability expectations | Operating contract, quotas, explicit refresh, restart and live-backup recovery tests implemented |
 | Exclusions and documentation | User-facing support statement matching the capability decisions | This baseline is the starting point |
 | Release execution | Version cut only after agreement; dry-run packages and CI verified; owner confirms real publish | Deliberately deferred |
 
@@ -212,15 +233,15 @@ claims that each has passed. Supported providers, cloud scope and the distributi
 |---|---|---|
 | S01 Create, load and restart | Create namespaces and v2/v3 tables through the server; insert/read with raw, typed and selected EF/Arrow APIs; restart a SQL-backed server and retain tables/views/history | Catalog/behavior/SQL tests exist; agree the full-stack runnable distribution and an example combining consumers |
 | S02 Interoperable mutation | Append/upsert/group-replace/delete/UPDATE/MERGE across supported partition and delete modes; named external engines return the same rows | BDD/regression matrix exists; publish exact supported combinations rather than “all engines” |
-| S03 Evolution and historical reads | Rename/add/widen/nested evolution preserve field identity; old snapshot/ref/instant reads use documented schemas and defaults | Strong existing read/evolution tests; F13 blocks declaring complete typed write-default semantics |
+| S03 Evolution and historical reads | Rename/add/widen/nested evolution preserve field identity; old snapshot/ref/instant reads use documented schemas and defaults | Read/evolution and new typed/EF default cases pass locally; cross-engine default cases await CI |
 | S04 Concurrency and atomic saves | Two writers either serializably succeed or return a documented conflict; multi-table REST/EF commits leave all-or-none state under failure | Interleaving/staging/EF transaction tests; Glue must remain explicitly non-atomic across tables |
 | S05 Authorization and confinement | Anonymous/reader/writer/admin behavior is explicit; grants, storage roots and signing/vending never authorize outside their table scope | Authorization/location/signing/vending tests; choose supported identity-provider and deployment configuration |
-| S06 Delegation and credential lifetime | Supported clients can create/load/read/write, refresh expired credentials, and recover after a replayed response has credentials removed | Server refresh route exists; .NET credential-refresh API missing. This cross-capability flow needs explicit qualification or completion |
+| S06 Delegation and credential lifetime | Supported clients can create/load/read/write, refresh expired credentials, and recover after a replayed response has credentials removed | Client refresh API and replayed-create recovery are covered; automatic background renewal remains excluded |
 | S07 Server-planned reads | Our client and supported external clients plan/read inline and async/task plans, with each supported delete mode and cancellation | Existing plan tests; newly enabled Spark flow needs green CI after ownership correction |
 | S08 Lifecycle and retention | Ref/WAP operations, maintenance, purge and dry-run orphan cleanup obey lineage, reachability, age and `gc.enabled`; feed replay agrees with snapshots | Local/model/fault/engine cases exist; specify partial-progress and expired-history behavior |
-| S09 Multi-instance recovery | Shared SQL state handles racing commits, duplicate requests and plan IDs across instances; restart/backup/restore procedure preserves recoverable state | Shared-state/concurrency tests cover portions; quota and operator recovery/backup expectations remain to define |
-| S10 Consumption and platforms | Each included library is installable from the release feed; server has a runnable/publishable artifact and example configuration; declared native dependencies work on supported platforms | Seven-package smoke test exists; four libraries currently excluded; no approved OS/architecture matrix or release server artifact |
-| S11 Query and resource behavior | Typed/EF semantics match documented LINQ behavior; query diagnostics expose client work; representative scan/write/maintenance sizes stay inside declared resource targets | Translation matrix exists; no benchmark/resource envelope yet; default row groups and writes can be large |
+| S09 Multi-instance recovery | Shared SQL state handles racing commits, duplicate requests and plan IDs across instances; restart/backup/restore procedure preserves recoverable state | Shared quotas/replay tests, live SQLite backup/restore, published-server restart and operator runbook implemented |
+| S10 Consumption and platforms | Each included library is installable from the release feed; server has a runnable/publishable artifact and example configuration; declared native dependencies work on supported platforms | Eleven-package consumer/server-restart checks pass locally; platform qualification CI pending |
+| S11 Query and resource behavior | Typed/EF semantics match documented LINQ behavior; query diagnostics expose client work; representative scan/write/maintenance sizes stay inside declared resource targets | Translation matrix and diagnostic resource envelope exist; row-group and whole-write memory boundaries remain explicit |
 | S12 Real-service integrations | Supported AWS catalog/storage/Athena/managed-job and GCS/ADLS delegation paths run against real services with appropriate isolation | Emulated/scripted evidence only; either obtain real-service results or explicitly mark these paths experimental |
 
 ## Execution evidence from this assessment
@@ -279,3 +300,14 @@ Azurite skip; Behaviour and Ecosystem passed 65 and 58 cases respectively.
 The harness now uses the same post-process shared-mount permission handoff as `SparkOracle.ReadTablesAsync`, preserving
 the Spark exit code. This repairs the test environment; [CI run 40385929772](https://github.com/rtkelly-labs/Iceberg.NET/actions/runs/40385929772) passed the unit,
 cross-engine and regression jobs after the correction, verifying that flow.
+
+## Fresh implementation verification on 28 October
+
+Rebased onto `c599bc9` to retain the merged Puffin split and reflection/fingerprint/AOT tooling changes.
+The full unit suite passed **1,150 tests with zero failures/skips**: Spec 823, NetStandard 109, LINQ 95,
+EF Core 34 and REST catalog behavior 89. Five Python orchestration tests passed. Package-consumer checks
+packed all eleven libraries at `0.0.1-dev.1`, exercised the additional four packages, and ran EF Core through the
+published REST executable before checking SQLite/replay persistence after restart. The API checker also rejected
+an intentional snapshot drift. These results do not cut a release or qualify real cloud services.
+
+The new required integration/platform checks and the full-stack package flow must pass again on the final PR SHA.

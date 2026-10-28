@@ -1,4 +1,5 @@
 """Smoke a published server executable, including durable state across a restart (stdlib only)."""
+
 from __future__ import annotations
 
 import json
@@ -15,8 +16,18 @@ import urllib.request
 
 def start(assembly: Path, root: Path):
     env = {k: v for k, v in os.environ.items() if not k.lower().startswith("iceberg__")}
-    env.update(Iceberg__Store="sqlite", Iceberg__SqlitePath=str(root / "catalog.db"), Iceberg__Warehouse=str(root / "warehouse"))
-    process = subprocess.Popen(["dotnet", str(assembly), "--urls", "http://127.0.0.1:0"], env=env, stdout=subprocess.PIPE, stderr=subprocess.STDOUT, text=True)
+    env.update(
+        Iceberg__Store="sqlite",
+        Iceberg__SqlitePath=str(root / "catalog.db"),
+        Iceberg__Warehouse=str(root / "warehouse"),
+    )
+    process = subprocess.Popen(
+        ["dotnet", str(assembly), "--urls", "http://127.0.0.1:0"],
+        env=env,
+        stdout=subprocess.PIPE,
+        stderr=subprocess.STDOUT,
+        text=True,
+    )
     lines: queue.Queue[str] = queue.Queue()
     log: list[str] = []
 
@@ -34,7 +45,9 @@ def start(assembly: Path, root: Path):
                 line = lines.get(timeout=0.2)
             except queue.Empty:
                 if process.poll() is not None:
-                    raise RuntimeError("Server exited before listening: " + "".join(log))
+                    raise RuntimeError(
+                        "Server exited before listening: " + "".join(log)
+                    )
                 continue
             if "Now listening on: http://127.0.0.1:" in line:
                 return process, line.split("Now listening on:", 1)[1].strip(), log
@@ -60,14 +73,18 @@ def request(base: str, path: str, body=None, key=None):
     if key:
         headers["Idempotency-Key"] = key
     data = None if body is None else json.dumps(body).encode()
-    with urllib.request.urlopen(urllib.request.Request(base + path, data=data, headers=headers), timeout=15) as response:
+    with urllib.request.urlopen(
+        urllib.request.Request(base + path, data=data, headers=headers), timeout=15
+    ) as response:
         content = response.read()
         return (json.loads(content) if content else None), response.headers
 
 
 def main():
     if len(sys.argv) not in (3, 4):
-        raise SystemExit("Usage: server-smoke.py <published-server-directory> <temporary-directory> [consumer-project]")
+        raise SystemExit(
+            "Usage: server-smoke.py <published-server-directory> <temporary-directory> [consumer-project]"
+        )
     assembly = Path(sys.argv[1]).resolve() / "Iceberg.Net.RestServer.dll"
     if not assembly.is_file():
         raise SystemExit(f"Missing published server: {assembly}")
@@ -80,10 +97,34 @@ def main():
             config, _ = request(base, "/v1/config")
             assert "endpoints" in config
             request(base, "/v1/namespaces", namespace, key="restart-key")
-            created, _ = request(base, "/v1/namespaces/smoke/tables", {"name": "events", "schema": {"type": "struct", "schema-id": 0, "fields": [{"id": 1, "name": "id", "required": True, "type": "long"}]}})
+            created, _ = request(
+                base,
+                "/v1/namespaces/smoke/tables",
+                {
+                    "name": "events",
+                    "schema": {
+                        "type": "struct",
+                        "schema-id": 0,
+                        "fields": [
+                            {"id": 1, "name": "id", "required": True, "type": "long"}
+                        ],
+                    },
+                },
+            )
             uuid = created["metadata"]["table-uuid"]
             if len(sys.argv) == 4:
-                subprocess.run(["dotnet", "run", "--project", sys.argv[3], "--no-build", "--", base], check=True)
+                subprocess.run(
+                    [
+                        "dotnet",
+                        "run",
+                        "--project",
+                        sys.argv[3],
+                        "--no-build",
+                        "--",
+                        base,
+                    ],
+                    check=True,
+                )
             document, _ = request(base, "/openapi/v1.json")
             assert document["paths"]
         except BaseException:
@@ -105,7 +146,9 @@ def main():
             raise
         finally:
             stop(process)
-    print("Published server OK: OpenAPI, SQLite table persistence and idempotent replay across restart")
+    print(
+        "Published server OK: OpenAPI, SQLite table persistence and idempotent replay across restart"
+    )
 
 
 if __name__ == "__main__":

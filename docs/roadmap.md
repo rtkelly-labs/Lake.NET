@@ -24,9 +24,8 @@ with NuGet trusted publishing.
 
 | Release scope under review | Current package configuration | Notes |
 |---|---|---|
-| `0.0.1` (not cut) | `Core`, `Avro`, `Puffin`, `IO`, `Catalog`, `Data`, `Linq` currently packable | Capability scope and acceptance criteria pending; [baseline](capability-baseline.md) |
-| Not selected for packaging | `EntityFrameworkCore`, `Spark`, `Athena`, `Arrow` | Implemented; currently `IsPackable=false`; inclusion is a release-scope decision |
-| unpublished by choice | `RestServer` | Storage-location checks are implemented; run the server from source |
+| `0.0.1` (not cut) | All eleven libraries, including EF Core, Arrow, Spark and Athena | Full-stack [support proposal](support-contract.md); real cloud paths remain experimental |
+| executable archive | `RestServer` | Framework-dependent publish artifact; restart/client smoke checks; no NuGet server package |
 
 ### Next-phase design (phases A–G)
 

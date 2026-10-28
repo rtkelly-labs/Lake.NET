@@ -5,6 +5,8 @@ Public Iceberg.Net.Puffin.PuffinBlob Iceberg.Net.Puffin.PuffinBlob.<Clone>$()
 Public Iceberg.Net.Puffin.PuffinBlob.PuffinBlob(string Type, System.Collections.Generic.IReadOnlyList<int> Fields, System.ReadOnlyMemory<byte> Payload, long SnapshotId = -1, long SequenceNumber = -1, string? CompressionCodec = null, System.Collections.Generic.IReadOnlyDictionary<string, string>? Properties = null)
 Public Iceberg.Net.Puffin.PuffinBlobMetadata Iceberg.Net.Puffin.PuffinBlobMetadata.<Clone>$()
 Public Iceberg.Net.Puffin.PuffinBlobMetadata.PuffinBlobMetadata(string Type, System.Collections.Generic.IReadOnlyList<int> Fields, long SnapshotId, long SequenceNumber, long Offset, long Length, string? CompressionCodec = null, System.Collections.Generic.IReadOnlyDictionary<string, string>? Properties = null)
+Public Iceberg.Net.Puffin.PuffinBlobType Iceberg.Net.Puffin.PuffinBlobType.<Clone>$()
+Public Iceberg.Net.Puffin.PuffinBlobType.PuffinBlobType(string Type, bool Compressible = true)
 Public Iceberg.Net.Puffin.PuffinFile.Contents Iceberg.Net.Puffin.PuffinFile.Contents.<Clone>$()
 Public Iceberg.Net.Puffin.PuffinFile.Contents.Contents(System.Collections.Generic.IReadOnlyList<Iceberg.Net.Puffin.PuffinBlobMetadata> Blobs, System.Collections.Generic.IReadOnlyDictionary<string, string> Properties, byte[] Bytes)
 Public Iceberg.Net.Puffin.PuffinFile.Written Iceberg.Net.Puffin.PuffinFile.Written.<Clone>$()
@@ -25,6 +27,8 @@ Public bool Iceberg.Net.Puffin.MumblingBitmap.Contains(int position)
 Public bool Iceberg.Net.Puffin.MumblingBitmap.IsEmpty { get; }
 Public bool Iceberg.Net.Puffin.PuffinBlob.Equals(Iceberg.Net.Puffin.PuffinBlob? other)
 Public bool Iceberg.Net.Puffin.PuffinBlobMetadata.Equals(Iceberg.Net.Puffin.PuffinBlobMetadata? other)
+Public bool Iceberg.Net.Puffin.PuffinBlobType.Compressible { get; init; }
+Public bool Iceberg.Net.Puffin.PuffinBlobType.Equals(Iceberg.Net.Puffin.PuffinBlobType? other)
 Public bool Iceberg.Net.Puffin.PuffinFile.Contents.Equals(Iceberg.Net.Puffin.PuffinFile.Contents? other)
 Public bool Iceberg.Net.Puffin.PuffinFile.Written.Equals(Iceberg.Net.Puffin.PuffinFile.Written? other)
 Public bool Iceberg.Net.Puffin.RoaringPositionBitmap.Contains(long position)
@@ -63,19 +67,23 @@ Public long Iceberg.Net.Puffin.RoaringPositionBitmap.Cardinality { get; }
 Public long Iceberg.Net.Puffin.ThetaSketch.ThetaLong { get; }
 Public override bool Iceberg.Net.Puffin.PuffinBlob.Equals(object? obj)
 Public override bool Iceberg.Net.Puffin.PuffinBlobMetadata.Equals(object? obj)
+Public override bool Iceberg.Net.Puffin.PuffinBlobType.Equals(object? obj)
 Public override bool Iceberg.Net.Puffin.PuffinFile.Contents.Equals(object? obj)
 Public override bool Iceberg.Net.Puffin.PuffinFile.Written.Equals(object? obj)
 Public override int Iceberg.Net.Puffin.PuffinBlob.GetHashCode()
 Public override int Iceberg.Net.Puffin.PuffinBlobMetadata.GetHashCode()
+Public override int Iceberg.Net.Puffin.PuffinBlobType.GetHashCode()
 Public override int Iceberg.Net.Puffin.PuffinFile.Contents.GetHashCode()
 Public override int Iceberg.Net.Puffin.PuffinFile.Written.GetHashCode()
 Public override string Iceberg.Net.Puffin.PuffinBlob.ToString()
 Public override string Iceberg.Net.Puffin.PuffinBlobMetadata.ToString()
+Public override string Iceberg.Net.Puffin.PuffinBlobType.ToString()
 Public override string Iceberg.Net.Puffin.PuffinFile.Contents.ToString()
 Public override string Iceberg.Net.Puffin.PuffinFile.Written.ToString()
 Public sealed Class Iceberg.Net.Puffin.MumblingBitmap
 Public sealed Class Iceberg.Net.Puffin.PuffinBlob : System.IEquatable<Iceberg.Net.Puffin.PuffinBlob>
 Public sealed Class Iceberg.Net.Puffin.PuffinBlobMetadata : System.IEquatable<Iceberg.Net.Puffin.PuffinBlobMetadata>
+Public sealed Class Iceberg.Net.Puffin.PuffinBlobType : System.IEquatable<Iceberg.Net.Puffin.PuffinBlobType>
 Public sealed Class Iceberg.Net.Puffin.PuffinFile.Contents : System.IEquatable<Iceberg.Net.Puffin.PuffinFile.Contents>
 Public sealed Class Iceberg.Net.Puffin.PuffinFile.Written : System.IEquatable<Iceberg.Net.Puffin.PuffinFile.Written>
 Public sealed Class Iceberg.Net.Puffin.RoaringPositionBitmap
@@ -83,6 +91,7 @@ Public sealed Class Iceberg.Net.Puffin.ThetaSketch
 Public static (ulong H1, ulong H2) Iceberg.Net.Puffin.Murmur3x64.Hash128(System.ReadOnlySpan<byte> data, ulong seed)
 Public static Class Iceberg.Net.Puffin.Crc32
 Public static Class Iceberg.Net.Puffin.DeletionVector
+Public static Class Iceberg.Net.Puffin.IcebergPuffinFile
 Public static Class Iceberg.Net.Puffin.MumblingPfor
 Public static Class Iceberg.Net.Puffin.Murmur3x64
 Public static Class Iceberg.Net.Puffin.PuffinBlobTypes
@@ -91,17 +100,21 @@ Public static Iceberg.Net.Puffin.MumblingBitmap Iceberg.Net.Puffin.MumblingBitma
 Public static Iceberg.Net.Puffin.MumblingBitmap Iceberg.Net.Puffin.MumblingBitmap.Of(System.Collections.Generic.IEnumerable<int> positions)
 Public static Iceberg.Net.Puffin.PuffinBlob Iceberg.Net.Puffin.DeletionVector.ToBlob(string referencedDataFile, Iceberg.Net.Puffin.RoaringPositionBitmap positions)
 Public static Iceberg.Net.Puffin.PuffinFile.Contents Iceberg.Net.Puffin.PuffinFile.Read(byte[] bytes)
-Public static Iceberg.Net.Puffin.PuffinFile.Written Iceberg.Net.Puffin.PuffinFile.Write(System.Collections.Generic.IEnumerable<Iceberg.Net.Puffin.PuffinBlob> blobs, System.Collections.Generic.IReadOnlyDictionary<string, string>? properties = null)
+Public static Iceberg.Net.Puffin.PuffinFile.Written Iceberg.Net.Puffin.IcebergPuffinFile.Write(System.Collections.Generic.IEnumerable<Iceberg.Net.Puffin.PuffinBlob> blobs, System.Collections.Generic.IReadOnlyDictionary<string, string>? properties = null)
+Public static Iceberg.Net.Puffin.PuffinFile.Written Iceberg.Net.Puffin.PuffinFile.Write(System.Collections.Generic.IEnumerable<Iceberg.Net.Puffin.PuffinBlob> blobs, System.Collections.Generic.IReadOnlyDictionary<string, string>? properties = null, System.Collections.Generic.IReadOnlyCollection<Iceberg.Net.Puffin.PuffinBlobType>? blobTypes = null)
 Public static Iceberg.Net.Puffin.RoaringPositionBitmap Iceberg.Net.Puffin.DeletionVector.Decode(System.ReadOnlySpan<byte> blob)
 Public static Iceberg.Net.Puffin.RoaringPositionBitmap Iceberg.Net.Puffin.DeletionVector.Decode(System.ReadOnlySpan<byte> blob, long? maxCardinality)
 Public static Iceberg.Net.Puffin.RoaringPositionBitmap Iceberg.Net.Puffin.RoaringPositionBitmap.Deserialize(System.ReadOnlySpan<byte> data)
 Public static Iceberg.Net.Puffin.RoaringPositionBitmap Iceberg.Net.Puffin.RoaringPositionBitmap.Deserialize(System.ReadOnlySpan<byte> data, long? maxCardinality)
 Public static Iceberg.Net.Puffin.ThetaSketch Iceberg.Net.Puffin.ThetaSketch.Deserialize(System.ReadOnlySpan<byte> data, long seed = 9001)
+Public static System.Collections.Generic.IReadOnlyList<Iceberg.Net.Puffin.PuffinBlobType> Iceberg.Net.Puffin.PuffinBlobTypes.Rules { get; }
 Public static System.ReadOnlySpan<byte> Iceberg.Net.Puffin.PuffinFile.Magic { get; }
 Public static bool Iceberg.Net.Puffin.PuffinBlob.operator !=(Iceberg.Net.Puffin.PuffinBlob? left, Iceberg.Net.Puffin.PuffinBlob? right)
 Public static bool Iceberg.Net.Puffin.PuffinBlob.operator ==(Iceberg.Net.Puffin.PuffinBlob? left, Iceberg.Net.Puffin.PuffinBlob? right)
 Public static bool Iceberg.Net.Puffin.PuffinBlobMetadata.operator !=(Iceberg.Net.Puffin.PuffinBlobMetadata? left, Iceberg.Net.Puffin.PuffinBlobMetadata? right)
 Public static bool Iceberg.Net.Puffin.PuffinBlobMetadata.operator ==(Iceberg.Net.Puffin.PuffinBlobMetadata? left, Iceberg.Net.Puffin.PuffinBlobMetadata? right)
+Public static bool Iceberg.Net.Puffin.PuffinBlobType.operator !=(Iceberg.Net.Puffin.PuffinBlobType? left, Iceberg.Net.Puffin.PuffinBlobType? right)
+Public static bool Iceberg.Net.Puffin.PuffinBlobType.operator ==(Iceberg.Net.Puffin.PuffinBlobType? left, Iceberg.Net.Puffin.PuffinBlobType? right)
 Public static bool Iceberg.Net.Puffin.PuffinFile.Contents.operator !=(Iceberg.Net.Puffin.PuffinFile.Contents? left, Iceberg.Net.Puffin.PuffinFile.Contents? right)
 Public static bool Iceberg.Net.Puffin.PuffinFile.Contents.operator ==(Iceberg.Net.Puffin.PuffinFile.Contents? left, Iceberg.Net.Puffin.PuffinFile.Contents? right)
 Public static bool Iceberg.Net.Puffin.PuffinFile.Written.operator !=(Iceberg.Net.Puffin.PuffinFile.Written? left, Iceberg.Net.Puffin.PuffinFile.Written? right)
@@ -113,11 +126,14 @@ Public static uint Iceberg.Net.Puffin.Crc32.Compute(System.ReadOnlySpan<byte> da
 Public static ushort Iceberg.Net.Puffin.ThetaSketch.SeedHash(long seed)
 Public string Iceberg.Net.Puffin.PuffinBlob.Type { get; init; }
 Public string Iceberg.Net.Puffin.PuffinBlobMetadata.Type { get; init; }
+Public string Iceberg.Net.Puffin.PuffinBlobType.Type { get; init; }
 Public string? Iceberg.Net.Puffin.PuffinBlob.CompressionCodec { get; init; }
 Public string? Iceberg.Net.Puffin.PuffinBlobMetadata.CompressionCodec { get; init; }
 Public void Iceberg.Net.Puffin.MumblingBitmap.Add(int position)
 Public void Iceberg.Net.Puffin.PuffinBlob.Deconstruct(out string Type, out System.Collections.Generic.IReadOnlyList<int> Fields, out System.ReadOnlyMemory<byte> Payload, out long SnapshotId, out long SequenceNumber, out string? CompressionCodec, out System.Collections.Generic.IReadOnlyDictionary<string, string>? Properties)
 Public void Iceberg.Net.Puffin.PuffinBlobMetadata.Deconstruct(out string Type, out System.Collections.Generic.IReadOnlyList<int> Fields, out long SnapshotId, out long SequenceNumber, out long Offset, out long Length, out string? CompressionCodec, out System.Collections.Generic.IReadOnlyDictionary<string, string>? Properties)
+Public void Iceberg.Net.Puffin.PuffinBlobType.Deconstruct(out string Type, out bool Compressible)
+Public void Iceberg.Net.Puffin.PuffinBlobType.Validate(Iceberg.Net.Puffin.PuffinBlob blob)
 Public void Iceberg.Net.Puffin.PuffinFile.Contents.Deconstruct(out System.Collections.Generic.IReadOnlyList<Iceberg.Net.Puffin.PuffinBlobMetadata> Blobs, out System.Collections.Generic.IReadOnlyDictionary<string, string> Properties, out byte[] Bytes)
 Public void Iceberg.Net.Puffin.PuffinFile.Written.Deconstruct(out byte[] Bytes, out System.Collections.Generic.IReadOnlyList<Iceberg.Net.Puffin.PuffinBlobMetadata> Blobs, out long FooterSize)
 Public void Iceberg.Net.Puffin.RoaringPositionBitmap.Add(long position)

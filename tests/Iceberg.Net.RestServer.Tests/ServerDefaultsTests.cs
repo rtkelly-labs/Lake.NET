@@ -16,6 +16,18 @@ public sealed class ServerDefaultsTests
 {
     private const string SigningKey = "a-server-defaults-test-signing-key-32b";
 
+    [Theory]
+    [InlineData("0")]
+    [InlineData("-1")]
+    public void Non_positive_idempotency_capacity_refuses_to_start(string capacity)
+    {
+        var error = Assert.ThrowsAny<Exception>(() => ServerHost.Start(settings: new Dictionary<string, string>
+        {
+            ["Idempotency:MaxClaimsPerPrincipal"] = capacity,
+        }));
+        Assert.Contains("MaxClaimsPerPrincipal must be positive", error.ToString());
+    }
+
     [Fact]
     public async Task Authentication_without_grants_refuses_to_start_unless_allow_all_is_explicit()
     {

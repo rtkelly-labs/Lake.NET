@@ -28,6 +28,8 @@ public static class RestServer
         {
             var options = sp.GetRequiredService<IConfiguration>().GetSection(RestServerOptions.Section).Get<RestServerOptions>() ?? new RestServerOptions();
             configure?.Invoke(options);
+            if (options.Idempotency.MaxClaimsPerPrincipal <= 0)
+                throw new InvalidOperationException("Idempotency:MaxClaimsPerPrincipal must be positive");
             return options;
         });
         services.TryAddSingleton<ICatalogStore>(sp =>

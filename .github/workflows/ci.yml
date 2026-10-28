@@ -185,6 +185,9 @@ jobs:
         run: docker compose -f emulation/docker-compose.yml --profile trino --profile polaris --profile gravitino --profile nessie --profile lakekeeper logs --tail 200
 
   platform:
+    defaults:
+      run:
+        shell: bash
     name: platform (${{ matrix.os }})
     runs-on: ${{ matrix.os }}
     timeout-minutes: 20

@@ -21,7 +21,7 @@ public static class OpenApiOperations
     // Every catalog route can answer 400 (malformed request), 401 (authentication on, no or bad token) and 403 (no
     // grant); getConfig and getToken are listed in full.
     private static Operation Op(string id, int success, int[] errors, string[]? query = null, string[]? headers = null) =>
-        new(id, success, [400, 401, 403, .. errors, .. headers?.Contains(Idem) == true ? new[] { 429 } : Array.Empty<int>()], query ?? [], headers ?? []);
+        new(id, success, [400, 401, 403, .. errors, .. (headers?.Contains(Idem) == true ? new[] { 429 } : Array.Empty<int>())], query ?? [], headers ?? []);
 
     /// <summary>By <c>METHOD /v1/{prefix}/…</c>, the form <see cref="Endpoints.Advertised"/> uses.</summary>
     public static readonly IReadOnlyDictionary<string, Operation> ByRoute = new Dictionary<string, Operation>(StringComparer.Ordinal)

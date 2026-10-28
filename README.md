@@ -5,15 +5,16 @@
 **Status:** capability review before `0.0.1` — exploratory, **not for production writes yet**.
 
 The [capability baseline](docs/capability-baseline.md) inventories implemented APIs, verification evidence,
-limitations and proposed release criteria. The `0.0.1` scope is still being formalised.
+limitations and proposed release criteria. The [full-stack support proposal](docs/support-contract.md) defines
+the intended package, server, resource and platform boundaries. The `0.0.1` scope is still being formalised.
 
 ## Why this exists
 
 Writing to Iceberg tables from C# today means handing the write to Python, Spark or a SQL engine. This
 project is **a native .NET Iceberg library**, so a C# producer can commit to a table
-directly through Glue (or any REST catalog) with the same guarantees PyIceberg and Java give.
+directly through Glue or compatible REST catalogs using Iceberg's optimistic commit protocol.
 
-No production-grade .NET Iceberg library exists today (see [docs/ports-and-engines.md](docs/ports-and-engines.md)).
+Implementation comparisons and reference engines are recorded in [docs/ports-and-engines.md](docs/ports-and-engines.md).
 
 ## What works now
 

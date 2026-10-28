@@ -34,6 +34,7 @@ public interface IIcebergRowBinding<T>
     Func<object?[], T> CreateReader(Schema rowSchema);
 
     /// <summary>The row for <paramref name="item"/>, aligned to <see cref="Schema"/>; unmapped columns are null.</summary>
+    /// <summary>Produce a physical row. Defaults fill absent members, including nested fields; mapped nulls remain null.</summary>
     object?[] ToRow(T item);
 }
 
