@@ -176,6 +176,8 @@ internal sealed class StructBinding
         }
     }
 
+    private static readonly ConcurrentDictionary<Type, (Func<object, object> Key, Func<object, object?> Value)> KvpAccessors = new();
+
     /// <summary>The entries of any dictionary value (<see cref="IDictionary"/>, or an enumerable of <c>KeyValuePair</c>).</summary>
     private static IEnumerable<(object Key, object? Value)> Entries(object v)
     {
@@ -185,10 +187,17 @@ internal sealed class StructBinding
             while (e.MoveNext()) yield return (e.Key, e.Value);
             yield break;
         }
+        (Func<object, object> Key, Func<object, object?> Value)? accessors = null;
         foreach (var item in (IEnumerable)v)
         {
-            var t = item!.GetType();
-            yield return (t.GetProperty("Key")!.GetValue(item)!, t.GetProperty("Value")!.GetValue(item));
+            if (item is null) continue;
+            accessors ??= KvpAccessors.GetOrAdd(item.GetType(), static t =>
+            {
+                var k = t.GetProperty("Key")!;
+                var val = t.GetProperty("Value")!;
+                return (o => k.GetValue(o)!, o => val.GetValue(o));
+            });
+            yield return (accessors.Value.Key(item), accessors.Value.Value(item));
         }
     }
 

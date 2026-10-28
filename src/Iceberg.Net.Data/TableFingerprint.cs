@@ -33,26 +33,29 @@ public sealed record TableFingerprint(long Rows, ulong RowHash, IReadOnlyDiction
         foreach (var task in await TableScan.PlanFilesAsync(table, snapshotId, null, ct))
         {
             var read = deletes.WithEqualityColumns(schema); // the schema's columns first, so row[c] lines up with fields[c]
-            var fileRows = await DataFiles.ReadAsync(table.IO, task.File, read, mapping, ct);
             var isDeleted = deletes.IsEmpty ? null : await deletes.RowFilterAsync(task.File, task.DataSequenceNumber, read, ct);
-            for (var pos = 0; pos < fileRows.Count; pos++)
+            await foreach (var batch in DataFiles.ReadBatchesAsync(table.IO, task.File, read, mapping, null, ct))
             {
-                var row = fileRows[pos];
-                if (isDeleted?.Invoke(pos, row) == true) continue;
-                for (var c = 0; c < fields.Count; c++)
+                for (var i = 0; i < batch.Rows.Count; i++)
                 {
-                    counts[c]++;
-                    if (row[c] is null)
+                    var pos = batch.FirstPosition + i;
+                    var row = batch.Rows[i];
+                    if (isDeleted?.Invoke(pos, row) == true) continue;
+                    for (var c = 0; c < fields.Count; c++)
                     {
-                        nulls[c]++;
-                        parts[c] = "\0";
-                        continue;
+                        counts[c]++;
+                        if (row[c] is null)
+                        {
+                            nulls[c]++;
+                            parts[c] = "\0";
+                            continue;
+                        }
+                        parts[c] = Canonical(fields[c].Type, row[c]!);
+                        hashes[c] += Hash(parts[c]);
                     }
-                    parts[c] = Canonical(fields[c].Type, row[c]!);
-                    hashes[c] += Hash(parts[c]);
+                    rowHash += Hash(string.Join('\u001f', parts));
+                    rows++;
                 }
-                rowHash += Hash(string.Join('\u001f', parts));
-                rows++;
             }
         }
         return new TableFingerprint(rows, rowHash,
@@ -95,7 +98,36 @@ public sealed record TableFingerprint(long Rows, ulong RowHash, IReadOnlyDiction
         : m.Scale < scale ? m.Unscaled * BigInteger.Pow(10, scale - m.Scale)
         : throw new InvalidDataException($"Decimal {m} has more scale than its column ({scale})");
 
-    private static ulong Hash(string text) => BinaryPrimitives.ReadUInt64LittleEndian(SHA256.HashData(Encoding.UTF8.GetBytes(text)));
+    private static ulong Hash(string text)
+    {
+        var byteCount = Encoding.UTF8.GetByteCount(text);
+        if (byteCount <= 512)
+        {
+            Span<byte> utf8 = stackalloc byte[byteCount];
+            Encoding.UTF8.GetBytes(text, utf8);
+            return Hash(utf8);
+        }
+        else
+        {
+            var rented = System.Buffers.ArrayPool<byte>.Shared.Rent(byteCount);
+            try
+            {
+                var len = Encoding.UTF8.GetBytes(text, rented);
+                return Hash(rented.AsSpan(0, len));
+            }
+            finally
+            {
+                System.Buffers.ArrayPool<byte>.Shared.Return(rented);
+            }
+        }
+    }
+
+    private static ulong Hash(ReadOnlySpan<byte> bytes)
+    {
+        Span<byte> hash = stackalloc byte[32];
+        SHA256.HashData(bytes, hash);
+        return BinaryPrimitives.ReadUInt64LittleEndian(hash);
+    }
 
     /// <summary>Parse the JSON printed by <c>pyiceberg_oracle.py fingerprint</c>.</summary>
     public static TableFingerprint FromJson(string json)

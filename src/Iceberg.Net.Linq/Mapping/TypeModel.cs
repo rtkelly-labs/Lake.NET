@@ -145,6 +145,11 @@ internal sealed class TypeModel
     public static Func<IEnumerable<object?>, object> ListFactory(Type target, Type element)
     {
         var listType = typeof(List<>).MakeGenericType(element);
+        var listCtor = listType.GetConstructor(Type.EmptyTypes);
+        Func<IList> createList = listCtor is not null
+            ? LinqExpression.Lambda<Func<IList>>(LinqExpression.New(listCtor)).Compile()
+            : () => (IList)Activator.CreateInstance(listType)!;
+
         if (target.IsArray)
             return items =>
             {
@@ -153,11 +158,11 @@ internal sealed class TypeModel
                 for (var i = 0; i < list.Count; i++) array.SetValue(list[i], i);
                 return array;
             };
-        var isSet = target.GetGenericTypeDefinition() is var d && (d == typeof(HashSet<>) || d == typeof(ISet<>));
+        var isSet = target.IsGenericType && (target.GetGenericTypeDefinition() == typeof(HashSet<>) || target.GetGenericTypeDefinition() == typeof(ISet<>));
         var setType = typeof(HashSet<>).MakeGenericType(element);
         return items =>
         {
-            var list = (IList)Activator.CreateInstance(listType)!;
+            var list = createList();
             foreach (var i in items) list.Add(i);
             return isSet ? Activator.CreateInstance(setType, list)! : list;
         };
@@ -166,9 +171,14 @@ internal sealed class TypeModel
     public static Func<IEnumerable<KeyValuePair<object, object?>>, object> MapFactory(Type key, Type value)
     {
         var dictType = typeof(Dictionary<,>).MakeGenericType(key, value);
+        var dictCtor = dictType.GetConstructor(Type.EmptyTypes);
+        Func<IDictionary> createDict = dictCtor is not null
+            ? LinqExpression.Lambda<Func<IDictionary>>(LinqExpression.New(dictCtor)).Compile()
+            : () => (IDictionary)Activator.CreateInstance(dictType)!;
+
         return entries =>
         {
-            var dict = (IDictionary)Activator.CreateInstance(dictType)!;
+            var dict = createDict();
             foreach (var e in entries) dict.Add(e.Key, e.Value);
             return dict;
         };

@@ -137,9 +137,14 @@ internal sealed class IcebergQueryCompiler(ICurrentDbContext current, IcebergSes
         return Expression.Lambda<Func<TResult>>(Expression.Convert(call, typeof(TResult))).Compile()();
     }
 
-    private static System.Collections.IEnumerable TrackAll(System.Collections.IEnumerable rows, Type element, Func<object?, object?> track) =>
-        (System.Collections.IEnumerable)typeof(IcebergQueryCompiler).GetMethod(nameof(TrackTyped), BindingFlags.NonPublic | BindingFlags.Static)!
-            .MakeGenericMethod(element).Invoke(null, [rows, track])!;
+    private static readonly System.Collections.Concurrent.ConcurrentDictionary<Type, MethodInfo> TrackMethods = new();
+
+    private static System.Collections.IEnumerable TrackAll(System.Collections.IEnumerable rows, Type element, Func<object?, object?> track)
+    {
+        var method = TrackMethods.GetOrAdd(element, static t =>
+            typeof(IcebergQueryCompiler).GetMethod(nameof(TrackTyped), BindingFlags.NonPublic | BindingFlags.Static)!.MakeGenericMethod(t));
+        return (System.Collections.IEnumerable)method.Invoke(null, [rows, track])!;
+    }
 
     private static IEnumerable<T> TrackTyped<T>(IEnumerable<T> rows, Func<object?, object?> track)
     {
@@ -279,18 +284,29 @@ internal sealed class IcebergQueryCompiler(ICurrentDbContext current, IcebergSes
             return base.VisitMethodCall(node);
         }
 
-        private static T Evaluate<T>(Expression e) => (T)Expression.Lambda<Func<object>>(Expression.Convert(e, typeof(object))).Compile()();
+        private static T Evaluate<T>(Expression e)
+        {
+            if (e is ConstantExpression c) return (T)c.Value!;
+            if (e is MemberExpression { Expression: ConstantExpression target, Member: FieldInfo fi })
+                return (T)fi.GetValue(target.Value)!;
+            if (e is MemberExpression { Expression: ConstantExpression targetProp, Member: PropertyInfo pi })
+                return (T)pi.GetValue(targetProp.Value)!;
+            return (T)Expression.Lambda<Func<object>>(Expression.Convert(e, typeof(object))).Compile()();
+        }
     }
 
     /// <summary>Puts the Iceberg queryable where the scanned <c>DbSet</c> was, and lazy queries where other sets are.</summary>
     private sealed class RootReplacer(EntityQueryRootExpression primary, object root, IcebergQueryCompiler compiler) : ExpressionVisitor
     {
+        private static readonly System.Collections.Concurrent.ConcurrentDictionary<Type, MethodInfo> SecondarySetMethods = new();
+
         protected override Expression VisitExtension(Expression node)
         {
             if (node == primary) return Expression.Constant(root, node.Type);
             if (node is EntityQueryRootExpression other)
             {
-                var rows = (System.Collections.IEnumerable)Generic(nameof(SecondarySet), other.EntityType.ClrType).Invoke(compiler, null)!;
+                var method = SecondarySetMethods.GetOrAdd(other.EntityType.ClrType, static t => Generic(nameof(SecondarySet), t));
+                var rows = (System.Collections.IEnumerable)method.Invoke(compiler, null)!;
                 return Expression.Constant(Queryable.AsQueryable(rows), node.Type);
             }
             return base.VisitExtension(node);
