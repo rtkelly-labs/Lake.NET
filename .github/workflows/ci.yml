@@ -96,6 +96,9 @@ jobs:
         env:
           ICEBERG_PYTHON: ${{ github.workspace }}/interop/.venv/bin/python
           ICEBERG_DUCKDB_REQUIRED: "1"
+          # RestServer.Tests copies its own interop/ into the output directory, which the repository
+          # lookup can mistake for the root. Use the runtime fetched by emulation/up.sh --spark.
+          ICEBERG_SPARK_JAR: ${{ github.workspace }}/emulation/.cache/iceberg-spark-runtime-4.0_2.13-1.12.0.jar
         run: ./tools/test-projects.sh test cross-engine
 
       - name: Emulator logs on failure

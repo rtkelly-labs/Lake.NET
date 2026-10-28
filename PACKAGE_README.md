@@ -3,7 +3,7 @@
 A native .NET implementation of [Apache Iceberg](https://iceberg.apache.org/): create, write, read and maintain Iceberg
 tables from C#, through AWS Glue, any Iceberg REST catalog, a JDBC/SQL catalog or an in-memory catalog.
 
-> **Preview.** `0.1.0-preview.*` releases are for evaluation. The API may change between previews. Everything is tested
+> **Early development.** The API and the capability set for `0.0.1` are still being formalised. The implemented paths are tested
 > against emulators (moto for S3 and Glue, the Iceberg REST fixture, Polaris, Nessie, Lakekeeper, Gravitino) and
 > cross-checked with Spark, PyIceberg, Trino and DuckDB, but has **not yet run against real AWS** (S3, Glue, Athena).
 

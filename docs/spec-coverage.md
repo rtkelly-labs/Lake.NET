@@ -29,9 +29,9 @@ Legend: ✅ implemented and tested · 🟡 partial · ⬜ not started · — not
 | `unknown` | | | ✓ | 🟡 model + JSON + promotion rule | `MetadataSpecTests` |
 | `file` (v4) | | | | 🟡 model + JSON; its 7 field IDs reserved; refused below v4 (so unusable until v4 lands); no Parquet/Avro mapping | `FileTypeTests` |
 | struct / list / map with field IDs | ✓ | ✓ | ✓ | ✅ model, JSON, Parquet read/write (3-level lists/maps; 2-level lists read), nested schema evolution (dotted paths); metrics for every primitive reachable through structs (not inside lists/maps, as Java); filters and partition sources may be fields inside structs (dotted names), not inside lists/maps | `MetadataSpecTests`, `NestedTypesTests`, Spark/PyIceberg cross-checks |
-| `initial-default` / `write-default` | | | ✓ | ✅ JSON single-value form (Appendix D) round-trips; reader applies initial defaults; `AddRequiredColumn(…, initialDefault)` | `MetadataSpecTests`, `SingleValueJsonTests`, `SchemaUpdateTests` |
+| `initial-default` / `write-default` | | | ✓ | ✅ JSON single-value form (Appendix D) round-trips; reader applies initial defaults; `AddRequiredColumn(…, initialDefault)`; 🟡 typed writes do not apply unmapped write defaults (baseline F13) | `MetadataSpecTests`, `SingleValueJsonTests`, `SchemaUpdateTests` |
 | Identifier field IDs (required, non-float) | ✓ | ✓ | ✓ | ✅ | `MetadataSpecTests` |
-| Schema evolution & type promotion (int→long, float→double, decimal widening, v3 date→timestamp, unknown→any) | ✓ | ✓ | ✓ | ✅ rules and `Table.UpdateSchemaAsync(s => s.AddColumn(…).RenameColumn(…).UpdateColumn(…).DeleteColumn(…).Move…)`, re-applied on conflict; top-level columns | `MetadataSpecTests`, `LocalTableTests`, `SchemaUpdateTests` |
+| Schema evolution & type promotion (int→long, float→double, decimal widening, v3 date→timestamp, unknown→any) | ✓ | ✓ | ✓ | ✅ rules and `Table.UpdateSchemaAsync(s => s.AddColumn(…).RenameColumn(…).UpdateColumn(…).DeleteColumn(…).Move…)`, re-applied on conflict; top-level and nested struct paths | `MetadataSpecTests`, `LocalTableTests`, `SchemaUpdateTests` |
 | Column projection by field ID | ✓ | ✓ | ✓ | ✅ (name fallback only when a file has no IDs) | `PyIcebergFixtureTests` |
 | Name mapping (`schema.name-mapping.default`) | ✓ | ✓ | ✓ | ✅ top-level columns, aliases for renames | `NameMappingAndImportTests` |
 | Reserved field IDs / metadata columns (`_file`, `_pos`, `_row_id`, …) | ✓ | ✓ | ✓ | 🟡 `_row_id` / `_last_updated_sequence_number` read and written (below); reserved IDs excluded from column metrics; `_file` / `_pos` not exposed | `SparkFixtureTests` |
@@ -111,22 +111,22 @@ Legend: ✅ implemented and tested · 🟡 partial · ⬜ not started · — not
 
 | Endpoint / feature | Status | Notes |
 |---|---|---|
-| `GET /v1/config` (defaults/overrides/endpoints/prefix) | ✅ | endpoints list stored, not yet used to gate calls |
+| `GET /v1/config` (defaults/overrides/endpoints/prefix) | ✅ | endpoints gate transaction and scan-planning capabilities; other client calls are not uniformly gated |
 | OAuth2 client credentials, bearer token | ✅ | `/v1/oauth/tokens` is deprecated upstream; configurable token URI |
 | SigV4 (Glue / S3 Tables IRC endpoints) | ✅ `SigV4Handler`, `RestCatalogOptions.ForGlue` / `ForS3Tables` | AWS test vectors (`SigV4Tests`), botocore agreement (`SigV4CrossCheckTests`); live endpoint needs AWS |
 | Namespaces: list (paged), create, exists, load, drop | ✅ | multi-level encoded with `0x1F` |
-| Namespace `updateProperties` | ⬜ | |
+| Namespace `updateProperties` | 🟡 | server implemented (`NamespaceOperationTests`); no corresponding `ICatalog` client operation |
 | Tables: list (paged), create, load, exists, drop (purge), rename, register | ✅ | `CatalogConformanceTests` against the Java reference server |
 | `updateTable` (requirements + updates) | ✅ | 409 → `CommitFailedException`; 500/502/503/504 → `CommitStateUnknownException` |
 | `Idempotency-Key` header | ✅ UUIDv7 per mutation; retried with the same key after transport errors, 429 or 5xx only when the server advertises `idempotency-key-lifetime` (and within it) | `IdempotencyTests` |
 | Storage credentials / per-table `config` | ✅ longest-prefix credential selection | |
-| `loadCredentials` refresh | ⬜ | |
+| `loadCredentials` refresh | 🟡 | server route implemented (`CredentialVendingTests`); no client refresh API |
 | Remote signing (`signRequest`) | ✅ `RestCatalog` signs S3 requests through the table's `…/sign` route when the table config has `s3.remote-signing-enabled` (`S3FileIOOptions.RequestSigner`); the server signs them (`Iceberg.Net.RestServer`) | `RemoteSigningTests` (AWS's S3 SigV4 example; a moto that checks signatures), `CrossEngineTests` (Spark 4 / Iceberg 1.12 and PyIceberg 0.12 sign through our server) |
 | Multi-table `transactions/commit` | ✅ `ICatalog.CommitTransactionAsync` + `SnapshotProducer.StageAsync`; staged UPDATE/MERGE with re-plan on conflict (`StagedCommit.CommitAllAsync`) | `CatalogConformanceTests` (Java REST server, Polaris; JDBC via one SQL transaction; Glue refuses), `StagedCommitTests` |
 | Scan planning (`plan`, `plan/{id}`, `tasks`, cancel) | ✅ `RestCatalog.PlanTableScanAsync` (inline, submitted → polled, plan tasks followed recursively, cancel on abandon), `ServerSideScan` reads with the server-matched deletes; content files and expressions in both Java 1.10 and spec (1.12) forms | `ServerScanPlanningLiveTests` (Gravitino plans our tables), `ServerScanPlanningTests` (Java-made plans replayed), `JavaMisreferencedDvTests`, `ExpressionJsonTests`, `SparkCrossEngineTests.Java_plans_our_tables_and_we_read_its_plans`. Server side (`Iceberg.Net.RestServer`, [rest-server.md](rest-server.md)): plans with the library's planner and delete index, stateless plan tasks, async mode, incremental append scans (`start-snapshot-id` / `end-snapshot-id`, also sent by `ScanPlanRequest`); `ScanPlanningTests`, `IncrementalScanPlanningTests`, and PyIceberg 0.12 and Spark 4.0.1 / Java 1.12 reading through it (`CrossEngineTests`) |
 | Views (create, load, replace, list, exists, rename, drop) | ✅ `IViewCatalog` on `RestCatalog` and `InMemoryCatalog`; view spec v1 metadata (`ViewMetadata`, history trimming) | `ViewTests`, `ViewConformanceTests` (Java REST server, Polaris; Trino queries our view and we read Trino's) |
-| Metrics reporting | ⬜ | |
-| ETag / freshness-aware loading | ⬜ | |
+| Metrics reporting | 🟡 | server accepts and discards reports (`MetricsOperationTests`); client submission and server report storage absent |
+| ETag / freshness-aware loading | 🟡 | server ETag handling (`ProtocolTests`); freshness-aware client loading absent |
 
 ## Puffin and views
 
@@ -135,7 +135,7 @@ Legend: ✅ implemented and tested · 🟡 partial · ⬜ not started · — not
 | Puffin container (magic, footer JSON, blobs) | ✅ uncompressed + zstd blobs; LZ4 footers rejected |
 | `apache-datasketches-theta-v1` | ✅ compact serial v3, verified against Apache DataSketches; NDV statistics files via `set-statistics` |
 | `deletion-vector-v1` | ✅ Roaring64 portable (array/bitmap written, runs read), CRC-32 |
-| View metadata v1 | ⬜ |
+| View metadata v1 | ✅ model/JSON, catalog views; `ViewTests`, `ViewConformanceTests` |
 
 ## How to extend this page
 

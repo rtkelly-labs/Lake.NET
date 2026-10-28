@@ -2,7 +2,8 @@
 
 | Doc | Read it for |
 |---|---|
-| [handover.md](handover.md) | **Start here when picking the project up:** branch and CI state, what each phase delivered, the test inventory, environment gotchas, open items and next steps |
+| [capability-baseline.md](capability-baseline.md) | **Scope before 0.0.1:** all 12 projects, 40 capabilities, evidence boundaries, assessment findings and proposed acceptance criteria |
+| [handover.md](handover.md) | **Start here when picking the project up:** release and contribution workflow, test inventory, local setup, open items and next steps |
 | [spec-coverage.md](spec-coverage.md) | **The foundation.** Section-by-section status against the table spec (v1–v3), REST, Puffin and view specs, with the test that pins each item |
 | [architecture.md](architecture.md) | Layers, the metadata-as-value model, the metastore commit protocol, retries, reading |
 | [state-management.md](state-management.md) | What Iceberg's release history taught about table state (sequence numbers, row lineage, unknown commits, idempotency, isolation, maintenance) and where we stand |
@@ -25,5 +26,5 @@
 | [iceberg-v4.md](iceberg-v4.md) | Following the Iceberg v4 proposals: status of each, what adopting it would mean here, and the plan |
 | [telemetry.md](telemetry.md) | Traces and metrics (`ActivitySource`/`Meter` "Iceberg.Net"): every span, tag and instrument, and wiring into OpenTelemetry |
 | [spark-and-athena.md](spark-and-athena.md) | Spark procedure SQL and EMR Serverless / Glue job submission (run against moto and Spark), Athena SQL, its Trino dialect and runner (run on Trino and moto), the DuckDB oracle |
-| [roadmap.md](roadmap.md) | Delivery milestones M0–M4, the 13 verification paths (built / left / needs action), upstream v4 changes, breaking out, open questions |
+| [roadmap.md](roadmap.md) | Delivery milestones M0–M4, the 13 verification paths (built / left / needs action), upstream v4 changes, repository split, open questions |
 | [research/ecosystem-2026-10.md](research/ecosystem-2026-10.md) | Sourced research snapshot (specs, releases, ports, engines, catalogs, .NET libraries) |

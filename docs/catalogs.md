@@ -106,7 +106,7 @@ Glue endpoint for Lake Formation governance. Challenges:
   prefix, Azure SAS tokens and downscoped GCS tokens, signs S3 requests for clients that hold no credentials (remote signing: our client,
   Spark and PyIceberg, on a moto that checks signatures), and replays responses by `Idempotency-Key`. Idempotency keys
   and plan IDs live in its database, so instances behind a load balancer share them.
-- Not implemented: GCS credentials, and signing for anything but S3.
+- GCS token vending is implemented and checked offline; real Google Cloud verification remains outstanding. Signing for anything but S3 is not implemented.
 
 ### Hive Metastore
 
