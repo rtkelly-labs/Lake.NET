@@ -4,7 +4,6 @@
 |---|---|
 | [../VISION.md](../VISION.md) | **Where the project is going:** Lake.NET, one library for Iceberg, DuckLake and Delta over shared layers |
 | [lake/README.md](lake/README.md) | The target state in detail: package mapping, shared layers, the rename and release phases, Delta, open decisions |
-| [dependencies.md](dependencies.md) | Dependency update PRs (Renovate): what it manages, which updates merge themselves, how to run it locally without a hosted service |
 | [standards.md](standards.md) | What every document must do: levels of detail, kinds of document, writing rules, review checklist |
 | [capability-baseline.md](capability-baseline.md) | **Scope before 0.0.1:** all 12 projects, 40 capabilities, evidence boundaries, assessment findings and proposed acceptance criteria |
 | [handover.md](handover.md) | **Start here when picking the project up:** release and contribution workflow, test inventory, local setup, open items and next steps |
