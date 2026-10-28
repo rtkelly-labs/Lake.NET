@@ -36,6 +36,14 @@ public sealed class IcebergMappableGenerator : IIncrementalGenerator
         defaultSeverity: DiagnosticSeverity.Error,
         isEnabledByDefault: true);
 
+    private static readonly DiagnosticDescriptor UnsupportedStructureDiagnostic = new(
+        id: "ICERG003",
+        title: "Unsupported type structure for Iceberg source generation",
+        messageFormat: "Type '{0}' is nested or generic, which is not supported for Iceberg source generation",
+        category: "Iceberg",
+        defaultSeverity: DiagnosticSeverity.Error,
+        isEnabledByDefault: true);
+
     public void Initialize(IncrementalGeneratorInitializationContext context)
     {
         var candidates = context.SyntaxProvider
@@ -70,6 +78,7 @@ public sealed class IcebergMappableGenerator : IIncrementalGenerator
 
         if (!hasAttr) return null;
 
+        var diagnostics = new List<Diagnostic>();
         var ns = symbol.ContainingNamespace.IsGlobalNamespace ? null : symbol.ContainingNamespace.ToDisplayString();
         var typeName = symbol.Name;
         var typeKind = typeDecl switch
@@ -80,9 +89,15 @@ public sealed class IcebergMappableGenerator : IIncrementalGenerator
             _ => "class"
         };
 
-        var properties = new List<MappablePropertyModel>();
-        int defaultFieldId = 1;
-        var diagnostics = new List<Diagnostic>();
+        if (symbol.IsGenericType || symbol.ContainingType is not null)
+        {
+            var loc = symbol.Locations.FirstOrDefault() ?? Location.None;
+            diagnostics.Add(Diagnostic.Create(UnsupportedStructureDiagnostic, loc, symbol.Name));
+            return new MappableTypeModel(ns, typeName, typeKind, ImmutableArray<MappablePropertyModel>.Empty, false, ImmutableArray<string>.Empty, diagnostics.ToImmutableArray());
+        }
+
+        var rawProperties = new List<(IPropertySymbol Member, int? ExplicitFieldId, string? CustomName, string? DeclaredType, int? Nullability, string? Doc, bool IsKey)>();
+        var usedExplicitIds = new HashSet<int>();
 
         foreach (var member in symbol.GetMembers().OfType<IPropertySymbol>())
         {
@@ -121,25 +136,47 @@ public sealed class IcebergMappableGenerator : IIncrementalGenerator
                 isKey = true;
             }
 
+            if (explicitFieldId.HasValue)
+            {
+                usedExplicitIds.Add(explicitFieldId.Value);
+            }
+
+            rawProperties.Add((member, explicitFieldId, customName, declaredType, nullability, doc, isKey));
+        }
+
+        int nextAutoId = 1;
+        int FreshId()
+        {
+            while (usedExplicitIds.Contains(nextAutoId)) nextAutoId++;
+            var id = nextAutoId++;
+            usedExplicitIds.Add(id);
+            return id;
+        }
+
+        var properties = new List<MappablePropertyModel>();
+
+        foreach (var raw in rawProperties)
+        {
+            var member = raw.Member;
             var typeSymbol = member.Type;
             bool clrNullable = typeSymbol.NullableAnnotation == NullableAnnotation.Annotated ||
                               (typeSymbol is INamedTypeSymbol nts && nts.OriginalDefinition.SpecialType == SpecialType.System_Nullable_T);
 
             bool isNullable;
-            if (isKey)
+            if (raw.IsKey)
             {
-                if (clrNullable || nullability == 2)
+                if (clrNullable || raw.Nullability == 2)
                 {
                     var loc = member.Locations.FirstOrDefault() ?? Location.None;
                     diagnostics.Add(Diagnostic.Create(OptionalKeyDiagnostic, loc, member.Name, typeName));
                 }
                 isNullable = false;
             }
-            else if (nullability == 1) // Required
+            else if (raw.Nullability == 1) // Required
             {
                 isNullable = false;
             }
-            else if (nullability == 2) // Optional
+            else if (raw.Nullability == 2) // Optional
             {
                 isNullable = true;
             }
@@ -153,9 +190,9 @@ public sealed class IcebergMappableGenerator : IIncrementalGenerator
             bool hasPublicSetter = member.SetMethod is not null && member.SetMethod.DeclaredAccessibility == Accessibility.Public;
 
             TypeAndConversion? resolved = null;
-            if (declaredType is not null)
+            if (raw.DeclaredType is not null)
             {
-                resolved = ParseDeclaredType(declaredType, typeSymbol);
+                resolved = ParseDeclaredType(raw.DeclaredType, typeSymbol);
             }
             resolved ??= GetDefaultTypeAndConversion(typeSymbol);
 
@@ -166,20 +203,20 @@ public sealed class IcebergMappableGenerator : IIncrementalGenerator
                 continue;
             }
 
-            int fieldId = explicitFieldId ?? defaultFieldId++;
+            int fieldId = raw.ExplicitFieldId ?? FreshId();
 
             properties.Add(new MappablePropertyModel(
                 member.Name,
-                customName ?? member.Name,
+                raw.CustomName ?? member.Name,
                 fieldId,
-                explicitFieldId,
-                customName,
-                doc,
+                raw.ExplicitFieldId,
+                raw.CustomName,
+                raw.Doc,
                 typeDisplay,
                 isNullable,
                 isValueType,
                 hasPublicSetter,
-                isKey,
+                raw.IsKey,
                 resolved.TypeExpr,
                 resolved.Conversion,
                 resolved.Scale
@@ -505,24 +542,24 @@ public sealed class IcebergMappableGenerator : IIncrementalGenerator
         sb.AppendLine("            options ??= global::Iceberg.Net.Linq.IcebergMapperOptions.Default;");
         sb.AppendLine("            if (explicitId is { } eid && eid > 0)");
         sb.AppendLine("            {");
-        sb.AppendLine("                return schema.Columns.FirstOrDefault(f => f.Id == eid)");
+        sb.AppendLine("                return global::System.Linq.Enumerable.FirstOrDefault(schema.Columns, f => f.Id == eid)");
         sb.AppendLine("                    ?? (options.IgnoreUnmatchedMembers ? null : throw new global::System.InvalidOperationException($\"{memberName} is bound to field ID {eid}, which is not in the schema\"));");
         sb.AppendLine("            }");
         sb.AppendLine("            var configuredId = options.FieldIds?.Invoke(memberName);");
         sb.AppendLine("            if (configuredId is { } fid)");
         sb.AppendLine("            {");
-        sb.AppendLine("                return schema.Columns.FirstOrDefault(f => f.Id == fid)");
+        sb.AppendLine("                return global::System.Linq.Enumerable.FirstOrDefault(schema.Columns, f => f.Id == fid)");
         sb.AppendLine("                    ?? (options.IgnoreUnmatchedMembers ? null : throw new global::System.InvalidOperationException($\"{memberName} is bound to field ID {fid}, which is not in the schema\"));");
         sb.AppendLine("            }");
         sb.AppendLine("            var name = customName ?? options.NameConverter?.Invoke(memberName) ?? memberName;");
-        sb.AppendLine("            var exact = schema.Columns.FirstOrDefault(f => f.Name == name);");
+        sb.AppendLine("            var exact = global::System.Linq.Enumerable.FirstOrDefault(schema.Columns, f => f.Name == name);");
         sb.AppendLine("            if (exact is not null) return exact;");
-        sb.AppendLine("            if (nameMapping?.Fields?.FirstOrDefault(x => x.FieldId is not null && x.Names.Contains(name)) is { FieldId: { } aliasId } &&");
-        sb.AppendLine("                schema.Columns.FirstOrDefault(f => f.Id == aliasId) is { } alias)");
+        sb.AppendLine("            if (nameMapping?.Fields is { } nmf && global::System.Linq.Enumerable.FirstOrDefault(nmf, x => x.FieldId is not null && x.Names.Contains(name)) is { FieldId: { } aliasId } &&");
+        sb.AppendLine("                global::System.Linq.Enumerable.FirstOrDefault(schema.Columns, f => f.Id == aliasId) is { } alias)");
         sb.AppendLine("                return alias;");
         sb.AppendLine("            if (options.CaseInsensitive)");
         sb.AppendLine("            {");
-        sb.AppendLine("                var matches = schema.Columns.Where(f => string.Equals(f.Name, name, global::System.StringComparison.OrdinalIgnoreCase)).ToList();");
+        sb.AppendLine("                var matches = global::System.Linq.Enumerable.ToList(global::System.Linq.Enumerable.Where(schema.Columns, f => string.Equals(f.Name, name, global::System.StringComparison.OrdinalIgnoreCase)));");
         sb.AppendLine("                if (matches.Count == 1) return matches[0];");
         sb.AppendLine("                if (matches.Count > 1) throw new global::System.InvalidOperationException($\"{memberName} matches {matches.Count} columns case-insensitively\");");
         sb.AppendLine("            }");
@@ -539,7 +576,8 @@ public sealed class IcebergMappableGenerator : IIncrementalGenerator
         sb.AppendLine("    }");
         sb.AppendLine("}");
 
-        spc.AddSource($"{model.TypeName}.Iceberg.g.cs", SourceText.From(sb.ToString(), Encoding.UTF8));
+        var hintName = $"{(model.Namespace is not null ? model.Namespace + "." : "")}{model.TypeName}.Iceberg.g.cs";
+        spc.AddSource(hintName, SourceText.From(sb.ToString(), Encoding.UTF8));
     }
 
     private static string GetWriteExpr(MappablePropertyModel p) => p.Conversion switch
@@ -592,27 +630,27 @@ public sealed class IcebergMappableGenerator : IIncrementalGenerator
     private static string GenerateReadExpr(MappablePropertyModel p) => p.Conversion switch
     {
         ConversionKind.Decimal => p.IsNullable
-            ? $"(p_{p.PropertyName} >= 0 && row[p_{p.PropertyName}] is not null) ? (row[p_{p.PropertyName}] is global::Iceberg.Net.Types.IcebergDecimal id_{p.PropertyName} ? id_{p.PropertyName}.ToDecimal() : (decimal)row[p_{p.PropertyName}]!) : default"
+            ? $"(p_{p.PropertyName} >= 0 && row[p_{p.PropertyName}] is not null) ? (row[p_{p.PropertyName}] is global::Iceberg.Net.Types.IcebergDecimal id_{p.PropertyName} ? id_{p.PropertyName}.ToDecimal() : (decimal)row[p_{p.PropertyName}]!) : default({p.TypeDisplay})"
             : $"(p_{p.PropertyName} >= 0 && row[p_{p.PropertyName}] is not null) ? (row[p_{p.PropertyName}] is global::Iceberg.Net.Types.IcebergDecimal id_{p.PropertyName} ? id_{p.PropertyName}.ToDecimal() : (decimal)row[p_{p.PropertyName}]!) : 0m",
-        ConversionKind.DateOnly => $"(p_{p.PropertyName} >= 0 && row[p_{p.PropertyName}] is int d_{p.PropertyName}) ? global::Iceberg.Net.Types.IcebergTime.DateFromDays(d_{p.PropertyName}) : default",
-        ConversionKind.DateTimeDate => $"(p_{p.PropertyName} >= 0 && row[p_{p.PropertyName}] is int d_{p.PropertyName}) ? global::System.DateTime.SpecifyKind(global::Iceberg.Net.Types.IcebergTime.Epoch.AddDays(d_{p.PropertyName}), global::System.DateTimeKind.Unspecified) : default",
-        ConversionKind.TimeOnly => $"(p_{p.PropertyName} >= 0 && row[p_{p.PropertyName}] is long t_{p.PropertyName}) ? global::Iceberg.Net.Types.IcebergTime.TimeFromMicros(t_{p.PropertyName}) : default",
-        ConversionKind.TimeSpan => $"(p_{p.PropertyName} >= 0 && row[p_{p.PropertyName}] is long ts_{p.PropertyName}) ? global::System.TimeSpan.FromTicks(ts_{p.PropertyName} * 10) : default",
-        ConversionKind.DateTime => $"(p_{p.PropertyName} >= 0 && row[p_{p.PropertyName}] is long dt_{p.PropertyName}) ? global::System.DateTime.SpecifyKind(global::Iceberg.Net.Types.IcebergTime.TimestampFromMicros(dt_{p.PropertyName}), global::System.DateTimeKind.Unspecified) : default",
-        ConversionKind.DateTimeTz => $"(p_{p.PropertyName} >= 0 && row[p_{p.PropertyName}] is long dt_{p.PropertyName}) ? global::Iceberg.Net.Types.IcebergTime.TimestampFromMicros(dt_{p.PropertyName}) : default",
-        ConversionKind.DateTimeOffset or ConversionKind.DateTimeOffsetTimestamp => $"(p_{p.PropertyName} >= 0 && row[p_{p.PropertyName}] is long dto_{p.PropertyName}) ? new global::System.DateTimeOffset(global::Iceberg.Net.Types.IcebergTime.TimestampFromMicros(dto_{p.PropertyName}), global::System.TimeSpan.Zero) : default",
-        ConversionKind.Short => $"(p_{p.PropertyName} >= 0 && row[p_{p.PropertyName}] is int s_{p.PropertyName}) ? (short)s_{p.PropertyName} : default",
-        ConversionKind.Byte => $"(p_{p.PropertyName} >= 0 && row[p_{p.PropertyName}] is int b_{p.PropertyName}) ? (byte)b_{p.PropertyName} : default",
-        ConversionKind.SByte => $"(p_{p.PropertyName} >= 0 && row[p_{p.PropertyName}] is int sb_{p.PropertyName}) ? (sbyte)sb_{p.PropertyName} : default",
-        ConversionKind.UShort => $"(p_{p.PropertyName} >= 0 && row[p_{p.PropertyName}] is int us_{p.PropertyName}) ? (ushort)us_{p.PropertyName} : default",
-        ConversionKind.UInt => $"(p_{p.PropertyName} >= 0 && row[p_{p.PropertyName}] is long u_{p.PropertyName}) ? (uint)u_{p.PropertyName} : default",
-        ConversionKind.EnumInt => $"(p_{p.PropertyName} >= 0 && row[p_{p.PropertyName}] is int e_{p.PropertyName}) ? ({p.TypeDisplay})e_{p.PropertyName} : default",
-        ConversionKind.EnumLong => $"(p_{p.PropertyName} >= 0 && row[p_{p.PropertyName}] is long e_{p.PropertyName}) ? ({p.TypeDisplay})e_{p.PropertyName} : default",
-        ConversionKind.Fixed => $"(p_{p.PropertyName} >= 0 && row[p_{p.PropertyName}] is byte[] f_{p.PropertyName}) ? f_{p.PropertyName} : default",
+        ConversionKind.DateOnly => $"(p_{p.PropertyName} >= 0 && row[p_{p.PropertyName}] is int d_{p.PropertyName}) ? global::Iceberg.Net.Types.IcebergTime.DateFromDays(d_{p.PropertyName}) : default({p.TypeDisplay})",
+        ConversionKind.DateTimeDate => $"(p_{p.PropertyName} >= 0 && row[p_{p.PropertyName}] is int d_{p.PropertyName}) ? global::System.DateTime.SpecifyKind(global::Iceberg.Net.Types.IcebergTime.Epoch.AddDays(d_{p.PropertyName}), global::System.DateTimeKind.Unspecified) : default({p.TypeDisplay})",
+        ConversionKind.TimeOnly => $"(p_{p.PropertyName} >= 0 && row[p_{p.PropertyName}] is long t_{p.PropertyName}) ? global::Iceberg.Net.Types.IcebergTime.TimeFromMicros(t_{p.PropertyName}) : default({p.TypeDisplay})",
+        ConversionKind.TimeSpan => $"(p_{p.PropertyName} >= 0 && row[p_{p.PropertyName}] is long ts_{p.PropertyName}) ? global::System.TimeSpan.FromTicks(ts_{p.PropertyName} * 10) : default({p.TypeDisplay})",
+        ConversionKind.DateTime => $"(p_{p.PropertyName} >= 0 && row[p_{p.PropertyName}] is long dt_{p.PropertyName}) ? global::System.DateTime.SpecifyKind(global::Iceberg.Net.Types.IcebergTime.TimestampFromMicros(dt_{p.PropertyName}), global::System.DateTimeKind.Unspecified) : default({p.TypeDisplay})",
+        ConversionKind.DateTimeTz => $"(p_{p.PropertyName} >= 0 && row[p_{p.PropertyName}] is long dt_{p.PropertyName}) ? global::Iceberg.Net.Types.IcebergTime.TimestampFromMicros(dt_{p.PropertyName}) : default({p.TypeDisplay})",
+        ConversionKind.DateTimeOffset or ConversionKind.DateTimeOffsetTimestamp => $"(p_{p.PropertyName} >= 0 && row[p_{p.PropertyName}] is long dto_{p.PropertyName}) ? new global::System.DateTimeOffset(global::Iceberg.Net.Types.IcebergTime.TimestampFromMicros(dto_{p.PropertyName}), global::System.TimeSpan.Zero) : default({p.TypeDisplay})",
+        ConversionKind.Short => $"(p_{p.PropertyName} >= 0 && row[p_{p.PropertyName}] is int s_{p.PropertyName}) ? (short)s_{p.PropertyName} : default({p.TypeDisplay})",
+        ConversionKind.Byte => $"(p_{p.PropertyName} >= 0 && row[p_{p.PropertyName}] is int b_{p.PropertyName}) ? (byte)b_{p.PropertyName} : default({p.TypeDisplay})",
+        ConversionKind.SByte => $"(p_{p.PropertyName} >= 0 && row[p_{p.PropertyName}] is int sb_{p.PropertyName}) ? (sbyte)sb_{p.PropertyName} : default({p.TypeDisplay})",
+        ConversionKind.UShort => $"(p_{p.PropertyName} >= 0 && row[p_{p.PropertyName}] is int us_{p.PropertyName}) ? (ushort)us_{p.PropertyName} : default({p.TypeDisplay})",
+        ConversionKind.UInt => $"(p_{p.PropertyName} >= 0 && row[p_{p.PropertyName}] is long u_{p.PropertyName}) ? (uint)u_{p.PropertyName} : default({p.TypeDisplay})",
+        ConversionKind.EnumInt => $"(p_{p.PropertyName} >= 0 && row[p_{p.PropertyName}] is int e_{p.PropertyName}) ? ({p.TypeDisplay})e_{p.PropertyName} : default({p.TypeDisplay})",
+        ConversionKind.EnumLong => $"(p_{p.PropertyName} >= 0 && row[p_{p.PropertyName}] is long e_{p.PropertyName}) ? ({p.TypeDisplay})e_{p.PropertyName} : default({p.TypeDisplay})",
+        ConversionKind.Fixed => $"(p_{p.PropertyName} >= 0 && row[p_{p.PropertyName}] is byte[] f_{p.PropertyName}) ? f_{p.PropertyName} : default({p.TypeDisplay})",
         _ => p.IsNullable
-            ? $"p_{p.PropertyName} >= 0 ? ({p.TypeDisplay})row[p_{p.PropertyName}] : default"
+            ? $"p_{p.PropertyName} >= 0 ? ({p.TypeDisplay})row[p_{p.PropertyName}] : default({p.TypeDisplay})"
             : p.IsValueType
-                ? $"(p_{p.PropertyName} >= 0 && row[p_{p.PropertyName}] is not null) ? ({p.TypeDisplay})row[p_{p.PropertyName}]! : default"
+                ? $"(p_{p.PropertyName} >= 0 && row[p_{p.PropertyName}] is not null) ? ({p.TypeDisplay})row[p_{p.PropertyName}]! : default({p.TypeDisplay})"
                 : $"(p_{p.PropertyName} >= 0 && row[p_{p.PropertyName}] is not null) ? ({p.TypeDisplay})row[p_{p.PropertyName}]! : default!"
     };
 

@@ -70,6 +70,25 @@ public partial class GeneratedScalarVarieties
     public TimeSpan Elapsed { get; set; }
 }
 
+[IcebergMappable]
+public partial class GeneratedNullableScalars
+{
+    public int Id { get; set; }
+    public decimal? MaybeDecimal { get; set; }
+    public DateOnly? MaybeDate { get; set; }
+    public TimeOnly? MaybeTime { get; set; }
+    public DateTime? MaybeDateTime { get; set; }
+    public DateTimeOffset? MaybeOffset { get; set; }
+}
+
+[IcebergMappable]
+public partial class GeneratedMixedIds
+{
+    public string A { get; set; } = "";
+    [IcebergField(1)]
+    public string B { get; set; } = "";
+}
+
 public class SourceGeneratorTests : CatalogTest
 {
     [Fact]
@@ -332,5 +351,42 @@ public class SourceGeneratorTests : CatalogTest
         Assert.Equal(item.Unsigned, read.Unsigned);
         Assert.Equal(item.State, read.State);
         Assert.Equal(item.Elapsed, read.Elapsed);
+    }
+
+    [Fact]
+    public async Task NullableScalars_ReadNullsCorrectly_WithoutDefaultingToZeroOrEpoch()
+    {
+        var table = await Catalog.CreateTableAsync<GeneratedNullableScalars>(NewId());
+        var item = new GeneratedNullableScalars
+        {
+            Id = 1,
+            MaybeDecimal = null,
+            MaybeDate = null,
+            MaybeTime = null,
+            MaybeDateTime = null,
+            MaybeOffset = null
+        };
+
+        await table.InsertAsync([item]);
+
+        var read = Assert.Single(await table.AsQueryable<GeneratedNullableScalars>().ToListAsync());
+        Assert.Equal(1, read.Id);
+        Assert.Null(read.MaybeDecimal);
+        Assert.Null(read.MaybeDate);
+        Assert.Null(read.MaybeTime);
+        Assert.Null(read.MaybeDateTime);
+        Assert.Null(read.MaybeOffset);
+    }
+
+    [Fact]
+    public void MixedExplicitAndAutoIds_DoNotCollide()
+    {
+        var schema = GeneratedMixedIds.IcebergSchema;
+        Assert.Equal(2, schema.Columns.Count);
+        var bCol = schema.Columns.First(c => c.Name == "B");
+        var aCol = schema.Columns.First(c => c.Name == "A");
+
+        Assert.Equal(1, bCol.Id);
+        Assert.Equal(2, aCol.Id); // Auto ID skipped 1 because B claimed it!
     }
 }

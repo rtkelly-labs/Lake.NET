@@ -8,7 +8,7 @@
     <IncludeBuildOutput>false</IncludeBuildOutput>
     <RootNamespace>Iceberg.Net.SourceGenerator</RootNamespace>
     <Description>Roslyn source generator for zero-reflection Iceberg row mapping and compile-time schema derivation.</Description>
-    <NoWarn>$(NoWarn);RS2008</NoWarn>
+    <NoWarn>$(NoWarn);RS2008;RS1032</NoWarn>
   </PropertyGroup>
 
   <ItemGroup>
