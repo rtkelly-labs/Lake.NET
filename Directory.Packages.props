@@ -44,5 +44,8 @@
     <PackageVersion Include="SharpFuzz" Version="2.3.0" />
     <!-- BDD: Gherkin features executed by xUnit (Reqnroll is the maintained successor of SpecFlow) -->
     <PackageVersion Include="Reqnroll.xUnit" Version="3.3.4" />
+    <!-- Roslyn Source Generator -->
+    <PackageVersion Include="Microsoft.CodeAnalysis.CSharp" Version="4.8.0" />
+    <PackageVersion Include="Microsoft.CodeAnalysis.Analyzers" Version="3.11.0" />
   </ItemGroup>
 </Project>

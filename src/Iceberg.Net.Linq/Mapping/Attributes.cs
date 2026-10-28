@@ -45,3 +45,9 @@ public sealed class IcebergIgnoreAttribute : Attribute;
 /// <summary>Marks a property as part of the table's identifier fields (the default upsert key).</summary>
 [AttributeUsage(AttributeTargets.Property, AllowMultiple = false)]
 public sealed class IcebergKeyAttribute : Attribute;
+
+/// <summary>
+/// Instructs the Iceberg source generator to emit compile-time, zero-reflection row mapping and schema definitions for this type.
+/// </summary>
+[AttributeUsage(AttributeTargets.Class | AttributeTargets.Struct, AllowMultiple = false, Inherited = false)]
+public sealed class IcebergMappableAttribute : Attribute;
