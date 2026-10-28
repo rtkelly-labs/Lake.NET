@@ -20,7 +20,7 @@ column. So a DuckLake table maps onto an Iceberg `Schema`, and everything below 
 | `ParquetFiles`: field-ID writer and reader, nested columns (Dremel), ranged reads, row-group pruning | Metadata JSON, manifests, manifest lists, the Avro codec |
 | The type model and physical values (`IcebergType`, `IcebergDecimal`, `IcebergTime`) | The metastore commit protocol (DuckLake commits are one SQL transaction) |
 | `Binder`, `MetricsEvaluator`, `RowEvaluator` (pruning and exact residual filtering) | Catalogs (the SQL database *is* the catalog) |
-| `IFileIO` (local, S3), write-once files | Puffin (DuckLake's deletion vectors are experimental and not read) |
+| `IFileIO` (local, S3), write-once files | DuckLake's bare and snapshot-keyed Puffin deletion vectors (1.1) |
 | The `Corruption` contract, `[Spec]` traceability, the fuzz harness, the oracle-test pattern | |
 
 About 3,400 lines of library code. No existing library changed; the shared pieces that did are listed under
@@ -148,11 +148,11 @@ DuckLake 1.1 shipped on 21 October 2026 with DuckDB 2.0. Both versions are suppo
 | `ducklake_schema.parent_schema_id` (nested schemas, e.g. `sales.europe.orders`) | Schemas are looked up by path; `CreateSchemaAsync("sales.europe")` creates a child; `changes_made` quotes each part (`"sales"."europe"`) |
 | `row_group_count` on data and delete files | Written |
 | `min_is_exact` / `max_is_exact` on file and table statistics | Written `true` where there is a bound (bounds come from the rows, untruncated), NULL where there is none |
-| `ducklake_view_column_tag` table | Created; views are not implemented |
+| `ducklake_view_column_tag` table | Created; view column tags are read and written |
 | Inlined tables' `row_id`/`begin_snapshot`/`end_snapshot` renamed `_ducklake_…` | Read by catalog version |
 | `null` column type, promotable later | `DuckLakeType.Null`; columns are left out of data files and read as NULL; `AlterColumnTypeAsync` promotes them |
 | Partition transforms `epoch_year`/`epoch_month`/`epoch_day`/`epoch_hour` | Iceberg.NET's time transforms (1.1 catalogs only) |
-| Multi-snapshot Puffin delete files | Not read (Puffin deletion vectors are not implemented) |
+| Multi-snapshot Puffin delete files | Read; selects the latest cumulative vector not after the scanned snapshot |
 | Partial files and the path chain, now in the spec's Queries page | Already implemented from DuckDB's behaviour |
 
 The 1.1 reference is DuckDB 2.0's `ducklake` extension. PyPI has no wheel for it (the newest extension wheel is 1.5.5,
@@ -352,6 +352,9 @@ await tx.AddDataFilesAsync("main", "events", ["s3://bucket/exports/region=eu/par
 await tx.CommitAsync();
 ```
 
+Registering a file transfers ownership to the lake: rewriting, snapshot expiry and cleanup can delete it, even
+when its absolute path is outside `data_path`, as [DuckDB documents](https://ducklake.select/docs/stable/duckdb/metadata/adding_files).
+
 Each file's footer is read (not its data): columns are matched to the table's by name (struct fields by name, list
 elements and map keys and values by position), whatever field IDs the file has, and each must be readable as its
 column's type (a narrower integer into a wider one, millisecond into microsecond timestamps; not text into numbers).
@@ -494,7 +497,6 @@ reader is the way past it), and without data inlining each small commit writes a
 ## Next steps
 
 1. Typed rows through the LINQ layer's mapping, shared with the Iceberg tables.
-2. Puffin deletion vectors.
-3. Write `INT(8)`/`INT(16)` annotations in Iceberg.Net.Data.
-4. An API review, then a named consumer, before graduation.
+2. Write `INT(8)`/`INT(16)` annotations in Iceberg.Net.Data.
+3. An API review, then a named consumer, before graduation.
 
