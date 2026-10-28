@@ -79,7 +79,7 @@ Iceberg.NET/
 
 ```bash
 # Run from the repository root
-./run-tests.sh spec        # L0 only: ~1 s, no network
+./run-tests.sh spec        # unit suites, no network or Docker
 ./run-tests.sh emulation   # starts moto + REST fixture, runs everything that doesn't need AWS
 ICEBERG_WAREHOUSE=s3://my-bucket/iceberg-regression ICEBERG_ATHENA_WORKGROUP=primary \
   ./run-tests.sh aws       # real Glue, S3 and Athena (see docs/regression-suite.md first)

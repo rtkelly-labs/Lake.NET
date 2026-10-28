@@ -56,7 +56,7 @@ without AWS; Nessie skips the v3 conformance case; the Athena paging fidelity ca
 ## Running
 
 ```bash
-./run-tests.sh spec                                   # L0
+./run-tests.sh spec                                   # all unit suites, no Docker
 ./emulation/up.sh --spark --trino --polaris --gravitino --nessie --lakekeeper   # everything CI runs; plain ./emulation/up.sh for moto + REST
 ./run-tests.sh emulation                              # L0 + BDD + L1 + L2
 dotnet test tests/Iceberg.Net.Spec.Tests --filter Spec=deletion-vectors   # every test of one spec section
