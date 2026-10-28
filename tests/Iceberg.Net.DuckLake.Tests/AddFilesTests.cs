@@ -74,6 +74,44 @@ public abstract class AddFilesTests : IAsyncLifetime
         return (await catalog.ReadAsync(table, filter)).Select(r => $"{r[0]}:{r[1] ?? "null"}").Order(StringComparer.Ordinal).ToList();
     }
 
+    [SkippableFact]
+    [Spec("ducklake: ducklake_file_column_stats")]
+    public async Task Unknown_footer_null_counts_and_missing_defaults_do_not_prune_matching_rows()
+    {
+        var catalog = await LakeAsync();
+        await _lake.ExecAsync("UPDATE ducklake_column SET initial_default = 'fallback' WHERE column_name = 'name'");
+        var missing = Plain("missing.parquet", [1]);
+        var unknown = External("unknown.parquet");
+        await ParquetFiles.WriteAsync(_lake.IO, unknown,
+            new Schema(0, [NestedField.Optional(1, "id", PrimitiveType.Long), NestedField.Optional(2, "name", PrimitiveType.String)]),
+            0, [], [[2L, null], [3L, "present"]], new ParquetWriteOptions { Statistics = false });
+        await AddAsync(catalog, [missing, unknown], new DuckLakeAddFileOptions { AllowMissing = true });
+        Assert.Equal(["1:fallback", "2:null", "3:present"], await RowsAsync(catalog));
+        Assert.Equal(["1:fallback"], await RowsAsync(catalog, Expr.Equal("name", "fallback")));
+        Assert.Equal(["2:null"], await RowsAsync(catalog, Expr.IsNull("name")));
+        Assert.Equal(["1:fallback", "3:present"], await RowsAsync(catalog, Expr.NotNull("name")));
+    }
+
+    [SkippableFact]
+    [Spec("ducklake: ducklake_files_scheduled_for_deletion")]
+    public async Task Registered_files_transfer_ownership_and_are_cleaned_up_after_expiry()
+    {
+        var catalog = await LakeAsync();
+        var external = Plain("owned.parquet", [1, 2], ["a", "b"]);
+        await AddAsync(catalog, [external]);
+        await using (var tx = catalog.BeginTransaction())
+        {
+            await tx.DeleteAsync("main", "t", Expr.Equal("id", 1L));
+            await tx.CommitAsync();
+        }
+        await catalog.RewriteDataFilesAsync(deleteThreshold: 0.1);
+        Assert.True(File.Exists(external)); // older snapshots still own the original
+        await catalog.ExpireSnapshotsAsync(DateTimeOffset.UtcNow.AddMinutes(1));
+        Assert.Contains(external, await catalog.CleanupOldFilesAsync());
+        Assert.False(File.Exists(external));
+        Assert.Equal(["2:b"], await RowsAsync(catalog));
+    }
+
     [Fact]
     [Spec("ducklake: ducklake_column_mapping")]
     [Spec("ducklake: ducklake_name_mapping")]

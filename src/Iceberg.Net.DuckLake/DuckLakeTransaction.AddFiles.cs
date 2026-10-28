@@ -59,17 +59,17 @@ public sealed partial class DuckLakeTransaction
             var stats = new List<DuckLakeColumnStats>();
             foreach (var c in columns.SelectMany(c => c.SelfAndDescendants()).Where(c => c.Type is DuckLakePrimitive))
             {
-                if (!facts.Statistics.TryGetValue((int)c.Id, out var s)) continue;
+                // Unknown counts must stay unknown: zero would incorrectly prune IS NULL scans.
+                if (!facts.Statistics.TryGetValue((int)c.Id, out var s) || s.NullValueCount is not { } nulls) continue;
                 var type = (DuckLakePrimitive)c.Type;
                 string? Bound(object? v) => v is null ? null : DuckLakeValues.Format(type, v);
                 var (min, max) = (Bound(s.LowerBound), Bound(s.UpperBound));
-                var nulls = s.NullValueCount ?? 0;
                 stats.Add(new DuckLakeColumnStats(c.Id, (s.ValueCount ?? 0) - nulls, nulls, min is null || max is null ? null : min, min is null || max is null ? null : max, null)
                     { ColumnSizeBytes = s.ColumnSize });
             }
-            // Format 1.1 (DuckDB 2.0): each leaf column the file lacks gets an all-null statistics row.
+            // Format 1.1: absent leaves with no initial default are all null. Defaults have unknown statistics.
             if (_catalog.Is11)
-                foreach (var c in missing.Where(c => c.Type is DuckLakePrimitive))
+                foreach (var c in missing.Where(c => c.Type is DuckLakePrimitive && c.InitialDefault is null))
                     stats.Add(new DuckLakeColumnStats(c.Id, 0, facts.RecordCount, null, null, null));
             foreach (var c in fromPath)
             {

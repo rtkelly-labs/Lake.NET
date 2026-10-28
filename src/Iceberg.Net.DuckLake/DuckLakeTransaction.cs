@@ -370,6 +370,7 @@ public sealed partial class DuckLakeTransaction : IAsyncDisposable
 
     private async Task<long> OrderAsync(DuckLakeDbContext db, PendingTable t, DuckLakeColumn col, CancellationToken ct)
     {
+        if (_ops.OfType<AddColumnOp>().FirstOrDefault(a => a.Table == t && a.Column.Id == col.Id) is { } added) return added.Order;
         var tableId = t.TableId;
         var id = col.Id;
         return await db.Columns.LiveAt(_base!.Value).Where(c => c.TableId == tableId && c.ColumnId == id).Select(c => c.ColumnOrder).FirstOrDefaultAsync(ct) ?? col.Id;
@@ -818,6 +819,9 @@ public sealed partial class DuckLakeTransaction : IAsyncDisposable
                     s.Schema.SchemaId = nextCatalogId++;
                     s.Schema.ParentId = s.Schema.Parent?.SchemaId ?? s.Schema.ParentId;
                     var parentId = s.Schema.ParentId;
+                    if (parentId is { } parent && !rows.Schemas.Any(x => x.SchemaId == parent)
+                        && !await db.Schemas.LiveAt(latest.SnapshotId).AnyAsync(x => x.SchemaId == parent, ct))
+                        throw new DuckLakeConflictException($"Parent of schema {s.Schema.Name} was dropped concurrently");
                     var name = s.Schema.Parts[^1];
                     var live = db.Schemas.LiveAt(latest.SnapshotId).Where(x => x.SchemaName == name);
                     var clash = v11 ? await live.AnyAsync(x => x.ParentSchemaId == parentId, ct) : await live.AnyAsync(ct);
@@ -879,6 +883,7 @@ public sealed partial class DuckLakeTransaction : IAsyncDisposable
                 {
                     var tableId = e.Table.TableId!.Value;
                     var ids = e.ColumnIds.ToList();
+                    rows.Columns.RemoveAll(x => x.TableId == tableId && ids.Contains(x.ColumnId));
                     await db.Columns.Current().Where(x => x.TableId == tableId && ids.Contains(x.ColumnId))
                         .ExecuteUpdateAsync(u => u.SetProperty(x => x.EndSnapshot, snapshotId), ct);
                     // Spec ducklake_column_tag: "Dropping a column ends its active tag versions, including tags on child fields."
@@ -891,9 +896,16 @@ public sealed partial class DuckLakeTransaction : IAsyncDisposable
                 {
                     var tableId = r.Table.TableId!.Value;
                     var columnId = r.Column.Id;
+                    var prior = rows.Columns.FirstOrDefault(x => x.TableId == tableId && x.ColumnId == columnId)
+                        ?? await db.Columns.Current().SingleOrDefaultAsync(x => x.TableId == tableId && x.ColumnId == columnId, ct);
                     await db.Columns.Current().Where(x => x.TableId == tableId && x.ColumnId == columnId && x.ParentColumn == null)
                         .ExecuteUpdateAsync(u => u.SetProperty(x => x.EndSnapshot, snapshotId), ct);
-                    rows.Columns.Add(ColumnRow(r.Table, r.Column, r.Parent, r.Order));
+                    rows.Columns.RemoveAll(x => x.TableId == tableId && x.ColumnId == columnId);
+                    var replacement = ColumnRow(r.Table, r.Column, r.Parent, r.Order);
+                    replacement.DefaultValue = prior?.DefaultValue;
+                    replacement.DefaultValueType = prior?.DefaultValueType;
+                    replacement.DefaultValueDialect = prior?.DefaultValueDialect;
+                    rows.Columns.Add(replacement);
                     versionedTables.Add(r.Table);
                     break;
                 }
@@ -1080,7 +1092,7 @@ public sealed partial class DuckLakeTransaction : IAsyncDisposable
         ColumnEntity ColumnRow(PendingTable table, DuckLakeColumn col, long? parent, long order) => new()
         {
             ColumnId = col.Id, BeginSnapshot = snapshotId, TableId = table.TableId!.Value, ColumnOrder = order, ColumnName = col.Name,
-            ColumnType = col.Type.ColumnType, NullsAllowed = col.Nullable, ParentColumn = parent,
+            ColumnType = col.Type.ColumnType, NullsAllowed = col.Nullable, ParentColumn = parent, InitialDefault = col.InitialDefault,
         };
 
         void AddColumnRows(PendingTable table, DuckLakeColumn col, long? parent, long order)

@@ -74,6 +74,35 @@ public abstract class FormatVersionTests : IDisposable
     private bool Sqlite => _backend == CatalogBackend.Sqlite;
 
     [SkippableFact]
+    [Spec("ducklake: CREATE SCHEMA")]
+    public async Task A_child_schema_cannot_commit_after_its_parent_is_dropped()
+    {
+        var lake = Lake();
+        var catalog = await lake.CreateAsync();
+        await using (var tx = catalog.BeginTransaction())
+        {
+            await tx.CreateSchemaAsync("sales");
+            await tx.CommitAsync();
+        }
+        await using var child = catalog.BeginTransaction();
+        await child.CreateSchemaAsync("sales.europe");
+        await child.CreateTableAsync("sales.europe", "t", [new("id", DuckLakeType.Int64)]);
+        await child.InsertAsync("sales.europe", "t", [[1L]]);
+        await using (var drop = catalog.BeginTransaction())
+        {
+            await drop.DropSchemaAsync("sales");
+            await drop.CommitAsync();
+        }
+        var latest = (await catalog.CurrentSnapshotAsync()).SnapshotId;
+        await Assert.ThrowsAsync<DuckLakeConflictException>(() => child.CommitAsync());
+        Assert.Equal(latest, (await catalog.CurrentSnapshotAsync()).SnapshotId);
+        Assert.Equal(["main"], await catalog.ListSchemasAsync());
+        Assert.Empty(await lake.SqlAsync("SELECT schema_id FROM ducklake_schema WHERE schema_name = 'europe'"));
+        Assert.Empty(lake.Files());
+        await DuckLakeValidator.AssertValidAsync(catalog);
+    }
+
+    [SkippableFact]
     [Spec("ducklake: ducklake_schema")]
     [Spec("ducklake: ducklake_snapshot_changes")]
     [Spec("ducklake: List Schemas")]

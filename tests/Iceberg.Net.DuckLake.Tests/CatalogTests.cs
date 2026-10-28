@@ -42,6 +42,39 @@ public abstract class CatalogTests : IAsyncLifetime
     }
 
     [SkippableFact]
+    [Spec("ducklake: ducklake_column")]
+    public async Task Column_replacements_preserve_defaults_and_coalesce_staged_changes()
+    {
+        var catalog = await WithTableAsync(rows: 1);
+        await using (var tx = catalog.BeginTransaction())
+        {
+            await tx.AddColumnAsync("main", "t", new("old", DuckLakeType.Int32));
+            await tx.CommitAsync();
+        }
+        // Defaults are supplied by attached catalogs; there is no public default-writing API yet.
+        await SqlAsync("UPDATE ducklake_column SET initial_default = '7', default_value = '8', default_value_type = 'literal', default_value_dialect = 'duckdb' WHERE column_name = 'old'");
+        var before = (await catalog.CurrentSnapshotAsync()).SnapshotId;
+        await using (var tx = catalog.BeginTransaction())
+        {
+            await tx.RenameColumnAsync("main", "t", "old", "renamed");
+            await tx.AlterColumnTypeAsync("main", "t", "renamed", DuckLakeType.Int64);
+            await tx.AddColumnAsync("main", "t", new("added", DuckLakeType.Int32));
+            await tx.RenameColumnAsync("main", "t", "added", "extra");
+            await tx.AlterColumnTypeAsync("main", "t", "extra", DuckLakeType.Int64);
+            await tx.AddColumnAsync("main", "t", new("discard", DuckLakeType.Int32));
+            await tx.RenameColumnAsync("main", "t", "discard", "removed");
+            await tx.DropColumnAsync("main", "t", "removed");
+            await tx.CommitAsync();
+        }
+        var table = await catalog.LoadTableAsync("main", "t");
+        Assert.Equal(["id", "name", "renamed", "extra"], table.Columns.Select(c => c.Name));
+        Assert.Equal(7L, (await catalog.ReadAsync(table))[0][2]);
+        Assert.Equal(7, (await catalog.ReadAsync(await catalog.LoadTableAsync("main", "t", before)))[0][2]);
+        Assert.Equal([["7", "8", "literal", "duckdb"]], await SqlAsync("SELECT initial_default, default_value, default_value_type, default_value_dialect FROM ducklake_column WHERE column_name = 'renamed' AND end_snapshot IS NULL"));
+        Assert.Equal(4, (await SqlAsync("SELECT column_id FROM ducklake_column WHERE end_snapshot IS NULL")).Count);
+    }
+
+    [SkippableFact]
     [Spec("ducklake: ducklake_metadata")]
     [Spec("ducklake: Get Current Snapshot")]
     public async Task A_new_catalog_has_snapshot_0_and_the_main_schema()

@@ -30,6 +30,73 @@ public abstract class CrossEngineTests : IAsyncLifetime
         finally { _lake.Dispose(); }
     }
 
+    [SkippableFact]
+    [Spec("ducklake: ducklake_column")]
+    [Spec("ducklake: ducklake_file_column_stats")]
+    [Spec("ducklake: ducklake_view")]
+    public async Task Defaults_and_repeated_schema_changes_remain_readable_in_both_engines()
+    {
+        Oracle.Require();
+        await Oracle.RunAsync(_lake,
+            "CALL lake.set_option('data_inlining_row_limit', 0)",
+            "CREATE TABLE lake.t (id BIGINT)", "INSERT INTO lake.t VALUES (1)",
+            "ALTER TABLE lake.t ADD COLUMN old INTEGER DEFAULT 7",
+            "CREATE VIEW lake.v AS SELECT 1 AS x");
+        _lake.MarkCreated();
+        var catalog = await _lake.OpenAsync();
+        var path = Path.Combine(_lake.Root, "missing.parquet");
+        await Data.ParquetFiles.WriteAsync(_lake.IO, path,
+            new Types.Schema(0, [Types.NestedField.Optional(1, "id", Types.PrimitiveType.Long)]),
+            0, [], [[2L]], Data.ParquetWriteOptions.Default);
+        await using (var tx = catalog.BeginTransaction())
+        {
+            await tx.AddDataFilesAsync("main", "t", [path], new DuckLakeAddFileOptions { AllowMissing = true });
+            await tx.CommitAsync();
+        }
+        var before = await catalog.LoadTableAsync("main", "t");
+        Assert.Equal(2, (await catalog.ReadAsync(before, Expr.Equal("old", 7))).Count);
+        await using (var tx = catalog.BeginTransaction())
+        {
+            await tx.RenameColumnAsync("main", "t", "old", "score");
+            await tx.AlterColumnTypeAsync("main", "t", "score", DuckLakeType.Int64);
+            await tx.AddColumnAsync("main", "t", new("added", DuckLakeType.Int32));
+            await tx.RenameColumnAsync("main", "t", "added", "extra");
+            await tx.AlterColumnTypeAsync("main", "t", "extra", DuckLakeType.Int64);
+            await tx.RenameTableAsync("main", "t", "a");
+            await tx.RenameTableAsync("main", "a", "b");
+            await tx.RenameViewAsync("main", "v", "va");
+            await tx.RenameViewAsync("main", "va", "vb");
+            await tx.CommitAsync();
+        }
+        var table = await catalog.LoadTableAsync("main", "b");
+        var ours = await catalog.ReadAsync(table, Expr.Equal("score", 7L));
+        Assert.Equal(2, ours.Count);
+        LakeJson.AssertSameRows(await Oracle.RowsAsync(_lake, "SELECT * FROM lake.b WHERE score = 7"), LakeJson.Rows(table.Columns, ours));
+        Assert.Equal(["[1]"], await Oracle.RowsAsync(_lake, "SELECT * FROM lake.vb"));
+    }
+
+    [SkippableFact]
+    [Spec("ducklake: ducklake_file_column_stats")]
+    public async Task Imported_files_without_statistics_keep_null_rows_in_both_engines()
+    {
+        Oracle.Require();
+        var catalog = await _lake.CreateAsync();
+        var path = Path.Combine(_lake.Root, "no-stats.parquet");
+        await Data.ParquetFiles.WriteAsync(_lake.IO, path,
+            new Types.Schema(0, [Types.NestedField.Optional(1, "id", Types.PrimitiveType.Long)]),
+            0, [], [[null], [1L]], new Data.ParquetWriteOptions { Statistics = false });
+        await using (var tx = catalog.BeginTransaction())
+        {
+            await tx.CreateTableAsync("main", "t", [new("id", DuckLakeType.Int64)]);
+            await tx.AddDataFilesAsync("main", "t", [path]);
+            await tx.CommitAsync();
+        }
+        var table = await catalog.LoadTableAsync("main", "t");
+        Assert.Single(await catalog.ReadAsync(table, Expr.IsNull("id")));
+        LakeJson.AssertSameRows(await Oracle.RowsAsync(_lake, "SELECT * FROM lake.t WHERE id IS NULL"),
+            LakeJson.Rows(table.Columns, await catalog.ReadAsync(table, Expr.IsNull("id"))));
+    }
+
     internal static readonly DuckLakeColumnDefinition[] AllTypes =
     [
         new("id", DuckLakeType.Int64, Nullable: false),
