@@ -239,6 +239,9 @@ public sealed class IdempotencyOptions
 {
     public bool Enabled { get; set; } = true;
 
+    /// <summary>Maximum unexpired keys (pending or completed) per principal, shared across server instances.</summary>
+    public int MaxClaimsPerPrincipal { get; set; } = 1024;
+
     /// <summary>Advertised as <c>idempotency-key-lifetime</c>; responses are kept at least this long (plus a minute's grace).</summary>
     public TimeSpan Lifetime { get; set; } = TimeSpan.FromMinutes(30);
 

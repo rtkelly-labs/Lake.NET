@@ -100,7 +100,7 @@ The IDs are stable discussion references for agreeing release scope. They do not
 | Ordinary primitives | Boolean/numerics, date/time, micro/nanosecond timestamps, string/binary, UUID, fixed, decimal through precision 38 have supported Parquet mappings |
 | Struct/list/map | Data I/O and typed mapping exist; filters/partition sources can traverse structs, not list/map elements; import and EF Core have narrower boundaries |
 | Variant / geometry / geography / unknown | Model/JSON capability does not imply complete data I/O; the Parquet writer has no cases for these types |
-| Defaults and encryption | Initial defaults are applied for missing read columns; applying write defaults to unmapped typed-write columns is defective (F13). Encryption keys are represented in metadata, not an implemented end-to-end encryption service |
+| Defaults and encryption | Initial defaults are applied for missing read columns; typed-write defaults for absent members are implemented, preserving explicit nulls (F13 fix). Encryption keys are represented in metadata, not an implemented end-to-end encryption service |
 | ORC | No data-file implementation |
 
 Sources: [Parquet mappings](../src/Iceberg.Net.Data/ParquetFiles.cs), [Avro mappings](../src/Iceberg.Net.Avro/ManifestCodec.cs),
@@ -247,9 +247,9 @@ execution exposed the ownership failure described below. The harness correction 
 Earlier package smoke testing in this work packed and consumed exactly seven packages at `0.1.0-preview.1`;
 that tested package plumbing, not approval or verification of a `0.0.1` release.
 
-## Confirmed behavior requiring follow-up
+## Confirmed behavior and implementation follow-up
 
-### Typed writes do not apply an unmapped column's write default (F13)
+### Typed write-default defect and correction (F13)
 
 A local probe creates a v3 table with `Id` and an unmapped integer `Extra` whose `write-default` is 7, then inserts a
 model that has only `Id` through the public typed insert API. Observed results:
@@ -264,7 +264,9 @@ unmapped field when a write default exists, while [StructBinding.ToRow](../src/I
 allocates a null-filled row and populates only mapped members. No writer application of `WriteDefault` was found.
 The probe and output are retained under gitignored `temp/capability-audit/default-probe/` and
 `temp/capability-audit/default-probe.log`. This is a confirmed implementation gap, not just a missing test tag.
-Do not claim complete default-write semantics until it is fixed and cross-engine verified.
+The mapper now fills only unmapped members, including nested structs, from independently decoded write defaults.
+New unit cases cover both file formats, explicit nulls/values, nested mutable defaults and preservation of existing
+unmapped values in MERGE. The BDD scenario compares Parquet with PyIceberg and Avro with Spark; CI evidence is pending.
 
 ### Enabling the server Spark tests exposed a Docker ownership issue (F03)
 
@@ -275,5 +277,5 @@ Docker. The other three Spark cases no longer skipped. The server result was 153
 Azurite skip; Behaviour and Ecosystem passed 65 and 58 cases respectively.
 
 The harness now uses the same post-process shared-mount permission handoff as `SparkOracle.ReadTablesAsync`, preserving
-the Spark exit code. This repairs the test environment; the follow-up CI result must establish whether the full
-Spark flow passes. It must not be represented as a verified fix before that run succeeds.
+the Spark exit code. This repairs the test environment; [CI run 40385929772](https://github.com/rtkelly-labs/Iceberg.NET/actions/runs/40385929772) passed the unit,
+cross-engine and regression jobs after the correction, verifying that flow.

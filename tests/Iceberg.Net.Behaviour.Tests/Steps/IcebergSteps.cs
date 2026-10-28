@@ -38,7 +38,7 @@ public sealed class IcebergWorld : IDisposable
     /// <summary>Switch to the emulated REST catalog over S3, which Trino reads too (needs emulation/up.sh --trino).</summary>
     public async Task UseSharedRestCatalogAsync()
     {
-        Skip.If(TrinoOracle.SkipReason is not null, TrinoOracle.SkipReason);
+        Require.Trino();
         Catalog.Dispose();
         Catalog = await TestEnvironment.Current.CatalogAsync("rest");
         Namespace = Namespace.Of(TestEnvironment.Current.NewNamespace("bdd"));
@@ -218,7 +218,7 @@ public sealed class IcebergSteps(IcebergWorld world)
     [Then(@"^PyIceberg reads the same rows$")]
     public async Task ThenPyIcebergAgrees()
     {
-        Skip.If(TestEnvironment.Current.LocalOracleSkipReason is not null, TestEnvironment.Current.LocalOracleSkipReason);
+        Require.LocalOracle();
         var table = await world.Catalog.LoadTableAsync(world.T.Identifier);
         var py = await TestEnvironment.Current.OracleAsync("read-metadata", table.MetadataLocation!);
         var theirs = py["rows"]!.AsArray().Select(r => $"{r!["id"]}|{r["name"]?.GetValue<string>() ?? "null"}|{r["region"]}").ToList();
@@ -229,7 +229,7 @@ public sealed class IcebergSteps(IcebergWorld world)
     [Then(@"^PyIceberg refuses the table$")]
     public async Task ThenPyIcebergRefuses()
     {
-        Skip.If(TestEnvironment.Current.LocalOracleSkipReason is not null, TestEnvironment.Current.LocalOracleSkipReason);
+        Require.LocalOracle();
         var table = await world.Catalog.LoadTableAsync(world.T.Identifier);
         var e = await Assert.ThrowsAsync<InvalidOperationException>(() => TestEnvironment.Current.OracleAsync("read-metadata", table.MetadataLocation!));
         Assert.Contains("equality deletes", e.Message);
@@ -257,7 +257,7 @@ public sealed class IcebergSteps(IcebergWorld world)
     [Then(@"^Trino reads the same rows$")]
     public async Task ThenTrinoAgrees()
     {
-        Skip.If(TrinoOracle.SkipReason is not null, TrinoOracle.SkipReason);
+        Require.Trino();
         var table = await world.Catalog.LoadTableAsync(world.T.Identifier);
         var trino = await TrinoOracle.QueryAsync($"SELECT id, name, region FROM {TrinoOracle.Table(world.Namespace.ToString(), "events")} ORDER BY id");
         var theirs = trino.Rows.Select(r => $"{r[0]}|{r[1]?.GetValue<string>() ?? "null"}|{r[2]}").ToList();

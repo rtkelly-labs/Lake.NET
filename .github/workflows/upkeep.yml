@@ -1,6 +1,6 @@
 name: upkeep
 
-# Weekly early warning (see docs/roadmap.md, "Verification"):
+# Manually dispatched early warning (see docs/roadmap.md, "Verification"):
 #   spec-drift   the Iceberg table/Puffin specs and REST OpenAPI on apache/iceberg main vs the sections pinned in
 #                docs/spec/sections.json; fails, listing changed sections and the tests that cover them.
 #   emulators    the regression suite against the :latest moto, REST fixture, Polaris and Trino images (not the pins),

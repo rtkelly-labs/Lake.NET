@@ -6,8 +6,8 @@ using Iceberg.Net.Metadata;
 namespace Iceberg.Net.Catalog;
 
 /// <summary>
-/// The JDBC/SQL catalog: Java's <c>JdbcCatalog</c> and PyIceberg's <c>SqlCatalog</c> tables, over any ADO.NET provider
-/// (SQLite, PostgreSQL, SQL Server, MySQL), so the same database can be shared with Java and Python engines.
+/// The JDBC/SQL catalog: Java's <c>JdbcCatalog</c> and PyIceberg's <c>SqlCatalog</c> tables, with an ADO.NET connection factory. SQLite is conformance-tested; other SQL providers need their own
+/// dialect and conformance validation before support can be claimed. The layout is shared with Java/Python engines.
 /// <code>
 /// iceberg_tables(catalog_name, table_namespace, table_name, metadata_location, previous_metadata_location)
 /// iceberg_namespace_properties(catalog_name, namespace, property_key, property_value)

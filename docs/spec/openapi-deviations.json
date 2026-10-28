@@ -17,7 +17,22 @@
   },
   "extra-responses": {
     "signRequest 404": "Signing is per table: a request for a table that does not exist is 404 (NoSuchTableException), as for every other table route.",
-    "viewExists 403": "A principal without browse rights on the namespace gets 403, as tableExists does; the reference lists 403 for tableExists but not viewExists."
+    "viewExists 403": "A principal without browse rights on the namespace gets 403, as tableExists does; the reference lists 403 for tableExists but not viewExists.",
+    "createNamespace 429": "Per-principal idempotency capacity is full: new keys receive 429 without applying the mutation; existing keys remain replayable.",
+    "dropNamespace 429": "Per-principal idempotency capacity is full: new keys receive 429 without applying the mutation; existing keys remain replayable.",
+    "updateProperties 429": "Per-principal idempotency capacity is full: new keys receive 429 without applying the mutation; existing keys remain replayable.",
+    "createTable 429": "Per-principal idempotency capacity is full: new keys receive 429 without applying the mutation; existing keys remain replayable.",
+    "registerTable 429": "Per-principal idempotency capacity is full: new keys receive 429 without applying the mutation; existing keys remain replayable.",
+    "updateTable 429": "Per-principal idempotency capacity is full: new keys receive 429 without applying the mutation; existing keys remain replayable.",
+    "dropTable 429": "Per-principal idempotency capacity is full: new keys receive 429 without applying the mutation; existing keys remain replayable.",
+    "unregisterTable 429": "Per-principal idempotency capacity is full: new keys receive 429 without applying the mutation; existing keys remain replayable.",
+    "reportMetrics 429": "Per-principal idempotency capacity is full: new keys receive 429 without applying the mutation; existing keys remain replayable.",
+    "renameTable 429": "Per-principal idempotency capacity is full: new keys receive 429 without applying the mutation; existing keys remain replayable.",
+    "commitTransaction 429": "Per-principal idempotency capacity is full: new keys receive 429 without applying the mutation; existing keys remain replayable.",
+    "createView 429": "Per-principal idempotency capacity is full: new keys receive 429 without applying the mutation; existing keys remain replayable.",
+    "replaceView 429": "Per-principal idempotency capacity is full: new keys receive 429 without applying the mutation; existing keys remain replayable.",
+    "dropView 429": "Per-principal idempotency capacity is full: new keys receive 429 without applying the mutation; existing keys remain replayable.",
+    "renameView 429": "Per-principal idempotency capacity is full: new keys receive 429 without applying the mutation; existing keys remain replayable."
   },
   "missing-parameters": {
     "loadTable query referenced-by": "Not implemented: authorization uses the principal's own grants and does not consider the chain of views that refers to the table.",

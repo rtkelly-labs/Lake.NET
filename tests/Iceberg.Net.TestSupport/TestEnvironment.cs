@@ -223,11 +223,22 @@ public sealed class TestEnvironment
 /// <summary>Skips (with the reason) when the configured target or capability is unavailable, instead of failing.</summary>
 public static class Require
 {
+    /// <summary>Fail a missing integration explicitly required by CI; otherwise skip with its concrete reason.</summary>
+    public static void Dependency(string name, string? reason, string? required = null)
+    {
+        if (reason is null) return;
+        var selected = (required ?? Environment.GetEnvironmentVariable("ICEBERG_REQUIRED_INTEGRATIONS") ?? "")
+            .Split(',', StringSplitOptions.RemoveEmptyEntries | StringSplitOptions.TrimEntries);
+        if (selected.Contains(name, StringComparer.OrdinalIgnoreCase) || selected.Contains("*"))
+            throw new InvalidOperationException($"Required integration '{name}' is unavailable: {reason}");
+        Skip.If(true, reason);
+    }
+
     public static void Target() => Skip.If(TestEnvironment.Current.SkipReason is not null, TestEnvironment.Current.SkipReason);
-    public static void Catalog(string kind) => Skip.If(TestEnvironment.Current.CatalogSkipReason(kind) is not null, TestEnvironment.Current.CatalogSkipReason(kind));
-    public static void Oracle() => Skip.If(TestEnvironment.Current.OracleSkipReason is not null, TestEnvironment.Current.OracleSkipReason);
-    public static void LocalOracle() => Skip.If(TestEnvironment.Current.LocalOracleSkipReason is not null, TestEnvironment.Current.LocalOracleSkipReason);
-    public static void Trino() => Skip.If(TrinoOracle.SkipReason is not null, TrinoOracle.SkipReason);
-    public static void Spark() => Skip.If(SparkOracle.SkipReason is not null, SparkOracle.SkipReason);
+    public static void Catalog(string kind) => Dependency("catalog:" + kind, TestEnvironment.Current.CatalogSkipReason(kind));
+    public static void Oracle() => Dependency("pyiceberg", TestEnvironment.Current.OracleSkipReason);
+    public static void LocalOracle() => Dependency("pyiceberg", TestEnvironment.Current.LocalOracleSkipReason);
+    public static void Trino() => Dependency("trino", TrinoOracle.SkipReason);
+    public static void Spark() => Dependency("spark", SparkOracle.SkipReason);
     public static void Athena() => Skip.If(TestEnvironment.Current.AthenaSkipReason is not null, TestEnvironment.Current.AthenaSkipReason);
 }

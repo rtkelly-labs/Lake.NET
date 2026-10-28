@@ -1,6 +1,6 @@
 name: aws
 
-# Nightly L2 run against real AWS (S3 + Glue + Athena), plus the shadow comparison of a
+# Manually dispatched L2 run against real AWS (S3 + Glue + Athena), plus the shadow comparison of a
 # production table read by .NET vs Athena. Dormant until configured: every job is skipped while the
 # ICEBERG_AWS_ROLE_ARN repository variable is unset. Setup (one-off, needs AWS access) is in
 # docs/regression-suite.md, "AWS mode".

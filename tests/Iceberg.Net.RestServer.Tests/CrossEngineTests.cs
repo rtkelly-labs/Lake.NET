@@ -98,7 +98,7 @@ public sealed class CrossEngineTests
     [SkippableFact]
     public async Task PyIceberg_and_the_dotnet_client_share_tables_through_the_server()
     {
-        Skip.If(Python is null, "ICEBERG_PYTHON is not set (an interpreter with interop/pyproject.toml installed)");
+        Require.Dependency("pyiceberg", Python is null ? "ICEBERG_PYTHON is not set (an interpreter with interop/pyproject.toml installed)" : null);
         await using var host = await StartSecuredAsync();
         var uri = host.Uri.ToString().TrimEnd('/');
 
@@ -131,7 +131,7 @@ public sealed class CrossEngineTests
     [SkippableFact]
     public async Task PyIceberg_staged_create_transactions_commit_through_the_server()
     {
-        Skip.If(Python is null, "ICEBERG_PYTHON is not set (an interpreter with interop/pyproject.toml installed)");
+        Require.Dependency("pyiceberg", Python is null ? "ICEBERG_PYTHON is not set (an interpreter with interop/pyproject.toml installed)" : null);
         await using var host = await StartSecuredAsync();
         var uri = host.Uri.ToString().TrimEnd('/');
         var written = await PyIcebergAsync("write", uri, Credential, "py", "staged", "0", "6", "stage");
@@ -145,7 +145,7 @@ public sealed class CrossEngineTests
     [SkippableFact]
     public async Task PyIceberg_reads_tables_the_dotnet_client_creates()
     {
-        Skip.If(Python is null, "ICEBERG_PYTHON is not set (an interpreter with interop/pyproject.toml installed)");
+        Require.Dependency("pyiceberg", Python is null ? "ICEBERG_PYTHON is not set (an interpreter with interop/pyproject.toml installed)" : null);
         await using var host = await StartSecuredAsync();
         using var catalog = await ConnectAsync(host);
         await catalog.CreateNamespaceAsync(Namespace.Of("net"));
@@ -166,7 +166,7 @@ public sealed class CrossEngineTests
     [Spec("rest: fetchScanTasks")]
     public async Task PyIceberg_reads_through_server_side_scan_planning()
     {
-        Skip.If(Python is null, "ICEBERG_PYTHON is not set (an interpreter with interop/pyproject.toml installed)");
+        Require.Dependency("pyiceberg", Python is null ? "ICEBERG_PYTHON is not set (an interpreter with interop/pyproject.toml installed)" : null);
         await using var host = await KestrelHost.StartAsync(o =>
         {
             o.Auth.Clients["spark"] = "spark-secret";
@@ -330,8 +330,8 @@ public sealed class CrossEngineTests
     public async Task Spark_signs_s3_requests_through_the_server()
     {
         Require.Spark();
-        Skip.If(AuthenticatingMoto.SkipReason is not null, AuthenticatingMoto.SkipReason);
-        Skip.If(AwsBundleJar is null, "iceberg-aws-bundle-1.12.0.jar is not next to the Spark jar");
+        Require.Dependency("moto-signing", AuthenticatingMoto.SkipReason);
+        Require.Dependency("spark-aws", AwsBundleJar is null ? "iceberg-aws-bundle-1.12.0.jar is not next to the Spark jar" : null);
         Directory.CreateDirectory(SparkOracle.SharedRoot);
         await using var moto = await AuthenticatingMoto.StartAsync();
         var settings = RemoteSigningTests.MotoSettings(moto);
@@ -383,8 +383,8 @@ public sealed class CrossEngineTests
     [Spec("rest: signRequest")]
     public async Task PyIceberg_signs_s3_requests_through_the_server()
     {
-        Skip.If(Python is null, "ICEBERG_PYTHON is not set (an interpreter with interop/pyproject.toml installed)");
-        Skip.If(AuthenticatingMoto.SkipReason is not null, AuthenticatingMoto.SkipReason);
+        Require.Dependency("pyiceberg", Python is null ? "ICEBERG_PYTHON is not set (an interpreter with interop/pyproject.toml installed)" : null);
+        Require.Dependency("moto-signing", AuthenticatingMoto.SkipReason);
         await using var moto = await AuthenticatingMoto.StartAsync();
         var settings = RemoteSigningTests.MotoSettings(moto);
         await using var host = await KestrelHost.StartAsync(o =>

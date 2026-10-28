@@ -50,7 +50,12 @@ public sealed partial class SqlCatalogStore
     private static DateTimeOffset FromMs(string ms) => DateTimeOffset.FromUnixTimeMilliseconds(long.Parse(ms, CultureInfo.InvariantCulture));
 
     public async Task<IdempotencyClaim?> ClaimAsync(string principal, string key, string fingerprint, DateTimeOffset now, DateTimeOffset expiredBefore, CancellationToken ct = default)
+        => await ClaimAsync(principal, key, fingerprint, now, expiredBefore, int.MaxValue, ct);
+
+    public async Task<IdempotencyClaim?> ClaimAsync(string principal, string key, string fingerprint, DateTimeOffset now, DateTimeOffset expiredBefore,
+        int maxClaimsPerPrincipal, CancellationToken ct = default)
     {
+        ArgumentOutOfRangeException.ThrowIfNegativeOrZero(maxClaimsPerPrincipal);
         await using var c = await OpenAsync(ct);
         (string, object?)[] id = [("@c", catalogName), ("@p", principal), ("@k", key)];
         await ExecuteAsync(c, null, "DELETE FROM iceberg_rest_idempotency WHERE catalog_name = @c AND principal = @p AND idempotency_key = @k AND created_ms < @e",
@@ -59,27 +64,39 @@ public sealed partial class SqlCatalogStore
         {
             try
             {
-                await ExecuteAsync(c, null, """
+                var inserted = await ExecuteAsync(c, null, """
                     INSERT INTO iceberg_rest_idempotency (catalog_name, principal, idempotency_key, fingerprint, created_ms)
-                    VALUES (@c, @p, @k, @f, @t)
-                    """, [.. id, ("@f", fingerprint), ("@t", Ms(now))], ct);
-                return null;
+                    SELECT @c, @p, @k, @f, @t
+                    WHERE (SELECT COUNT(*) FROM iceberg_rest_idempotency
+                           WHERE catalog_name = @c AND principal = @p AND created_ms >= @e) < @limit
+                    """, [.. id, ("@f", fingerprint), ("@t", Ms(now)), ("@e", Ms(expiredBefore)), ("@limit", maxClaimsPerPrincipal)], ct);
+                if (inserted == 1) return null;
+                // A conditional insert and its count are one database statement, so concurrent instances
+                // cannot each reserve the last slot. Existing keys must remain replayable at capacity.
+                var existing = await LoadClaimAsync(c, id, ct);
+                return existing ?? throw new IdempotencyCapacityException();
             }
             catch (DbException) when (attempt < 3)
             {
                 // The key is taken (primary key): read the claim. It may have been released meanwhile; then try again.
-                var rows = await QueryAsync(c, """
-                    SELECT fingerprint, created_ms, status, content_type, etag, body FROM iceberg_rest_idempotency
-                    WHERE catalog_name = @c AND principal = @p AND idempotency_key = @k
-                    """, id, ct);
-                if (rows.Count == 0) continue;
-                var r = rows[0];
-                var response = r[2] is { } status
-                    ? new StoredResponse(int.Parse(status, CultureInfo.InvariantCulture), r[3], r[4], Convert.FromBase64String(r[5] ?? ""))
-                    : null;
-                return new IdempotencyClaim(r[0]!, FromMs(r[1]!), response);
+                var existing = await LoadClaimAsync(c, id, ct);
+                if (existing is not null) return existing;
             }
         }
+    }
+
+    private static async Task<IdempotencyClaim?> LoadClaimAsync(DbConnection c, (string, object?)[] id, CancellationToken ct)
+    {
+        var rows = await QueryAsync(c, """
+            SELECT fingerprint, created_ms, status, content_type, etag, body FROM iceberg_rest_idempotency
+            WHERE catalog_name = @c AND principal = @p AND idempotency_key = @k
+            """, id, ct);
+        if (rows.Count == 0) return null;
+        var r = rows[0];
+        var response = r[2] is { } status
+            ? new StoredResponse(int.Parse(status, CultureInfo.InvariantCulture), r[3], r[4], Convert.FromBase64String(r[5] ?? ""))
+            : null;
+        return new IdempotencyClaim(r[0]!, FromMs(r[1]!), response);
     }
 
     public async Task CompleteAsync(string principal, string key, DateTimeOffset claimed, StoredResponse response, CancellationToken ct = default)

@@ -9,6 +9,12 @@ using Iceberg.Net.Metadata;
 
 namespace Iceberg.Net.Catalog;
 
+/// <summary>Credentials vended for a storage prefix; callers may rebuild their FileIO with the refreshed config.</summary>
+public sealed record StorageCredential(string Prefix, IReadOnlyDictionary<string, string> Config)
+{
+    public override string ToString() => $"StorageCredential {{ Prefix = {Prefix}, Config = [redacted] }}";
+}
+
 public sealed record RestCatalogOptions
 {
     /// <summary>Catalog base URI, e.g. <c>http://localhost:8181</c> (the client appends <c>/v1/...</c>).</summary>
@@ -361,8 +367,12 @@ public sealed class RestCatalog : ICatalog, IViewCatalog
         if (r.Location is not null) body["location"] = r.Location;
         if (r.Spec is not null) body["partition-spec"] = TypeJson.SpecToJson(r.Spec);
         if (r.SortOrder is not null) body["write-order"] = TypeJson.SortOrderToJson(r.SortOrder);
-        var resp = await SendAsync(HttpMethod.Post, $"{NsPath(r.Identifier.Namespace)}/tables", body, ct, conflict: m => new AlreadyExistsException(m));
-        return telemetry.Succeeded(ToTable(r.Identifier, resp!));
+        var replayed = false;
+        var resp = await SendAsync(HttpMethod.Post, $"{NsPath(r.Identifier.Namespace)}/tables", body, ct,
+            conflict: m => new AlreadyExistsException(m), onReplay: () => replayed = true);
+        // Stored responses deliberately omit vended credentials. Reload after a replay, rather than constructing
+        // a table whose FileIO silently falls back to the caller's ambient credentials.
+        return telemetry.Succeeded(replayed ? await LoadTableAsync(r.Identifier, ct) : ToTable(r.Identifier, resp!));
     }
 
     private const string TransactionsEndpoint = "POST /v1/{prefix}/transactions/commit";
@@ -388,6 +398,21 @@ public sealed class RestCatalog : ICatalog, IViewCatalog
         return telemetry.Succeeded(ToTable(id, (await SendAsync(HttpMethod.Get, TablePath(id), null, ct))!));
     }
 
+    /// <summary>
+    /// Request fresh storage credentials for a table. A caller that owns its FileIO may rebuild it from the returned
+    /// prefix/config entries; calling LoadTableAsync instead returns a new table with refreshed metadata and FileIO.
+    /// Existing table handles and in-flight operations are not mutated.
+    /// </summary>
+    public async Task<IReadOnlyList<StorageCredential>> LoadCredentialsAsync(TableIdentifier id, CancellationToken ct = default)
+    {
+        const string endpoint = "GET /v1/{prefix}/namespaces/{namespace}/tables/{table}/credentials";
+        if (Endpoints.Count > 0 && !Endpoints.Contains(endpoint))
+            throw new NotSupportedException("This REST server does not advertise storage credential refresh");
+        var result = await SendAsync(HttpMethod.Get, $"{TablePath(id)}/credentials", null, ct);
+        return result?["storage-credentials"]?.AsArray().Select(c => new StorageCredential(
+            c!["prefix"]!.GetValue<string>(), MetadataJson.StringMapFrom(c["config"]))).ToList() ?? [];
+    }
+
     public async Task<bool> TableExistsAsync(TableIdentifier id, CancellationToken ct = default)
     {
         try
@@ -404,7 +429,10 @@ public sealed class RestCatalog : ICatalog, IViewCatalog
     public async Task<Table> RegisterTableAsync(TableIdentifier id, string metadataLocation, CancellationToken ct = default)
     {
         var body = new JsonObject { ["name"] = id.Name, ["metadata-location"] = metadataLocation };
-        return ToTable(id, (await SendAsync(HttpMethod.Post, $"{NsPath(id.Namespace)}/register", body, ct, conflict: m => new AlreadyExistsException(m)))!);
+        var replayed = false;
+        var response = await SendAsync(HttpMethod.Post, $"{NsPath(id.Namespace)}/register", body, ct,
+            conflict: m => new AlreadyExistsException(m), onReplay: () => replayed = true);
+        return replayed ? await LoadTableAsync(id, ct) : ToTable(id, response!);
     }
 
     public Task RenameTableAsync(TableIdentifier from, TableIdentifier to, CancellationToken ct = default)
@@ -548,7 +576,8 @@ public sealed class RestCatalog : ICatalog, IViewCatalog
         JsonNode? body,
         CancellationToken ct,
         Func<string, Exception>? conflict = null,
-        bool commit = false)
+        bool commit = false,
+        Action? onReplay = null)
     {
         // Spec 1.11+: one UUIDv7 key per logical mutation, reused on every retry, lets the server answer a replay of a
         // mutation it already applied with the original response. Servers that predate it ignore the header.
@@ -588,7 +617,12 @@ public sealed class RestCatalog : ICatalog, IViewCatalog
         using (resp)
         {
             var text = resp.Content is null ? "" : await resp.Content.ReadAsStringAsync(ct);
-            if (resp.IsSuccessStatusCode) return text.Length == 0 ? null : JsonNode.Parse(text);
+            if (resp.IsSuccessStatusCode)
+            {
+                if (resp.Headers.TryGetValues("Idempotent-Replayed", out var replay) && replay.Contains("true", StringComparer.OrdinalIgnoreCase))
+                    onReplay?.Invoke();
+                return text.Length == 0 ? null : JsonNode.Parse(text);
+            }
 
             var message = ErrorMessage(text) ?? $"{(int)resp.StatusCode} {resp.ReasonPhrase}";
             var type = ErrorType(text);

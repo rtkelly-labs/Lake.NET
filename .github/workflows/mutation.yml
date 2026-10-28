@@ -1,6 +1,6 @@
 name: mutation
 
-# Weekly Stryker.NET runs (see docs/roadmap.md, "Mutation testing"). Too slow for
+# Manually dispatched Stryker.NET runs (see docs/roadmap.md, "Mutation testing"). Too slow for
 # PR CI. Each job uploads the HTML/JSON report; record notable score changes in the roadmap's mutation table.
 # The break threshold in each config is 0, so a run fails only if Stryker itself fails.
 on:

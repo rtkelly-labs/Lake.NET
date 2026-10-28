@@ -175,6 +175,51 @@ public sealed class SharedStateTests
             (await ServerSideScan.ReadAsync(table, plan)).Select(r => (long)r[0]!).Order());
     }
 
+    [Theory]
+    [MemberData(nameof(Stores))]
+    public async Task Idempotency_capacity_is_shared_and_existing_keys_still_replay(string store)
+    {
+        await using var pair = new Pair(store, new Dictionary<string, string> { ["Idempotency:MaxClaimsPerPrincipal"] = "1" });
+        using var one = pair.One.Http();
+        using var two = pair.Two.Http();
+        Assert.Equal(HttpStatusCode.OK, (await SendAsync(one, HttpMethod.Post, "/v1/namespaces", "first", CreateNs("first"))).Status);
+        Assert.Equal(HttpStatusCode.TooManyRequests, (await SendAsync(two, HttpMethod.Post, "/v1/namespaces", "second", CreateNs("second"))).Status);
+        Assert.True((await SendAsync(two, HttpMethod.Post, "/v1/namespaces", "first", CreateNs("first"))).Replayed);
+        Assert.Equal(HttpStatusCode.NotFound, (await ProtocolTests.SendAsync(one, HttpMethod.Get, "/v1/namespaces/second")).Status);
+    }
+
+    [Theory]
+    [MemberData(nameof(Stores))]
+    public async Task Concurrent_claims_obey_the_budget_and_other_principals_are_independent(string store)
+    {
+        var root = Path.Combine(Path.GetTempPath(), "iceberg-restserver-tests", Guid.NewGuid().ToString("N"));
+        Directory.CreateDirectory(root);
+        try
+        {
+            var one = StateStore(store, root);
+            var two = store == "memory" ? one : StateStore(store, root);
+            await ((ICatalogStore)one).InitializeAsync();
+            var now = DateTimeOffset.UtcNow;
+            async Task<bool> Claim(int i)
+            {
+                try
+                {
+                    await (i % 2 == 0 ? one : two).ClaimAsync("p", i.ToString(), "f", now, now.AddHours(-1), 2);
+                    return true;
+                }
+                catch (IdempotencyCapacityException) { return false; }
+            }
+            Assert.Equal(2, (await Task.WhenAll(Enumerable.Range(0, 16).Select(Claim))).Count(x => x));
+            Assert.Null(await two.ClaimAsync("other", "separate", "f", now, now.AddHours(-1), 2));
+            Assert.Null(await one.ClaimAsync("p", "after-expiry", "f", now.AddHours(2), now.AddHours(1), 2));
+        }
+        finally
+        {
+            Microsoft.Data.Sqlite.SqliteConnection.ClearAllPools();
+            Directory.Delete(root, recursive: true);
+        }
+    }
+
     private static IServerStateStore StateStore(string store, string root) => store switch
     {
         "memory" => new InMemoryCatalogStore(),

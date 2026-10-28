@@ -106,7 +106,7 @@ public sealed class AzureCredentialVendingTests
     [Trait("Category", "Emulation")]
     public async Task Azurite_enforces_the_vended_tokens()
     {
-        Skip.If(Azurite.SkipReason is not null, Azurite.SkipReason);
+        Iceberg.Net.TestSupport.Require.Dependency("azurite", Azurite.SkipReason);
         await using var azurite = await Azurite.StartAsync();
         await azurite.CreateContainerAsync("lake");
         var options = new AdlsCredentialVendingOptions { Accounts = { [Account] = Key }, Scope = "container" };

@@ -76,6 +76,9 @@ public sealed class InMemoryCatalogStore : ICatalogStore, IServerStateStore
 
     public Task<IdempotencyClaim?> ClaimAsync(string principal, string key, string fingerprint, DateTimeOffset now, DateTimeOffset expiredBefore, CancellationToken ct = default) =>
         _state.ClaimAsync(principal, key, fingerprint, now, expiredBefore, ct);
+    public Task<IdempotencyClaim?> ClaimAsync(string principal, string key, string fingerprint, DateTimeOffset now, DateTimeOffset expiredBefore,
+        int maxClaimsPerPrincipal, CancellationToken ct = default) =>
+        _state.ClaimAsync(principal, key, fingerprint, now, expiredBefore, maxClaimsPerPrincipal, ct);
     public Task CompleteAsync(string principal, string key, DateTimeOffset claimed, StoredResponse response, CancellationToken ct = default) =>
         _state.CompleteAsync(principal, key, claimed, response, ct);
     public Task ReleaseAsync(string principal, string key, DateTimeOffset claimed, CancellationToken ct = default) => _state.ReleaseAsync(principal, key, claimed, ct);

@@ -16,5 +16,6 @@
   </ItemGroup>
   <ItemGroup>
     <ProjectReference Include="../Iceberg.Net.TestSupport/Iceberg.Net.TestSupport.csproj" />
+    <ProjectReference Include="../../src/Iceberg.Net.Linq/Iceberg.Net.Linq.csproj" />
   </ItemGroup>
 </Project>

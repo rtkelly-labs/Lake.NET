@@ -15,6 +15,8 @@ namespace Iceberg.Net.RestServer;
 public sealed class IdempotencyStore(IdempotencyOptions options, IServerStateStore state, Func<DateTimeOffset>? clock = null)
 {
     private readonly Func<DateTimeOffset> _clock = clock ?? (() => DateTimeOffset.UtcNow);
+    private readonly int _capacity = options.MaxClaimsPerPrincipal > 0 ? options.MaxClaimsPerPrincipal
+        : throw new ArgumentOutOfRangeException(nameof(options), "MaxClaimsPerPrincipal must be positive");
     private long _lastSweepTicks;
 
     public const string Header = "Idempotency-Key";
@@ -54,7 +56,17 @@ public sealed class IdempotencyStore(IdempotencyOptions options, IServerStateSto
         while (true)
         {
             var now = Now();
-            var existing = await state.ClaimAsync(principal, key, fingerprint, now, now - Retention, http.RequestAborted);
+            IdempotencyClaim? existing;
+            try
+            {
+                existing = await state.ClaimAsync(principal, key, fingerprint, now, now - Retention, _capacity, http.RequestAborted);
+            }
+            catch (IdempotencyCapacityException)
+            {
+                http.Response.Headers.RetryAfter = "60";
+                await ErrorModel.WriteAsync(http, 429, "TooManyRequestsException", "Idempotency capacity is full; retry after retained keys expire");
+                return;
+            }
             if (existing is null)
             {
                 await RunAsync(http, next, principal, key, now);

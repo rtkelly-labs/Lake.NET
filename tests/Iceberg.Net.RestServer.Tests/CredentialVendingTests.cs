@@ -18,6 +18,43 @@ namespace Iceberg.Net.RestServer.Tests;
 [Spec("rest: loadCredentials")]
 public sealed class CredentialVendingTests
 {
+    private sealed class LoseFirstCreateResponse(HttpMessageHandler inner) : DelegatingHandler(inner)
+    {
+        public int Lost { get; private set; }
+        protected override async Task<HttpResponseMessage> SendAsync(HttpRequestMessage request, CancellationToken ct)
+        {
+            var response = await base.SendAsync(request, ct);
+            if (request.Method == HttpMethod.Post && request.RequestUri!.AbsolutePath.EndsWith("/tables", StringComparison.Ordinal) && Lost++ == 0)
+            {
+                response.Dispose();
+                throw new HttpRequestException("simulated lost create response");
+            }
+            return response;
+        }
+    }
+
+    [Fact]
+    public async Task A_replayed_create_reloads_credentials_and_the_client_can_refresh_them()
+    {
+        var vendor = new RecordingVendor();
+        await using var host = ServerHost.Start(services: services => services.AddSingleton<IStorageCredentialVendor>(vendor));
+        IReadOnlyDictionary<string, string>? used = null;
+        using var catalog = await host.ConnectAsync(accessDelegation: "vended-credentials", wrap: inner => new LoseFirstCreateResponse(inner), io: props =>
+        {
+            used = new Dictionary<string, string>(props);
+            return new LocalFileIO();
+        });
+        await catalog.CreateNamespaceAsync(Namespace.Of("db"));
+        var table = await catalog.CreateTableAsync(new CreateTableRequest(TableIdentifier.Of("db", "events"), ScanPlanningTests.Schema));
+        Assert.Equal("WRITER", used!["s3.access-key-id"]);
+        Assert.True(vendor.Calls.Count >= 2); // original create and fresh load after the credential-free replay
+        var refreshed = await catalog.LoadCredentialsAsync(table.Identifier);
+        Assert.Equal("WRITER", Assert.Single(refreshed).Config["s3.access-key-id"]);
+        Assert.DoesNotContain("WRITER", refreshed[0].ToString());
+        await TableMutations.InsertAsync(table, ScanPlanningTests.Rows(0, 1));
+        Assert.Single(await TableScan.ReadAllAsync(table));
+    }
+
     private sealed class RecordingVendor : IStorageCredentialVendor
     {
         public List<(TableIdentifier Table, string Location, bool Write)> Calls { get; } = [];

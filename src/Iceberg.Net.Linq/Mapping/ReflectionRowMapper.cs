@@ -45,6 +45,7 @@ internal sealed class StructBinding
     private readonly TypeModel _model;
     private readonly IReadOnlyList<NestedField> _fields;
     private readonly (ModelMember Member, int Position, Func<object?, object?> Write)[] _writes;
+    private readonly (int Position, NestedField Field)[] _defaults;
     private Func<object?[], object>? _factory;
 
     public IReadOnlyList<IcebergMemberBinding> Members { get; }
@@ -59,6 +60,9 @@ internal sealed class StructBinding
         _fields = fields;
         Members = members;
         _writes = writes;
+        var mapped = writes.Select(w => w.Item2).ToHashSet();
+        _defaults = fields.Select((field, position) => (Position: position, Field: field))
+            .Where(f => !mapped.Contains(f.Position) && f.Field.WriteDefault is System.Text.Json.Nodes.JsonNode).ToArray();
     }
 
     public static StructBinding Create(Type type, IReadOnlyList<NestedField> fields, IReadOnlyList<MappedField>? mapped, IcebergMapperOptions options, string path)
@@ -207,6 +211,10 @@ internal sealed class StructBinding
     public object?[] ToRow(object item)
     {
         var row = new object?[_fields.Count];
+        // A default fills an absent member, never an explicitly supplied null. Decode per row so mutable
+        // defaults (binary/struct/list/map) are not shared between independent rows or mapper invocations.
+        foreach (var (position, field) in _defaults)
+            row[position] = Json.SingleValueJson.FromJson(field.Type, (System.Text.Json.Nodes.JsonNode)field.WriteDefault!);
         foreach (var (member, position, write) in _writes)
         {
             try

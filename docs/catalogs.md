@@ -116,8 +116,8 @@ Glue endpoint for Lake Formation governance. Challenges:
 ### JDBC / SQL catalog
 
 - A single table `iceberg_tables(catalog_name, table_namespace, table_name, metadata_location, previous_metadata_location)`;
-  CAS is `UPDATE … WHERE metadata_location = :expected` and checking the row count. ✅ `JdbcCatalog` over any
-  ADO.NET provider, in the "V0" layout Java and PyIceberg default to (no `iceberg_type` column), plus
+  CAS is `UPDATE … WHERE metadata_location = :expected` and checking the row count. ✅ `JdbcCatalog` with an
+  ADO.NET connection factory (SQLite is verified; other providers are not yet conformance-tested), in the "V0" layout Java and PyIceberg default to (no `iceberg_type` column), plus
   `iceberg_namespace_properties` with the `exists` marker row. Runs the full conformance suite and soak over SQLite,
   and PyIceberg's `SqlCatalog` reads and writes the same database (`CrossEngineTests`).
 - Views: `new JdbcCatalog(..., views: true)` switches to Java's "V1" layout (`jdbc.schema-version=V1`): an

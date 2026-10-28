@@ -1,7 +1,5 @@
 <Project Sdk="Microsoft.NET.Sdk">
   <PropertyGroup>
-    <!-- Not in the first preview; published in a later one (docs/roadmap.md, Release plan). -->
-    <IsPackable>false</IsPackable>
     <RootNamespace>Iceberg.Net.Arrow</RootNamespace>
     <Description>Apache Arrow interop: Iceberg schemas as Arrow schemas (with field IDs), RecordBatch reads and writes.</Description>
     <AllowUnsafeBlocks>false</AllowUnsafeBlocks>

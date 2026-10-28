@@ -33,6 +33,8 @@
     <Project Path="tests/Iceberg.Net.TestSupport/Iceberg.Net.TestSupport.csproj" />
   </Folder>
   <Folder Name="/tools/">
+    <Project Path="tools/ApiSurface/ApiSurface.csproj" />
+    <Project Path="tools/ResourceProbe/ResourceProbe.csproj" />
     <Project Path="tools/ShadowCompare/ShadowCompare.csproj" />
   </Folder>
 </Solution>

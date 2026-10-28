@@ -1,7 +1,5 @@
 <Project Sdk="Microsoft.NET.Sdk">
   <PropertyGroup>
-    <!-- Not in the first preview; published in a later one (docs/roadmap.md, Release plan). -->
-    <IsPackable>false</IsPackable>
     <RootNamespace>Iceberg.Net.Spark</RootNamespace>
     <Description>Spark SQL for Iceberg's stored procedures (rewrite_data_files, expire_snapshots, remove_orphan_files, …) with escaped identifiers and literals, and EMR Serverless / AWS Glue job submission that runs a generated script.</Description>
     <PackageTags>$(PackageTags);spark;emr-serverless;glue-etl</PackageTags>
