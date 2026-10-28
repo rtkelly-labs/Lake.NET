@@ -2,6 +2,7 @@
 
 | Doc | Read it for |
 |---|---|
+| [dependencies.md](dependencies.md) | Dependency update PRs (Renovate): what it manages, which updates merge themselves, how to run it locally without a hosted service |
 | [capability-baseline.md](capability-baseline.md) | **Scope before 0.0.1:** all 12 projects, 40 capabilities, evidence boundaries, assessment findings and proposed acceptance criteria |
 | [handover.md](handover.md) | **Start here when picking the project up:** release and contribution workflow, test inventory, local setup, open items and next steps |
 | [spec-coverage.md](spec-coverage.md) | **The foundation.** Section-by-section status against the table spec (v1–v3), REST, Puffin and view specs, with the test that pins each item |
