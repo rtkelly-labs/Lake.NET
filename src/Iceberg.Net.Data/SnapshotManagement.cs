@@ -39,6 +39,7 @@ public sealed class SnapshotManager
 {
     private readonly Table _table;
     private readonly TableMetadata _observed;
+    private readonly WritePlanGuard _planGuard;
     private readonly List<Func<RefState, ValueTask>> _ops = [];
     /// <summary>Refs whose value when this manager was created is what an operation expects; moved since → conflict.</summary>
     private readonly HashSet<string> _pinned = new(StringComparer.Ordinal);
@@ -49,6 +50,7 @@ public sealed class SnapshotManager
     {
         _table = table;
         _observed = table.Metadata;
+        _planGuard = new WritePlanGuard(table.Metadata);
     }
 
     private SnapshotManager Add(Func<RefState, ValueTask> op, params string[] pins)
@@ -64,6 +66,7 @@ public sealed class SnapshotManager
     /// <summary>Override <c>commit.retry.num-retries</c> for re-applying rebasable changes after a lost race.</summary>
     public SnapshotManager WithRetries(int retries)
     {
+        if (retries < 0) throw new ArgumentOutOfRangeException(nameof(retries));
         _retries = retries;
         return this;
     }
@@ -220,13 +223,17 @@ public sealed class SnapshotManager
 
     public async Task<TableMetadata> CommitAsync(CancellationToken ct = default)
     {
+        _planGuard.ValidateIdentity(_table.Metadata);
         if (_cherryPick is { } pick) return await CherryPicker.CommitAsync(_table, pick, _retries, ct);
         if (_ops.Count == 0) return _table.Metadata;
 
         var policy = CommitRetryPolicy.From(_table.Metadata);
         if (_retries is { } r) policy = policy with { NumRetries = r };
+        var budget = new CommitRetryBudget(policy);
         for (var attempt = 0; ; attempt++)
         {
+            budget.CheckAttempt();
+            _planGuard.ValidateIdentity(_table.Metadata);
             var @base = _table.Metadata;
             foreach (var name in _pinned)
             {
@@ -241,12 +248,12 @@ public sealed class SnapshotManager
             if (updates.Count == 0) return @base;
             try
             {
+                budget.CheckAttempt();
                 return await _table.CommitAsync(requirements, updates, ct);
             }
-            catch (CommitFailedException) when (attempt < policy.NumRetries)
+            catch (CommitFailedException conflict) when (attempt < policy.NumRetries)
             {
-                var wait = Math.Min(policy.MaxWaitMs, policy.MinWaitMs * (1 << Math.Min(attempt, 20)));
-                await Task.Delay(wait + Random.Shared.Next(wait / 10 + 1), ct);
+                if (await budget.RetryAsync(conflict, ct) is null) throw;
                 await _table.RefreshAsync(ct);
             }
         }
@@ -333,8 +340,12 @@ internal static class CherryPicker
     {
         var policy = CommitRetryPolicy.From(table.Metadata);
         if (retries is { } r) policy = policy with { NumRetries = r };
+        var budget = new CommitRetryBudget(policy);
+        var planGuard = new WritePlanGuard(table.Metadata);
         for (var attempt = 0; ; attempt++)
         {
+            budget.CheckAttempt();
+            planGuard.ValidateIdentity(table.Metadata);
             var m = table.Metadata;
             var pick = m.SnapshotById(snapshotId) ?? throw new ValidationException($"Cannot cherry-pick unknown snapshot ID: {snapshotId}");
             var dynamicOverwrite = pick.Operation == Operations.Overwrite && pick.Summary.GetValueOrDefault(ReplacePartitions) == "true";
@@ -344,12 +355,14 @@ internal static class CherryPicker
                 var main = m.Refs.GetValueOrDefault(SnapshotRef.Main);
                 try
                 {
+                    budget.CheckAttempt();
                     return await table.CommitAsync(
                         [new UpdateRequirement.AssertTableUuid(m.TableUuid), new UpdateRequirement.AssertRefSnapshotId(SnapshotRef.Main, m.CurrentSnapshotId)],
                         [new MetadataUpdate.SetSnapshotRef(SnapshotRef.Main, main is null ? SnapshotRef.Branch(pick.SnapshotId) : main with { SnapshotId = pick.SnapshotId })], ct);
                 }
-                catch (CommitFailedException) when (attempt < policy.NumRetries)
+                catch (CommitFailedException conflict) when (attempt < policy.NumRetries)
                 {
+                    if (await budget.RetryAsync(conflict, ct) is null) throw;
                     await table.RefreshAsync(ct);
                     continue; // main moved: no longer a fast-forward; replay instead
                 }
@@ -371,6 +384,7 @@ internal static class CherryPicker
             producer.AddFiles(added.Select(f => f with { FirstRowId = null }))
                 .Set(SourceSnapshotId, snapshotId.ToString(CultureInfo.InvariantCulture))
                 .WithRetries(policy.NumRetries)
+                .WithRetryBudget(budget)
                 .ValidateEachAttempt((current, c) => ValidateAsync(table, current, pick, dynamicOverwrite ? replaced : null, removedPaths, c));
             await producer.CommitAsync(ct);
             return table.Metadata;

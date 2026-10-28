@@ -112,6 +112,21 @@ var athena = new AthenaQueryRunner(new AmazonAthenaClient(), new AthenaQueryOpti
 var result = await athena.RunAsync(AthenaSql.Vacuum(t));
 ```
 
+For restartable work, persist the SQL, token and runner configuration before submitting, then persist the
+returned execution ID:
+
+```csharp
+var id = await athena.StartAsync(sql, savedClientRequestToken);
+// After a restart or local wait timeout: resume this execution, without submitting another query.
+var result = await athena.ResumeAsync(id, sql);
+```
+
+`AthenaSubmissionUnknownException` carries the request token after ambiguous submission.
+`AthenaQueryTimedOutException` carries the execution ID after a local timeout. A terminal
+`AthenaQueryFailedException` exposes Athena's `ErrorCategory`, `ErrorType`, `ErrorMessage` and `Retryable` hint;
+it does not automatically resubmit SQL. See the [stability and retry design](stability-and-retries.md) for the
+distinction between submission recovery, polling and a deliberate new execution.
+
 - **Two quoting dialects**: Athena runs DDL (CREATE/ALTER TABLE) through its Hive parser (back-quotes) and queries,
   `OPTIMIZE` and `VACUUM` through Trino (double quotes, a double quote doubled; string literals with `''`).
 - Hive DDL string literals have no escape Athena handles reliably, so locations, comments and property values

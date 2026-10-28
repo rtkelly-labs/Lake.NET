@@ -142,6 +142,131 @@ public sealed class AthenaSqlTests
     private static Row Row(params string?[] values) => new() { Data = values.Select(v => new Datum { VarCharValue = v }).ToList() };
 
     [Fact]
+    public async Task Lost_submission_recovers_with_the_same_token_across_runner_instances()
+    {
+        using var client = new FakeAthena();
+        var executions = new Dictionary<string, string>();
+        var first = true;
+        client.Calls.On<StartQueryExecutionRequest, StartQueryExecutionResponse>(request =>
+        {
+            executions.TryAdd(request.ClientRequestToken, "existing-execution");
+            if (first) { first = false; throw new IOException("lost submission response"); }
+            return new StartQueryExecutionResponse { QueryExecutionId = executions[request.ClientRequestToken] };
+        });
+        var token = Guid.NewGuid().ToString("N");
+        var options = new AthenaQueryOptions { WorkGroup = "wg" };
+        var error = await Assert.ThrowsAsync<AthenaSubmissionUnknownException>(() => new AthenaQueryRunner(client, options).StartAsync("INSERT INTO events VALUES (1)", token));
+        Assert.Equal(token, error.ClientRequestToken);
+        Assert.IsType<IOException>(error.InnerException);
+        Assert.Equal("existing-execution", await new AthenaQueryRunner(client, options).StartAsync("INSERT INTO events VALUES (1)", error.ClientRequestToken));
+        Assert.Single(executions);
+        Assert.All(client.Calls.Sent<StartQueryExecutionRequest>(), request => Assert.Equal(token, request.ClientRequestToken));
+    }
+
+    [Fact]
+    public async Task Generated_submission_token_is_available_even_when_the_response_is_lost()
+    {
+        using var client = new FakeAthena();
+        client.Calls.On<StartQueryExecutionRequest, StartQueryExecutionResponse>(_ => throw new IOException("lost"));
+        var error = await Assert.ThrowsAsync<AthenaSubmissionUnknownException>(() => new AthenaQueryRunner(client, new AthenaQueryOptions()).StartAsync("SELECT 1"));
+        Assert.Equal(Assert.Single(client.Calls.Sent<StartQueryExecutionRequest>()).ClientRequestToken, error.ClientRequestToken);
+    }
+
+    [Fact]
+    public async Task Retryable_failed_execution_exposes_service_details_without_resubmitting()
+    {
+        using var client = new FakeAthena();
+        client.Calls.On<StartQueryExecutionRequest, StartQueryExecutionResponse>(_ => new StartQueryExecutionResponse { QueryExecutionId = "failed" })
+            .On<GetQueryExecutionRequest, GetQueryExecutionResponse>(_ => new GetQueryExecutionResponse
+            {
+                QueryExecution = new QueryExecution
+                {
+                    Status = new QueryExecutionStatus
+                    {
+                        State = QueryExecutionState.FAILED, StateChangeReason = "ICEBERG_COMMIT_ERROR",
+                        AthenaError = new AthenaError { ErrorCategory = 1, ErrorType = 1234, Retryable = true, ErrorMessage = "transient failure" },
+                    },
+                },
+            });
+        var error = await Assert.ThrowsAsync<AthenaQueryFailedException>(() => new AthenaQueryRunner(client, new AthenaQueryOptions()).RunAsync("INSERT INTO events VALUES (1)"));
+        Assert.True(error.Retryable);
+        Assert.Equal(1, error.ErrorCategory);
+        Assert.Equal(1234, error.ErrorType);
+        Assert.Equal("transient failure", error.ErrorMessage);
+        Assert.Single(client.Calls.Sent<StartQueryExecutionRequest>());
+        Assert.Empty(client.Calls.Sent<GetQueryResultsRequest>());
+    }
+
+    [Fact]
+    public async Task Running_back_to_queued_is_the_same_execution()
+    {
+        using var client = new FakeAthena();
+        var states = new Queue<QueryExecutionState>([QueryExecutionState.RUNNING, QueryExecutionState.QUEUED, QueryExecutionState.RUNNING, QueryExecutionState.SUCCEEDED]);
+        client.Calls.On<GetQueryExecutionRequest, GetQueryExecutionResponse>(request =>
+        {
+            Assert.Equal("same-query", request.QueryExecutionId);
+            return new GetQueryExecutionResponse { QueryExecution = new QueryExecution { Status = new QueryExecutionStatus { State = states.Dequeue() } } };
+        });
+        await new AthenaQueryRunner(client, new AthenaQueryOptions { PollInterval = TimeSpan.Zero }).WaitAsync("same-query");
+        Assert.Empty(client.Calls.Sent<StartQueryExecutionRequest>());
+        Assert.Equal(4, client.Calls.Sent<GetQueryExecutionRequest>().Count());
+    }
+
+    [Fact]
+    public async Task Local_timeout_can_resume_the_existing_execution_without_starting_another_query()
+    {
+        using var client = new FakeAthena();
+        var state = QueryExecutionState.RUNNING;
+        client.Calls.On<GetQueryExecutionRequest, GetQueryExecutionResponse>(_ => new GetQueryExecutionResponse
+        {
+            QueryExecution = new QueryExecution { Status = new QueryExecutionStatus { State = state } },
+        }).On<GetQueryResultsRequest, GetQueryResultsResponse>(_ => new GetQueryResultsResponse { ResultSet = new ResultSet { Rows = [] } });
+        var runner = new AthenaQueryRunner(client, new AthenaQueryOptions { Timeout = TimeSpan.Zero });
+        var error = await Assert.ThrowsAsync<AthenaQueryTimedOutException>(() => runner.WaitAsync("ongoing"));
+        state = QueryExecutionState.SUCCEEDED;
+        Assert.Equal("ongoing", (await runner.ResumeAsync(error.QueryExecutionId)).QueryExecutionId);
+        Assert.Empty(client.Calls.Sent<StartQueryExecutionRequest>());
+    }
+
+    [Theory]
+    [InlineData(0)]
+    [InlineData(31)]
+    [InlineData(129)]
+    public async Task Invalid_submission_token_is_rejected_before_calling_Athena(int length)
+    {
+        using var client = new FakeAthena();
+        await Assert.ThrowsAsync<ArgumentException>(() => new AthenaQueryRunner(client, new AthenaQueryOptions()).StartAsync("SELECT 1", new string('a', length)));
+        Assert.Empty(client.Calls.Sent<StartQueryExecutionRequest>());
+    }
+
+    [Fact]
+    public async Task Definite_service_rejection_preserves_its_type()
+    {
+        using var client = new FakeAthena();
+        client.Calls.On<StartQueryExecutionRequest, StartQueryExecutionResponse>(_ => throw new InvalidRequestException("bad SQL") { StatusCode = System.Net.HttpStatusCode.BadRequest });
+        await Assert.ThrowsAsync<InvalidRequestException>(() => new AthenaQueryRunner(client, new AthenaQueryOptions()).StartAsync("bad"));
+    }
+
+    [Fact]
+    public async Task Invalid_local_polling_configuration_does_not_submit_SQL()
+    {
+        using var client = new FakeAthena();
+        var runner = new AthenaQueryRunner(client, new AthenaQueryOptions { PollInterval = TimeSpan.FromSeconds(10), MaxPollInterval = TimeSpan.FromSeconds(1) });
+        await Assert.ThrowsAsync<ArgumentException>(() => runner.RunAsync("INSERT INTO events VALUES (1)"));
+        Assert.Empty(client.Calls.Sent<StartQueryExecutionRequest>());
+    }
+
+    [Fact]
+    public async Task Cancellation_before_submission_never_calls_Athena()
+    {
+        using var client = new FakeAthena();
+        using var cancel = new CancellationTokenSource();
+        cancel.Cancel();
+        await Assert.ThrowsAnyAsync<OperationCanceledException>(() => new AthenaQueryRunner(client, new AthenaQueryOptions()).StartAsync("INSERT INTO events VALUES (1)", cancel.Token));
+        Assert.Empty(client.Calls.Sent<StartQueryExecutionRequest>());
+    }
+
+    [Fact]
     public async Task Runner_polls_until_done_and_reads_every_page_without_the_header()
     {
         var athena = new FakeAthena();

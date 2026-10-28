@@ -77,8 +77,12 @@ public static class Maintenance
     {
         options ??= new ExpireOptions();
         var policy = CommitRetryPolicy.From(table.Metadata);
+        var budget = new CommitRetryBudget(policy);
+        var planGuard = new WritePlanGuard(table.Metadata);
         for (var attempt = 0; ; attempt++)
         {
+            budget.CheckAttempt();
+            planGuard.ValidateIdentity(table.Metadata);
             var m = table.Metadata;
             // Checked on every attempt: a retry refreshes the table, and another writer may have turned GC off meanwhile.
             RequireGc(m);
@@ -91,12 +95,12 @@ public static class Maintenance
             if (expire.Count > 0) updates.Add(new MetadataUpdate.RemoveSnapshots(expire.Select(s => s.SnapshotId).ToList()));
             try
             {
+                budget.CheckAttempt();
                 await table.CommitAsync(requirements, updates, ct);
             }
-            catch (CommitFailedException) when (attempt < policy.NumRetries)
+            catch (CommitFailedException conflict) when (attempt < policy.NumRetries)
             {
-                var wait = Math.Min(policy.MaxWaitMs, policy.MinWaitMs * (1 << Math.Min(attempt, 20)));
-                await Task.Delay(wait + Random.Shared.Next(wait / 10 + 1), ct);
+                if (await budget.RetryAsync(conflict, ct) is null) throw;
                 await table.RefreshAsync(ct);
                 continue;
             }

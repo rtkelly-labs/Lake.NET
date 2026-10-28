@@ -10,15 +10,6 @@ using Iceberg.Net.Puffin;
 using Iceberg.Net.Types;
 
 namespace Iceberg.Net.Data;
-public sealed record CommitRetryPolicy(int NumRetries = 4, int MinWaitMs = 100, int MaxWaitMs = 60_000)
-{
-    /// <summary>From table properties <c>commit.retry.*</c>, as Java reads them.</summary>
-    public static CommitRetryPolicy From(TableMetadata m) => new(
-        int.Parse(m.Property("commit.retry.num-retries", "4"), CultureInfo.InvariantCulture),
-        int.Parse(m.Property("commit.retry.min-wait-ms", "100"), CultureInfo.InvariantCulture),
-        int.Parse(m.Property("commit.retry.max-wait-ms", "60000"), CultureInfo.InvariantCulture));
-}
-
 /// <summary>
 /// Produces a new snapshot: writes manifests and a manifest list, then commits
 /// <c>add-snapshot</c> + <c>set-snapshot-ref main</c> guarded by <c>assert-ref-snapshot-id</c>.
@@ -29,6 +20,7 @@ public sealed record CommitRetryPolicy(int NumRetries = 4, int MinWaitMs = 100, 
 public sealed class SnapshotProducer
 {
     private readonly Table _table;
+    private readonly WritePlanGuard _planGuard;
     private readonly List<DataFile> _added = [];
     private Func<DataFile, bool>? _deleteWhere;
     /// <summary>Null = derive from what the snapshot does (append / delete / overwrite).</summary>
@@ -46,10 +38,15 @@ public sealed class SnapshotProducer
     private readonly List<string> _attemptArtifacts = [];
     private Dictionary<string, RoaringPositionBitmap>? _rowDeletes;
     private bool _convertPositionDeletes;
+    private CommitStateUnknownException? _unknownOutcome;
+    private CommitRetryBudget? _retryBudget;
+
+    internal SnapshotProducer WithRetryBudget(CommitRetryBudget budget) { _retryBudget = budget; return this; }
 
     private SnapshotProducer(Table table)
     {
         _table = table;
+        _planGuard = new WritePlanGuard(table.Metadata);
         _startingSnapshotId = table.Metadata.CurrentSnapshotId;
     }
 
@@ -251,6 +248,7 @@ public sealed class SnapshotProducer
     /// <summary>Override <c>commit.retry.num-retries</c>; 0 makes a conflict surface as <see cref="CommitFailedException"/> so the caller can re-plan.</summary>
     public SnapshotProducer WithRetries(int retries)
     {
+        if (retries < 0) throw new ArgumentOutOfRangeException(nameof(retries));
         _retries = retries;
         return this;
     }
@@ -291,56 +289,71 @@ public sealed class SnapshotProducer
 
     public async Task<Snapshot> CommitAsync(CancellationToken ct = default)
     {
+        if (_unknownOutcome is { } previous)
+            throw new CommitStateUnknownException("Cannot replay a producer whose previous commit outcome is unresolved", previous);
         var policy = CommitRetryPolicy.From(_table.Metadata);
         if (_retries is { } r) policy = policy with { NumRetries = r };
+        var budget = _retryBudget ?? new CommitRetryBudget(policy);
         using var telemetry = IcebergTelemetry.StartCommit(_table.Identifier.ToString(), _operation);
-        for (var attempt = 0; ; attempt++)
+        try
         {
-            try
+            for (var attempt = 0; ; attempt++)
             {
-                if (_validateEachAttempt is { } check) await check(_table.Metadata, ct);
-                if (attempt > 0) await ValidateNoConflictingDataAsync(ct);
-                var snapshot = await ApplyOrConflictAsync(ct);
-                var requirements = new List<UpdateRequirement>
-                {
-                    new UpdateRequirement.AssertTableUuid(_table.Metadata.TableUuid),
-                    BranchRequirement(_table.Metadata),
-                };
                 try
                 {
-                    await _table.CommitAsync(requirements, [new MetadataUpdate.AddSnapshot(snapshot), SetBranch(snapshot.SnapshotId)], ct);
+                    budget.CheckAttempt();
+                    _planGuard.Validate(_table.Metadata, _deleteWhere is not null);
+                    if (_validateEachAttempt is { } check) await check(_table.Metadata, ct);
+                    if (attempt > 0) await ValidateNoConflictingDataAsync(ct);
+                    var snapshot = await ApplyOrConflictAsync(ct);
+                    budget.CheckAttempt();
+                    var requirements = new List<UpdateRequirement>
+                    {
+                        new UpdateRequirement.AssertTableUuid(_planGuard.TableUuid),
+                        new UpdateRequirement.AssertCurrentSchemaId(_planGuard.SchemaId),
+                        BranchRequirement(_table.Metadata),
+                    };
+                    if (_deleteWhere is not null) requirements.Add(new UpdateRequirement.AssertDefaultSpecId(_planGuard.SpecId));
+                    try
+                    {
+                        await _table.CommitAsync(requirements, [new MetadataUpdate.AddSnapshot(snapshot), SetBranch(snapshot.SnapshotId)], ct);
+                    }
+                    catch (ArgumentException stale) when (_table.Metadata.FormatVersion > 1)
+                    {
+                        if (snapshot.SequenceNumber > await LastSequenceNumberAsync(ct)) throw;
+                        // The branch head is what we planned against, but another writer added a snapshot meanwhile (on another
+                        // branch, or before a rollback returned the head to our parent): our sequence number is stale. A conflict
+                        // to retry with the next sequence number, not an invalid commit (Java #15126).
+                        throw new CommitFailedException($"Sequence number {snapshot.SequenceNumber} of snapshot {snapshot.SnapshotId} is stale: {stale.Message}", stale);
+                    }
+                    catch (CommitStateUnknownException unknown)
+                    {
+                        if (!await CommitRecovery.ConfirmAsync([(_table, snapshot.SnapshotId)], unknown, ct)) throw;
+                    }
+                    _attemptArtifacts.Clear();
+                    telemetry.Committed(snapshot.SnapshotId, snapshot.Operation);
+                    await CleanupAsync(ct);
+                    return snapshot;
                 }
-                catch (ArgumentException stale) when (_table.Metadata.FormatVersion > 1)
+                catch (CommitFailedException conflict) when (attempt < policy.NumRetries)
                 {
-                    if (snapshot.SequenceNumber > await LastSequenceNumberAsync(ct)) throw;
-                    // The branch head is what we planned against, but another writer added a snapshot meanwhile (on another
-                    // branch, or before a rollback returned the head to our parent): our sequence number is stale. A conflict
-                    // to retry with the next sequence number, not an invalid commit (Java #15126).
-                    throw new CommitFailedException($"Sequence number {snapshot.SequenceNumber} of snapshot {snapshot.SnapshotId} is stale: {stale.Message}", stale);
+                    var wait = await budget.RetryAsync(conflict, ct);
+                    if (wait is null) { telemetry.FailedWith(conflict); throw; }
+                    _staleArtifacts.AddRange(_attemptArtifacts);
+                    _attemptArtifacts.Clear();
+                    telemetry.Retrying(attempt + 1, conflict, wait);
+                    await _table.RefreshAsync(ct);
                 }
-                catch (CommitStateUnknownException unknown) when (unknown.ServerResponded)
+                catch (CommitStateUnknownException unknown)
                 {
-                    // The catalog finished the request with an error, so its outcome is now fixed: look for our
-                    // snapshot (IDs are random 63-bit values). Absent means not applied, which is a plain conflict.
-                    if (!await AppliedAsync(snapshot.SnapshotId, unknown, ct))
-                        throw new CommitFailedException($"Commit of snapshot {snapshot.SnapshotId} was not applied ({unknown.Message})", unknown);
+                    _unknownOutcome = unknown;
+                    telemetry.FailedWith(unknown);
+                    throw;
                 }
-                _attemptArtifacts.Clear();
-                telemetry.Committed(snapshot.SnapshotId, snapshot.Operation);
-                await CleanupAsync(ct);
-                return snapshot;
+                catch (Exception e) when (telemetry.FailedWith(e)) { throw; } // records the outcome; the filter never catches
             }
-            catch (CommitFailedException conflict) when (attempt < policy.NumRetries)
-            {
-                _staleArtifacts.AddRange(_attemptArtifacts);
-                _attemptArtifacts.Clear();
-                var wait = Math.Min(policy.MaxWaitMs, policy.MinWaitMs * (1 << Math.Min(attempt, 20)));
-                telemetry.Retrying(attempt + 1, conflict, TimeSpan.FromMilliseconds(wait));
-                await Task.Delay(wait + Random.Shared.Next(wait / 10 + 1), ct);
-                await _table.RefreshAsync(ct);
-            }
-            catch (Exception e) when (telemetry.FailedWith(e)) { throw; } // records the outcome; the filter never catches
         }
+        catch (Exception error) when (telemetry.FailedWith(error)) { throw; }
     }
 
     /// <summary>
@@ -375,12 +388,19 @@ public sealed class SnapshotProducer
     /// </summary>
     internal async Task<(TableCommit Commit, Snapshot Snapshot, IReadOnlyList<string> Artifacts)> StageWithArtifactsAsync(CancellationToken ct)
     {
+        _planGuard.Validate(_table.Metadata, _deleteWhere is not null);
         var snapshot = await ApplyAsync(ct);
         // The added files' manifests are reused across attempts, so they are not attempt artifacts; a stage owns them.
         var artifacts = _attemptArtifacts.Concat(_writtenManifestPaths).Distinct(StringComparer.Ordinal).ToList();
         _attemptArtifacts.Clear();
-        var commit = new TableCommit(_table.Identifier,
-            [new UpdateRequirement.AssertTableUuid(_table.Metadata.TableUuid), BranchRequirement(_table.Metadata)],
+        var requirements = new List<UpdateRequirement>
+        {
+            new UpdateRequirement.AssertTableUuid(_planGuard.TableUuid),
+            new UpdateRequirement.AssertCurrentSchemaId(_planGuard.SchemaId),
+            BranchRequirement(_table.Metadata),
+        };
+        if (_deleteWhere is not null) requirements.Add(new UpdateRequirement.AssertDefaultSpecId(_planGuard.SpecId));
+        var commit = new TableCommit(_table.Identifier, requirements,
             [new MetadataUpdate.AddSnapshot(snapshot), SetBranch(snapshot.SnapshotId)]);
         return (commit, snapshot, artifacts);
     }
@@ -397,19 +417,6 @@ public sealed class SnapshotProducer
     {
         await _table.RefreshAsync(ct);
         return _table.Metadata.LastSequenceNumber;
-    }
-
-    private async Task<bool> AppliedAsync(long snapshotId, CommitStateUnknownException unknown, CancellationToken ct)
-    {
-        try
-        {
-            await _table.RefreshAsync(ct);
-        }
-        catch (Exception e) when (e is not OperationCanceledException)
-        {
-            throw new CommitStateUnknownException($"{unknown.Message}; resolving it failed: {e.Message}", unknown);
-        }
-        return _table.Metadata.SnapshotById(snapshotId) is not null;
     }
 
     /// <summary>Java's snapshot ID scheme: a random positive long derived from a UUID.</summary>

@@ -218,39 +218,48 @@ public static partial class TableMutations
     private static async Task<(Snapshot? Snapshot, T Outcome, int Attempts)> RetryAsync<T>(Table table, Func<Task<(SnapshotProducer? Producer, T Outcome)>> plan, CancellationToken ct)
     {
         var policy = CommitRetryPolicy.From(table.Metadata);
+        var budget = new CommitRetryBudget(policy);
+        var planGuard = new WritePlanGuard(table.Metadata);
         using var telemetry = IcebergTelemetry.StartCommit(table.Identifier.ToString(), null); // the producer's attempts report into it
-        for (var attempt = 1; ; attempt++)
+        try
         {
-            if (attempt > 1) await table.RefreshAsync(ct);
-            SnapshotProducer? producer;
-            T outcome;
-            try
+            for (var attempt = 1; ; attempt++)
             {
-                (producer, outcome) = await plan();
-            }
-            catch (Exception e) when (e is FileNotFoundException or DirectoryNotFoundException && attempt <= policy.NumRetries)
-            {
-                // Compaction and expiry removed a file of the state this attempt planned against: re-plan if the table
-                // has moved since, as for a lost commit race; otherwise the file is genuinely missing.
-                var before = table.Metadata.CurrentSnapshotId;
-                await table.RefreshAsync(ct);
-                if (table.Metadata.CurrentSnapshotId == before) throw;
-                telemetry.Retrying(attempt, e);
-                await BackOffAsync(policy, attempt, ct);
-                continue;
-            }
-            if (producer is null) { telemetry.NothingToCommit(); return (null, outcome, attempt); }
+                if (attempt > 1) await table.RefreshAsync(ct);
+                budget.CheckAttempt();
+                planGuard.Validate(table.Metadata);
+                SnapshotProducer? producer;
+                T outcome;
+                try
+                {
+                    (producer, outcome) = await plan();
+                }
+                catch (Exception e) when (e is FileNotFoundException or DirectoryNotFoundException && attempt <= policy.NumRetries)
+                {
+                    // Compaction and expiry removed a file of the state this attempt planned against: re-plan if the table
+                    // has moved since, as for a lost commit race; otherwise the file is genuinely missing.
+                    var before = table.Metadata.CurrentSnapshotId;
+                    await table.RefreshAsync(ct);
+                    if (table.Metadata.CurrentSnapshotId == before) throw;
+                    if (await budget.RetryAsync(e, ct) is not { } wait) throw;
+                    telemetry.Retrying(attempt, e, wait);
+                    continue;
+                }
+                if (producer is null) { telemetry.NothingToCommit(); return (null, outcome, attempt); }
 
-            try
-            {
-                return (await producer.CommitAsync(ct), outcome, attempt);
-            }
-            catch (CommitFailedException conflict) when (attempt <= policy.NumRetries)
-            {
-                telemetry.Retrying(attempt, conflict);
-                await BackOffAsync(policy, attempt, ct);
+                try
+                {
+                    planGuard.Validate(table.Metadata);
+                    return (await producer.WithRetryBudget(budget).CommitAsync(ct), outcome, attempt);
+                }
+                catch (CommitFailedException conflict) when (attempt <= policy.NumRetries)
+                {
+                    if (await budget.RetryAsync(conflict, ct) is not { } wait) { telemetry.FailedWith(conflict); throw; }
+                    telemetry.Retrying(attempt, conflict, wait);
+                }
             }
         }
+        catch (Exception error) when (telemetry.FailedWith(error)) { throw; }
     }
 
     /// <summary>Adds this attempt's deletes to <paramref name="producer"/>; returns rows deleted (null if unknown) and files rewritten.</summary>
@@ -290,12 +299,6 @@ public static partial class TableMutations
     {
         producer.RemoveDataFiles([m.File.FilePath]);
         if (m.Survivors.Count > 0) producer.AddFiles(await TableWriter.WriteAsync(table, m.Survivors, m.SurvivorLineage.Count > 0 ? m.SurvivorLineage : null, ct));
-    }
-
-    private static Task BackOffAsync(CommitRetryPolicy policy, int attempt, CancellationToken ct)
-    {
-        var wait = Math.Min(policy.MaxWaitMs, policy.MinWaitMs * (1 << Math.Min(attempt - 1, 20)));
-        return Task.Delay(wait + Random.Shared.Next(wait / 10 + 1), ct);
     }
 
     /// <summary>What a mutation does to one live row: delete it (<see cref="Replacement"/> null) or replace it.</summary>

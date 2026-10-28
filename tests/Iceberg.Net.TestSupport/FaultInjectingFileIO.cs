@@ -24,6 +24,8 @@ public sealed class FaultInjectingFileIO(IFileIO inner) : IFileIO
     public int Writes => _writes;
     public List<string> Written { get; } = [];
     public bool Fired { get; private set; }
+    /// <summary>Observe the exact injected exception at the storage boundary, before it propagates.</summary>
+    public Action<string, FaultKind, Exception>? OnFault { get; set; }
 
     public void Reset(int? failAt = null, FaultKind kind = FaultKind.FailBeforeWrite)
     {
@@ -50,7 +52,9 @@ public sealed class FaultInjectingFileIO(IFileIO inner) : IFileIO
                 await inner.WriteAsync(location, content, overwrite, ct);
                 lock (Written) Written.Add(location);
             }
-            throw new IOException($"Injected {Kind} fault at write #{n}: {location}");
+            var error = new IOException($"Injected {Kind} fault at write #{n}: {location}");
+            OnFault?.Invoke(location, Kind, error);
+            throw error;
         }
         await inner.WriteAsync(location, content, overwrite, ct);
         lock (Written) Written.Add(location);

@@ -76,17 +76,24 @@ public static class Compaction
 
     public static async Task<RewriteResult> RewriteDataFilesAsync(Table table, RewriteOptions? options = null, int maxAttempts = 5, CancellationToken ct = default)
     {
+        if (maxAttempts < 1) throw new ArgumentOutOfRangeException(nameof(maxAttempts));
         options ??= new RewriteOptions();
         if (options.PartialProgressEnabled) return await RewritePartialAsync(table, options, maxAttempts, ct);
+        var policy = CommitRetryPolicy.From(table.Metadata);
+        var budget = new CommitRetryBudget(policy with { NumRetries = Math.Min(policy.NumRetries, maxAttempts - 1) });
+        var planGuard = new WritePlanGuard(table.Metadata);
         for (var attempt = 1; ; attempt++)
         {
             if (attempt > 1) await table.RefreshAsync(ct);
+            budget.CheckAttempt();
+            planGuard.Validate(table.Metadata);
             if (table.Metadata.CurrentSnapshot is null) return new RewriteResult(null, 0, 0, 0, attempt);
             var groups = await PlanGroupsAsync(table, options, null, ct);
             if (groups.Count == 0) return new RewriteResult(null, 0, 0, 0, attempt);
-            var (snapshot, outcome) = await CommitGroupsAsync(table, groups, ct);
+            var (snapshot, outcome) = await CommitGroupsAsync(table, groups, budget, ct);
             if (snapshot is not null) return new RewriteResult(snapshot, outcome.Removed, outcome.Added, outcome.Rows, attempt) { Commits = [snapshot] };
-            if (attempt >= maxAttempts) throw new CommitFailedException($"Compaction lost {attempt} races in a row; giving up");
+            if (await budget.RetryAsync(new CommitFailedException($"Compaction lost {attempt} races in a row; giving up"), ct) is null)
+                throw new CommitFailedException($"Compaction exhausted its commit retry budget after {attempt} attempts");
         }
     }
 
@@ -99,20 +106,26 @@ public static class Compaction
         if (planned.Count == 0) return new RewriteResult(null, 0, 0, 0, 1);
 
         var perCommit = (planned.Count + options.PartialProgressMaxCommits - 1) / options.PartialProgressMaxCommits;
+        var policy = CommitRetryPolicy.From(table.Metadata);
+        var planGuard = new WritePlanGuard(table.Metadata);
         var batches = planned.Chunk(perCommit).Select(b => b.Select(g => g.Key).ToHashSet(StringComparer.Ordinal)).ToList();
         var commits = new List<Snapshot>();
         int removed = 0, added = 0, failed = 0, attempts = 0;
         long rows = 0;
         foreach (var keys in batches)
         {
+            // Partial-progress batches are independent commits, each with its own bounded retry budget.
+            var budget = new CommitRetryBudget(policy with { NumRetries = Math.Min(policy.NumRetries, maxAttempts - 1) });
             for (var attempt = 1; ; attempt++)
             {
                 attempts = attempt;
                 if (attempt > 1) await table.RefreshAsync(ct);
+                if (!budget.CanStartAttempt) { failed += keys.Count; break; }
+                planGuard.Validate(table.Metadata);
                 // Re-planned on the current state: a concurrent change to these partitions is read, never undone.
                 var groups = await PlanGroupsAsync(table, options, keys, ct);
                 if (groups.Count == 0) break;
-                var (snapshot, outcome) = await CommitGroupsAsync(table, groups, ct);
+                var (snapshot, outcome) = await CommitGroupsAsync(table, groups, budget, ct);
                 if (snapshot is not null)
                 {
                     commits.Add(snapshot);
@@ -121,7 +134,7 @@ public static class Compaction
                     rows += outcome.Rows;
                     break;
                 }
-                if (attempt >= maxAttempts)
+                if (await budget.RetryAsync(new CommitFailedException("Compaction batch lost a race"), ct) is null)
                 {
                     failed += keys.Count;
                     break;
@@ -132,7 +145,7 @@ public static class Compaction
     }
 
     /// <summary>Rewrite the groups and commit them as one <c>replace</c>; null when a concurrent commit won (nothing left behind).</summary>
-    private static async Task<(Snapshot? Snapshot, (int Removed, int Added, long Rows) Outcome)> CommitGroupsAsync(Table table, IReadOnlyList<Group> groups, CancellationToken ct)
+    private static async Task<(Snapshot? Snapshot, (int Removed, int Added, long Rows) Outcome)> CommitGroupsAsync(Table table, IReadOnlyList<Group> groups, CommitRetryBudget budget, CancellationToken ct)
     {
         var deletes = await TableScan.DeletesAsync(table, null, ct);
         var mapping = NameMapping.ForTable(table.Metadata.Properties);
@@ -165,6 +178,7 @@ public static class Compaction
         }
 
         var producer = SnapshotProducer.Rewrite(table).RemoveDataFiles(removed).AddFiles(added).WithRetries(0)
+            .WithRetryBudget(budget)
             .Set("rewritten-data-files-count", removed.Count.ToString(CultureInfo.InvariantCulture));
         try
         {

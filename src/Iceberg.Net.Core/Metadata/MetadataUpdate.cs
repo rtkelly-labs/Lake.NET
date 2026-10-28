@@ -120,9 +120,10 @@ public class CommitFailedException(string message, Exception? inner = null) : Ex
 public class CommitStateUnknownException(string message, Exception? inner = null) : Exception(message, inner)
 {
     /// <summary>
-    /// True when the catalog answered with an error (e.g. HTTP 500/502/503/504 or a service exception): the request
-    /// has finished, so reloading the table tells whether it was applied. False for timeouts and dropped connections,
-    /// where the request may still be applied later and the outcome cannot be resolved by looking.
+    /// True when an error response was received. This is diagnostic information, not proof that a write failed
+    /// or that a backend stopped processing it. Only positive commit evidence can resolve an uncertain outcome.
     /// </summary>
     public bool ServerResponded { get; init; }
+    /// <summary>A failure while checking commit status; the original commit error remains the inner exception.</summary>
+    public Exception? ResolutionFailure { get; init; }
 }
