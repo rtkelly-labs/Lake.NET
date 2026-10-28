@@ -1,0 +1,125 @@
+// Renovate: dependency update PRs for this repository (docs/dependencies.md), opened by Mend's hosted Renovate app.
+// The generic rules are meant to move into a shared preset (rtkelly-labs/renovate-config) used by every
+// rtkelly-labs repository; until then they live here.
+{
+  $schema: 'https://docs.renovatebot.com/renovate-schema.json',
+  extends: [
+    'config:recommended',
+    ':semanticCommits',
+    // Workflows pin actions to 40-character SHAs (AGENTS.md); keep them pinned, with the version as a comment.
+    'helpers:pinGitHubActionDigests',
+  ],
+  labels: ['dependencies'],
+  schedule: ['before 6am on monday'],
+  prConcurrentLimit: 5,
+  prHourlyLimit: 2,
+  // Wait before proposing a release: most broken or malicious releases are pulled within days.
+  minimumReleaseAge: '3 days',
+  // Squash-merged PR titles become changelog lines (docs/lake/releases.md).
+  semanticCommitType: 'build',
+  semanticCommitScope: 'deps',
+  // Major updates wait until someone ticks them on the Dependency Dashboard issue.
+  major: { dependencyDashboardApproval: true },
+  lockFileMaintenance: { enabled: true, schedule: ['before 6am on the first day of the month'] },
+  // The Parquet.Net fork submodule (external/parquet-dotnet) follows the fork branch named in .gitmodules.
+  'git-submodules': { enabled: true },
+  customManagers: [
+    {
+      // emulation/docker-compose.yml: `image: repo:${SOME_TAG:-1.2.3}` (the tag is overridable by environment).
+      // The built-in docker-compose manager skips these, but reads `image: ${SOME_IMAGE:-repo:tag}` itself.
+      customType: 'regex',
+      managerFilePatterns: ['/^emulation/docker-compose\\.ya?ml$/'],
+      matchStrings: ['image:\\s*(?<depName>[a-z0-9./_-]+):\\$\\{[A-Z_]+:-(?<currentValue>[^}]+)\\}'],
+      datasourceTemplate: 'docker',
+    },
+    {
+      // emulation/up.sh: the Spark oracle image default.
+      customType: 'regex',
+      managerFilePatterns: ['/^emulation/up\\.sh$/'],
+      matchStrings: ['ICEBERG_SPARK_IMAGE:-(?<depName>apache/spark):(?<currentValue>[^}"]+)'],
+      datasourceTemplate: 'docker',
+    },
+  ],
+  // Rules apply in order and later ones win: the general auto-merge rule comes first, its exceptions after it.
+  packageRules: [
+    {
+      // Patches of libraries and tools merge themselves once CI is green; everything else waits for review.
+      matchUpdateTypes: ['patch', 'digest', 'pin'],
+      matchManagers: ['nuget', 'github-actions'],
+      automerge: true,
+    },
+    {
+      // Library dependencies that ship together each month.
+      groupName: '.NET 10 libraries',
+      matchPackageNames: [
+        'System.Text.Json',
+        'System.Diagnostics.DiagnosticSource',
+        'Microsoft.EntityFrameworkCore{/,}**',
+        'Microsoft.AspNetCore.**',
+        'Microsoft.Data.Sqlite',
+      ],
+    },
+    {
+      groupName: 'AWS SDK',
+      matchPackageNames: ['AWSSDK.**'],
+    },
+    {
+      // The data plane: changes here can change what we write, so they are always reviewed.
+      groupName: 'Parquet and Arrow',
+      matchPackageNames: ['ParquetSharp', 'Parquet.Net', 'Parquet.SourceGenerator', 'Apache.Arrow'],
+      automerge: false,
+    },
+    {
+      groupName: 'test tooling',
+      matchPackageNames: [
+        'xunit',
+        'xunit.**',
+        'Xunit.**',
+        'Microsoft.NET.Test.Sdk',
+        'FsCheck',
+        'Reqnroll.**',
+        'SharpFuzz',
+        'sharpfuzz.commandline',
+        'dotnet-stryker',
+      ],
+    },
+    {
+      groupName: 'GitHub Actions',
+      matchManagers: ['github-actions'],
+      semanticCommitType: 'ci',
+    },
+    {
+      // Reference implementations used as test oracles (interop/, emulation/). A bump can change test results,
+      // so it is never merged automatically and always reviewed against docs/regression-suite.md.
+      groupName: 'oracles and emulators',
+      matchFileNames: ['interop/**', 'emulation/**'],
+      addLabels: ['oracle'],
+      automerge: false,
+      semanticCommitScope: 'oracles',
+    },
+    {
+      // moto is pinned twice (the Python package and the image); they move together.
+      groupName: 'moto',
+      matchPackageNames: ['moto', 'motoserver/moto'],
+    },
+    {
+      // The Spark image must match the pinned iceberg-spark-runtime-4.0_2.13 jar in emulation/up.sh, whose
+      // checksum is updated by hand; only patch releases of Spark 4.0 are proposed.
+      matchPackageNames: ['apache/spark'],
+      allowedVersions: '/^4\\.0\\./',
+    },
+    {
+      // The .NET SDK band is chosen deliberately (global.json rollForward: latestFeature).
+      matchManagers: ['nuget'],
+      matchDepTypes: ['dotnet-sdk'],
+      matchUpdateTypes: ['major', 'minor'],
+      enabled: false,
+    },
+    {
+      // A new SDK can bring new analyzer warnings, and warnings are errors here: always reviewed.
+      matchManagers: ['nuget'],
+      matchDepTypes: ['dotnet-sdk'],
+      automerge: false,
+    },
+  ],
+}
