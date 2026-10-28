@@ -2,8 +2,9 @@
 
 The snapshots capture the exported type/member shape for the solution's source projects and their declared
 target frameworks (currently 12 projects / 14 files). They are generated from compiled assemblies using the Roslyn compiler shipped with the
-SDK pinned in `global.json`. Parameter names/defaults, generic constraints, accessibility, modifiers and nullable
-reference types are included. This is an API review gate, not proof of behavioral or wire-format compatibility.
+SDK pinned in `global.json`. Parameter names/defaults, extension-method markers, ref returns, generic constraints, accessibility, modifiers and
+nullable reference types are included. A real compiled fixture checks these details, ignores private-only changes,
+and verifies that removing `this` is rejected even though the underlying CLR signature is unchanged. This is an API review gate, not proof of behavioral or wire-format compatibility.
 
 ```bash
 dotnet build Iceberg.Net.slnx

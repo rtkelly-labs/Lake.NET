@@ -592,7 +592,7 @@ Public static Iceberg.Net.Data.CommitRetryPolicy Iceberg.Net.Data.CommitRetryPol
 Public static Iceberg.Net.Data.DeleteIndex Iceberg.Net.Data.DeleteIndex.ForResolvedDeletes(Iceberg.Net.Catalog.Table table)
 Public static Iceberg.Net.Data.DeleteStrategy Iceberg.Net.Data.TableMutations.Resolve(Iceberg.Net.Catalog.Table table, Iceberg.Net.Data.DeleteStrategy strategy, string modeProperty)
 Public static Iceberg.Net.Data.ParquetWriteOptions Iceberg.Net.Data.ParquetWriteOptions.Default { get; }
-Public static Iceberg.Net.Data.SnapshotManager Iceberg.Net.Data.SnapshotManagementExtensions.ManageSnapshots(Iceberg.Net.Catalog.Table table)
+Public static Iceberg.Net.Data.SnapshotManager Iceberg.Net.Data.SnapshotManagementExtensions.ManageSnapshots(this Iceberg.Net.Catalog.Table table)
 Public static Iceberg.Net.Data.SnapshotProducer Iceberg.Net.Data.SnapshotProducer.Append(Iceberg.Net.Catalog.Table table)
 Public static Iceberg.Net.Data.SnapshotProducer Iceberg.Net.Data.SnapshotProducer.ConvertPositionDeletesToDeletionVectors(Iceberg.Net.Catalog.Table table)
 Public static Iceberg.Net.Data.SnapshotProducer Iceberg.Net.Data.SnapshotProducer.DeleteFiles(Iceberg.Net.Catalog.Table table, System.Func<Iceberg.Net.Manifests.DataFile, bool> deleteWhere)
