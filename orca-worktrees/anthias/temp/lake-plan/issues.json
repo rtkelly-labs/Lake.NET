@@ -1,0 +1,133 @@
+{
+  "G0": {
+    "repo": "rtkelly-labs/Lake.NET",
+    "url": "https://github.com/rtkelly-labs/Lake.NET/issues/27",
+    "number": 27
+  },
+  "G1": {
+    "repo": "rtkelly-labs/Lake.NET",
+    "url": "https://github.com/rtkelly-labs/Lake.NET/issues/28",
+    "number": 28
+  },
+  "U01a": {
+    "repo": "rtkelly-labs/Lake.NET",
+    "url": "https://github.com/rtkelly-labs/Lake.NET/issues/29",
+    "number": 29
+  },
+  "U01b": {
+    "repo": "rtkelly-labs/Lake.NET",
+    "url": "https://github.com/rtkelly-labs/Lake.NET/issues/30",
+    "number": 30
+  },
+  "U01c": {
+    "repo": "rtkelly-labs/Lake.NET",
+    "url": "https://github.com/rtkelly-labs/Lake.NET/issues/31",
+    "number": 31
+  },
+  "H0": {
+    "repo": "rtkelly-labs/Lake.NET",
+    "url": "https://github.com/rtkelly-labs/Lake.NET/issues/32",
+    "number": 32
+  },
+  "U02": {
+    "repo": "rtkelly-labs/Lake.NET",
+    "url": "https://github.com/rtkelly-labs/Lake.NET/issues/33",
+    "number": 33
+  },
+  "U05": {
+    "repo": "rtkelly-labs/Lake.NET",
+    "url": "https://github.com/rtkelly-labs/Lake.NET/issues/34",
+    "number": 34
+  },
+  "R1": {
+    "repo": "rtkelly13/rig",
+    "url": "https://github.com/rtkelly13/rig/issues/385",
+    "number": 385
+  },
+  "R2": {
+    "repo": "rtkelly-labs/Lake.NET",
+    "url": "https://github.com/rtkelly-labs/Lake.NET/issues/35",
+    "number": 35
+  },
+  "R3": {
+    "repo": "rtkelly13/rig",
+    "url": "https://github.com/rtkelly13/rig/issues/386",
+    "number": 386
+  },
+  "R4": {
+    "repo": "rtkelly13/rig",
+    "url": "https://github.com/rtkelly13/rig/issues/387",
+    "number": 387
+  },
+  "R5": {
+    "repo": "rtkelly13/rig",
+    "url": "https://github.com/rtkelly13/rig/issues/388",
+    "number": 388
+  },
+  "R6": {
+    "repo": "rtkelly13/rig",
+    "url": "https://github.com/rtkelly13/rig/issues/389",
+    "number": 389
+  },
+  "U06": {
+    "repo": "rtkelly-labs/Lake.NET",
+    "url": "https://github.com/rtkelly-labs/Lake.NET/issues/36",
+    "number": 36
+  },
+  "H1": {
+    "repo": "rtkelly-labs/Lake.NET",
+    "url": "https://github.com/rtkelly-labs/Lake.NET/issues/37",
+    "number": 37
+  },
+  "U03": {
+    "repo": "rtkelly-labs/Lake.NET",
+    "url": "https://github.com/rtkelly-labs/Lake.NET/issues/38",
+    "number": 38
+  },
+  "U04": {
+    "repo": "rtkelly-labs/Parquet.SourceGenerator",
+    "url": "https://github.com/rtkelly-labs/Parquet.SourceGenerator/issues/740",
+    "number": 740
+  },
+  "N1": {
+    "repo": "rtkelly-labs/Lake.NET",
+    "url": "https://github.com/rtkelly-labs/Lake.NET/issues/39",
+    "number": 39
+  },
+  "N2": {
+    "repo": "rtkelly-labs/Lake.NET",
+    "url": "https://github.com/rtkelly-labs/Lake.NET/issues/40",
+    "number": 40
+  },
+  "H2": {
+    "repo": "rtkelly-labs/Lake.NET",
+    "url": "https://github.com/rtkelly-labs/Lake.NET/issues/41",
+    "number": 41
+  },
+  "R4x": {
+    "repo": "rtkelly13/rig",
+    "url": "https://github.com/rtkelly13/rig/issues/390",
+    "number": 390
+  },
+  "N1b": {
+    "repo": "rtkelly-labs/Lake.NET",
+    "url": "https://github.com/rtkelly-labs/Lake.NET/issues/42",
+    "number": 42,
+    "closed": true
+  },
+  "U08": {
+    "repo": "rtkelly-labs/Lake.NET",
+    "url": "https://github.com/rtkelly-labs/Lake.NET/issues/43",
+    "number": 43
+  },
+  "H3": {
+    "repo": "rtkelly-labs/Lake.NET",
+    "url": "https://github.com/rtkelly-labs/Lake.NET/issues/44",
+    "number": 44
+  },
+  "TRACK": {
+    "repo": "rtkelly-labs/Lake.NET",
+    "url": "https://github.com/rtkelly-labs/Lake.NET/issues/45",
+    "number": 45
+  }
+}

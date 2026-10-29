@@ -1,0 +1,11 @@
+test_exported_shape_and_real_metadata_drift (test_api_surface.ApiSurfaceContract.test_exported_shape_and_real_metadata_drift) ... ok
+test_aws_selects_target_before_tests_without_starting_emulators (test_test_runner.TestRunner.test_aws_selects_target_before_tests_without_starting_emulators) ... ok
+test_dependency_failure_prevents_tests (test_test_runner.TestRunner.test_dependency_failure_prevents_tests) ... ok
+test_emulators_start_before_any_test_and_all_suites_use_selected_target (test_test_runner.TestRunner.test_emulators_start_before_any_test_and_all_suites_use_selected_target) ... ok
+test_invalid_mode_and_missing_aws_warehouse_fail_before_tests (test_test_runner.TestRunner.test_invalid_mode_and_missing_aws_warehouse_fail_before_tests) ... ok
+test_spec_only_runs_unit (test_test_runner.TestRunner.test_spec_only_runs_unit) ... ok
+
+----------------------------------------------------------------------
+Ran 6 tests in 9.857s
+
+OK

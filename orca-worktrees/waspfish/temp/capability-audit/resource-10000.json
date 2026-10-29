@@ -1,0 +1,35 @@
+{
+  "runtime": ".NET 10.0.12",
+  "os": "macOS 15.7.7",
+  "architecture": "Arm64",
+  "inputRows": 10000,
+  "payloadCharacters": 269,
+  "dataFileCount": 1,
+  "dataFileBytes": 2013640,
+  "MaxBatchRows": 10000,
+  "RowGroupsRead": 1,
+  "scanReadBytes": 98728,
+  "peakProcessWorkingSetBytes": null,
+  "processWorkingSetBytes": 76644352,
+  "managedHeapBytes": 27435656,
+  "phases": [
+    {
+      "phase": "input-materialization",
+      "rows": 10000,
+      "elapsedMs": 24.7256,
+      "allocatedBytes": 12143160
+    },
+    {
+      "phase": "insert",
+      "rows": 10000,
+      "elapsedMs": 540.2176,
+      "allocatedBytes": 18369760
+    },
+    {
+      "phase": "projected-scan",
+      "rows": 10000,
+      "elapsedMs": 242.0761,
+      "allocatedBytes": 1715480
+    }
+  ]
+}

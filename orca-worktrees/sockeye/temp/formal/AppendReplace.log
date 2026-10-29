@@ -1,0 +1,23 @@
+TLC2 Version 2.19 of 08 August 2024 (rev: 5a47802)
+Running breadth-first search Model-Checking with fp 0 and seed 1 with 1 worker on 8 cores with 910MB heap and 64MB offheap memory [pid: 76635] (Mac OS X 15.7.7 aarch64, Homebrew 21.0.12.1 x86_64, MSBDiskFPSet, DiskStateQueue).
+Parsing file /Users/ryankelly/orca/workspaces/Iceberg.NET/sockeye/formal/commit-retry/CommitRetry.tla
+Parsing file /Users/ryankelly/orca/workspaces/Iceberg.NET/sockeye/temp/formal/Integers.tla
+Parsing file /Users/ryankelly/orca/workspaces/Iceberg.NET/sockeye/temp/formal/Sequences.tla
+Parsing file /Users/ryankelly/orca/workspaces/Iceberg.NET/sockeye/temp/formal/FiniteSets.tla
+Parsing file /Users/ryankelly/orca/workspaces/Iceberg.NET/sockeye/temp/formal/Naturals.tla
+Semantic processing of module Naturals
+Semantic processing of module Integers
+Semantic processing of module Sequences
+Semantic processing of module FiniteSets
+Semantic processing of module CommitRetry
+Starting... (2026-10-28 11:52:51)
+Computing initial states...
+Finished computing initial states: 1 distinct state generated at 2026-10-28 11:52:51.
+Model checking completed. No error has been found.
+  Estimates of the probability that TLC did not check all reachable states
+  because two distinct states had the same fingerprint:
+  calculated (optimistic):  val = 1.5E-14
+1069 states generated, 613 distinct states found, 0 states left on queue.
+The depth of the complete state graph search is 12.
+The average outdegree of the complete state graph is 1 (minimum is 0, the maximum 6 and the 95th percentile is 4).
+Finished in 01s at (2026-10-28 11:52:51)

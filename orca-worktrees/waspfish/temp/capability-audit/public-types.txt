@@ -1,0 +1,354 @@
+src/Iceberg.Net.Spark/SparkSql.cs:13:public static class SparkSql
+src/Iceberg.Net.Spark/SparkSql.cs:81:public sealed record SparkSqlFragment(string Sql)
+src/Iceberg.Net.Spark/SparkSql.cs:87:public sealed record SparkTable(string Catalog, IReadOnlyList<string> Namespace, string Name)
+src/Iceberg.Net.Catalog/ManifestStore.cs:15:public static class ManifestStore
+src/Iceberg.Net.Catalog/JdbcCatalog.cs:25:public sealed class JdbcCatalog : MetastoreCatalog, IViewCatalog
+src/Iceberg.Net.Catalog/TableFiles.cs:15:public static class TableFiles
+src/Iceberg.Net.EntityFrameworkCore/Metadata/IcebergModelBuilderExtensions.cs:10:public static class IcebergAnnotationNames
+src/Iceberg.Net.EntityFrameworkCore/Metadata/IcebergModelBuilderExtensions.cs:24:public static class IcebergModelBuilderExtensions
+src/Iceberg.Net.Athena/AthenaQueryRunner.cs:7:public sealed record AthenaQueryOptions
+src/Iceberg.Net.Athena/AthenaQueryRunner.cs:21:public sealed record AthenaQueryResult(string QueryExecutionId, IReadOnlyList<string> Columns, IReadOnlyList<IReadOnlyList<string?>> Rows, long? DataScannedBytes,
+src/Iceberg.Net.Athena/AthenaQueryRunner.cs:24:public sealed class AthenaQueryFailedException(string queryExecutionId, string state, string? reason, string sql)
+src/Iceberg.Net.Athena/AthenaQueryRunner.cs:36:public sealed class AthenaQueryRunner(IAmazonAthena athena, AthenaQueryOptions options)
+src/Iceberg.Net.Athena/AthenaSql.cs:14:public sealed record AthenaTable(string Database, string Name, string? Catalog = null)
+src/Iceberg.Net.Athena/AthenaSql.cs:29:public sealed record AthenaIcebergProperties
+src/Iceberg.Net.Athena/AthenaSql.cs:74:public static class AthenaSql
+src/Iceberg.Net.Athena/TrinoSql.cs:17:public static class TrinoSql
+src/Iceberg.Net.IO/RangeReadStream.cs:11:public sealed class RangeReadStream : Stream
+src/Iceberg.Net.EntityFrameworkCore/Query/IcebergEntityFrameworkQueryableExtensions.cs:9:public static class IcebergEntityFrameworkQueryableExtensions
+src/Iceberg.Net.Linq/Writes/IcebergWrites.cs:18:public sealed class SetPropertyCalls<T>
+src/Iceberg.Net.Linq/Writes/IcebergWrites.cs:30:public sealed class MergeSetPropertyCalls<T>
+src/Iceberg.Net.Linq/Writes/IcebergWrites.cs:43:public sealed class IcebergMergeBuilder<T>
+src/Iceberg.Net.Linq/Writes/IcebergWrites.cs:176:public static class IcebergWrites
+src/Iceberg.Net.Linq/Query/IcebergQueryable.cs:9:public sealed record IcebergQueryOptions
+src/Iceberg.Net.Linq/Query/IcebergQueryable.cs:24:public sealed class IcebergQueryable<T> : IOrderedQueryable<T>, IAsyncEnumerable<T>
+src/Iceberg.Net.Spark/GlueSqlJobRunner.cs:8:public sealed record GlueJobOptions
+src/Iceberg.Net.Spark/GlueSqlJobRunner.cs:27:public sealed class GlueSqlJobRunner(IAmazonGlue glue, SparkScriptStager stager, GlueJobOptions options) : ISparkSqlJobRunner
+src/Iceberg.Net.Linq/Query/IcebergQueryableExtensions.cs:9:public static class IcebergQueryableExtensions
+src/Iceberg.Net.Catalog/SigV4Handler.cs:16:public sealed class SigV4Handler : DelegatingHandler
+src/Iceberg.Net.Linq/Mapping/IcebergSchema.cs:12:public static class IcebergSchema
+src/Iceberg.Net.Catalog/Catalog.cs:13:public sealed record Namespace(IReadOnlyList<string> Levels)
+src/Iceberg.Net.Catalog/Catalog.cs:21:public sealed record TableIdentifier(Namespace Namespace, string Name)
+src/Iceberg.Net.Catalog/Catalog.cs:27:public class NoSuchTableException(string message) : Exception(message);
+src/Iceberg.Net.Catalog/Catalog.cs:28:public class NoSuchNamespaceException(string message) : Exception(message);
+src/Iceberg.Net.Catalog/Catalog.cs:29:public class AlreadyExistsException(string message) : Exception(message);
+src/Iceberg.Net.Catalog/Catalog.cs:32:public sealed record TableCommit(TableIdentifier Identifier, IReadOnlyList<UpdateRequirement> Requirements, IReadOnlyList<MetadataUpdate> Updates);
+src/Iceberg.Net.Catalog/Catalog.cs:39:public sealed record CreateTableRequest(
+src/Iceberg.Net.Catalog/Catalog.cs:49:public interface ICatalog : IDisposable
+src/Iceberg.Net.Catalog/Catalog.cs:94:public sealed class Table(ICatalog catalog, TableIdentifier identifier, TableMetadata metadata, IFileIO io)
+src/Iceberg.Net.Catalog/Catalog.cs:196:public abstract partial class MetastoreCatalog(string name, IFileIO io) : ICatalog
+src/Iceberg.Net.Catalog/Catalog.cs:405:public class InMemoryCatalog(string warehouse, IFileIO? io = null, string name = "memory") : MetastoreCatalog(name, io ?? new LocalFileIO()), IViewCatalog
+src/Iceberg.Net.Linq/Mapping/ReflectionRowMapper.cs:14:public sealed class ReflectionRowMapper<T> : IIcebergRowMapper<T>
+src/Iceberg.Net.EntityFrameworkCore/Infrastructure/IcebergOptionsExtension.cs:14:public sealed class IcebergOptionsExtension : IDbContextOptionsExtension
+src/Iceberg.Net.EntityFrameworkCore/Infrastructure/IcebergOptionsExtension.cs:96:public sealed class IcebergDbContextOptionsBuilder(DbContextOptionsBuilder builder)
+src/Iceberg.Net.Catalog/GlueCatalog.cs:10:public sealed record GlueCatalogOptions
+src/Iceberg.Net.Catalog/GlueCatalog.cs:32:public sealed class GlueCatalog : MetastoreCatalog
+src/Iceberg.Net.Catalog/ScanPlanning.cs:13:public sealed record ScanPlanRequest(Expression? Filter = null, long? SnapshotId = null, IReadOnlyList<string>? Select = null, bool CaseSensitive = true)
+src/Iceberg.Net.Catalog/ScanPlanning.cs:38:public sealed record ServerScanTask(DataFile DataFile, IReadOnlyList<DataFile> Deletes, Expression? Residual);
+src/Iceberg.Net.Catalog/ScanPlanning.cs:41:public sealed record ServerScanPlan(IReadOnlyList<ServerScanTask> Tasks, string? PlanId, int Polls, int PlanTasksFetched)
+src/Iceberg.Net.Catalog/ScanPlanning.cs:55:public sealed class ScanPlanningException(string message) : Exception(message);
+src/Iceberg.Net.IO/FileIO.cs:11:public interface IFileIO : IDisposable
+src/Iceberg.Net.IO/FileIO.cs:25:public sealed record StoredFile(string Location, long Size, DateTime LastModifiedUtc);
+src/Iceberg.Net.IO/FileIO.cs:28:public interface ISupportsListing
+src/Iceberg.Net.IO/FileIO.cs:34:public sealed class FileAlreadyExistsException(string location) : IOException($"File already exists: {location}");
+src/Iceberg.Net.IO/FileIO.cs:37:public sealed class LocalFileIO : IFileIO, ISupportsListing
+src/Iceberg.Net.IO/FileIO.cs:104:public sealed record S3FileIOOptions
+src/Iceberg.Net.IO/FileIO.cs:161:public sealed class S3FileIO : IFileIO, ISupportsListing
+src/Iceberg.Net.IO/FileIO.cs:341:public sealed class ResolvingFileIO(Func<IFileIO> s3Factory) : IFileIO, ISupportsListing
+src/Iceberg.Net.Catalog/TableLocations.cs:11:public static class TableLocations
+src/Iceberg.Net.Catalog/RestCatalog.cs:12:public sealed record RestCatalogOptions
+src/Iceberg.Net.Catalog/RestCatalog.cs:90:public sealed class RestCatalog : ICatalog, IViewCatalog
+src/Iceberg.Net.IO/SequentialRangeReader.cs:11:public sealed class SequentialRangeReader : IAsyncDisposable
+src/Iceberg.Net.Avro/AvroSchema.cs:10:public abstract record AvroSchema
+src/Iceberg.Net.Avro/AvroSchema.cs:46:public enum AvroKind { Null, Boolean, Int, Long, Float, Double, Bytes, String }
+src/Iceberg.Net.Avro/AvroSchema.cs:48:public sealed record AvroPrimitive(AvroKind Kind) : AvroSchema;
+src/Iceberg.Net.Avro/AvroSchema.cs:50:public sealed record AvroField(string Name, AvroSchema Schema, int? FieldId = null, string? Doc = null, bool DefaultNull = false);
+src/Iceberg.Net.Avro/AvroSchema.cs:52:public sealed record AvroRecord(string Name, IReadOnlyList<AvroField> Fields) : AvroSchema
+src/Iceberg.Net.Avro/AvroSchema.cs:62:public sealed record AvroArray(AvroSchema Items) : AvroSchema;
+src/Iceberg.Net.Avro/AvroSchema.cs:65:public sealed record AvroMap(AvroSchema Values) : AvroSchema;
+src/Iceberg.Net.Avro/AvroSchema.cs:67:public sealed record AvroFixed(string Name, int Size) : AvroSchema;
+src/Iceberg.Net.Avro/AvroSchema.cs:69:public sealed record AvroUnion(IReadOnlyList<AvroSchema> Branches) : AvroSchema;
+src/Iceberg.Net.Avro/AvroSchema.cs:71:public static class AvroSchemaJson
+src/Iceberg.Net.EntityFrameworkCore/Infrastructure/IcebergServiceCollectionExtensions.cs:14:public static class IcebergServiceCollectionExtensions
+src/Iceberg.Net.Puffin/ThetaSketch.cs:14:public sealed class ThetaSketch
+src/Iceberg.Net.Puffin/ThetaSketch.cs:124:public static class Murmur3x64
+src/Iceberg.Net.Avro/ManifestCodec.cs:16:public static class ManifestCodec
+src/Iceberg.Net.EntityFrameworkCore/Infrastructure/IcebergDbContextOptionsExtensions.cs:8:public static class IcebergDbContextOptionsExtensions
+src/Iceberg.Net.Avro/AvroCodec.cs:13:public static class AvroBinary
+src/Iceberg.Net.Avro/AvroCodec.cs:321:public enum AvroCodecKind { Null, Deflate }
+src/Iceberg.Net.Avro/AvroCodec.cs:324:public static class AvroContainer
+src/Iceberg.Net.Spark/IcebergProcedures.cs:7:public sealed record SparkProcedureCall(string Catalog, string Procedure, IReadOnlyList<KeyValuePair<string, object?>> Arguments)
+src/Iceberg.Net.Spark/IcebergProcedures.cs:32:public sealed class SparkOptions : Dictionary<string, string>, IEmpty
+src/Iceberg.Net.Spark/IcebergProcedures.cs:39:public enum RewriteStrategy { BinPack, Sort }
+src/Iceberg.Net.Spark/IcebergProcedures.cs:42:public sealed record RewriteDataFilesOptions
+src/Iceberg.Net.Spark/IcebergProcedures.cs:87:public sealed record ExpireSnapshotsOptions
+src/Iceberg.Net.Spark/IcebergProcedures.cs:99:public sealed record RemoveOrphanFilesOptions
+src/Iceberg.Net.Spark/IcebergProcedures.cs:114:public sealed record ChangelogViewOptions
+src/Iceberg.Net.Spark/IcebergProcedures.cs:131:public sealed class IcebergProcedures(string catalog)
+src/Iceberg.Net.Core/Metadata/Snapshot.cs:4:public static class Operations
+src/Iceberg.Net.Core/Metadata/Snapshot.cs:16:public sealed record Snapshot
+src/Iceberg.Net.Core/Metadata/Snapshot.cs:37:public enum SnapshotRefType { Branch, Tag }
+src/Iceberg.Net.Core/Metadata/Snapshot.cs:40:public sealed record SnapshotRef(
+src/Iceberg.Net.Core/Metadata/Snapshot.cs:53:public sealed record SnapshotLogEntry(long TimestampMs, long SnapshotId);
+src/Iceberg.Net.Core/Metadata/Snapshot.cs:55:public sealed record MetadataLogEntry(long TimestampMs, string MetadataFile);
+src/Iceberg.Net.Core/Metadata/Snapshot.cs:58:public sealed record StatisticsFile(
+src/Iceberg.Net.Core/Metadata/Snapshot.cs:66:public sealed record BlobMetadata(string Type, long SnapshotId, long SequenceNumber, IReadOnlyList<int> Fields, IReadOnlyDictionary<string, string>? Properties = null);
+src/Iceberg.Net.Core/Metadata/Snapshot.cs:68:public sealed record PartitionStatisticsFile(long SnapshotId, string StatisticsPath, long FileSizeInBytes);
+src/Iceberg.Net.Core/Metadata/Snapshot.cs:71:public sealed record EncryptedKey(string KeyId, string EncryptedKeyMetadata, string? EncryptedById = null, IReadOnlyDictionary<string, string>? Properties = null);
+src/Iceberg.Net.Puffin/MumblingBitmap.cs:19:public sealed class MumblingBitmap
+src/Iceberg.Net.Puffin/MumblingBitmap.cs:158:public static class MumblingPfor
+src/Iceberg.Net.Core/Metadata/TableMetadata.cs:11:public sealed record TableMetadata
+src/Iceberg.Net.Puffin/RoaringPositionBitmap.cs:12:public sealed class RoaringPositionBitmap
+src/Iceberg.Net.Puffin/PuffinFile.cs:8:public sealed record PuffinBlobMetadata(
+src/Iceberg.Net.Puffin/PuffinFile.cs:19:public sealed record PuffinBlob(
+src/Iceberg.Net.Puffin/PuffinFile.cs:28:public static class PuffinBlobTypes
+src/Iceberg.Net.Puffin/PuffinFile.cs:39:public static class PuffinFile
+src/Iceberg.Net.Puffin/DeletionVector.cs:12:public static class DeletionVector
+src/Iceberg.Net.Puffin/DeletionVector.cs:65:public static class Crc32
+src/Iceberg.Net.Core/Expressions/Evaluators.cs:9:public static class ValueComparer
+src/Iceberg.Net.Core/Expressions/Evaluators.cs:42:public static class RowEvaluator
+src/Iceberg.Net.Core/Expressions/Evaluators.cs:132:public sealed class MetricsEvaluator(Expression bound)
+src/Iceberg.Net.Core/Expressions/Evaluators.cs:182:public sealed class ManifestEvaluator(Expression projected)
+src/Iceberg.Net.Core/Expressions/Evaluators.cs:212:public static class Projections
+src/Iceberg.Net.Core/Expressions/Expression.cs:6:public enum Operation
+src/Iceberg.Net.Core/Expressions/Expression.cs:24:public abstract record Expression
+src/Iceberg.Net.Core/Expressions/Expression.cs:33:public sealed record AlwaysTrue : Expression
+src/Iceberg.Net.Core/Expressions/Expression.cs:38:public sealed record AlwaysFalse : Expression
+src/Iceberg.Net.Core/Expressions/Expression.cs:43:public sealed record And(Expression Left, Expression Right) : Expression
+src/Iceberg.Net.Core/Expressions/Expression.cs:48:public sealed record Or(Expression Left, Expression Right) : Expression
+src/Iceberg.Net.Core/Expressions/Expression.cs:53:public sealed record Not(Expression Child) : Expression
+src/Iceberg.Net.Core/Expressions/Expression.cs:59:public sealed record UnboundPredicate(string Column, Operation Op, IReadOnlyList<object?> Literals) : Expression
+src/Iceberg.Net.Core/Expressions/Expression.cs:89:public sealed record BoundPredicate(int Position, int FieldId, string Name, IcebergType Type, Operation Op, IReadOnlyList<object> Literals) : Expression
+src/Iceberg.Net.Core/Expressions/Expression.cs:103:public static class Expr
+src/Iceberg.Net.Core/Expressions/Expression.cs:202:public static class Binder
+src/Iceberg.Net.Core/Expressions/Expression.cs:264:public static class Literals
+src/Iceberg.Net.Core/Transforms/Transform.cs:12:public abstract record Transform
+src/Iceberg.Net.Core/Transforms/Transform.cs:70:public sealed record IdentityTransform : Transform
+src/Iceberg.Net.Core/Transforms/Transform.cs:79:public sealed record VoidTransform : Transform
+src/Iceberg.Net.Core/Transforms/Transform.cs:88:public sealed record UnknownTransform(string Name) : Transform
+src/Iceberg.Net.Core/Transforms/Transform.cs:96:public sealed record BucketTransform : Transform
+src/Iceberg.Net.Core/Transforms/Transform.cs:133:public sealed record TruncateTransform : Transform
+src/Iceberg.Net.Core/Transforms/Transform.cs:174:public enum TimeUnit { Year, Month, Day, Hour }
+src/Iceberg.Net.Core/Transforms/Transform.cs:176:public sealed record TimeTransform(TimeUnit Unit) : Transform
+src/Iceberg.Net.Core/Transforms/Murmur3.cs:12:public static class Murmur3
+src/Iceberg.Net.Core/Manifests/ManifestModel.cs:3:public enum FileContent { Data = 0, PositionDeletes = 1, EqualityDeletes = 2 }
+src/Iceberg.Net.Core/Manifests/ManifestModel.cs:5:public enum ManifestContent { Data = 0, Deletes = 1 }
+src/Iceberg.Net.Core/Manifests/ManifestModel.cs:7:public enum ManifestEntryStatus { Existing = 0, Added = 1, Deleted = 2 }
+src/Iceberg.Net.Core/Manifests/ManifestModel.cs:13:public sealed record DataFile
+src/Iceberg.Net.Core/Manifests/ManifestModel.cs:46:public sealed record ManifestEntry(
+src/Iceberg.Net.Core/Manifests/ManifestModel.cs:53:public sealed record FieldSummary(bool ContainsNull, bool? ContainsNan, byte[]? LowerBound, byte[]? UpperBound);
+src/Iceberg.Net.Core/Manifests/ManifestModel.cs:56:public sealed record ManifestFile
+src/Iceberg.Net.Core/Manifests/ContentStatsLayout.cs:12:public static class ContentStatsLayout
+src/Iceberg.Net.Avro/ManifestFormat.cs:12:public interface IManifestFormat
+src/Iceberg.Net.Avro/ManifestFormat.cs:34:public sealed class AvroManifestFormat : IManifestFormat
+src/Iceberg.Net.Core/Manifests/ColumnStats.cs:9:public readonly record struct GeoPoint(double X, double Y, double? Z = null, double? M = null);
+src/Iceberg.Net.Core/Manifests/ColumnStats.cs:16:public sealed class VariantBound(byte[] bytes) : IEquatable<VariantBound>
+src/Iceberg.Net.Core/Manifests/ColumnStats.cs:39:public sealed record ColumnStats
+src/Iceberg.Net.Core/Manifests/ColumnStats.cs:145:public sealed class ContentStats
+src/Iceberg.Net.Core/Manifests/ColumnStats.cs:226:public static class BoundSerialization
+src/Iceberg.Net.Catalog/Views.cs:7:public sealed record View(TableIdentifier Identifier, ViewMetadata Metadata)
+src/Iceberg.Net.Catalog/Views.cs:14:public sealed record ViewDefinition(
+src/Iceberg.Net.Catalog/Views.cs:29:public interface IViewCatalog
+src/Iceberg.Net.Core/Json/UpdateJson.cs:9:public static class UpdateJson
+src/Iceberg.Net.Linq/Mapping/Attributes.cs:4:public enum IcebergNullability
+src/Iceberg.Net.Linq/Mapping/Attributes.cs:17:public sealed class IcebergFieldAttribute : Attribute
+src/Iceberg.Net.Linq/Mapping/Attributes.cs:43:public sealed class IcebergIgnoreAttribute : Attribute;
+src/Iceberg.Net.Linq/Mapping/Attributes.cs:47:public sealed class IcebergKeyAttribute : Attribute;
+src/Iceberg.Net.Core/Metadata/ViewMetadata.cs:8:public sealed record ViewRepresentation(string Sql, string Dialect)
+src/Iceberg.Net.Core/Metadata/ViewMetadata.cs:14:public sealed record ViewVersion(
+src/Iceberg.Net.Core/Metadata/ViewMetadata.cs:27:public sealed record ViewLogEntry(long TimestampMs, int VersionId);
+src/Iceberg.Net.Core/Metadata/ViewMetadata.cs:33:public sealed record ViewMetadata
+src/Iceberg.Net.Core/Metadata/ViewMetadata.cs:85:public static class ViewJson
+src/Iceberg.Net.Spark/SparkJobs.cs:10:public sealed class SparkSqlScript
+src/Iceberg.Net.Spark/SparkJobs.cs:35:public sealed class SparkCatalogConfig
+src/Iceberg.Net.Spark/SparkJobs.cs:97:public enum SparkJobState { Pending, Running, Succeeded, Failed, Cancelled }
+src/Iceberg.Net.Spark/SparkJobs.cs:100:public sealed record SparkJobRun(string RunId, SparkJobState State, string? Details = null, string? StatementsLocation = null)
+src/Iceberg.Net.Spark/SparkJobs.cs:106:public interface ISparkSqlJobRunner
+src/Iceberg.Net.Spark/SparkJobs.cs:114:public static class SparkJobRunnerExtensions
+src/Iceberg.Net.Spark/SparkJobs.cs:141:public sealed class SparkJobFailedException(SparkJobRun run) : Exception($"Spark job {run.RunId} ended {run.State}: {run.Details}")
+src/Iceberg.Net.Spark/SparkJobs.cs:150:public sealed class SparkScriptStager(IFileIO io, string stagingPrefix)
+src/Iceberg.Net.Spark/EmrServerlessSqlJobRunner.cs:8:public sealed record EmrServerlessJobOptions
+src/Iceberg.Net.Spark/EmrServerlessSqlJobRunner.cs:28:public sealed class EmrServerlessSqlJobRunner(IAmazonEMRServerless emr, SparkScriptStager stager, EmrServerlessJobOptions options) : ISparkSqlJobRunner
+src/Iceberg.Net.Core/Partitioning/PartitionSpecUpdate.cs:13:public sealed class PartitionSpecUpdate
+src/Iceberg.Net.Core/Json/MetadataJson.cs:9:public static class MetadataJson
+src/Iceberg.Net.Core/Partitioning/PartitionSpec.cs:10:public sealed record PartitionField(int SourceId, int FieldId, string Name, Transform Transform, IReadOnlyList<int>? SourceIds = null)
+src/Iceberg.Net.Core/Partitioning/PartitionSpec.cs:15:public sealed class PartitionSpec
+src/Iceberg.Net.Core/Partitioning/PartitionSpec.cs:96:public enum SortDirection { Asc, Desc }
+src/Iceberg.Net.Core/Partitioning/PartitionSpec.cs:97:public enum NullOrder { NullsFirst, NullsLast }
+src/Iceberg.Net.Core/Partitioning/PartitionSpec.cs:99:public sealed record SortField(Transform Transform, int SourceId, SortDirection Direction, NullOrder NullOrder);
+src/Iceberg.Net.Core/Partitioning/PartitionSpec.cs:101:public sealed class SortOrder(int orderId, IEnumerable<SortField> fields)
+src/Iceberg.Net.Core/Metadata/TableMetadataBuilder.cs:12:public sealed class TableMetadataBuilder
+src/Iceberg.Net.Core/Corruption.cs:13:public static class Corruption
+src/Iceberg.Net.Data/Scan.cs:11:public abstract record SnapshotSelector
+src/Iceberg.Net.Data/Scan.cs:29:public static class TimeTravel
+src/Iceberg.Net.Data/Scan.cs:67:public sealed record ScanRequest
+src/Iceberg.Net.Data/Scan.cs:82:public sealed class ScanMetrics
+src/Iceberg.Net.Data/Scan.cs:136:public static partial class TableScan
+src/Iceberg.Net.Core/Metadata/MetadataUpdate.cs:10:public abstract record MetadataUpdate(string Action)
+src/Iceberg.Net.Core/Metadata/MetadataUpdate.cs:43:public abstract record UpdateRequirement(string Type)
+src/Iceberg.Net.Core/Metadata/MetadataUpdate.cs:117:public class CommitFailedException(string message, Exception? inner = null) : Exception(message, inner);
+src/Iceberg.Net.Core/Metadata/MetadataUpdate.cs:120:public class CommitStateUnknownException(string message, Exception? inner = null) : Exception(message, inner)
+src/Iceberg.Net.Data/UpdateMerge.cs:12:public sealed class RowUpdate
+src/Iceberg.Net.Data/UpdateMerge.cs:38:public sealed class MergeBuilder
+src/Iceberg.Net.Data/UpdateMerge.cs:94:public sealed record MergeResult(Snapshot? Snapshot, long RowsUpdated, long RowsDeleted, long RowsInserted, DeleteStrategy Strategy, int Attempts);
+src/Iceberg.Net.Data/UpdateMerge.cs:96:public static partial class TableMutations
+src/Iceberg.Net.Arrow/ArrowInterop.cs:21:public static class ArrowInterop
+src/Iceberg.Net.Linq/Mapping/IIcebergRowMapper.cs:14:public interface IIcebergRowMapper<T>
+src/Iceberg.Net.Linq/Mapping/IIcebergRowMapper.cs:22:public interface IIcebergRowBinding<T>
+src/Iceberg.Net.Linq/Mapping/IIcebergRowMapper.cs:41:public sealed class IcebergMemberBinding
+src/Iceberg.Net.Linq/Mapping/IIcebergRowMapper.cs:71:public sealed record IcebergMapperOptions
+src/Iceberg.Net.Linq/Mapping/IIcebergRowMapper.cs:91:public static class IcebergNaming
+src/Iceberg.Net.Data/Compaction.cs:26:public sealed record RewriteOptions(
+src/Iceberg.Net.Data/Compaction.cs:36:public sealed record RewriteResult(Snapshot? Snapshot, int FilesRewritten, int FilesAdded, long RowsRewritten, int Attempts)
+src/Iceberg.Net.Data/Compaction.cs:48:public sealed record RewritePositionDeletesResult(Snapshot? Snapshot, int DeleteFilesRemoved, int DeleteFilesAdded, long DanglingPositionsDropped);
+src/Iceberg.Net.Data/Compaction.cs:56:public static class Compaction
+src/Iceberg.Net.Core/Json/ExpressionJson.cs:16:public static class ExpressionJson
+src/Iceberg.Net.Data/TableWriter.cs:13:public static class TableWriter
+src/Iceberg.Net.Core/Types/Schema.cs:6:public sealed class Schema
+src/Iceberg.Net.Core/Types/Schema.cs:108:public static class TypeUtil
+src/Iceberg.Net.Core/Json/ContentFileJson.cs:16:public static class ContentFileJson
+src/Iceberg.Net.Data/SnapshotProducer.cs:13:public sealed record CommitRetryPolicy(int NumRetries = 4, int MinWaitMs = 100, int MaxWaitMs = 60_000)
+src/Iceberg.Net.Data/SnapshotProducer.cs:29:public sealed class SnapshotProducer
+src/Iceberg.Net.Data/SnapshotProducer.cs:895:public sealed class ValidationException(string message) : Exception(message);
+src/Iceberg.Net.Core/Json/TypeJson.cs:11:public static partial class TypeJson
+src/Iceberg.Net.Arrow/TableArrow.cs:11:public static class TableArrow
+src/Iceberg.Net.Core/Json/SingleValueJson.cs:13:public static class SingleValueJson
+src/Iceberg.Net.Data/Maintenance.cs:14:public sealed record ExpireResult(IReadOnlyList<long> Expired, IReadOnlyList<string> DeletedFiles)
+src/Iceberg.Net.Data/Maintenance.cs:30:public sealed record ExpireOptions
+src/Iceberg.Net.Data/Maintenance.cs:44:public static class Maintenance
+src/Iceberg.Net.Data/PuffinStatistics.cs:14:public static class PuffinStatistics
+src/Iceberg.Net.Data/StagedCommit.cs:19:public class StagedCommit
+src/Iceberg.Net.Data/StagedCommit.cs:234:public sealed class StagedCommit<TResult> : StagedCommit
+src/Iceberg.Net.Data/ServerSideScan.cs:12:public static class ServerSideScan
+src/Iceberg.Net.Core/Diagnostics/IcebergTelemetry.cs:13:public static class IcebergTelemetry
+src/Iceberg.Net.Data/DeleteFiles.cs:12:public static class PositionDeleteFiles
+src/Iceberg.Net.Data/DeleteFiles.cs:64:public static class EqualityDeleteFiles
+src/Iceberg.Net.Data/DeleteFiles.cs:77:public sealed record DeleteEntry(DataFile File, long DataSequenceNumber, ManifestFile Manifest)
+src/Iceberg.Net.Data/DeleteFiles.cs:87:public static class EqualityKey
+src/Iceberg.Net.Data/DeleteFiles.cs:116:public sealed class DeleteIndex
+src/Iceberg.Net.Data/MetadataTables.cs:13:public sealed record SnapshotsRow(DateTimeOffset CommittedAt, long SnapshotId, long? ParentId, string? Operation, string? ManifestList, IReadOnlyDictionary<string, string> Summary)
+src/Iceberg.Net.Data/MetadataTables.cs:23:public sealed record HistoryRow(DateTimeOffset MadeCurrentAt, long SnapshotId, long? ParentId, bool IsCurrentAncestor)
+src/Iceberg.Net.Data/MetadataTables.cs:32:public sealed record RefsRow(string Name, string Type, long SnapshotId, long? MaxReferenceAgeInMs, int? MinSnapshotsToKeep, long? MaxSnapshotAgeInMs)
+src/Iceberg.Net.Data/MetadataTables.cs:42:public sealed record PartitionSummaryRow(bool ContainsNull, bool? ContainsNan, string? LowerBound, string? UpperBound);
+src/Iceberg.Net.Data/MetadataTables.cs:45:public sealed record ManifestsRow(
+src/Iceberg.Net.Data/MetadataTables.cs:66:public sealed record FilesRow(
+src/Iceberg.Net.Data/MetadataTables.cs:85:public sealed record EntriesRow(int Status, long? SnapshotId, long? SequenceNumber, long? FileSequenceNumber, FilesRow DataFile)
+src/Iceberg.Net.Data/MetadataTables.cs:98:public sealed record PartitionsRow(
+src/Iceberg.Net.Data/MetadataTables.cs:113:public sealed record MetadataLogEntriesRow(DateTimeOffset Timestamp, string File, long? LatestSnapshotId, int? LatestSchemaId, long? LatestSequenceNumber);
+src/Iceberg.Net.Data/MetadataTables.cs:122:public static class MetadataTables
+src/Iceberg.Net.Data/TableValidator.cs:11:public enum IssueSeverity { Warning, Error }
+src/Iceberg.Net.Data/TableValidator.cs:14:public sealed record ValidationIssue(IssueSeverity Severity, string Code, string Message, string? Path = null)
+src/Iceberg.Net.Data/TableValidator.cs:19:public sealed record ValidationReport(IReadOnlyList<ValidationIssue> Issues, int SnapshotsChecked, int FilesChecked, bool Deep)
+src/Iceberg.Net.Data/TableValidator.cs:28:public sealed record ValidationOptions
+src/Iceberg.Net.Data/TableValidator.cs:43:public static class TableValidator
+src/Iceberg.Net.Data/RowSorter.cs:12:public sealed class RowSorter : IComparer<object?[]>
+src/Iceberg.Net.Data/ChangeFeed.cs:12:public enum ChangeType { Insert, Delete }
+src/Iceberg.Net.Data/ChangeFeed.cs:18:public sealed record ChangeRow(object?[] Row, ChangeType ChangeType, int ChangeOrdinal, long CommitSnapshotId);
+src/Iceberg.Net.Data/ChangeFeed.cs:20:public sealed record ChangeFeedOptions
+src/Iceberg.Net.Data/ChangeFeed.cs:46:public static class ChangeFeed
+src/Iceberg.Net.Data/TableScan.cs:18:public static class RowLineage
+src/Iceberg.Net.Data/TableScan.cs:31:public sealed record LineageRow(object?[] Row, long? RowId, long? LastUpdatedSequenceNumber);
+src/Iceberg.Net.Data/TableScan.cs:34:public sealed record ScanTask(DataFile File, long DataSequenceNumber, string ManifestPath);
+src/Iceberg.Net.Data/TableScan.cs:37:public sealed record ScanPlan(IReadOnlyList<ScanTask> Tasks, int ManifestsRead, int ManifestsSkipped, int FilesSkippedByPartition, int FilesSkippedByMetrics);
+src/Iceberg.Net.Data/TableScan.cs:39:public static partial class TableScan
+src/Iceberg.Net.Core/Types/IcebergType.cs:7:public enum TypeId
+src/Iceberg.Net.Core/Types/IcebergType.cs:35:public abstract record IcebergType(TypeId TypeId)
+src/Iceberg.Net.Core/Types/IcebergType.cs:47:public record PrimitiveType : IcebergType
+src/Iceberg.Net.Core/Types/IcebergType.cs:96:public sealed record DecimalType : PrimitiveType
+src/Iceberg.Net.Core/Types/IcebergType.cs:112:public sealed record FixedType : PrimitiveType
+src/Iceberg.Net.Core/Types/IcebergType.cs:126:public sealed record GeometryType(string? Crs = null) : PrimitiveType(TypeId.Geometry)
+src/Iceberg.Net.Core/Types/IcebergType.cs:133:public sealed record GeographyType(string? Crs = null, string? Algorithm = null) : PrimitiveType(TypeId.Geography)
+src/Iceberg.Net.Core/Types/IcebergType.cs:153:public sealed record FileType : IcebergType
+src/Iceberg.Net.Core/Types/IcebergType.cs:189:public sealed record NestedField(
+src/Iceberg.Net.Core/Types/IcebergType.cs:206:public sealed record StructType : IcebergType
+src/Iceberg.Net.Core/Types/IcebergType.cs:228:public sealed record ListType(int ElementId, IcebergType ElementType, bool ElementRequired) : IcebergType(TypeId.List)
+src/Iceberg.Net.Core/Types/IcebergType.cs:234:public sealed record MapType(int KeyId, IcebergType KeyType, int ValueId, IcebergType ValueType, bool ValueRequired) : IcebergType(TypeId.Map)
+src/Iceberg.Net.Core/Types/SchemaUpdate.cs:14:public sealed class SchemaUpdate
+src/Iceberg.Net.Data/TableFingerprint.cs:19:public sealed record TableFingerprint(long Rows, ulong RowHash, IReadOnlyDictionary<int, ColumnFingerprint> Columns)
+src/Iceberg.Net.Data/TableFingerprint.cs:128:public sealed record ColumnFingerprint(string Name, long Count, long Nulls, ulong Hash);
+src/Iceberg.Net.Core/Types/Conversions.cs:11:public static class Conversions
+src/Iceberg.Net.Core/Types/NameMapping.cs:6:public sealed record MappedField(int? FieldId, IReadOnlyList<string> Names, IReadOnlyList<MappedField>? Fields = null);
+src/Iceberg.Net.Core/Types/NameMapping.cs:13:public sealed class NameMapping(IReadOnlyList<MappedField> fields)
+src/Iceberg.Net.Data/SnapshotManagement.cs:13:public sealed record RefRetention(int? MinSnapshotsToKeep = null, long? MaxSnapshotAgeMs = null, long? MaxRefAgeMs = null);
+src/Iceberg.Net.Data/SnapshotManagement.cs:15:public static class SnapshotManagementExtensions
+src/Iceberg.Net.Data/SnapshotManagement.cs:38:public sealed class SnapshotManager
+src/Iceberg.Net.Core/Types/Values.cs:10:public readonly record struct IcebergDecimal(BigInteger Unscaled, int Scale) : IComparable<IcebergDecimal>, IComparable
+src/Iceberg.Net.Core/Types/Values.cs:58:public static class IcebergTime
+src/Iceberg.Net.RestServer/Program.cs:9:public partial class Program;
+src/Iceberg.Net.Data/TableMutations.cs:11:public enum DeleteStrategy
+src/Iceberg.Net.Data/TableMutations.cs:28:public sealed record MutationResult(Snapshot Snapshot, long RowsInserted, long? RowsDeleted, int DataFilesRewritten, DeleteStrategy Strategy, int Attempts);
+src/Iceberg.Net.Data/TableMutations.cs:36:public static partial class TableMutations
+src/Iceberg.Net.Data/AvroDataFiles.cs:11:public sealed record DataFileBatch(long FirstPosition, IReadOnlyList<object?[]> Rows);
+src/Iceberg.Net.Data/AvroDataFiles.cs:14:public sealed record DataFileReadOptions
+src/Iceberg.Net.Data/AvroDataFiles.cs:36:public static class DataFiles
+src/Iceberg.Net.Data/AvroDataFiles.cs:78:public static class AvroDataFiles
+src/Iceberg.Net.RestServer/Errors.cs:9:public sealed class BadRequestException(string message) : Exception(message);
+src/Iceberg.Net.RestServer/Errors.cs:12:public sealed class NamespaceNotEmptyException(string message) : Exception(message);
+src/Iceberg.Net.RestServer/Errors.cs:15:public sealed class UnprocessableEntityException(string message) : Exception(message);
+src/Iceberg.Net.RestServer/Errors.cs:18:public sealed class NoSuchViewException(string message) : NoSuchTableException(message);
+src/Iceberg.Net.RestServer/Errors.cs:21:public static class ErrorModel
+src/Iceberg.Net.RestServer/Authorization.cs:9:public enum CatalogPrivilege
+src/Iceberg.Net.RestServer/Authorization.cs:22:public sealed record CatalogResource(Namespace Namespace, string? Name = null)
+src/Iceberg.Net.RestServer/Authorization.cs:33:public interface IAuthorizer
+src/Iceberg.Net.RestServer/Authorization.cs:39:public sealed class ForbiddenException(string message) : Exception(message);
+src/Iceberg.Net.RestServer/Authorization.cs:42:public sealed class AllowAllAuthorizer : IAuthorizer
+src/Iceberg.Net.RestServer/Authorization.cs:52:public sealed class StaticAuthorizer : IAuthorizer
+src/Iceberg.Net.RestServer/Authorization.cs:107:public static class Principals
+src/Iceberg.Net.Data/ParquetImport.cs:12:public sealed record ImportProblem(string Column, string Problem);
+src/Iceberg.Net.Data/ParquetImport.cs:14:public sealed class ParquetImportException(string location, IReadOnlyList<ImportProblem> problems)
+src/Iceberg.Net.Data/ParquetImport.cs:27:public static class ParquetImport
+src/Iceberg.Net.RestServer/Auth.cs:19:public sealed class TokenService
+src/Iceberg.Net.RestServer/Auth.cs:99:public static class AuthSetup
+src/Iceberg.Net.Data/ParquetFiles.cs:14:public sealed record ParquetWriteOptions
+src/Iceberg.Net.Data/ParquetFiles.cs:30:public static class ParquetFiles
+src/Iceberg.Net.RestServer/AzureCredentialVending.cs:22:public sealed class AdlsSasCredentialVendor(AdlsCredentialVendingOptions options, Func<DateTimeOffset>? clock = null) : IStorageCredentialVendor
+src/Iceberg.Net.RestServer/AzureCredentialVending.cs:95:public sealed class CompositeCredentialVendor(IReadOnlyList<IStorageCredentialVendor> vendors) : IStorageCredentialVendor
+src/Iceberg.Net.RestServer/RestServerOptions.cs:7:public sealed class RestServerOptions
+src/Iceberg.Net.RestServer/RestServerOptions.cs:70:public sealed class LocationOptions
+src/Iceberg.Net.RestServer/RestServerOptions.cs:84:public sealed class RemoteSigningOptions
+src/Iceberg.Net.RestServer/RestServerOptions.cs:106:public sealed class RestServerAuthorizationOptions
+src/Iceberg.Net.RestServer/RestServerOptions.cs:119:public sealed class ScanPlanningOptions
+src/Iceberg.Net.RestServer/RestServerOptions.cs:151:public sealed class CredentialVendingOptions
+src/Iceberg.Net.RestServer/RestServerOptions.cs:188:public sealed class GcsCredentialVendingOptions
+src/Iceberg.Net.RestServer/RestServerOptions.cs:219:public sealed class AdlsCredentialVendingOptions
+src/Iceberg.Net.RestServer/RestServerOptions.cs:238:public sealed class IdempotencyOptions
+src/Iceberg.Net.RestServer/RestServerOptions.cs:257:public sealed class RestServerAuthOptions
+src/Iceberg.Net.RestServer/SqlCatalogStore.cs:23:public sealed partial class SqlCatalogStore(Func<DbConnection> connect, string catalogName = "rest") : ICatalogStore, IServerStateStore
+src/Iceberg.Net.RestServer/ServerState.cs:6:public sealed record StoredResponse(int Status, string? ContentType, string? ETag, byte[] Body);
+src/Iceberg.Net.RestServer/ServerState.cs:12:public sealed record IdempotencyClaim(string Fingerprint, DateTimeOffset Claimed, StoredResponse? Response);
+src/Iceberg.Net.RestServer/ServerState.cs:15:public sealed record PlanRecord(string PlanId, TableIdentifier Table, string Status, string? Result, string? Error, DateTimeOffset Created, DateTimeOffset? Finished);
+src/Iceberg.Net.RestServer/ServerState.cs:23:public interface IServerStateStore
+src/Iceberg.Net.RestServer/ServerState.cs:59:public sealed class InMemoryServerStateStore : IServerStateStore
+src/Iceberg.Net.RestServer/RestServer.cs:19:public static class RestServer
+src/Iceberg.Net.RestServer/Endpoints.cs:17:public static class Endpoints
+src/Iceberg.Net.RestServer/CatalogService.Locations.cs:17:public sealed partial class CatalogService
+src/Iceberg.Net.RestServer/Idempotency.cs:15:public sealed class IdempotencyStore(IdempotencyOptions options, IServerStateStore state, Func<DateTimeOffset>? clock = null)
+src/Iceberg.Net.RestServer/RemoteSigning.cs:14:public sealed record RemoteSignRequest(string Region, Uri Uri, string Method, IReadOnlyDictionary<string, IReadOnlyList<string>> Headers, string? Body, string? Provider)
+src/Iceberg.Net.RestServer/RemoteSigning.cs:48:public sealed partial class S3RequestSigner
+src/Iceberg.Net.RestServer/ViewUpdates.cs:9:public sealed record ViewRequirement(Guid Uuid)
+src/Iceberg.Net.RestServer/ViewUpdates.cs:29:public abstract record ViewUpdate
+src/Iceberg.Net.RestServer/SqlServerState.cs:17:public sealed partial class SqlCatalogStore
+src/Iceberg.Net.RestServer/ScanPlanning.cs:16:public sealed class NoSuchPlanIdException(string message) : Exception(message);
+src/Iceberg.Net.RestServer/ScanPlanning.cs:19:public sealed class NoSuchPlanTaskException(string message) : Exception(message);
+src/Iceberg.Net.RestServer/ScanPlanning.cs:22:public sealed record PlanRequest(
+src/Iceberg.Net.RestServer/ScanPlanning.cs:55:public sealed class ScanPlanner(CatalogService catalog, ScanPlanningOptions options, IServerStateStore state, ILogger? logger = null)
+src/Iceberg.Net.RestServer/CatalogStore.cs:7:public enum CatalogEntryKind { Table, View }
+src/Iceberg.Net.RestServer/CatalogStore.cs:13:public sealed record PointerSwap(TableIdentifier Id, string? Expected, string NewLocation);
+src/Iceberg.Net.RestServer/CatalogStore.cs:21:public interface ICatalogStore
+src/Iceberg.Net.RestServer/CatalogStore.cs:73:public sealed class InMemoryCatalogStore : ICatalogStore, IServerStateStore
+src/Iceberg.Net.RestServer/GcsCredentialVending.cs:11:public sealed record GcpAccessToken(string Token, DateTimeOffset? ExpiresAt);
+src/Iceberg.Net.RestServer/GcsCredentialVending.cs:18:public interface IGcpAccessTokenSource
+src/Iceberg.Net.RestServer/GcsCredentialVending.cs:24:public sealed class StaticGcpAccessTokenSource(string token, DateTimeOffset? expiresAt = null) : IGcpAccessTokenSource
+src/Iceberg.Net.RestServer/GcsCredentialVending.cs:30:public abstract class CachingGcpAccessTokenSource : IGcpAccessTokenSource, IDisposable
+src/Iceberg.Net.RestServer/GcsCredentialVending.cs:89:public sealed class MetadataServerGcpAccessTokenSource(string? endpoint = null, HttpMessageHandler? inner = null, Func<DateTimeOffset>? clock = null)
+src/Iceberg.Net.RestServer/GcsCredentialVending.cs:108:public sealed class ServiceAccountGcpAccessTokenSource : CachingGcpAccessTokenSource
+src/Iceberg.Net.RestServer/GcsCredentialVending.cs:163:public sealed class GcsDownscopedCredentialVendor : IStorageCredentialVendor, IDisposable
+src/Iceberg.Net.RestServer/CatalogService.cs:13:public sealed record LoadedTable(TableIdentifier Id, string? MetadataLocation, TableMetadata Metadata);
+src/Iceberg.Net.RestServer/CatalogService.cs:16:public sealed record LoadedView(TableIdentifier Id, string MetadataLocation, ViewMetadata Metadata);
+src/Iceberg.Net.RestServer/CatalogService.cs:19:public sealed record CreateTableSpec(
+src/Iceberg.Net.RestServer/CatalogService.cs:36:public sealed partial class CatalogService(ICatalogStore store, IFileIO io, RestServerOptions options)
+src/Iceberg.Net.RestServer/OpenApiOperations.cs:13:public static class OpenApiOperations
+src/Iceberg.Net.RestServer/CredentialVending.cs:11:public sealed record VendedCredential(string Prefix, IReadOnlyDictionary<string, string> Config, DateTimeOffset? Expiration)
+src/Iceberg.Net.RestServer/CredentialVending.cs:23:public interface IStorageCredentialVendor
+src/Iceberg.Net.RestServer/CredentialVending.cs:30:public sealed class NoCredentialVendor : IStorageCredentialVendor
+src/Iceberg.Net.RestServer/CredentialVending.cs:44:public sealed class StsCredentialVendor : IStorageCredentialVendor, IDisposable

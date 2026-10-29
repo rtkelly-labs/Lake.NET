@@ -1,0 +1,52 @@
+  Determining projects to restore...
+  Restored /Users/ryankelly/orca/workspaces/Iceberg.NET/waspfish/tests/Iceberg.Net.NetStandard.Tests/Iceberg.Net.NetStandard.Tests.csproj (in 1.52 sec).
+  Restored /Users/ryankelly/orca/workspaces/Iceberg.NET/waspfish/tests/Iceberg.Net.Fuzz/Iceberg.Net.Fuzz.csproj (in 1.59 sec).
+  Restored /Users/ryankelly/orca/workspaces/Iceberg.NET/waspfish/tests/Iceberg.Net.Linq.Tests/Iceberg.Net.Linq.Tests.csproj (in 1.52 sec).
+  Restored /Users/ryankelly/orca/workspaces/Iceberg.NET/waspfish/tests/Iceberg.Net.EntityFrameworkCore.Tests/Iceberg.Net.EntityFrameworkCore.Tests.csproj (in 1.52 sec).
+  Restored /Users/ryankelly/orca/workspaces/Iceberg.NET/waspfish/tests/Iceberg.Net.RestCatalogBehaviour.Tests/Iceberg.Net.RestCatalogBehaviour.Tests.csproj (in 1.52 sec).
+  Restored /Users/ryankelly/orca/workspaces/Iceberg.NET/waspfish/tests/Iceberg.Net.Ecosystem.Tests/Iceberg.Net.Ecosystem.Tests.csproj (in 1.51 sec).
+  Restored /Users/ryankelly/orca/workspaces/Iceberg.NET/waspfish/tests/Iceberg.Net.RestProtocol.Tests/Iceberg.Net.RestProtocol.Tests.csproj (in 1.53 sec).
+  Restored /Users/ryankelly/orca/workspaces/Iceberg.NET/waspfish/tests/Iceberg.Net.Regression.Tests/Iceberg.Net.Regression.Tests.csproj (in 1.6 sec).
+  Restored /Users/ryankelly/orca/workspaces/Iceberg.NET/waspfish/tools/ApiSurface/ApiSurface.csproj (in 3 ms).
+  Restored /Users/ryankelly/orca/workspaces/Iceberg.NET/waspfish/tests/Iceberg.Net.Behaviour.Tests/Iceberg.Net.Behaviour.Tests.csproj (in 13 ms).
+  Restored /Users/ryankelly/orca/workspaces/Iceberg.NET/waspfish/tools/ResourceProbe/ResourceProbe.csproj (in 9 ms).
+  Restored /Users/ryankelly/orca/workspaces/Iceberg.NET/waspfish/tests/Iceberg.Net.TestSupport/Iceberg.Net.TestSupport.csproj (in 25 ms).
+  Restored /Users/ryankelly/orca/workspaces/Iceberg.NET/waspfish/tests/Iceberg.Net.RestServer.Tests/Iceberg.Net.RestServer.Tests.csproj (in 36 ms).
+  Restored /Users/ryankelly/orca/workspaces/Iceberg.NET/waspfish/tests/Iceberg.Net.Spec.Tests/Iceberg.Net.Spec.Tests.csproj (in 43 ms).
+  Restored /Users/ryankelly/orca/workspaces/Iceberg.NET/waspfish/tools/ShadowCompare/ShadowCompare.csproj (in 56 ms).
+  12 of 27 projects are up-to-date for restore.
+  Iceberg.Net.IO -> /Users/ryankelly/orca/workspaces/Iceberg.NET/waspfish/src/Iceberg.Net.IO/bin/Debug/net10.0/Iceberg.Net.IO.dll
+  Iceberg.Net.Puffin -> /Users/ryankelly/orca/workspaces/Iceberg.NET/waspfish/src/Iceberg.Net.Puffin/bin/Debug/net10.0/Iceberg.Net.Puffin.dll
+  Iceberg.Net.Core -> /Users/ryankelly/orca/workspaces/Iceberg.NET/waspfish/src/Iceberg.Net.Core/bin/Debug/netstandard2.0/Iceberg.Net.Core.dll
+  Iceberg.Net.Core -> /Users/ryankelly/orca/workspaces/Iceberg.NET/waspfish/src/Iceberg.Net.Core/bin/Debug/net10.0/Iceberg.Net.Core.dll
+  ApiSurface -> /Users/ryankelly/orca/workspaces/Iceberg.NET/waspfish/tools/ApiSurface/bin/Debug/net10.0/ApiSurface.dll
+  Iceberg.Net.Avro -> /Users/ryankelly/orca/workspaces/Iceberg.NET/waspfish/src/Iceberg.Net.Avro/bin/Debug/net10.0/Iceberg.Net.Avro.dll
+  Iceberg.Net.Athena -> /Users/ryankelly/orca/workspaces/Iceberg.NET/waspfish/src/Iceberg.Net.Athena/bin/Debug/net10.0/Iceberg.Net.Athena.dll
+  Iceberg.Net.Avro -> /Users/ryankelly/orca/workspaces/Iceberg.NET/waspfish/src/Iceberg.Net.Avro/bin/Debug/netstandard2.0/Iceberg.Net.Avro.dll
+  Iceberg.Net.Fuzz -> /Users/ryankelly/orca/workspaces/Iceberg.NET/waspfish/tests/Iceberg.Net.Fuzz/bin/Debug/net10.0/Iceberg.Net.Fuzz.dll
+  Iceberg.Net.NetStandard.Tests -> /Users/ryankelly/orca/workspaces/Iceberg.NET/waspfish/tests/Iceberg.Net.NetStandard.Tests/bin/Debug/net10.0/Iceberg.Net.NetStandard.Tests.dll
+  Iceberg.Net.Catalog -> /Users/ryankelly/orca/workspaces/Iceberg.NET/waspfish/src/Iceberg.Net.Catalog/bin/Debug/net10.0/Iceberg.Net.Catalog.dll
+  Iceberg.Net.Spark -> /Users/ryankelly/orca/workspaces/Iceberg.NET/waspfish/src/Iceberg.Net.Spark/bin/Debug/net10.0/Iceberg.Net.Spark.dll
+  Iceberg.Net.Data -> /Users/ryankelly/orca/workspaces/Iceberg.NET/waspfish/src/Iceberg.Net.Data/bin/Debug/net10.0/Iceberg.Net.Data.dll
+  Iceberg.Net.Arrow -> /Users/ryankelly/orca/workspaces/Iceberg.NET/waspfish/src/Iceberg.Net.Arrow/bin/Debug/net10.0/Iceberg.Net.Arrow.dll
+  Iceberg.Net.Linq -> /Users/ryankelly/orca/workspaces/Iceberg.NET/waspfish/src/Iceberg.Net.Linq/bin/Debug/net10.0/Iceberg.Net.Linq.dll
+  Iceberg.Net.TestSupport -> /Users/ryankelly/orca/workspaces/Iceberg.NET/waspfish/tests/Iceberg.Net.TestSupport/bin/Debug/net10.0/Iceberg.Net.TestSupport.dll
+  ShadowCompare -> /Users/ryankelly/orca/workspaces/Iceberg.NET/waspfish/tools/ShadowCompare/bin/Debug/net10.0/ShadowCompare.dll
+  ResourceProbe -> /Users/ryankelly/orca/workspaces/Iceberg.NET/waspfish/tools/ResourceProbe/bin/Debug/net10.0/ResourceProbe.dll
+  Iceberg.Net.RestServer -> /Users/ryankelly/orca/workspaces/Iceberg.NET/waspfish/src/Iceberg.Net.RestServer/bin/Debug/net10.0/Iceberg.Net.RestServer.dll
+  Iceberg.Net.EntityFrameworkCore -> /Users/ryankelly/orca/workspaces/Iceberg.NET/waspfish/src/Iceberg.Net.EntityFrameworkCore/bin/Debug/net10.0/Iceberg.Net.EntityFrameworkCore.dll
+  Iceberg.Net.RestCatalogBehaviour.Tests -> /Users/ryankelly/orca/workspaces/Iceberg.NET/waspfish/tests/Iceberg.Net.RestCatalogBehaviour.Tests/bin/Debug/net10.0/Iceberg.Net.RestCatalogBehaviour.Tests.dll
+  Iceberg.Net.EntityFrameworkCore.Tests -> /Users/ryankelly/orca/workspaces/Iceberg.NET/waspfish/tests/Iceberg.Net.EntityFrameworkCore.Tests/bin/Debug/net10.0/Iceberg.Net.EntityFrameworkCore.Tests.dll
+  Iceberg.Net.RestProtocol.Tests -> /Users/ryankelly/orca/workspaces/Iceberg.NET/waspfish/tests/Iceberg.Net.RestProtocol.Tests/bin/Debug/net10.0/Iceberg.Net.RestProtocol.Tests.dll
+  Iceberg.Net.Spec.Tests -> /Users/ryankelly/orca/workspaces/Iceberg.NET/waspfish/tests/Iceberg.Net.Spec.Tests/bin/Debug/net10.0/Iceberg.Net.Spec.Tests.dll
+  Iceberg.Net.Linq.Tests -> /Users/ryankelly/orca/workspaces/Iceberg.NET/waspfish/tests/Iceberg.Net.Linq.Tests/bin/Debug/net10.0/Iceberg.Net.Linq.Tests.dll
+  Iceberg.Net.RestServer.Tests -> /Users/ryankelly/orca/workspaces/Iceberg.NET/waspfish/tests/Iceberg.Net.RestServer.Tests/bin/Debug/net10.0/Iceberg.Net.RestServer.Tests.dll
+  Iceberg.Net.Ecosystem.Tests -> /Users/ryankelly/orca/workspaces/Iceberg.NET/waspfish/tests/Iceberg.Net.Ecosystem.Tests/bin/Debug/net10.0/Iceberg.Net.Ecosystem.Tests.dll
+  Iceberg.Net.Behaviour.Tests -> /Users/ryankelly/orca/workspaces/Iceberg.NET/waspfish/tests/Iceberg.Net.Behaviour.Tests/bin/Debug/net10.0/Iceberg.Net.Behaviour.Tests.dll
+  Iceberg.Net.Regression.Tests -> /Users/ryankelly/orca/workspaces/Iceberg.NET/waspfish/tests/Iceberg.Net.Regression.Tests/bin/Debug/net10.0/Iceberg.Net.Regression.Tests.dll
+
+Build succeeded.
+    0 Warning(s)
+    0 Error(s)
+
+Time Elapsed 00:00:30.74

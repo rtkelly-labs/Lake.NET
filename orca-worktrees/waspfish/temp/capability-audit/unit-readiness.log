@@ -1,0 +1,70 @@
+  Determining projects to restore...
+  Restored /Users/ryankelly/orca/workspaces/Iceberg.NET/waspfish/tests/Iceberg.Net.EntityFrameworkCore.Tests/Iceberg.Net.EntityFrameworkCore.Tests.csproj (in 223 ms).
+  9 of 10 projects are up-to-date for restore.
+  Iceberg.Net.IO -> /Users/ryankelly/orca/workspaces/Iceberg.NET/waspfish/src/Iceberg.Net.IO/bin/Debug/net10.0/Iceberg.Net.IO.dll
+  Iceberg.Net.Puffin -> /Users/ryankelly/orca/workspaces/Iceberg.NET/waspfish/src/Iceberg.Net.Puffin/bin/Debug/net10.0/Iceberg.Net.Puffin.dll
+  Iceberg.Net.Core -> /Users/ryankelly/orca/workspaces/Iceberg.NET/waspfish/src/Iceberg.Net.Core/bin/Debug/net10.0/Iceberg.Net.Core.dll
+  Iceberg.Net.Avro -> /Users/ryankelly/orca/workspaces/Iceberg.NET/waspfish/src/Iceberg.Net.Avro/bin/Debug/net10.0/Iceberg.Net.Avro.dll
+  Iceberg.Net.Catalog -> /Users/ryankelly/orca/workspaces/Iceberg.NET/waspfish/src/Iceberg.Net.Catalog/bin/Debug/net10.0/Iceberg.Net.Catalog.dll
+  Iceberg.Net.Data -> /Users/ryankelly/orca/workspaces/Iceberg.NET/waspfish/src/Iceberg.Net.Data/bin/Debug/net10.0/Iceberg.Net.Data.dll
+  Iceberg.Net.TestSupport -> /Users/ryankelly/orca/workspaces/Iceberg.NET/waspfish/tests/Iceberg.Net.TestSupport/bin/Debug/net10.0/Iceberg.Net.TestSupport.dll
+  Iceberg.Net.Linq -> /Users/ryankelly/orca/workspaces/Iceberg.NET/waspfish/src/Iceberg.Net.Linq/bin/Debug/net10.0/Iceberg.Net.Linq.dll
+  Iceberg.Net.EntityFrameworkCore -> /Users/ryankelly/orca/workspaces/Iceberg.NET/waspfish/src/Iceberg.Net.EntityFrameworkCore/bin/Debug/net10.0/Iceberg.Net.EntityFrameworkCore.dll
+  Iceberg.Net.EntityFrameworkCore.Tests -> /Users/ryankelly/orca/workspaces/Iceberg.NET/waspfish/tests/Iceberg.Net.EntityFrameworkCore.Tests/bin/Debug/net10.0/Iceberg.Net.EntityFrameworkCore.Tests.dll
+Test run for /Users/ryankelly/orca/workspaces/Iceberg.NET/waspfish/tests/Iceberg.Net.EntityFrameworkCore.Tests/bin/Debug/net10.0/Iceberg.Net.EntityFrameworkCore.Tests.dll (.NETCoreApp,Version=v10.0)
+A total of 1 test files matched the specified pattern.
+
+Passed!  - Failed:     0, Passed:    34, Skipped:     0, Total:    34, Duration: 1 s - Iceberg.Net.EntityFrameworkCore.Tests.dll (net10.0)
+  Determining projects to restore...
+  All projects are up-to-date for restore.
+  Iceberg.Net.IO -> /Users/ryankelly/orca/workspaces/Iceberg.NET/waspfish/src/Iceberg.Net.IO/bin/Debug/net10.0/Iceberg.Net.IO.dll
+  Iceberg.Net.Puffin -> /Users/ryankelly/orca/workspaces/Iceberg.NET/waspfish/src/Iceberg.Net.Puffin/bin/Debug/net10.0/Iceberg.Net.Puffin.dll
+  Iceberg.Net.Core -> /Users/ryankelly/orca/workspaces/Iceberg.NET/waspfish/src/Iceberg.Net.Core/bin/Debug/net10.0/Iceberg.Net.Core.dll
+  Iceberg.Net.Avro -> /Users/ryankelly/orca/workspaces/Iceberg.NET/waspfish/src/Iceberg.Net.Avro/bin/Debug/net10.0/Iceberg.Net.Avro.dll
+  Iceberg.Net.Catalog -> /Users/ryankelly/orca/workspaces/Iceberg.NET/waspfish/src/Iceberg.Net.Catalog/bin/Debug/net10.0/Iceberg.Net.Catalog.dll
+  Iceberg.Net.Data -> /Users/ryankelly/orca/workspaces/Iceberg.NET/waspfish/src/Iceberg.Net.Data/bin/Debug/net10.0/Iceberg.Net.Data.dll
+  Iceberg.Net.TestSupport -> /Users/ryankelly/orca/workspaces/Iceberg.NET/waspfish/tests/Iceberg.Net.TestSupport/bin/Debug/net10.0/Iceberg.Net.TestSupport.dll
+  Iceberg.Net.Linq -> /Users/ryankelly/orca/workspaces/Iceberg.NET/waspfish/src/Iceberg.Net.Linq/bin/Debug/net10.0/Iceberg.Net.Linq.dll
+  Iceberg.Net.Linq.Tests -> /Users/ryankelly/orca/workspaces/Iceberg.NET/waspfish/tests/Iceberg.Net.Linq.Tests/bin/Debug/net10.0/Iceberg.Net.Linq.Tests.dll
+Test run for /Users/ryankelly/orca/workspaces/Iceberg.NET/waspfish/tests/Iceberg.Net.Linq.Tests/bin/Debug/net10.0/Iceberg.Net.Linq.Tests.dll (.NETCoreApp,Version=v10.0)
+A total of 1 test files matched the specified pattern.
+
+Passed!  - Failed:     0, Passed:    95, Skipped:     0, Total:    95, Duration: 1 s - Iceberg.Net.Linq.Tests.dll (net10.0)
+  Determining projects to restore...
+  All projects are up-to-date for restore.
+  Iceberg.Net.Core -> /Users/ryankelly/orca/workspaces/Iceberg.NET/waspfish/src/Iceberg.Net.Core/bin/Debug/netstandard2.0/Iceberg.Net.Core.dll
+  Iceberg.Net.Avro -> /Users/ryankelly/orca/workspaces/Iceberg.NET/waspfish/src/Iceberg.Net.Avro/bin/Debug/netstandard2.0/Iceberg.Net.Avro.dll
+  Iceberg.Net.NetStandard.Tests -> /Users/ryankelly/orca/workspaces/Iceberg.NET/waspfish/tests/Iceberg.Net.NetStandard.Tests/bin/Debug/net10.0/Iceberg.Net.NetStandard.Tests.dll
+Test run for /Users/ryankelly/orca/workspaces/Iceberg.NET/waspfish/tests/Iceberg.Net.NetStandard.Tests/bin/Debug/net10.0/Iceberg.Net.NetStandard.Tests.dll (.NETCoreApp,Version=v10.0)
+A total of 1 test files matched the specified pattern.
+
+Passed!  - Failed:     0, Passed:   109, Skipped:     0, Total:   109, Duration: 55 ms - Iceberg.Net.NetStandard.Tests.dll (net10.0)
+  Determining projects to restore...
+  All projects are up-to-date for restore.
+  Iceberg.Net.Puffin -> /Users/ryankelly/orca/workspaces/Iceberg.NET/waspfish/src/Iceberg.Net.Puffin/bin/Debug/net10.0/Iceberg.Net.Puffin.dll
+  Iceberg.Net.IO -> /Users/ryankelly/orca/workspaces/Iceberg.NET/waspfish/src/Iceberg.Net.IO/bin/Debug/net10.0/Iceberg.Net.IO.dll
+  Iceberg.Net.Core -> /Users/ryankelly/orca/workspaces/Iceberg.NET/waspfish/src/Iceberg.Net.Core/bin/Debug/net10.0/Iceberg.Net.Core.dll
+  Iceberg.Net.Avro -> /Users/ryankelly/orca/workspaces/Iceberg.NET/waspfish/src/Iceberg.Net.Avro/bin/Debug/net10.0/Iceberg.Net.Avro.dll
+  Iceberg.Net.Catalog -> /Users/ryankelly/orca/workspaces/Iceberg.NET/waspfish/src/Iceberg.Net.Catalog/bin/Debug/net10.0/Iceberg.Net.Catalog.dll
+  Iceberg.Net.Data -> /Users/ryankelly/orca/workspaces/Iceberg.NET/waspfish/src/Iceberg.Net.Data/bin/Debug/net10.0/Iceberg.Net.Data.dll
+  Iceberg.Net.RestServer -> /Users/ryankelly/orca/workspaces/Iceberg.NET/waspfish/src/Iceberg.Net.RestServer/bin/Debug/net10.0/Iceberg.Net.RestServer.dll
+  Iceberg.Net.RestCatalogBehaviour.Tests -> /Users/ryankelly/orca/workspaces/Iceberg.NET/waspfish/tests/Iceberg.Net.RestCatalogBehaviour.Tests/bin/Debug/net10.0/Iceberg.Net.RestCatalogBehaviour.Tests.dll
+Test run for /Users/ryankelly/orca/workspaces/Iceberg.NET/waspfish/tests/Iceberg.Net.RestCatalogBehaviour.Tests/bin/Debug/net10.0/Iceberg.Net.RestCatalogBehaviour.Tests.dll (.NETCoreApp,Version=v10.0)
+A total of 1 test files matched the specified pattern.
+
+Passed!  - Failed:     0, Passed:    89, Skipped:     0, Total:    89, Duration: 5 s - Iceberg.Net.RestCatalogBehaviour.Tests.dll (net10.0)
+  Determining projects to restore...
+  All projects are up-to-date for restore.
+  Iceberg.Net.Core -> /Users/ryankelly/orca/workspaces/Iceberg.NET/waspfish/src/Iceberg.Net.Core/bin/Debug/net10.0/Iceberg.Net.Core.dll
+  Iceberg.Net.Avro -> /Users/ryankelly/orca/workspaces/Iceberg.NET/waspfish/src/Iceberg.Net.Avro/bin/Debug/net10.0/Iceberg.Net.Avro.dll
+  Iceberg.Net.IO -> /Users/ryankelly/orca/workspaces/Iceberg.NET/waspfish/src/Iceberg.Net.IO/bin/Debug/net10.0/Iceberg.Net.IO.dll
+  Iceberg.Net.Puffin -> /Users/ryankelly/orca/workspaces/Iceberg.NET/waspfish/src/Iceberg.Net.Puffin/bin/Debug/net10.0/Iceberg.Net.Puffin.dll
+  Iceberg.Net.Catalog -> /Users/ryankelly/orca/workspaces/Iceberg.NET/waspfish/src/Iceberg.Net.Catalog/bin/Debug/net10.0/Iceberg.Net.Catalog.dll
+  Iceberg.Net.Data -> /Users/ryankelly/orca/workspaces/Iceberg.NET/waspfish/src/Iceberg.Net.Data/bin/Debug/net10.0/Iceberg.Net.Data.dll
+  Iceberg.Net.TestSupport -> /Users/ryankelly/orca/workspaces/Iceberg.NET/waspfish/tests/Iceberg.Net.TestSupport/bin/Debug/net10.0/Iceberg.Net.TestSupport.dll
+  Iceberg.Net.Arrow -> /Users/ryankelly/orca/workspaces/Iceberg.NET/waspfish/src/Iceberg.Net.Arrow/bin/Debug/net10.0/Iceberg.Net.Arrow.dll
+  Iceberg.Net.Spec.Tests -> /Users/ryankelly/orca/workspaces/Iceberg.NET/waspfish/tests/Iceberg.Net.Spec.Tests/bin/Debug/net10.0/Iceberg.Net.Spec.Tests.dll
+Test run for /Users/ryankelly/orca/workspaces/Iceberg.NET/waspfish/tests/Iceberg.Net.Spec.Tests/bin/Debug/net10.0/Iceberg.Net.Spec.Tests.dll (.NETCoreApp,Version=v10.0)
+A total of 1 test files matched the specified pattern.
+
+Passed!  - Failed:     0, Passed:   823, Skipped:     0, Total:   823, Duration: 31 s - Iceberg.Net.Spec.Tests.dll (net10.0)

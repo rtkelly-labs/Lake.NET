@@ -1,0 +1,36 @@
+[31m[1mWARNING: This is a development server. Do not use it in a production deployment. Use a production WSGI server instead.[0m
+ * Running on http://127.0.0.1:19448
+[33mPress CTRL+C to quit[0m
+127.0.0.1 - - [28/Oct/2026 17:27:09] "PUT /iceberg-regression HTTP/1.1" 200 -
+127.0.0.1 - - [28/Oct/2026 17:27:20] "PUT /iceberg-regression/warehouse/vending-8f4c101822b240be90cf50b85a7b77ba/db/vended/metadata/00000-26fe8bb3-9caf-444d-b75f-cb3145c0eb11.metadata.json HTTP/1.1" 200 -
+127.0.0.1 - - [28/Oct/2026 17:27:21] "POST / HTTP/1.1" 200 -
+127.0.0.1 - - [28/Oct/2026 17:27:21] "PUT /iceberg-regression/warehouse/vending-8f4c101822b240be90cf50b85a7b77ba/db/vended/data/region=eu/20a4f7578e634b888b5d0432a63702fe.parquet HTTP/1.1" 200 -
+127.0.0.1 - - [28/Oct/2026 17:27:21] "PUT /iceberg-regression/warehouse/vending-8f4c101822b240be90cf50b85a7b77ba/db/vended/data/region=us/dc5f949ee07048d78d3f8466fab4e564.parquet HTTP/1.1" 200 -
+127.0.0.1 - - [28/Oct/2026 17:27:21] "PUT /iceberg-regression/warehouse/vending-8f4c101822b240be90cf50b85a7b77ba/db/vended/data/region=apac/683a785ebb0147a38e7abce583ac456c.parquet HTTP/1.1" 200 -
+127.0.0.1 - - [28/Oct/2026 17:27:21] "PUT /iceberg-regression/warehouse/vending-8f4c101822b240be90cf50b85a7b77ba/db/vended/metadata/36b6c83b-f8ba-459f-b811-a6b3f51fc00b-m-added.avro HTTP/1.1" 200 -
+127.0.0.1 - - [28/Oct/2026 17:27:21] "PUT /iceberg-regression/warehouse/vending-8f4c101822b240be90cf50b85a7b77ba/db/vended/metadata/snap-4169442831742835960-1-36b6c83b-f8ba-459f-b811-a6b3f51fc00b.avro HTTP/1.1" 200 -
+127.0.0.1 - - [28/Oct/2026 17:27:21] "GET /iceberg-regression/warehouse/vending-8f4c101822b240be90cf50b85a7b77ba/db/vended/metadata/00000-26fe8bb3-9caf-444d-b75f-cb3145c0eb11.metadata.json HTTP/1.1" 200 -
+127.0.0.1 - - [28/Oct/2026 17:27:21] "PUT /iceberg-regression/warehouse/vending-8f4c101822b240be90cf50b85a7b77ba/db/vended/metadata/00001-0f8bee50-4690-4201-8f7f-c89c2c6789f6.metadata.json HTTP/1.1" 200 -
+127.0.0.1 - - [28/Oct/2026 17:27:21] "GET /iceberg-regression/warehouse/vending-8f4c101822b240be90cf50b85a7b77ba/db/vended/metadata/snap-4169442831742835960-1-36b6c83b-f8ba-459f-b811-a6b3f51fc00b.avro HTTP/1.1" 200 -
+127.0.0.1 - - [28/Oct/2026 17:27:21] "GET /iceberg-regression/warehouse/vending-8f4c101822b240be90cf50b85a7b77ba/db/vended/metadata/00001-0f8bee50-4690-4201-8f7f-c89c2c6789f6.metadata.json HTTP/1.1" 200 -
+127.0.0.1 - - [28/Oct/2026 17:27:21] "GET /iceberg-regression/warehouse/vending-8f4c101822b240be90cf50b85a7b77ba/db/vended/metadata/snap-4169442831742835960-1-36b6c83b-f8ba-459f-b811-a6b3f51fc00b.avro HTTP/1.1" 200 -
+127.0.0.1 - - [28/Oct/2026 17:27:21] "GET /iceberg-regression/warehouse/vending-8f4c101822b240be90cf50b85a7b77ba/db/vended/metadata/36b6c83b-f8ba-459f-b811-a6b3f51fc00b-m-added.avro HTTP/1.1" 200 -
+127.0.0.1 - - [28/Oct/2026 17:27:21] "[35m[1mGET /iceberg-regression/warehouse/vending-8f4c101822b240be90cf50b85a7b77ba/db/vended/data/region=eu/20a4f7578e634b888b5d0432a63702fe.parquet HTTP/1.1[0m" 206 -
+127.0.0.1 - - [28/Oct/2026 17:27:21] "[35m[1mGET /iceberg-regression/warehouse/vending-8f4c101822b240be90cf50b85a7b77ba/db/vended/data/region=us/dc5f949ee07048d78d3f8466fab4e564.parquet HTTP/1.1[0m" 206 -
+127.0.0.1 - - [28/Oct/2026 17:27:21] "[35m[1mGET /iceberg-regression/warehouse/vending-8f4c101822b240be90cf50b85a7b77ba/db/vended/data/region=apac/683a785ebb0147a38e7abce583ac456c.parquet HTTP/1.1[0m" 206 -
+127.0.0.1 - - [28/Oct/2026 17:27:21] "GET /iceberg-regression/warehouse/vending-8f4c101822b240be90cf50b85a7b77ba/db/vended/metadata/00001-0f8bee50-4690-4201-8f7f-c89c2c6789f6.metadata.json HTTP/1.1" 200 -
+127.0.0.1 - - [28/Oct/2026 17:27:21] "GET /iceberg-regression/warehouse/vending-8f4c101822b240be90cf50b85a7b77ba/db/vended/metadata/snap-4169442831742835960-1-36b6c83b-f8ba-459f-b811-a6b3f51fc00b.avro HTTP/1.1" 200 -
+127.0.0.1 - - [28/Oct/2026 17:27:21] "GET /iceberg-regression/warehouse/vending-8f4c101822b240be90cf50b85a7b77ba/db/vended/metadata/36b6c83b-f8ba-459f-b811-a6b3f51fc00b-m-added.avro HTTP/1.1" 200 -
+127.0.0.1 - - [28/Oct/2026 17:27:21] "[35m[1mGET /iceberg-regression/warehouse/vending-8f4c101822b240be90cf50b85a7b77ba/db/vended/data/region=eu/20a4f7578e634b888b5d0432a63702fe.parquet HTTP/1.1[0m" 206 -
+127.0.0.1 - - [28/Oct/2026 17:27:21] "[35m[1mGET /iceberg-regression/warehouse/vending-8f4c101822b240be90cf50b85a7b77ba/db/vended/data/region=us/dc5f949ee07048d78d3f8466fab4e564.parquet HTTP/1.1[0m" 206 -
+127.0.0.1 - - [28/Oct/2026 17:27:21] "[35m[1mGET /iceberg-regression/warehouse/vending-8f4c101822b240be90cf50b85a7b77ba/db/vended/data/region=apac/683a785ebb0147a38e7abce583ac456c.parquet HTTP/1.1[0m" 206 -
+127.0.0.1 - - [28/Oct/2026 17:27:21] "GET /iceberg-regression/warehouse/vending-8f4c101822b240be90cf50b85a7b77ba/db/vended/metadata/00001-0f8bee50-4690-4201-8f7f-c89c2c6789f6.metadata.json HTTP/1.1" 200 -
+127.0.0.1 - - [28/Oct/2026 17:27:21] "GET /iceberg-regression/warehouse/vending-8f4c101822b240be90cf50b85a7b77ba/db/vended/metadata/snap-4169442831742835960-1-36b6c83b-f8ba-459f-b811-a6b3f51fc00b.avro HTTP/1.1" 200 -
+127.0.0.1 - - [28/Oct/2026 17:27:21] "GET /iceberg-regression/warehouse/vending-8f4c101822b240be90cf50b85a7b77ba/db/vended/metadata/36b6c83b-f8ba-459f-b811-a6b3f51fc00b-m-added.avro HTTP/1.1" 200 -
+127.0.0.1 - - [28/Oct/2026 17:27:21] "[35m[1mDELETE /iceberg-regression/warehouse/vending-8f4c101822b240be90cf50b85a7b77ba/db/vended/metadata/36b6c83b-f8ba-459f-b811-a6b3f51fc00b-m-added.avro HTTP/1.1[0m" 204 -
+127.0.0.1 - - [28/Oct/2026 17:27:21] "[35m[1mDELETE /iceberg-regression/warehouse/vending-8f4c101822b240be90cf50b85a7b77ba/db/vended/data/region=us/dc5f949ee07048d78d3f8466fab4e564.parquet HTTP/1.1[0m" 204 -
+127.0.0.1 - - [28/Oct/2026 17:27:21] "[35m[1mDELETE /iceberg-regression/warehouse/vending-8f4c101822b240be90cf50b85a7b77ba/db/vended/metadata/snap-4169442831742835960-1-36b6c83b-f8ba-459f-b811-a6b3f51fc00b.avro HTTP/1.1[0m" 204 -
+127.0.0.1 - - [28/Oct/2026 17:27:21] "[35m[1mDELETE /iceberg-regression/warehouse/vending-8f4c101822b240be90cf50b85a7b77ba/db/vended/data/region=eu/20a4f7578e634b888b5d0432a63702fe.parquet HTTP/1.1[0m" 204 -
+127.0.0.1 - - [28/Oct/2026 17:27:21] "[35m[1mDELETE /iceberg-regression/warehouse/vending-8f4c101822b240be90cf50b85a7b77ba/db/vended/metadata/00000-26fe8bb3-9caf-444d-b75f-cb3145c0eb11.metadata.json HTTP/1.1[0m" 204 -
+127.0.0.1 - - [28/Oct/2026 17:27:21] "[35m[1mDELETE /iceberg-regression/warehouse/vending-8f4c101822b240be90cf50b85a7b77ba/db/vended/metadata/00001-0f8bee50-4690-4201-8f7f-c89c2c6789f6.metadata.json HTTP/1.1[0m" 204 -
+127.0.0.1 - - [28/Oct/2026 17:27:21] "[35m[1mDELETE /iceberg-regression/warehouse/vending-8f4c101822b240be90cf50b85a7b77ba/db/vended/data/region=apac/683a785ebb0147a38e7abce583ac456c.parquet HTTP/1.1[0m" 204 -

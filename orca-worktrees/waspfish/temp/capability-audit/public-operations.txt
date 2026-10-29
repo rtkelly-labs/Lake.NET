@@ -1,0 +1,173 @@
+src/Iceberg.Net.IO/RangeReadStream.cs:51:    public async Task PrefetchAsync(long offset, long count, CancellationToken ct = default)
+src/Iceberg.Net.IO/FileIO.cs:39:    public async IAsyncEnumerable<StoredFile> ListAsync(string prefix, [System.Runtime.CompilerServices.EnumeratorCancellation] CancellationToken ct = default)
+src/Iceberg.Net.IO/FileIO.cs:62:    public Task<byte[]> ReadAllAsync(string location, CancellationToken ct = default) => File.ReadAllBytesAsync(PathOf(location), ct);
+src/Iceberg.Net.IO/FileIO.cs:64:    public Task<Stream> OpenReadAsync(string location, CancellationToken ct = default) => Task.FromResult<Stream>(File.OpenRead(PathOf(location)));
+src/Iceberg.Net.IO/FileIO.cs:66:    public async Task<byte[]> ReadRangeAsync(string location, long offset, int length, CancellationToken ct = default)
+src/Iceberg.Net.IO/FileIO.cs:75:    public Task<long> LengthAsync(string location, CancellationToken ct = default) => Task.FromResult(new FileInfo(PathOf(location)).Length);
+src/Iceberg.Net.IO/FileIO.cs:77:    public Task<bool> ExistsAsync(string location, CancellationToken ct = default) => Task.FromResult(File.Exists(PathOf(location)));
+src/Iceberg.Net.IO/FileIO.cs:79:    public async Task WriteAsync(string location, ReadOnlyMemory<byte> content, bool overwrite = false, CancellationToken ct = default)
+src/Iceberg.Net.IO/FileIO.cs:94:    public Task DeleteAsync(string location, CancellationToken ct = default)
+src/Iceberg.Net.IO/FileIO.cs:163:    public async IAsyncEnumerable<StoredFile> ListAsync(string prefix, [System.Runtime.CompilerServices.EnumeratorCancellation] CancellationToken ct = default)
+src/Iceberg.Net.IO/FileIO.cs:263:    public Task<byte[]> ReadAllAsync(string location, CancellationToken ct = default) =>
+src/Iceberg.Net.IO/FileIO.cs:275:    public async Task<Stream> OpenReadAsync(string location, CancellationToken ct = default) => new MemoryStream(await ReadAllAsync(location, ct));
+src/Iceberg.Net.IO/FileIO.cs:277:    public Task<byte[]> ReadRangeAsync(string location, long offset, int length, CancellationToken ct = default) =>
+src/Iceberg.Net.IO/FileIO.cs:289:    public Task<long> LengthAsync(string location, CancellationToken ct = default) =>
+src/Iceberg.Net.IO/FileIO.cs:297:    public async Task<bool> ExistsAsync(string location, CancellationToken ct = default)
+src/Iceberg.Net.IO/FileIO.cs:310:    public async Task WriteAsync(string location, ReadOnlyMemory<byte> content, bool overwrite = false, CancellationToken ct = default)
+src/Iceberg.Net.IO/FileIO.cs:328:    public async Task DeleteAsync(string location, CancellationToken ct = default)
+src/Iceberg.Net.IO/FileIO.cs:343:    public IAsyncEnumerable<StoredFile> ListAsync(string prefix, CancellationToken ct = default) =>
+src/Iceberg.Net.IO/FileIO.cs:351:    public Task<byte[]> ReadAllAsync(string l, CancellationToken ct = default) => For(l).ReadAllAsync(l, ct);
+src/Iceberg.Net.IO/FileIO.cs:352:    public Task<Stream> OpenReadAsync(string l, CancellationToken ct = default) => For(l).OpenReadAsync(l, ct);
+src/Iceberg.Net.IO/FileIO.cs:353:    public Task<byte[]> ReadRangeAsync(string l, long o, int n, CancellationToken ct = default) => For(l).ReadRangeAsync(l, o, n, ct);
+src/Iceberg.Net.IO/FileIO.cs:354:    public Task<long> LengthAsync(string l, CancellationToken ct = default) => For(l).LengthAsync(l, ct);
+src/Iceberg.Net.IO/FileIO.cs:355:    public Task<bool> ExistsAsync(string l, CancellationToken ct = default) => For(l).ExistsAsync(l, ct);
+src/Iceberg.Net.IO/FileIO.cs:356:    public Task WriteAsync(string l, ReadOnlyMemory<byte> c, bool overwrite = false, CancellationToken ct = default) => For(l).WriteAsync(l, c, overwrite, ct);
+src/Iceberg.Net.IO/FileIO.cs:357:    public Task DeleteAsync(string l, CancellationToken ct = default) => For(l).DeleteAsync(l, ct);
+src/Iceberg.Net.IO/SequentialRangeReader.cs:51:    public async ValueTask<(byte[] Buffer, int Index, int Available)> EnsureAsync(long offset, int count, CancellationToken ct = default)
+src/Iceberg.Net.IO/SequentialRangeReader.cs:140:    public async ValueTask DisposeAsync()
+src/Iceberg.Net.Catalog/JdbcCatalog.cs:46:    public async Task InitializeAsync(CancellationToken ct = default)
+src/Iceberg.Net.Catalog/JdbcCatalog.cs:282:    public async Task<IReadOnlyList<TableIdentifier>> ListViewsAsync(Namespace ns, CancellationToken ct = default)
+src/Iceberg.Net.Catalog/JdbcCatalog.cs:291:    public async Task<View> CreateViewAsync(TableIdentifier id, ViewDefinition definition, IReadOnlyDictionary<string, string>? properties = null, CancellationToken ct = default)
+src/Iceberg.Net.Catalog/JdbcCatalog.cs:300:    public async Task<View> LoadViewAsync(TableIdentifier id, CancellationToken ct = default)
+src/Iceberg.Net.Catalog/JdbcCatalog.cs:307:    public async Task<bool> ViewExistsAsync(TableIdentifier id, CancellationToken ct = default)
+src/Iceberg.Net.Catalog/JdbcCatalog.cs:313:    public async Task<View> ReplaceViewAsync(TableIdentifier id, ViewDefinition definition, CancellationToken ct = default)
+src/Iceberg.Net.Catalog/JdbcCatalog.cs:319:    public async Task DropViewAsync(TableIdentifier id, CancellationToken ct = default)
+src/Iceberg.Net.Catalog/JdbcCatalog.cs:328:    public Task RenameViewAsync(TableIdentifier from, TableIdentifier to, CancellationToken ct = default)
+src/Iceberg.Net.Catalog/Catalog.cs:106:    public async Task<Table> RefreshAsync(CancellationToken ct = default)
+src/Iceberg.Net.Catalog/Catalog.cs:112:    public async Task<TableMetadata> CommitAsync(IReadOnlyList<UpdateRequirement> requirements, IReadOnlyList<MetadataUpdate> updates, CancellationToken ct = default)
+src/Iceberg.Net.Catalog/Catalog.cs:118:    public Task<TableMetadata> SetPropertiesAsync(IReadOnlyDictionary<string, string> props, CancellationToken ct = default) =>
+src/Iceberg.Net.Catalog/Catalog.cs:122:    public Task<TableMetadata> ReplaceSortOrderAsync(SortOrder order, CancellationToken ct = default) =>
+src/Iceberg.Net.Catalog/Catalog.cs:131:    public Task<TableMetadata> UpdateSchemaAsync(Schema newSchema, CancellationToken ct = default) =>
+src/Iceberg.Net.Catalog/Catalog.cs:149:    public async Task<TableMetadata> UpdateSpecAsync(Action<PartitionSpecUpdate> changes, int retries = 4, CancellationToken ct = default)
+src/Iceberg.Net.Catalog/Catalog.cs:173:    public async Task<TableMetadata> UpdateSchemaAsync(Action<SchemaUpdate> changes, int retries = 4, CancellationToken ct = default)
+src/Iceberg.Net.Catalog/Catalog.cs:232:    public async Task<Table> CreateTableAsync(CreateTableRequest r, CancellationToken ct = default)
+src/Iceberg.Net.Catalog/Catalog.cs:243:    public async Task<Table> LoadTableAsync(TableIdentifier id, CancellationToken ct = default)
+src/Iceberg.Net.Catalog/Catalog.cs:250:    public async Task<bool> TableExistsAsync(TableIdentifier id, CancellationToken ct = default) => await CurrentMetadataLocationAsync(id, ct) is not null;
+src/Iceberg.Net.Catalog/Catalog.cs:252:    public async Task<Table> RegisterTableAsync(TableIdentifier id, string metadataLocation, CancellationToken ct = default)
+src/Iceberg.Net.Catalog/Catalog.cs:260:    public async Task DropTableAsync(TableIdentifier id, bool purge = false, CancellationToken ct = default)
+src/Iceberg.Net.Catalog/Catalog.cs:278:    public async Task<TableMetadata> CommitTableAsync(TableCommit commit, CancellationToken ct = default)
+src/Iceberg.Net.Catalog/Catalog.cs:291:    public async Task CommitTransactionAsync(IReadOnlyList<TableCommit> commits, CancellationToken ct = default)
+src/Iceberg.Net.Catalog/Catalog.cs:409:    public Task<IReadOnlyList<TableIdentifier>> ListViewsAsync(Namespace ns, CancellationToken ct = default)
+src/Iceberg.Net.Catalog/Catalog.cs:414:    public async Task<View> CreateViewAsync(TableIdentifier id, ViewDefinition definition, IReadOnlyDictionary<string, string>? properties = null, CancellationToken ct = default)
+src/Iceberg.Net.Catalog/Catalog.cs:425:    public async Task<View> LoadViewAsync(TableIdentifier id, CancellationToken ct = default)
+src/Iceberg.Net.Catalog/Catalog.cs:433:    public Task<bool> ViewExistsAsync(TableIdentifier id, CancellationToken ct = default)
+src/Iceberg.Net.Catalog/Catalog.cs:438:    public async Task<View> ReplaceViewAsync(TableIdentifier id, ViewDefinition definition, CancellationToken ct = default)
+src/Iceberg.Net.Catalog/Catalog.cs:444:    public Task DropViewAsync(TableIdentifier id, CancellationToken ct = default)
+src/Iceberg.Net.Catalog/Catalog.cs:451:    public Task RenameViewAsync(TableIdentifier from, TableIdentifier to, CancellationToken ct = default)
+src/Iceberg.Net.Catalog/RestCatalog.cs:97:    public async Task<IReadOnlyList<TableIdentifier>> ListViewsAsync(Namespace ns, CancellationToken ct = default)
+src/Iceberg.Net.Catalog/RestCatalog.cs:111:    public async Task<View> CreateViewAsync(TableIdentifier id, ViewDefinition definition, IReadOnlyDictionary<string, string>? properties = null, CancellationToken ct = default)
+src/Iceberg.Net.Catalog/RestCatalog.cs:124:    public async Task<View> LoadViewAsync(TableIdentifier id, CancellationToken ct = default) =>
+src/Iceberg.Net.Catalog/RestCatalog.cs:127:    public async Task<bool> ViewExistsAsync(TableIdentifier id, CancellationToken ct = default)
+src/Iceberg.Net.Catalog/RestCatalog.cs:140:    public async Task<View> ReplaceViewAsync(TableIdentifier id, ViewDefinition definition, CancellationToken ct = default)
+src/Iceberg.Net.Catalog/RestCatalog.cs:165:    public Task DropViewAsync(TableIdentifier id, CancellationToken ct = default) => SendAsync(HttpMethod.Delete, ViewPath(id), null, ct);
+src/Iceberg.Net.Catalog/RestCatalog.cs:167:    public Task RenameViewAsync(TableIdentifier from, TableIdentifier to, CancellationToken ct = default)
+src/Iceberg.Net.Catalog/RestCatalog.cs:212:    public static async Task<RestCatalog> ConnectAsync(
+src/Iceberg.Net.Catalog/RestCatalog.cs:292:    public async Task CreateNamespaceAsync(Namespace ns, IReadOnlyDictionary<string, string>? properties = null, CancellationToken ct = default)
+src/Iceberg.Net.Catalog/RestCatalog.cs:302:    public async Task<IReadOnlyList<Namespace>> ListNamespacesAsync(Namespace? parent = null, CancellationToken ct = default)
+src/Iceberg.Net.Catalog/RestCatalog.cs:318:    public async Task<bool> NamespaceExistsAsync(Namespace ns, CancellationToken ct = default)
+src/Iceberg.Net.Catalog/RestCatalog.cs:331:    public Task DropNamespaceAsync(Namespace ns, CancellationToken ct = default) => SendAsync(HttpMethod.Delete, NsPath(ns), null, ct);
+src/Iceberg.Net.Catalog/RestCatalog.cs:333:    public async Task<IReadOnlyList<TableIdentifier>> ListTablesAsync(Namespace ns, CancellationToken ct = default)
+src/Iceberg.Net.Catalog/RestCatalog.cs:347:    public async Task<Table> CreateTableAsync(CreateTableRequest r, CancellationToken ct = default)
+src/Iceberg.Net.Catalog/RestCatalog.cs:381:    public Task<ServerScanPlan> PlanTableScanAsync(Table table, ScanPlanRequest request, TimeSpan? timeout = null, CancellationToken ct = default) =>
+src/Iceberg.Net.Catalog/RestCatalog.cs:385:    public async Task<Table> LoadTableAsync(TableIdentifier id, CancellationToken ct = default)
+src/Iceberg.Net.Catalog/RestCatalog.cs:391:    public async Task<bool> TableExistsAsync(TableIdentifier id, CancellationToken ct = default)
+src/Iceberg.Net.Catalog/RestCatalog.cs:404:    public async Task<Table> RegisterTableAsync(TableIdentifier id, string metadataLocation, CancellationToken ct = default)
+src/Iceberg.Net.Catalog/RestCatalog.cs:410:    public Task RenameTableAsync(TableIdentifier from, TableIdentifier to, CancellationToken ct = default)
+src/Iceberg.Net.Catalog/RestCatalog.cs:421:    public async Task DropTableAsync(TableIdentifier id, bool purge = false, CancellationToken ct = default)
+src/Iceberg.Net.Catalog/RestCatalog.cs:428:    public async Task<TableMetadata> CommitTableAsync(TableCommit commit, CancellationToken ct = default)
+src/Iceberg.Net.Catalog/RestCatalog.cs:441:    public async Task CommitTransactionAsync(IReadOnlyList<TableCommit> commits, CancellationToken ct = default)
+src/Iceberg.Net.Catalog/SigV4Handler.cs:41:    public async Task SignAsync(HttpRequestMessage request, CancellationToken ct = default)
+src/Iceberg.Net.Catalog/Views.cs:44:    public static async Task<string> WriteNextAsync(IO.IFileIO io, ViewMetadata metadata, string? expected, CancellationToken ct)
+src/Iceberg.Net.Catalog/Views.cs:52:    public static async Task<ViewMetadata> ReadAsync(IO.IFileIO io, string location, CancellationToken ct) =>
+src/Iceberg.Net.Catalog/ScanPlanning.cs:67:    public static async Task<ServerScanPlan> PlanAsync(
+src/Iceberg.Net.Catalog/TableFiles.cs:21:    public static async Task<HashSet<string>> ReachableAsync(TableMetadata metadata, IFileIO io, IEnumerable<Snapshot> snapshots, CancellationToken ct = default, bool dataFiles = true)
+src/Iceberg.Net.Catalog/TableFiles.cs:49:    public static async Task<int> DeleteAllAsync(IFileIO io, IEnumerable<string> files, CancellationToken ct = default)
+src/Iceberg.Net.Data/UpdateMerge.cs:109:    public static async Task<MergeResult> UpdateAsync(Table table, Expression filter, Action<RowUpdate> set,
+src/Iceberg.Net.Data/UpdateMerge.cs:122:    public static async Task<StagedCommit<MergeResult>> StageUpdateAsync(Table table, Expression filter, Action<RowUpdate> set,
+src/Iceberg.Net.Data/UpdateMerge.cs:166:    public static async Task<MergeResult> MergeAsync(Table table, IReadOnlyList<object?[]> source, IReadOnlyList<string> on, Action<MergeBuilder> clauses,
+src/Iceberg.Net.Data/UpdateMerge.cs:180:    public static async Task<StagedCommit<MergeResult>> StageMergeAsync(Table table, IReadOnlyList<object?[]> source, IReadOnlyList<string> on,
+src/Iceberg.Net.Data/TableWriter.cs:15:    public static Task<IReadOnlyList<DataFile>> WriteAsync(Table table, IReadOnlyList<object?[]> rows, CancellationToken ct = default) =>
+src/Iceberg.Net.Data/TableWriter.cs:22:    public static async Task<IReadOnlyList<DataFile>> WriteAsync(Table table, IReadOnlyList<object?[]> rows, IReadOnlyList<(long? RowId, long? Seq)>? lineage, CancellationToken ct = default)
+src/Iceberg.Net.Data/SnapshotProducer.cs:292:    public async Task<Snapshot> CommitAsync(CancellationToken ct = default)
+src/Iceberg.Net.Data/SnapshotProducer.cs:370:    public async Task<TableCommit> StageAsync(CancellationToken ct = default) => (await StageWithArtifactsAsync(ct)).Commit;
+src/Iceberg.Net.Data/TableScan.cs:41:    public static async Task<IReadOnlyList<ManifestFile>> ManifestsAsync(Table table, Snapshot snapshot, CancellationToken ct = default)
+src/Iceberg.Net.Data/TableScan.cs:52:    public static async Task<IReadOnlyList<ScanTask>> PlanFilesAsync(Table table, long? snapshotId = null, Func<DataFile, bool>? filter = null, CancellationToken ct = default) =>
+src/Iceberg.Net.Data/TableScan.cs:56:    public static async Task<IReadOnlyList<ScanTask>> PlanFilesAsync(Table table, Expression filter, long? snapshotId = null, CancellationToken ct = default) =>
+src/Iceberg.Net.Data/TableScan.cs:64:    public static async Task<ScanPlan> PlanAsync(Table table, Expression filter, long? snapshotId = null, Func<DataFile, bool>? fileFilter = null, CancellationToken ct = default)
+src/Iceberg.Net.Data/TableScan.cs:78:    public static Task<ScanPlan> PlanManifestsAsync(Table table, Snapshot snapshot, IReadOnlyList<ManifestFile> manifests, Schema schema, Expression filter,
+src/Iceberg.Net.Data/TableScan.cs:108:    public static async Task<IReadOnlyList<ManifestFile>> AppendManifestsAsync(Table table, IReadOnlyList<Snapshot> appends, CancellationToken ct = default)
+src/Iceberg.Net.Data/TableScan.cs:125:    public static Task<ScanPlan> PlanAppendManifestsAsync(Table table, IReadOnlyList<Snapshot> appends, IReadOnlyList<ManifestFile> manifests, Schema schema,
+src/Iceberg.Net.Data/TableScan.cs:139:    public static async Task<ScanPlan> PlanAppendsAsync(Table table, long? fromExclusive, long toInclusive, Expression? filter = null, CancellationToken ct = default)
+src/Iceberg.Net.Data/TableScan.cs:182:    public static async Task<DeleteIndex> DeletesAsync(Table table, long? snapshotId = null, CancellationToken ct = default)
+src/Iceberg.Net.Data/TableScan.cs:189:    public static async Task<List<LineageRow>> ReadWithLineageAsync(Table table, long? snapshotId = null, CancellationToken ct = default)
+src/Iceberg.Net.Data/TableScan.cs:222:    public static Task<List<object?[]>> ReadAllAsync(Table table, long? snapshotId = null, CancellationToken ct = default) =>
+src/Iceberg.Net.Data/TableScan.cs:229:    public static async Task<List<object?[]>> ReadAsync(Table table, Expression filter, long? snapshotId = null, CancellationToken ct = default)
+src/Iceberg.Net.Data/TableFingerprint.cs:21:    public static async Task<TableFingerprint> ComputeAsync(Table table, long? snapshotId = null, CancellationToken ct = default)
+src/Iceberg.Net.Data/ChangeFeed.cs:48:    public static async IAsyncEnumerable<ChangeRow> ChangesAsync(Table table, long? fromExclusive, long? toInclusive = null, ChangeFeedOptions? options = null,
+src/Iceberg.Net.Data/TableValidator.cs:45:    public static async Task<ValidationReport> ValidateAsync(Table table, ValidationOptions? options = null, CancellationToken ct = default)
+src/Iceberg.Net.Data/TableValidator.cs:66:    public static async Task AssertValidAsync(Table table, ValidationOptions? options = null, CancellationToken ct = default)
+src/Iceberg.Net.Data/Maintenance.cs:54:    public static async Task<IReadOnlyList<long>> ExpireSnapshotsAsync(Table table, long olderThanMs, int? retainLast = null, CancellationToken ct = default) =>
+src/Iceberg.Net.Data/Maintenance.cs:61:    public static Task<ExpireResult> ExpireAsync(Table table, long olderThanMs, int? retainLast = null, bool cleanExpiredFiles = true, CancellationToken ct = default) =>
+src/Iceberg.Net.Data/Maintenance.cs:76:    public static async Task<ExpireResult> ExpireAsync(Table table, ExpireOptions? options, CancellationToken ct = default)
+src/Iceberg.Net.Data/Maintenance.cs:188:    public static Task<Snapshot> RewriteManifestsAsync(Table table, long targetSizeBytes = 8L * 1024 * 1024, CancellationToken ct = default) =>
+src/Iceberg.Net.Data/Maintenance.cs:201:    public static async Task<IReadOnlyList<string>> DeleteOrphanFilesAsync(Table table, TimeSpan? olderThan = null, bool dryRun = false, CancellationToken ct = default)
+src/Iceberg.Net.Data/StagedCommit.cs:53:    public static async Task<StagedCommit> StageAsync(Table table, Func<CancellationToken, Task<SnapshotProducer?>> plan, CancellationToken ct = default)
+src/Iceberg.Net.Data/StagedCommit.cs:99:    public async Task DiscardAsync(CancellationToken ct = default)
+src/Iceberg.Net.Data/StagedCommit.cs:123:    public static async Task CommitAllAsync(IReadOnlyList<StagedCommit> staged, CancellationToken ct = default)
+src/Iceberg.Net.Data/DeleteFiles.cs:24:    public static async Task<DataFile> WriteAsync(IFileIO io, string location, int specId, IReadOnlyList<object?> partition,
+src/Iceberg.Net.Data/DeleteFiles.cs:33:    public static async Task<IReadOnlyDictionary<string, RoaringPositionBitmap>> ReadAsync(IFileIO io, string location, CancellationToken ct = default) =>
+src/Iceberg.Net.Data/DeleteFiles.cs:36:    public static Task<IReadOnlyDictionary<string, RoaringPositionBitmap>> ReadAsync(IFileIO io, string location, string format, CancellationToken ct = default) =>
+src/Iceberg.Net.Data/DeleteFiles.cs:40:    public static Task<IReadOnlyDictionary<string, RoaringPositionBitmap>> ReadAsync(IFileIO io, DataFile file, CancellationToken ct = default) =>
+src/Iceberg.Net.Data/DeleteFiles.cs:66:    public static async Task<DataFile> WriteAsync(IFileIO io, string location, int specId, IReadOnlyList<object?> partition,
+src/Iceberg.Net.Data/DeleteFiles.cs:134:    public static async Task<DeleteIndex> LoadAsync(Table table, IReadOnlyList<ManifestFile> manifests, CancellationToken ct = default)
+src/Iceberg.Net.Data/DeleteFiles.cs:176:    public async Task<Func<long, object?[], bool>?> RowFilterAsync(DataFile dataFile, IReadOnlyList<DataFile> applicable, Schema projection, CancellationToken ct = default)
+src/Iceberg.Net.Data/DeleteFiles.cs:275:    public async Task<RoaringPositionBitmap?> DeletedPositionsAsync(DataFile dataFile, long dataSequenceNumber, CancellationToken ct = default)
+src/Iceberg.Net.Data/DeleteFiles.cs:297:    public async Task<Func<long, object?[], bool>?> RowFilterAsync(DataFile dataFile, long dataSequenceNumber, Schema projection, CancellationToken ct = default)
+src/Iceberg.Net.Data/DeleteFiles.cs:331:    public Task<IReadOnlyDictionary<string, RoaringPositionBitmap>> PositionDeletesAsync(string location, string format = "PARQUET")
+src/Iceberg.Net.Data/DeleteFiles.cs:342:    public Task<IReadOnlyDictionary<string, RoaringPositionBitmap>> PositionDeletesAsync(DataFile deleteFile)
+src/Iceberg.Net.Data/DeleteFiles.cs:352:    public async Task<RoaringPositionBitmap> ReadDeletionVectorAsync(DataFile dv, CancellationToken ct = default)
+src/Iceberg.Net.Data/ParquetFiles.cs:81:    public static Task<DataFile> WriteAsync(
+src/Iceberg.Net.Data/ParquetFiles.cs:92:    public static async Task<DataFile> WriteAsync(
+src/Iceberg.Net.Data/ParquetFiles.cs:298:    public static async Task<List<object?[]>> ReadAsync(IFileIO io, string location, Schema projection, CancellationToken ct = default) =>
+src/Iceberg.Net.Data/ParquetFiles.cs:302:    public static async Task<List<object?[]>> ReadAsync(IFileIO io, string location, Schema projection, NameMapping? mapping, CancellationToken ct = default)
+src/Iceberg.Net.Data/ParquetFiles.cs:320:    public static async IAsyncEnumerable<DataFileBatch> ReadBatchesAsync(IFileIO io, string location, Schema projection, NameMapping? mapping,
+src/Iceberg.Net.Data/TableMutations.cs:42:    public static Task<MutationResult> InsertAsync(Table table, IReadOnlyList<object?[]> rows, CancellationToken ct = default) =>
+src/Iceberg.Net.Data/TableMutations.cs:50:    public static Task<MutationResult> UpsertAsync(Table table, IReadOnlyList<object?[]> rows, IReadOnlyList<string>? keyColumns = null,
+src/Iceberg.Net.Data/TableMutations.cs:63:    public static Task<MutationResult> ReplaceGroupsAsync(Table table, IReadOnlyList<object?[]> rows, IReadOnlyList<string> groupColumns,
+src/Iceberg.Net.Data/TableMutations.cs:72:    public static Task<MutationResult> DeleteByKeysAsync(Table table, IReadOnlyList<string> keyColumns, IEnumerable<object?[]> keys,
+src/Iceberg.Net.Data/TableMutations.cs:82:    public static Task<MutationResult> DeleteWhereAsync(Table table, Func<object?[], bool> predicate,
+src/Iceberg.Net.Data/TableMutations.cs:95:    public static Task<MutationResult> DeleteWhereAsync(Table table, Expression filter,
+src/Iceberg.Net.Data/TableMutations.cs:111:    public static Task<MutationResult> DeleteWhereAsync(Table table, Expression filter, Func<object?[], bool> refine,
+src/Iceberg.Net.Data/ParquetImport.cs:30:    public static async Task<DataFile> ToDataFileAsync(Table table, string location, CancellationToken ct = default)
+src/Iceberg.Net.Data/ParquetImport.cs:172:    public static Task<TableMetadata> ApplyNameMappingAsync(Table table, CancellationToken ct = default) =>
+src/Iceberg.Net.Data/AvroDataFiles.cs:38:    public static async Task<List<object?[]>> ReadAsync(IFileIO io, Manifests.DataFile file, Schema projection, NameMapping? mapping = null, CancellationToken ct = default)
+src/Iceberg.Net.Data/AvroDataFiles.cs:45:    public static async Task<List<object?[]>> ReadAsync(IFileIO io, string location, string format, Schema projection, NameMapping? mapping = null, CancellationToken ct = default)
+src/Iceberg.Net.Data/AvroDataFiles.cs:56:    public static IAsyncEnumerable<DataFileBatch> ReadBatchesAsync(IFileIO io, Manifests.DataFile file, Schema projection, NameMapping? mapping = null,
+src/Iceberg.Net.Data/AvroDataFiles.cs:61:    public static IAsyncEnumerable<DataFileBatch> ReadBatchesAsync(IFileIO io, string location, string format, Schema projection, NameMapping? mapping = null,
+src/Iceberg.Net.Data/AvroDataFiles.cs:80:    public static async Task<List<object?[]>> ReadAsync(IFileIO io, string location, Schema projection, NameMapping? mapping = null, CancellationToken ct = default)
+src/Iceberg.Net.Data/AvroDataFiles.cs:97:    public static async IAsyncEnumerable<DataFileBatch> ReadBatchesAsync(IFileIO io, string location, Schema projection, NameMapping? mapping = null,
+src/Iceberg.Net.Data/AvroDataFiles.cs:286:    public static async Task<Manifests.DataFile> WriteAsync(IFileIO io, string location, Schema schema, int specId, IReadOnlyList<object?> partition,
+src/Iceberg.Net.Data/SnapshotManagement.cs:221:    public async Task<TableMetadata> CommitAsync(CancellationToken ct = default)
+src/Iceberg.Net.Data/SnapshotManagement.cs:332:    public static async Task<TableMetadata> CommitAsync(Table table, long snapshotId, int? retries, CancellationToken ct)
+src/Iceberg.Net.Data/ServerSideScan.cs:15:    public static async Task<List<object?[]>> ReadAsync(RestCatalog catalog, Table table, Expression? filter = null, long? snapshotId = null, CancellationToken ct = default)
+src/Iceberg.Net.Data/ServerSideScan.cs:22:    public static async Task<List<object?[]>> ReadAsync(Table table, ServerScanPlan plan, Expression? filter = null, CancellationToken ct = default)
+src/Iceberg.Net.Data/PuffinStatistics.cs:23:    public static async Task<StatisticsFile> ComputeNdvAsync(Table table, IEnumerable<string>? columns = null, CancellationToken ct = default)
+src/Iceberg.Net.Data/PuffinStatistics.cs:66:    public static async Task<IReadOnlyDictionary<int, double>> ReadNdvAsync(Table table, StatisticsFile stats, CancellationToken ct = default)
+src/Iceberg.Net.Data/MetadataTables.cs:155:    public static async Task<IReadOnlyList<ManifestsRow>> ManifestsAsync(Table table, SnapshotSelector? at = null, CancellationToken ct = default)
+src/Iceberg.Net.Data/MetadataTables.cs:174:    public static async Task<IReadOnlyList<FilesRow>> FilesAsync(Table table, SnapshotSelector? at = null, CancellationToken ct = default) =>
+src/Iceberg.Net.Data/MetadataTables.cs:177:    public static async Task<IReadOnlyList<FilesRow>> DataFilesAsync(Table table, SnapshotSelector? at = null, CancellationToken ct = default) =>
+src/Iceberg.Net.Data/MetadataTables.cs:180:    public static async Task<IReadOnlyList<FilesRow>> DeleteFilesAsync(Table table, SnapshotSelector? at = null, CancellationToken ct = default) =>
+src/Iceberg.Net.Data/MetadataTables.cs:184:    public static async Task<IReadOnlyList<EntriesRow>> EntriesAsync(Table table, SnapshotSelector? at = null, CancellationToken ct = default)
+src/Iceberg.Net.Data/MetadataTables.cs:200:    public static async Task<IReadOnlyList<PartitionsRow>> PartitionsAsync(Table table, SnapshotSelector? at = null, CancellationToken ct = default)
+src/Iceberg.Net.Data/Compaction.cs:77:    public static async Task<RewriteResult> RewriteDataFilesAsync(Table table, RewriteOptions? options = null, int maxAttempts = 5, CancellationToken ct = default)
+src/Iceberg.Net.Data/Compaction.cs:190:    public static async Task<RewritePositionDeletesResult> RewritePositionDeletesAsync(Table table, CancellationToken ct = default)
+src/Iceberg.Net.Catalog/ManifestStore.cs:35:    public static async Task<IReadOnlyList<ManifestFile>> ReadListAsync(IFileIO io, string manifestList, CancellationToken ct = default)
+src/Iceberg.Net.Catalog/ManifestStore.cs:46:    public static async Task<ManifestCodec.ManifestContents> ReadAsync(IFileIO io, string path, PartitionSpec spec, Schema schema, ManifestFile? manifest = null,
+src/Iceberg.Net.Catalog/ManifestStore.cs:54:    public static Task<ManifestCodec.ManifestContents> ReadAsync(IFileIO io, TableMetadata metadata, ManifestFile manifest, CancellationToken ct = default) =>
+src/Iceberg.Net.Catalog/ManifestStore.cs:58:    public static async Task<long> WriteAsync(IFileIO io, string path, int formatVersion, Schema schema, PartitionSpec spec, ManifestContent content,
+src/Iceberg.Net.Catalog/ManifestStore.cs:67:    public static async Task WriteListAsync(IFileIO io, string path, int formatVersion, long snapshotId, long? parentSnapshotId, long sequenceNumber,
+src/Iceberg.Net.Data/Scan.cs:157:    public static async IAsyncEnumerable<object?[]> ReadRowsAsync(Table table, ScanRequest request, [EnumeratorCancellation] CancellationToken ct = default)
+src/Iceberg.Net.Data/Scan.cs:164:    public static IAsyncEnumerable<IReadOnlyList<object?[]>> ReadBatchesAsync(Table table, ScanRequest request, CancellationToken ct = default)
+src/Iceberg.Net.Data/Scan.cs:178:    public static IAsyncEnumerable<IReadOnlyList<object?[]>> ReadBatchesAsync(Table table, Expression filter, long? snapshotId = null, ScanMetrics? metrics = null,
+src/Iceberg.Net.Data/Scan.cs:183:    public static async Task<ScanPlan> PlanAsync(Table table, ScanRequest request, CancellationToken ct = default)
+src/Iceberg.Net.Data/Scan.cs:199:    public static async Task<long> CountAsync(Table table, ScanRequest request, CancellationToken ct = default)

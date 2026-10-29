@@ -1,0 +1,115 @@
+TLC2 Version 2.19 of 08 August 2024 (rev: 5a47802)
+Running breadth-first search Model-Checking with fp 0 and seed 1 with 1 worker on 8 cores with 910MB heap and 64MB offheap memory [pid: 77019] (Mac OS X 15.7.7 aarch64, Homebrew 21.0.12.1 x86_64, MSBDiskFPSet, DiskStateQueue).
+Parsing file /Users/ryankelly/orca/workspaces/Iceberg.NET/sockeye/formal/commit-retry/WritePlan.tla
+Parsing file /Users/ryankelly/orca/workspaces/Iceberg.NET/sockeye/temp/formal/Integers.tla
+Parsing file /Users/ryankelly/orca/workspaces/Iceberg.NET/sockeye/temp/formal/Naturals.tla
+Semantic processing of module Naturals
+Semantic processing of module Integers
+Semantic processing of module WritePlan
+Starting... (2026-10-28 11:53:05)
+Computing initial states...
+Finished computing initial states: 1 distinct state generated at 2026-10-28 11:53:05.
+Error: Invariant PublishedSchemaCorrect is violated.
+Error: The behavior up to this point is:
+State 1: <Initial predicate>
+/\ publishedSpecVersion = -1
+/\ publishedSpecCorrect = TRUE
+/\ fileSpec = -1
+/\ metadataVersion = 0
+/\ phase = "new"
+/\ publishedSchemaCorrect = TRUE
+/\ retried = FALSE
+/\ specVersion = 0
+/\ expectedVersion = 0
+/\ schemaVersion = 0
+/\ originalSchema = -1
+/\ cachedSchema = 0
+
+State 2: <Plan line 20, col 9 to line 24, col 101 of module WritePlan>
+/\ publishedSpecVersion = -1
+/\ publishedSpecCorrect = TRUE
+/\ fileSpec = 0
+/\ metadataVersion = 0
+/\ phase = "planned"
+/\ publishedSchemaCorrect = TRUE
+/\ retried = FALSE
+/\ specVersion = 0
+/\ expectedVersion = 0
+/\ schemaVersion = 0
+/\ originalSchema = 0
+/\ cachedSchema = 0
+
+State 3: <ChangeSchema line 26, col 17 to line 30, col 76 of module WritePlan>
+/\ publishedSpecVersion = -1
+/\ publishedSpecCorrect = TRUE
+/\ fileSpec = 0
+/\ metadataVersion = 1
+/\ phase = "planned"
+/\ publishedSchemaCorrect = TRUE
+/\ retried = FALSE
+/\ specVersion = 0
+/\ expectedVersion = 0
+/\ schemaVersion = 1
+/\ originalSchema = 0
+/\ cachedSchema = 0
+
+State 4: <CatalogRead line 39, col 16 to line 45, col 75 of module WritePlan>
+/\ publishedSpecVersion = -1
+/\ publishedSpecCorrect = TRUE
+/\ fileSpec = 0
+/\ metadataVersion = 1
+/\ phase = "conflict"
+/\ publishedSchemaCorrect = TRUE
+/\ retried = FALSE
+/\ specVersion = 0
+/\ expectedVersion = 1
+/\ schemaVersion = 1
+/\ originalSchema = 0
+/\ cachedSchema = 0
+
+State 5: <Refresh line 59, col 12 to line 65, col 71 of module WritePlan>
+/\ publishedSpecVersion = -1
+/\ publishedSpecCorrect = TRUE
+/\ fileSpec = 0
+/\ metadataVersion = 1
+/\ phase = "planned"
+/\ publishedSchemaCorrect = TRUE
+/\ retried = TRUE
+/\ specVersion = 0
+/\ expectedVersion = 1
+/\ schemaVersion = 1
+/\ originalSchema = 0
+/\ cachedSchema = 1
+
+State 6: <CatalogRead line 39, col 16 to line 45, col 75 of module WritePlan>
+/\ publishedSpecVersion = -1
+/\ publishedSpecCorrect = TRUE
+/\ fileSpec = 0
+/\ metadataVersion = 1
+/\ phase = "catalog-ready"
+/\ publishedSchemaCorrect = TRUE
+/\ retried = TRUE
+/\ specVersion = 0
+/\ expectedVersion = 1
+/\ schemaVersion = 1
+/\ originalSchema = 0
+/\ cachedSchema = 1
+
+State 7: <CatalogSwap line 48, col 5 to line 57, col 46 of module WritePlan>
+/\ publishedSpecVersion = 0
+/\ publishedSpecCorrect = TRUE
+/\ fileSpec = 0
+/\ metadataVersion = 2
+/\ phase = "done"
+/\ publishedSchemaCorrect = FALSE
+/\ retried = TRUE
+/\ specVersion = 0
+/\ expectedVersion = 1
+/\ schemaVersion = 1
+/\ originalSchema = 0
+/\ cachedSchema = 1
+
+65 states generated, 56 distinct states found, 14 states left on queue.
+The depth of the complete state graph search is 7.
+The average outdegree of the complete state graph is 1 (minimum is 0, the maximum 3 and the 95th percentile is 3).
+Finished in 00s at (2026-10-28 11:53:05)

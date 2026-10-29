@@ -1,0 +1,10 @@
+  Determining projects to restore...
+  All projects are up-to-date for restore.
+  Iceberg.Net.IO -> /Users/ryankelly/orca/workspaces/Iceberg.NET/waspfish/src/Iceberg.Net.IO/bin/Release/net10.0/Iceberg.Net.IO.dll
+  Iceberg.Net.Puffin -> /Users/ryankelly/orca/workspaces/Iceberg.NET/waspfish/src/Iceberg.Net.Puffin/bin/Release/net10.0/Iceberg.Net.Puffin.dll
+  Iceberg.Net.Core -> /Users/ryankelly/orca/workspaces/Iceberg.NET/waspfish/src/Iceberg.Net.Core/bin/Release/net10.0/Iceberg.Net.Core.dll
+  Iceberg.Net.Avro -> /Users/ryankelly/orca/workspaces/Iceberg.NET/waspfish/src/Iceberg.Net.Avro/bin/Release/net10.0/Iceberg.Net.Avro.dll
+  Iceberg.Net.Catalog -> /Users/ryankelly/orca/workspaces/Iceberg.NET/waspfish/src/Iceberg.Net.Catalog/bin/Release/net10.0/Iceberg.Net.Catalog.dll
+  Iceberg.Net.Data -> /Users/ryankelly/orca/workspaces/Iceberg.NET/waspfish/src/Iceberg.Net.Data/bin/Release/net10.0/Iceberg.Net.Data.dll
+  Iceberg.Net.RestServer -> /Users/ryankelly/orca/workspaces/Iceberg.NET/waspfish/src/Iceberg.Net.RestServer/bin/Release/net10.0/Iceberg.Net.RestServer.dll
+  Iceberg.Net.RestServer -> /Users/ryankelly/orca/workspaces/Iceberg.NET/waspfish/temp/published-rest-server/

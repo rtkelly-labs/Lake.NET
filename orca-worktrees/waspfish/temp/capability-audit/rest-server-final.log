@@ -1,0 +1,45 @@
+  Determining projects to restore...
+  All projects are up-to-date for restore.
+  Iceberg.Net.IO -> /Users/ryankelly/orca/workspaces/Iceberg.NET/waspfish/src/Iceberg.Net.IO/bin/Debug/net10.0/Iceberg.Net.IO.dll
+  Iceberg.Net.Puffin -> /Users/ryankelly/orca/workspaces/Iceberg.NET/waspfish/src/Iceberg.Net.Puffin/bin/Debug/net10.0/Iceberg.Net.Puffin.dll
+  Iceberg.Net.Core -> /Users/ryankelly/orca/workspaces/Iceberg.NET/waspfish/src/Iceberg.Net.Core/bin/Debug/net10.0/Iceberg.Net.Core.dll
+  Iceberg.Net.Avro -> /Users/ryankelly/orca/workspaces/Iceberg.NET/waspfish/src/Iceberg.Net.Avro/bin/Debug/net10.0/Iceberg.Net.Avro.dll
+  Iceberg.Net.Catalog -> /Users/ryankelly/orca/workspaces/Iceberg.NET/waspfish/src/Iceberg.Net.Catalog/bin/Debug/net10.0/Iceberg.Net.Catalog.dll
+  Iceberg.Net.Data -> /Users/ryankelly/orca/workspaces/Iceberg.NET/waspfish/src/Iceberg.Net.Data/bin/Debug/net10.0/Iceberg.Net.Data.dll
+  Iceberg.Net.Linq -> /Users/ryankelly/orca/workspaces/Iceberg.NET/waspfish/src/Iceberg.Net.Linq/bin/Debug/net10.0/Iceberg.Net.Linq.dll
+  Iceberg.Net.TestSupport -> /Users/ryankelly/orca/workspaces/Iceberg.NET/waspfish/tests/Iceberg.Net.TestSupport/bin/Debug/net10.0/Iceberg.Net.TestSupport.dll
+  Iceberg.Net.EntityFrameworkCore -> /Users/ryankelly/orca/workspaces/Iceberg.NET/waspfish/src/Iceberg.Net.EntityFrameworkCore/bin/Debug/net10.0/Iceberg.Net.EntityFrameworkCore.dll
+  Iceberg.Net.RestServer -> /Users/ryankelly/orca/workspaces/Iceberg.NET/waspfish/src/Iceberg.Net.RestServer/bin/Debug/net10.0/Iceberg.Net.RestServer.dll
+  Iceberg.Net.RestServer.Tests -> /Users/ryankelly/orca/workspaces/Iceberg.NET/waspfish/tests/Iceberg.Net.RestServer.Tests/bin/Debug/net10.0/Iceberg.Net.RestServer.Tests.dll
+Test run for /Users/ryankelly/orca/workspaces/Iceberg.NET/waspfish/tests/Iceberg.Net.RestServer.Tests/bin/Debug/net10.0/Iceberg.Net.RestServer.Tests.dll (.NETCoreApp,Version=v10.0)
+A total of 1 test files matched the specified pattern.
+[xUnit.net 00:00:02.49]     Iceberg.Net.RestServer.Tests.CredentialVendingTests.Moto_sts_credentials_are_vended_and_used [SKIP]
+  Skipped Iceberg.Net.RestServer.Tests.CredentialVendingTests.Moto_sts_credentials_are_vended_and_used [1 ms]
+[xUnit.net 00:00:05.10]     Iceberg.Net.RestServer.Tests.CrossEngineTests.Spark_reads_through_server_side_scan_planning [SKIP]
+[xUnit.net 00:00:05.11]     Iceberg.Net.RestServer.Tests.CrossEngineTests.PyIceberg_and_the_dotnet_client_share_tables_through_the_server [SKIP]
+[xUnit.net 00:00:05.11]     Iceberg.Net.RestServer.Tests.CrossEngineTests.PyIceberg_signs_s3_requests_through_the_server [SKIP]
+  Skipped Iceberg.Net.RestServer.Tests.CrossEngineTests.Spark_reads_through_server_side_scan_planning [1 ms]
+  Skipped Iceberg.Net.RestServer.Tests.CrossEngineTests.PyIceberg_and_the_dotnet_client_share_tables_through_the_server [1 ms]
+  Skipped Iceberg.Net.RestServer.Tests.CrossEngineTests.PyIceberg_signs_s3_requests_through_the_server [1 ms]
+[xUnit.net 00:00:05.11]     Iceberg.Net.RestServer.Tests.CrossEngineTests.PyIceberg_staged_create_transactions_commit_through_the_server [SKIP]
+[xUnit.net 00:00:05.12]     Iceberg.Net.RestServer.Tests.CrossEngineTests.PyIceberg_reads_tables_the_dotnet_client_creates [SKIP]
+[xUnit.net 00:00:05.13]     Iceberg.Net.RestServer.Tests.CrossEngineTests.Spark_and_the_dotnet_client_share_tables_through_the_server [SKIP]
+[xUnit.net 00:00:05.13]     Iceberg.Net.RestServer.Tests.CrossEngineTests.PyIceberg_reads_through_server_side_scan_planning [SKIP]
+[xUnit.net 00:00:05.13]     Iceberg.Net.RestServer.Tests.CrossEngineTests.Spark_signs_s3_requests_through_the_server [SKIP]
+[xUnit.net 00:00:05.13]     Iceberg.Net.RestServer.Tests.CrossEngineTests.Spark_incremental_reads_match_server_incremental_plans [SKIP]
+  Skipped Iceberg.Net.RestServer.Tests.CrossEngineTests.PyIceberg_staged_create_transactions_commit_through_the_server [1 ms]
+  Skipped Iceberg.Net.RestServer.Tests.CrossEngineTests.PyIceberg_reads_tables_the_dotnet_client_creates [1 ms]
+  Skipped Iceberg.Net.RestServer.Tests.CrossEngineTests.Spark_and_the_dotnet_client_share_tables_through_the_server [1 ms]
+  Skipped Iceberg.Net.RestServer.Tests.CrossEngineTests.PyIceberg_reads_through_server_side_scan_planning [1 ms]
+  Skipped Iceberg.Net.RestServer.Tests.CrossEngineTests.Spark_signs_s3_requests_through_the_server [1 ms]
+  Skipped Iceberg.Net.RestServer.Tests.CrossEngineTests.Spark_incremental_reads_match_server_incremental_plans [1 ms]
+[xUnit.net 00:00:06.83]     Iceberg.Net.RestServer.Tests.GcsCrossEngineTests.PyIceberg_sends_the_vended_token_to_gcs [SKIP]
+[xUnit.net 00:00:06.86]     Iceberg.Net.RestServer.Tests.GcsCrossEngineTests.Iceberg_java_gcs_file_io_sends_the_vended_token_for_the_tables_prefix_only [SKIP]
+  Skipped Iceberg.Net.RestServer.Tests.GcsCrossEngineTests.PyIceberg_sends_the_vended_token_to_gcs [1 ms]
+  Skipped Iceberg.Net.RestServer.Tests.GcsCrossEngineTests.Iceberg_java_gcs_file_io_sends_the_vended_token_for_the_tables_prefix_only [1 ms]
+[xUnit.net 00:00:07.26]     Iceberg.Net.RestServer.Tests.RemoteSigningTests.Our_client_reads_and_writes_s3_through_the_signer [SKIP]
+  Skipped Iceberg.Net.RestServer.Tests.RemoteSigningTests.Our_client_reads_and_writes_s3_through_the_signer [1 ms]
+[xUnit.net 00:00:09.42]     Iceberg.Net.RestServer.Tests.AzureCredentialVendingTests.Azurite_enforces_the_vended_tokens [SKIP]
+  Skipped Iceberg.Net.RestServer.Tests.AzureCredentialVendingTests.Azurite_enforces_the_vended_tokens [1 ms]
+
+Passed!  - Failed:     0, Passed:   141, Skipped:    14, Total:   155, Duration: 13 s - Iceberg.Net.RestServer.Tests.dll (net10.0)

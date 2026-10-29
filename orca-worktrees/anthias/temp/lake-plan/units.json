@@ -1,0 +1,484 @@
+[
+  {
+    "id": "G0",
+    "title": "Freeze the online session and back up its branches",
+    "wave": 0,
+    "executor": "human",
+    "repo": "(all)",
+    "depends_on": [],
+    "base": "origin/main",
+    "branch": null,
+    "worktree": null,
+    "touches": [],
+    "must_not_touch": [],
+    "locks": [],
+    "pr_title": null
+  },
+  {
+    "id": "G1",
+    "title": "Decide D3, D5, D6, D12 and the fork's stable branch",
+    "wave": 0,
+    "executor": "human",
+    "repo": "Iceberg.NET",
+    "depends_on": [],
+    "base": "origin/main",
+    "branch": null,
+    "worktree": null,
+    "touches": [],
+    "must_not_touch": [],
+    "locks": [],
+    "pr_title": null
+  },
+  {
+    "id": "U01a",
+    "title": "Land the vision and target-state docs",
+    "wave": 1,
+    "executor": "claude (this session) or agent",
+    "repo": "Iceberg.NET",
+    "depends_on": [],
+    "base": "(existing worktree)",
+    "branch": "rtkelly13/refactor-rename-library",
+    "worktree": "anthias (existing)",
+    "touches": [
+      "VISION.md",
+      "docs/standards.md",
+      "docs/lake/**",
+      "docs/README.md",
+      "docs/roadmap.md",
+      "AGENTS.md (the VISION and standards rows only)"
+    ],
+    "must_not_touch": [
+      "LICENSE",
+      "NOTICE",
+      "src/**",
+      ".github/**",
+      "docs/dependencies.md"
+    ],
+    "locks": [],
+    "pr_title": "docs: Lake.NET vision, target state and documentation standards"
+  },
+  {
+    "id": "U01b",
+    "title": "Relicense to Apache-2.0",
+    "wave": 1,
+    "executor": "claude (this session) or agent",
+    "repo": "Iceberg.NET",
+    "depends_on": [],
+    "base": "origin/main",
+    "branch": "rtkelly13/relicense-apache",
+    "worktree": "anthias (existing)",
+    "touches": [
+      "LICENSE",
+      "NOTICE",
+      "src/Directory.Build.props",
+      "AI_POLICY.md",
+      "PACKAGE_README.md",
+      "CHANGELOG.md"
+    ],
+    "must_not_touch": [
+      "docs/**",
+      ".github/**"
+    ],
+    "locks": [],
+    "pr_title": "chore(license): relicense to Apache-2.0 with a NOTICE file"
+  },
+  {
+    "id": "U01c",
+    "title": "Add the Renovate config",
+    "wave": 1,
+    "executor": "claude (this session) or agent",
+    "repo": "Iceberg.NET",
+    "depends_on": [],
+    "base": "origin/main",
+    "branch": "rtkelly13/renovate",
+    "worktree": "anthias (existing)",
+    "touches": [
+      ".github/renovate.json5",
+      "docs/dependencies.md",
+      "docs/README.md (the dependencies row)",
+      "AGENTS.md (the dependencies row)"
+    ],
+    "must_not_touch": [
+      "src/**",
+      "docs/lake/**"
+    ],
+    "locks": [],
+    "pr_title": "ci(deps): adopt Renovate for dependency updates"
+  },
+  {
+    "id": "H0",
+    "title": "Install the Mend Renovate GitHub App",
+    "wave": 1,
+    "executor": "human",
+    "repo": "(org)",
+    "depends_on": [],
+    "base": "origin/main",
+    "branch": null,
+    "worktree": null,
+    "touches": [],
+    "must_not_touch": [],
+    "locks": [],
+    "pr_title": null
+  },
+  {
+    "id": "U02",
+    "title": "Recover the DuckLake incubation from the online session",
+    "wave": 1,
+    "executor": "antigravity",
+    "repo": "Iceberg.NET",
+    "depends_on": [
+      "G0"
+    ],
+    "base": "ef5eb9d",
+    "branch": "lake/recover-ducklake",
+    "worktree": "lake-recover-ducklake",
+    "touches": [
+      "src/Iceberg.Net.DuckLake/**",
+      "tests/Iceberg.Net.DuckLake*/**",
+      "tests/Iceberg.Net.Fuzz/**",
+      "tests/Iceberg.Net.TestSupport/**",
+      "src/Iceberg.Net.Data/** (the small changes the branch made)",
+      "interop/**",
+      "emulation/**",
+      ".github/workflows/**",
+      "tools/**",
+      "docs/**",
+      "AGENTS.md",
+      "README.md",
+      "CHANGELOG.md",
+      "Directory.Packages.props",
+      "Iceberg.Net.slnx",
+      "run-tests.sh",
+      "examples/**"
+    ],
+    "must_not_touch": [
+      ".gitmodules",
+      "external/**",
+      "src/Iceberg.Net.Data.ParquetNet/**",
+      "tools/ParquetBackendBench/**"
+    ],
+    "locks": [
+      "emulation stack (only if running the Docker suites locally)"
+    ],
+    "pr_title": "feat(ducklake): incubate DuckLake 1.0 and 1.1 (evaluation build, not packed)"
+  },
+  {
+    "id": "U05",
+    "title": "Land or park open PR #25 and stale worktrees",
+    "wave": 1,
+    "executor": "human",
+    "repo": "Iceberg.NET",
+    "depends_on": [],
+    "base": "origin/main",
+    "branch": null,
+    "worktree": null,
+    "touches": [],
+    "must_not_touch": [],
+    "locks": [],
+    "pr_title": null
+  },
+  {
+    "id": "R1",
+    "title": "Declare Renovate in rig's GitHub Apps governance",
+    "wave": 1,
+    "executor": "antigravity",
+    "repo": "rig",
+    "depends_on": [],
+    "base": "origin/main",
+    "branch": "feat/renovate-app",
+    "worktree": "renovate-app",
+    "touches": [
+      "config/repo_policies.json",
+      "docs/repo-governance.md",
+      "tests/**"
+    ],
+    "must_not_touch": [],
+    "locks": [],
+    "pr_title": "feat(governance): declare the Renovate GitHub App"
+  },
+  {
+    "id": "R2",
+    "title": "Shared Renovate preset for the estate",
+    "wave": 1,
+    "executor": "antigravity",
+    "repo": "rtkelly-labs/.github",
+    "depends_on": [
+      "U01c"
+    ],
+    "base": "origin/main",
+    "branch": "feat/renovate-preset",
+    "worktree": "(clone of rtkelly-labs/.github)",
+    "touches": [
+      "renovate-config.json (or default.json) in rtkelly-labs/.github"
+    ],
+    "must_not_touch": [],
+    "locks": [],
+    "pr_title": "feat(renovate): shared preset for rtkelly-labs repositories"
+  },
+  {
+    "id": "R3",
+    "title": "Package and version dashboard: `rig estate packages`",
+    "wave": 1,
+    "executor": "antigravity",
+    "repo": "rig",
+    "depends_on": [],
+    "base": "origin/main",
+    "branch": "feat/estate-packages",
+    "worktree": "estate-packages",
+    "touches": [
+      "src/** (the estate CLI)",
+      "config/managed-projects.json (schema only, if a field is needed)",
+      "docs/estate.md",
+      "docs/estate/packages.md (new)",
+      "tests/**"
+    ],
+    "must_not_touch": [],
+    "locks": [],
+    "pr_title": "feat(estate): packages dashboard across registries, tags and changelogs"
+  },
+  {
+    "id": "R4",
+    "title": "Repository rename support: `rig estate rename-repo` (dropped 2026-10-28: no rename tool in rig)",
+    "wave": 1,
+    "executor": "dropped",
+    "repo": "rig",
+    "depends_on": [],
+    "base": "origin/main",
+    "branch": "feat/estate-rename-repo",
+    "worktree": "estate-rename-repo",
+    "touches": [
+      "src/** (the estate CLI)",
+      "docs/estate.md",
+      "docs/estate/rename.md (new)",
+      "tests/**"
+    ],
+    "must_not_touch": [],
+    "locks": [],
+    "pr_title": "feat(estate): rename-repo, from GitHub rename to clones, worktrees and Orca"
+  },
+  {
+    "id": "R5",
+    "title": "NuGet package retirement helper",
+    "wave": 1,
+    "executor": "antigravity",
+    "repo": "rig",
+    "depends_on": [
+      "R3"
+    ],
+    "base": "origin/main",
+    "branch": "feat/estate-retire-packages",
+    "worktree": "estate-retire-packages",
+    "touches": [
+      "src/**",
+      "docs/estate/packages.md",
+      "tests/**"
+    ],
+    "must_not_touch": [],
+    "locks": [],
+    "pr_title": "feat(estate): retire packages (deprecate, unlist) with a verified nuget.org runbook"
+  },
+  {
+    "id": "R6",
+    "title": "Orca setup for Iceberg.NET agent worktrees",
+    "wave": 1,
+    "executor": "antigravity",
+    "repo": "rig",
+    "depends_on": [],
+    "base": "origin/main",
+    "branch": "feat/orca-iceberg",
+    "worktree": "orca-iceberg",
+    "touches": [
+      "config/orca.json"
+    ],
+    "must_not_touch": [],
+    "locks": [],
+    "pr_title": "feat(orca): Iceberg.NET worktree location and setup"
+  },
+  {
+    "id": "U06",
+    "title": "Commit orca.yaml for agent worktrees",
+    "wave": 1,
+    "executor": "antigravity",
+    "repo": "Iceberg.NET",
+    "depends_on": [
+      "R6"
+    ],
+    "base": "origin/main",
+    "branch": "build/orca-yaml",
+    "worktree": "orca-yaml",
+    "touches": [
+      "orca.yaml"
+    ],
+    "must_not_touch": [],
+    "locks": [],
+    "pr_title": "build(orca): setup script for new worktrees"
+  },
+  {
+    "id": "H1",
+    "title": "Create the fork's stable branch",
+    "wave": 2,
+    "executor": "human",
+    "repo": "parquet-dotnet",
+    "depends_on": [
+      "G0",
+      "G1"
+    ],
+    "base": "origin/main",
+    "branch": null,
+    "worktree": null,
+    "touches": [],
+    "must_not_touch": [],
+    "locks": [],
+    "pr_title": null
+  },
+  {
+    "id": "U03",
+    "title": "Recover the Parquet.Net backend and fork submodule",
+    "wave": 2,
+    "executor": "antigravity",
+    "repo": "Iceberg.NET",
+    "depends_on": [
+      "U02",
+      "H1"
+    ],
+    "base": "origin/main",
+    "branch": "lake/recover-parquet-net",
+    "worktree": "lake-recover-parquet-net",
+    "touches": [],
+    "must_not_touch": [
+      "src/Iceberg.Net.DuckLake/** (except what these commits change)"
+    ],
+    "locks": [
+      "emulation stack (only if running Docker suites locally)"
+    ],
+    "pr_title": "feat(data): Parquet.Net as a second Parquet backend, through the fork submodule"
+  },
+  {
+    "id": "U04",
+    "title": "Triage the online session's Parquet.SourceGenerator branch",
+    "wave": 2,
+    "executor": "antigravity",
+    "repo": "Parquet.SourceGenerator",
+    "depends_on": [
+      "G0"
+    ],
+    "base": "origin/ccr-87fadcf9-bxi9wr",
+    "branch": "ccr-87fadcf9-bxi9wr",
+    "worktree": "sg-ccr-triage",
+    "touches": [],
+    "must_not_touch": [],
+    "locks": [],
+    "pr_title": "draft: Lake.Parquet packaging from the online session (triage)"
+  },
+  {
+    "id": "N1",
+    "title": "Mechanical rename to Lake.*",
+    "wave": 3,
+    "executor": "antigravity",
+    "repo": "Iceberg.NET",
+    "depends_on": [
+      "G1",
+      "U01a",
+      "U01b",
+      "U02",
+      "U03",
+      "U05"
+    ],
+    "base": "origin/main",
+    "branch": "rtkelly13/lake-rename",
+    "worktree": "lake-rename",
+    "touches": [],
+    "must_not_touch": [],
+    "locks": [
+      "repository: no other Iceberg.NET PR merges while this is open",
+      "emulation stack"
+    ],
+    "pr_title": "refactor!: rename Iceberg.Net.* to Lake.* (no behaviour change)"
+  },
+  {
+    "id": "N2",
+    "title": "Per-package versions, changelogs and public API files",
+    "wave": 3,
+    "executor": "antigravity",
+    "repo": "Iceberg.NET",
+    "depends_on": [
+      "N1",
+      "G1"
+    ],
+    "base": "rtkelly13/lake-rename",
+    "branch": "rtkelly13/lake-versioning",
+    "worktree": "lake-versioning",
+    "touches": [],
+    "must_not_touch": [],
+    "locks": [],
+    "pr_title": "build(release): per-package versions, changelogs and public API tracking"
+  },
+  {
+    "id": "H2",
+    "title": "Finish the GitHub rename: publishing and app checks",
+    "wave": 4,
+    "executor": "human",
+    "repo": "Iceberg.NET",
+    "depends_on": [
+      "R5"
+    ],
+    "base": "origin/main",
+    "branch": null,
+    "worktree": null,
+    "touches": [],
+    "must_not_touch": [],
+    "locks": [],
+    "pr_title": null
+  },
+  {
+    "id": "R4x",
+    "title": "Apply the rename on this machine",
+    "wave": 4,
+    "executor": "human",
+    "repo": "rig",
+    "depends_on": [],
+    "base": "origin/main",
+    "branch": null,
+    "worktree": null,
+    "touches": [],
+    "must_not_touch": [],
+    "locks": [],
+    "pr_title": null
+  },
+  {
+    "id": "U08",
+    "title": "Update references in other repositories",
+    "wave": 4,
+    "executor": "antigravity",
+    "repo": "(estate)",
+    "depends_on": [
+      "N1"
+    ],
+    "base": "origin/main",
+    "branch": null,
+    "worktree": null,
+    "touches": [],
+    "must_not_touch": [],
+    "locks": [],
+    "pr_title": "docs: Iceberg.NET is now Lake.NET"
+  },
+  {
+    "id": "H3",
+    "title": "First Lake.* release and retiring Iceberg.Net.*",
+    "wave": 5,
+    "executor": "human",
+    "repo": "Lake.NET",
+    "depends_on": [
+      "N2",
+      "H2",
+      "R5"
+    ],
+    "base": "origin/main",
+    "branch": null,
+    "worktree": null,
+    "touches": [],
+    "must_not_touch": [],
+    "locks": [],
+    "pr_title": null
+  }
+]

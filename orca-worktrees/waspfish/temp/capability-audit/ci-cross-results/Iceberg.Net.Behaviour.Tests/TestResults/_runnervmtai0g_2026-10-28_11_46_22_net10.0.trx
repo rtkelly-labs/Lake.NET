@@ -1,0 +1,2233 @@
+﻿<?xml version="1.0" encoding="utf-8"?>
+<TestRun id="f4015737-4227-4874-a117-f4799d2c6bf5" name="@runnervmtai0g 2026-10-28 11:46:22" xmlns="http://microsoft.com/schemas/VisualStudio/TeamTest/2010">
+  <Times creation="2026-10-28T11:46:22.9752934+00:00" queuing="2026-10-28T11:46:22.9752934+00:00" start="2026-10-28T11:46:20.8955181+00:00" finish="2026-10-28T11:47:27.3329347+00:00" />
+  <TestSettings name="default" id="3fd01697-b4de-471f-bb3a-b4c13a9f510c">
+    <Deployment runDeploymentRoot="_runnervmtai0g_2026-10-28_11_46_22" />
+  </TestSettings>
+  <Results>
+    <UnitTestResult executionId="aca8962b-16fa-4e36-bfc8-1de10e1bf6b6" testId="45ef2f5a-d296-c398-dfb8-5bca150249ff" testName="Updated and merged rows keep their identity(strategy: &quot;position deletes&quot;, __pickleIndex: &quot;9&quot;, exampleTags: [])" computerName="runnervmtai0g" duration="00:00:00.0370863" startTime="2026-10-28T11:46:56.1078431+00:00" endTime="2026-10-28T11:46:56.1078433+00:00" testType="13cdc9d9-ddb5-4fa4-a97d-d965ccfc6d4b" outcome="Passed" testListId="8c84fa94-04c1-424b-9868-57a2d4851a1d" relativeResultsDirectory="aca8962b-16fa-4e36-bfc8-1de10e1bf6b6">
+      <Output>
+        <StdOut>Given the default rows are:
+  --- table step argument ---
+  | id | name  | region |
+  | 1  | alice | eu     |
+  | 2  | bob   | us     |
+  | 3  | carol | eu     |
+  | 4  | dave  | us     |
+-&gt; done: IcebergSteps.GivenDefaultRows(&lt;table&gt;) (0.0s)
+Given a format v3 table keyed by "id" holding the default rows
+-&gt; done: IcebergSteps.GivenTableWithDefaults(3) (0.0s)
+And I note every row's row id
+-&gt; done: UpdateMergeSteps.GivenRowIds() (0.0s)
+When I set name to "robert" where id is 2 with position deletes
+-&gt; done: UpdateMergeSteps.WhenUpdate("name", "robert", 2, PositionDeletes) (0.0s)
+And I merge the feed with position deletes, updating matches and inserting new rows:
+  --- table step argument ---
+  | id | name | region |
+  | 3  | caz  | eu     |
+  | 5  | erin | eu     |
+-&gt; done: UpdateMergeSteps.WhenMerge(PositionDeletes, &lt;table&gt;) (0.0s)
+Then rows 1, 2, 3 and 4 keep their row ids
+-&gt; done: UpdateMergeSteps.ThenKeepRowIds("1, 2, 3", 4) (0.0s)
+And row 5 has a new row id
+-&gt; done: UpdateMergeSteps.ThenNewRowId(5) (0.0s)</StdOut>
+      </Output>
+    </UnitTestResult>
+    <UnitTestResult executionId="4a1fc839-2a32-4de5-8e7b-c8f578f0d91c" testId="b18c86d7-560d-dc5d-c064-447b10bacc1e" testName="Correcting a value changes only the rows the filter selects(version: &quot;2&quot;, strategy: &quot;position deletes&quot;, deleteFiles: &quot;position delete files&quot;, __pickleIndex: &quot;1&quot;, exampleTags: [])" computerName="runnervmtai0g" duration="00:00:01.4232092" startTime="2026-10-28T11:46:53.4728305+00:00" endTime="2026-10-28T11:46:53.4728307+00:00" testType="13cdc9d9-ddb5-4fa4-a97d-d965ccfc6d4b" outcome="Passed" testListId="8c84fa94-04c1-424b-9868-57a2d4851a1d" relativeResultsDirectory="4a1fc839-2a32-4de5-8e7b-c8f578f0d91c">
+      <Output>
+        <StdOut>Given the default rows are:
+  --- table step argument ---
+  | id | name  | region |
+  | 1  | alice | eu     |
+  | 2  | bob   | us     |
+  | 3  | carol | eu     |
+  | 4  | dave  | us     |
+-&gt; done: IcebergSteps.GivenDefaultRows(&lt;table&gt;) (0.0s)
+Given a format v2 table keyed by "id" holding the default rows
+-&gt; done: IcebergSteps.GivenTableWithDefaults(2) (0.0s)
+When I set name to "robert" where id is 2 with position deletes
+-&gt; done: UpdateMergeSteps.WhenUpdate("name", "robert", 2, PositionDeletes) (0.0s)
+Then the change reports 1 updated, 0 deleted and 0 inserted
+-&gt; done: UpdateMergeSteps.ThenCounts(1, 0, 0) (0.0s)
+And the table contains exactly:
+  --- table step argument ---
+  | id | name   | region |
+  | 1  | alice  | eu     |
+  | 2  | robert | us     |
+  | 3  | carol  | eu     |
+  | 4  | dave   | us     |
+-&gt; done: IcebergSteps.ThenContains(&lt;table&gt;) (0.0s)
+And the table's delete files are position delete files
+-&gt; done: IcebergSteps.ThenDeleteFilesAre("position delete f...") (0.0s)
+And PyIceberg reads the same rows
+-&gt; done: IcebergSteps.ThenPyIcebergAgrees() (1.4s)</StdOut>
+      </Output>
+    </UnitTestResult>
+    <UnitTestResult executionId="a333d61e-b7dc-41fa-86d5-b05967e4e4fe" testId="4a8be8e7-c000-4d18-45c6-5b2e41d5edcf" testName="Delete by key(version: &quot;3&quot;, strategy: &quot;equality deletes&quot;, operation: &quot;delete&quot;, __pickleIndex: &quot;5&quot;, exampleTags: [])" computerName="runnervmtai0g" duration="00:00:00.0106982" startTime="2026-10-28T11:46:52.7883268+00:00" endTime="2026-10-28T11:46:52.7883269+00:00" testType="13cdc9d9-ddb5-4fa4-a97d-d965ccfc6d4b" outcome="Passed" testListId="8c84fa94-04c1-424b-9868-57a2d4851a1d" relativeResultsDirectory="a333d61e-b7dc-41fa-86d5-b05967e4e4fe">
+      <Output>
+        <StdOut>Given the default rows are:
+  --- table step argument ---
+  | id | name | region |
+  | 1  | a    | eu     |
+  | 2  | b    | us     |
+  | 3  | c    | eu     |
+  | 4  | d    | us     |
+-&gt; done: IcebergSteps.GivenDefaultRows(&lt;table&gt;) (0.0s)
+Given a format v3 table keyed by "id" holding the default rows
+-&gt; done: IcebergSteps.GivenTableWithDefaults(3) (0.0s)
+When I delete keys 2 and 3 with equality deletes
+-&gt; done: IcebergSteps.WhenDeleteKeys(2, 3, EqualityDeletes) (0.0s)
+Then the table contains exactly:
+  --- table step argument ---
+  | id | name | region |
+  | 1  | a    | eu     |
+  | 4  | d    | us     |
+-&gt; done: IcebergSteps.ThenContains(&lt;table&gt;) (0.0s)
+And the last snapshot operation is "delete"
+-&gt; done: IcebergSteps.ThenOperation("delete") (0.0s)</StdOut>
+      </Output>
+    </UnitTestResult>
+    <UnitTestResult executionId="2afba832-6ad6-4180-8208-0ea4828495f5" testId="543ed6c2-6e50-e67d-a1f6-6adcc1da4104" testName="Upserting the same rows twice is idempotent(version: &quot;2&quot;, strategy: &quot;equality deletes&quot;, __pickleIndex: &quot;10&quot;, exampleTags: [])" computerName="runnervmtai0g" duration="00:00:00.0574809" startTime="2026-10-28T11:46:23.0327708+00:00" endTime="2026-10-28T11:46:23.0327709+00:00" testType="13cdc9d9-ddb5-4fa4-a97d-d965ccfc6d4b" outcome="Passed" testListId="8c84fa94-04c1-424b-9868-57a2d4851a1d" relativeResultsDirectory="2afba832-6ad6-4180-8208-0ea4828495f5">
+      <Output>
+        <StdOut>Given a format v2 table keyed by "id"
+-&gt; done: IcebergSteps.GivenTable(2) (0.0s)
+And the table contains:
+  --- table step argument ---
+  | id | name | region |
+  | 1  | a    | eu     |
+-&gt; done: IcebergSteps.GivenRows(&lt;table&gt;) (0.0s)
+When I upsert with equality deletes:
+  --- table step argument ---
+  | id | name | region |
+  | 1  | a2   | eu     |
+-&gt; done: IcebergSteps.WhenUpsert(EqualityDeletes, &lt;table&gt;) (0.0s)
+And I upsert with equality deletes:
+  --- table step argument ---
+  | id | name | region |
+  | 1  | a2   | eu     |
+-&gt; done: IcebergSteps.WhenUpsert(EqualityDeletes, &lt;table&gt;) (0.0s)
+Then the table contains exactly:
+  --- table step argument ---
+  | id | name | region |
+  | 1  | a2   | eu     |
+-&gt; done: IcebergSteps.ThenContains(&lt;table&gt;) (0.0s)</StdOut>
+      </Output>
+    </UnitTestResult>
+    <UnitTestResult executionId="eabb5095-72bf-4883-bc3c-043a6da374a5" testId="40369559-1095-155f-a640-6b2b34393f0a" testName="Delete by predicate(version: &quot;3&quot;, strategy: &quot;copy-on-write&quot;, __pickleIndex: &quot;8&quot;, exampleTags: [])" computerName="runnervmtai0g" duration="00:00:00.9743662" startTime="2026-10-28T11:46:56.3558791+00:00" endTime="2026-10-28T11:46:56.3558793+00:00" testType="13cdc9d9-ddb5-4fa4-a97d-d965ccfc6d4b" outcome="Passed" testListId="8c84fa94-04c1-424b-9868-57a2d4851a1d" relativeResultsDirectory="eabb5095-72bf-4883-bc3c-043a6da374a5">
+      <Output>
+        <StdOut>Given the default rows are:
+  --- table step argument ---
+  | id | name | region |
+  | 1  | a    | eu     |
+  | 2  | b    | us     |
+  | 3  | c    | eu     |
+  | 4  | d    | us     |
+-&gt; done: IcebergSteps.GivenDefaultRows(&lt;table&gt;) (0.0s)
+Given a format v3 table keyed by "id" holding the default rows
+-&gt; done: IcebergSteps.GivenTableWithDefaults(3) (0.0s)
+When I delete rows where region is "us" with copy-on-write
+-&gt; done: IcebergSteps.WhenDeleteWhere("us", CopyOnWrite) (0.0s)
+Then the table contains exactly:
+  --- table step argument ---
+  | id | name | region |
+  | 1  | a    | eu     |
+  | 3  | c    | eu     |
+-&gt; done: IcebergSteps.ThenContains(&lt;table&gt;) (0.0s)
+And PyIceberg reads the same rows
+-&gt; done: IcebergSteps.ThenPyIcebergAgrees() (0.9s)</StdOut>
+      </Output>
+    </UnitTestResult>
+    <UnitTestResult executionId="5c26b2c9-db44-4a3b-897e-8b4b7c54d329" testId="8caae6ea-9b9b-65b0-35e4-da0ede3a2291" testName="Correcting a value changes only the rows the filter selects(version: &quot;3&quot;, strategy: &quot;copy-on-write&quot;, deleteFiles: &quot;none&quot;, __pickleIndex: &quot;2&quot;, exampleTags: [])" computerName="runnervmtai0g" duration="00:00:01.6161277" startTime="2026-10-28T11:46:52.0395583+00:00" endTime="2026-10-28T11:46:52.0395585+00:00" testType="13cdc9d9-ddb5-4fa4-a97d-d965ccfc6d4b" outcome="Passed" testListId="8c84fa94-04c1-424b-9868-57a2d4851a1d" relativeResultsDirectory="5c26b2c9-db44-4a3b-897e-8b4b7c54d329">
+      <Output>
+        <StdOut>Given the default rows are:
+  --- table step argument ---
+  | id | name  | region |
+  | 1  | alice | eu     |
+  | 2  | bob   | us     |
+  | 3  | carol | eu     |
+  | 4  | dave  | us     |
+-&gt; done: IcebergSteps.GivenDefaultRows(&lt;table&gt;) (0.0s)
+Given a format v3 table keyed by "id" holding the default rows
+-&gt; done: IcebergSteps.GivenTableWithDefaults(3) (0.0s)
+When I set name to "robert" where id is 2 with copy-on-write
+-&gt; done: UpdateMergeSteps.WhenUpdate("name", "robert", 2, CopyOnWrite) (0.0s)
+Then the change reports 1 updated, 0 deleted and 0 inserted
+-&gt; done: UpdateMergeSteps.ThenCounts(1, 0, 0) (0.0s)
+And the table contains exactly:
+  --- table step argument ---
+  | id | name   | region |
+  | 1  | alice  | eu     |
+  | 2  | robert | us     |
+  | 3  | carol  | eu     |
+  | 4  | dave   | us     |
+-&gt; done: IcebergSteps.ThenContains(&lt;table&gt;) (0.0s)
+And the table's delete files are none
+-&gt; done: IcebergSteps.ThenDeleteFilesAre("none") (0.0s)
+And PyIceberg reads the same rows
+-&gt; done: IcebergSteps.ThenPyIcebergAgrees() (1.6s)</StdOut>
+      </Output>
+    </UnitTestResult>
+    <UnitTestResult executionId="dd1642c7-2ddf-49d0-88ed-0b62896b24df" testId="8fd53bd6-98c2-5c77-366e-6af96f48f208" testName="Trino reads our deletes through the REST catalog(version: &quot;3&quot;, mechanism: &quot;copy-on-write&quot;, __pickleIndex: &quot;6&quot;, exampleTags: [])" computerName="runnervmtai0g" duration="00:00:00.5222000" startTime="2026-10-28T11:47:27.2417855+00:00" endTime="2026-10-28T11:47:27.2417856+00:00" testType="13cdc9d9-ddb5-4fa4-a97d-d965ccfc6d4b" outcome="Passed" testListId="8c84fa94-04c1-424b-9868-57a2d4851a1d" relativeResultsDirectory="dd1642c7-2ddf-49d0-88ed-0b62896b24df">
+      <Output>
+        <StdOut>Given the tables live in the shared REST catalog
+-&gt; done: IcebergSteps.GivenSharedCatalog() (0.0s)
+And a format v3 table keyed by "id"
+-&gt; done: IcebergSteps.GivenTable(3) (0.0s)
+And the table contains:
+  --- table step argument ---
+  | id | name  | region |
+  | 1  | alice | eu     |
+  | 2  | bob   | us     |
+  | 3  | carol | eu     |
+-&gt; done: IcebergSteps.GivenRows(&lt;table&gt;) (0.0s)
+When I upsert with copy-on-write:
+  --- table step argument ---
+  | id | name  | region |
+  | 2  | bobby | us     |
+  | 4  | dan   | eu     |
+-&gt; done: IcebergSteps.WhenUpsert(CopyOnWrite, &lt;table&gt;) (0.1s)
+And I delete keys 1 and 3 with copy-on-write
+-&gt; done: IcebergSteps.WhenDeleteKeys(1, 3, CopyOnWrite) (0.1s)
+Then the table contains exactly:
+  --- table step argument ---
+  | id | name  | region |
+  | 2  | bobby | us     |
+  | 4  | dan   | eu     |
+-&gt; done: IcebergSteps.ThenContains(&lt;table&gt;) (0.0s)
+And Trino reads the same rows
+-&gt; done: IcebergSteps.ThenTrinoAgrees() (0.3s)</StdOut>
+      </Output>
+    </UnitTestResult>
+    <UnitTestResult executionId="e1d05fef-5446-462f-b540-2077631c013c" testId="9ffeedc3-93d1-0283-9146-b609a0a616c6" testName="Updated and merged rows keep their identity(strategy: &quot;copy-on-write&quot;, __pickleIndex: &quot;8&quot;, exampleTags: [])" computerName="runnervmtai0g" duration="00:00:00.0622165" startTime="2026-10-28T11:46:56.0657427+00:00" endTime="2026-10-28T11:46:56.0657429+00:00" testType="13cdc9d9-ddb5-4fa4-a97d-d965ccfc6d4b" outcome="Passed" testListId="8c84fa94-04c1-424b-9868-57a2d4851a1d" relativeResultsDirectory="e1d05fef-5446-462f-b540-2077631c013c">
+      <Output>
+        <StdOut>Given the default rows are:
+  --- table step argument ---
+  | id | name  | region |
+  | 1  | alice | eu     |
+  | 2  | bob   | us     |
+  | 3  | carol | eu     |
+  | 4  | dave  | us     |
+-&gt; done: IcebergSteps.GivenDefaultRows(&lt;table&gt;) (0.0s)
+Given a format v3 table keyed by "id" holding the default rows
+-&gt; done: IcebergSteps.GivenTableWithDefaults(3) (0.0s)
+And I note every row's row id
+-&gt; done: UpdateMergeSteps.GivenRowIds() (0.0s)
+When I set name to "robert" where id is 2 with copy-on-write
+-&gt; done: UpdateMergeSteps.WhenUpdate("name", "robert", 2, CopyOnWrite) (0.0s)
+And I merge the feed with copy-on-write, updating matches and inserting new rows:
+  --- table step argument ---
+  | id | name | region |
+  | 3  | caz  | eu     |
+  | 5  | erin | eu     |
+-&gt; done: UpdateMergeSteps.WhenMerge(CopyOnWrite, &lt;table&gt;) (0.0s)
+Then rows 1, 2, 3 and 4 keep their row ids
+-&gt; done: UpdateMergeSteps.ThenKeepRowIds("1, 2, 3", 4) (0.0s)
+And row 5 has a new row id
+-&gt; done: UpdateMergeSteps.ThenNewRowId(5) (0.0s)</StdOut>
+      </Output>
+    </UnitTestResult>
+    <UnitTestResult executionId="b80e7c90-beca-4d75-aed3-4a1f1004aefc" testId="a5339be4-d9b7-2979-936c-c78d3d57dabf" testName="Pure insertion never touches existing rows(version: &quot;2&quot;, __pickleIndex: &quot;0&quot;, exampleTags: [])" computerName="runnervmtai0g" duration="00:00:02.0538759" startTime="2026-10-28T11:46:29.1377964+00:00" endTime="2026-10-28T11:46:29.1377966+00:00" testType="13cdc9d9-ddb5-4fa4-a97d-d965ccfc6d4b" outcome="Passed" testListId="8c84fa94-04c1-424b-9868-57a2d4851a1d" relativeResultsDirectory="b80e7c90-beca-4d75-aed3-4a1f1004aefc">
+      <Output>
+        <StdOut>Given a format v2 table keyed by "id"
+-&gt; done: IcebergSteps.GivenTable(2) (0.0s)
+And the table contains:
+  --- table step argument ---
+  | id | name | region |
+  | 1  | a    | eu     |
+  | 2  | b    | us     |
+-&gt; done: IcebergSteps.GivenRows(&lt;table&gt;) (0.0s)
+When I insert:
+  --- table step argument ---
+  | id | name | region |
+  | 3  | c    | eu     |
+-&gt; done: IcebergSteps.WhenInsert(&lt;table&gt;) (0.0s)
+Then the table contains exactly:
+  --- table step argument ---
+  | id | name | region |
+  | 1  | a    | eu     |
+  | 2  | b    | us     |
+  | 3  | c    | eu     |
+-&gt; done: IcebergSteps.ThenContains(&lt;table&gt;) (0.0s)
+And the last snapshot operation is "append"
+-&gt; done: IcebergSteps.ThenOperation("append") (0.0s)
+And the table has no delete files
+-&gt; done: IcebergSteps.ThenNoDeleteFiles() (0.0s)
+And PyIceberg reads the same rows
+-&gt; done: IcebergSteps.ThenPyIcebergAgrees() (2.0s)</StdOut>
+      </Output>
+    </UnitTestResult>
+    <UnitTestResult executionId="12ec95e8-9211-453c-8da9-0a4a2dfe3227" testId="d0641248-2a07-b4d1-2df2-9ad3edfa426c" testName="Concurrent upserts of the same key keep a single row(version: &quot;2&quot;, strategy: &quot;copy-on-write&quot;, __pickleIndex: &quot;0&quot;, exampleTags: [])" computerName="runnervmtai0g" duration="00:00:00.2893240" startTime="2026-10-28T11:46:49.8357709+00:00" endTime="2026-10-28T11:46:49.8357711+00:00" testType="13cdc9d9-ddb5-4fa4-a97d-d965ccfc6d4b" outcome="Passed" testListId="8c84fa94-04c1-424b-9868-57a2d4851a1d" relativeResultsDirectory="12ec95e8-9211-453c-8da9-0a4a2dfe3227">
+      <Output>
+        <StdOut>Given a format v2 table keyed by "id"
+-&gt; done: IcebergSteps.GivenTable(2) (0.1s)
+And the table contains:
+  --- table step argument ---
+  | id | name | region |
+  | 1  | a    | eu     |
+-&gt; done: IcebergSteps.GivenRows(&lt;table&gt;) (0.0s)
+And a second writer that has already loaded the table
+-&gt; done: IcebergSteps.GivenSecondWriter() (0.0s)
+When I upsert with copy-on-write:
+  --- table step argument ---
+  | id | name    | region |
+  | 7  | from-me | eu     |
+-&gt; done: IcebergSteps.WhenUpsert(CopyOnWrite, &lt;table&gt;) (0.0s)
+And the second writer upserts with copy-on-write:
+  --- table step argument ---
+  | id | name        | region |
+  | 7  | from-second | eu     |
+-&gt; done: IcebergSteps.WhenSecondUpserts(CopyOnWrite, &lt;table&gt;) (0.1s)
+Then the table contains exactly:
+  --- table step argument ---
+  | id | name        | region |
+  | 1  | a           | eu     |
+  | 7  | from-second | eu     |
+-&gt; done: IcebergSteps.ThenContains(&lt;table&gt;) (0.0s)
+And the second writer needed 2 attempts
+-&gt; done: IcebergSteps.ThenAttempts(2) (0.0s)</StdOut>
+      </Output>
+    </UnitTestResult>
+    <UnitTestResult executionId="fafb40a6-6f98-4277-b614-677fff0adf9a" testId="a2dfdaf4-89a7-86df-2641-15b585ba5071" testName="A customer who moves region moves to that region's partition(version: &quot;2&quot;, strategy: &quot;copy-on-write&quot;, __pickleIndex: &quot;4&quot;, exampleTags: [])" computerName="runnervmtai0g" duration="00:00:01.3639376" startTime="2026-10-28T11:46:54.8479591+00:00" endTime="2026-10-28T11:46:54.8479593+00:00" testType="13cdc9d9-ddb5-4fa4-a97d-d965ccfc6d4b" outcome="Passed" testListId="8c84fa94-04c1-424b-9868-57a2d4851a1d" relativeResultsDirectory="fafb40a6-6f98-4277-b614-677fff0adf9a">
+      <Output>
+        <StdOut>Given the default rows are:
+  --- table step argument ---
+  | id | name  | region |
+  | 1  | alice | eu     |
+  | 2  | bob   | us     |
+  | 3  | carol | eu     |
+  | 4  | dave  | us     |
+-&gt; done: IcebergSteps.GivenDefaultRows(&lt;table&gt;) (0.0s)
+Given a format v2 table keyed by "id" and partitioned by "region"
+-&gt; done: IcebergSteps.GivenPartitionedTable(2) (0.0s)
+And the table contains the default rows
+-&gt; done: IcebergSteps.GivenDefaults() (0.0s)
+When I set region to "apac" where id is 3 with copy-on-write
+-&gt; done: UpdateMergeSteps.WhenUpdate("region", "apac", 3, CopyOnWrite) (0.0s)
+Then the table contains exactly:
+  --- table step argument ---
+  | id | name  | region |
+  | 1  | alice | eu     |
+  | 2  | bob   | us     |
+  | 3  | carol | apac   |
+  | 4  | dave  | us     |
+-&gt; done: IcebergSteps.ThenContains(&lt;table&gt;) (0.0s)
+And the row with id 3 is stored in the "apac" partition
+-&gt; done: UpdateMergeSteps.ThenPartition(3, "apac") (0.0s)
+And PyIceberg reads the same rows
+-&gt; done: IcebergSteps.ThenPyIcebergAgrees() (1.3s)</StdOut>
+      </Output>
+    </UnitTestResult>
+    <UnitTestResult executionId="aa15371c-ffc0-47bd-aba2-3ee6d3c1d1f8" testId="7c694602-40d7-f97b-3379-923b1805ba6b" testName="Group replacement swaps whole groups and leaves the rest alone(version: &quot;2&quot;, strategy: &quot;copy-on-write&quot;, pyiceberg: &quot;reads the same rows&quot;, __pickleIndex: &quot;13&quot;, exampleTags: [])" computerName="runnervmtai0g" duration="00:00:01.5137812" startTime="2026-10-28T11:46:52.7734362+00:00" endTime="2026-10-28T11:46:52.7734364+00:00" testType="13cdc9d9-ddb5-4fa4-a97d-d965ccfc6d4b" outcome="Passed" testListId="8c84fa94-04c1-424b-9868-57a2d4851a1d" relativeResultsDirectory="aa15371c-ffc0-47bd-aba2-3ee6d3c1d1f8">
+      <Output>
+        <StdOut>Given a format v2 table keyed by "id" and partitioned by "region"
+-&gt; done: IcebergSteps.GivenPartitionedTable(2) (0.0s)
+And the table contains:
+  --- table step argument ---
+  | id | name | region |
+  | 1  | a    | eu     |
+  | 2  | b    | us     |
+  | 3  | c    | eu     |
+  | 4  | d    | apac   |
+-&gt; done: IcebergSteps.GivenRows(&lt;table&gt;) (0.0s)
+When I replace the "region" groups with copy-on-write:
+  --- table step argument ---
+  | id | name | region |
+  | 10 | x    | eu     |
+  | 11 | y    | us     |
+-&gt; done: IcebergSteps.WhenReplaceGroups("region", CopyOnWrite, &lt;table&gt;) (0.0s)
+Then the table contains exactly:
+  --- table step argument ---
+  | id | name | region |
+  | 4  | d    | apac   |
+  | 10 | x    | eu     |
+  | 11 | y    | us     |
+-&gt; done: IcebergSteps.ThenContains(&lt;table&gt;) (0.0s)
+And PyIceberg reads the same rows
+-&gt; done: IcebergSteps.ThenPyIcebergAgrees() (1.5s)</StdOut>
+      </Output>
+    </UnitTestResult>
+    <UnitTestResult executionId="48867543-1304-437c-8f3e-e33b132db29b" testId="22ec277c-0ea7-471a-9210-19398f41b9a9" testName="A typed insert fills omitted optional and required columns(format: &quot;avro&quot;, reader: &quot;Spark&quot;, __pickleIndex: &quot;1&quot;, exampleTags: [])" computerName="runnervmtai0g" duration="00:00:22.3415560" startTime="2026-10-28T11:46:49.5117658+00:00" endTime="2026-10-28T11:46:49.5117660+00:00" testType="13cdc9d9-ddb5-4fa4-a97d-d965ccfc6d4b" outcome="Passed" testListId="8c84fa94-04c1-424b-9868-57a2d4851a1d" relativeResultsDirectory="48867543-1304-437c-8f3e-e33b132db29b">
+      <Output>
+        <StdOut>Given a format v3 table with typed write defaults using avro
+-&gt; done: WriteDefaultSteps.GivenDefaults("avro") (0.0s)
+When I insert a typed row omitting the defaulted columns
+-&gt; done: WriteDefaultSteps.InsertTyped() (0.1s)
+Then the table contains exactly:
+  --- table step argument ---
+  | id | name      | region |
+  | 1  | anonymous | eu     |
+-&gt; done: IcebergSteps.ThenContains(&lt;table&gt;) (0.1s)
+And Spark reads the same rows
+-&gt; done: IcebergSteps.ThenSparkAgrees() (22.1s)</StdOut>
+      </Output>
+    </UnitTestResult>
+    <UnitTestResult executionId="f06daa11-100f-4568-b02e-c26756dacc97" testId="83104d74-db71-2171-cb0e-2b06440932f8" testName="Group replacement swaps whole groups and leaves the rest alone(version: &quot;2&quot;, strategy: &quot;position deletes&quot;, pyiceberg: &quot;reads the same rows&quot;, __pickleIndex: &quot;14&quot;, exampleTags: [])" computerName="runnervmtai0g" duration="00:00:01.7301717" startTime="2026-10-28T11:46:54.5222578+00:00" endTime="2026-10-28T11:46:54.5222580+00:00" testType="13cdc9d9-ddb5-4fa4-a97d-d965ccfc6d4b" outcome="Passed" testListId="8c84fa94-04c1-424b-9868-57a2d4851a1d" relativeResultsDirectory="f06daa11-100f-4568-b02e-c26756dacc97">
+      <Output>
+        <StdOut>Given a format v2 table keyed by "id" and partitioned by "region"
+-&gt; done: IcebergSteps.GivenPartitionedTable(2) (0.0s)
+And the table contains:
+  --- table step argument ---
+  | id | name | region |
+  | 1  | a    | eu     |
+  | 2  | b    | us     |
+  | 3  | c    | eu     |
+  | 4  | d    | apac   |
+-&gt; done: IcebergSteps.GivenRows(&lt;table&gt;) (0.0s)
+When I replace the "region" groups with position deletes:
+  --- table step argument ---
+  | id | name | region |
+  | 10 | x    | eu     |
+  | 11 | y    | us     |
+-&gt; done: IcebergSteps.WhenReplaceGroups("region", PositionDeletes, &lt;table&gt;) (0.0s)
+Then the table contains exactly:
+  --- table step argument ---
+  | id | name | region |
+  | 4  | d    | apac   |
+  | 10 | x    | eu     |
+  | 11 | y    | us     |
+-&gt; done: IcebergSteps.ThenContains(&lt;table&gt;) (0.0s)
+And PyIceberg reads the same rows
+-&gt; done: IcebergSteps.ThenPyIcebergAgrees() (1.7s)</StdOut>
+      </Output>
+    </UnitTestResult>
+    <UnitTestResult executionId="f4d3c0c3-0f13-4051-bf4b-4b68bfa7391a" testId="4bd2ef3f-183c-1dea-29be-e99e90dc6c58" testName="Correcting a value changes only the rows the filter selects(version: &quot;3&quot;, strategy: &quot;position deletes&quot;, deleteFiles: &quot;deletion vectors&quot;, __pickleIndex: &quot;3&quot;, exampleTags: [])" computerName="runnervmtai0g" duration="00:00:01.8199081" startTime="2026-10-28T11:46:48.2957570+00:00" endTime="2026-10-28T11:46:48.2957572+00:00" testType="13cdc9d9-ddb5-4fa4-a97d-d965ccfc6d4b" outcome="Passed" testListId="8c84fa94-04c1-424b-9868-57a2d4851a1d" relativeResultsDirectory="f4d3c0c3-0f13-4051-bf4b-4b68bfa7391a">
+      <Output>
+        <StdOut>Given the default rows are:
+  --- table step argument ---
+  | id | name  | region |
+  | 1  | alice | eu     |
+  | 2  | bob   | us     |
+  | 3  | carol | eu     |
+  | 4  | dave  | us     |
+-&gt; done: IcebergSteps.GivenDefaultRows(&lt;table&gt;) (0.0s)
+Given a format v3 table keyed by "id" holding the default rows
+-&gt; done: IcebergSteps.GivenTableWithDefaults(3) (0.0s)
+When I set name to "robert" where id is 2 with position deletes
+-&gt; done: UpdateMergeSteps.WhenUpdate("name", "robert", 2, PositionDeletes) (0.0s)
+Then the change reports 1 updated, 0 deleted and 0 inserted
+-&gt; done: UpdateMergeSteps.ThenCounts(1, 0, 0) (0.0s)
+And the table contains exactly:
+  --- table step argument ---
+  | id | name   | region |
+  | 1  | alice  | eu     |
+  | 2  | robert | us     |
+  | 3  | carol  | eu     |
+  | 4  | dave   | us     |
+-&gt; done: IcebergSteps.ThenContains(&lt;table&gt;) (0.0s)
+And the table's delete files are deletion vectors
+-&gt; done: IcebergSteps.ThenDeleteFilesAre("deletion vectors") (0.0s)
+And PyIceberg reads the same rows
+-&gt; done: IcebergSteps.ThenPyIcebergAgrees() (1.8s)</StdOut>
+      </Output>
+    </UnitTestResult>
+    <UnitTestResult executionId="bdd4fc7c-13f9-4c25-bbce-c5c50006dcc7" testId="56d92541-055b-a9a3-4c84-ec709934cdab" testName="Equality deletes cannot express a predicate" computerName="runnervmtai0g" duration="00:00:00.0068882" startTime="2026-10-28T11:46:57.1617502+00:00" endTime="2026-10-28T11:46:57.1617504+00:00" testType="13cdc9d9-ddb5-4fa4-a97d-d965ccfc6d4b" outcome="Passed" testListId="8c84fa94-04c1-424b-9868-57a2d4851a1d" relativeResultsDirectory="bdd4fc7c-13f9-4c25-bbce-c5c50006dcc7">
+      <Output>
+        <StdOut>Given the default rows are:
+  --- table step argument ---
+  | id | name | region |
+  | 1  | a    | eu     |
+  | 2  | b    | us     |
+  | 3  | c    | eu     |
+  | 4  | d    | us     |
+-&gt; done: IcebergSteps.GivenDefaultRows(&lt;table&gt;) (0.0s)
+Given a format v2 table keyed by "id" holding the default rows
+-&gt; done: IcebergSteps.GivenTableWithDefaults(2) (0.0s)
+When I delete rows where region is "us" with equality deletes
+-&gt; done: IcebergSteps.WhenDeleteWhere("us", EqualityDeletes) (0.0s)
+Then the write fails with "Equality deletes delete by key"
+-&gt; done: IcebergSteps.ThenFails("Equality deletes ...") (0.0s)</StdOut>
+      </Output>
+    </UnitTestResult>
+    <UnitTestResult executionId="220f3f34-eda3-461d-95ef-1af1f1032d67" testId="f5789611-4994-6857-3d98-327b18402002" testName="Delete by predicate(version: &quot;3&quot;, strategy: &quot;position deletes&quot;, __pickleIndex: &quot;9&quot;, exampleTags: [])" computerName="runnervmtai0g" duration="00:00:01.2312203" startTime="2026-10-28T11:46:55.3736294+00:00" endTime="2026-10-28T11:46:55.3736296+00:00" testType="13cdc9d9-ddb5-4fa4-a97d-d965ccfc6d4b" outcome="Passed" testListId="8c84fa94-04c1-424b-9868-57a2d4851a1d" relativeResultsDirectory="220f3f34-eda3-461d-95ef-1af1f1032d67">
+      <Output>
+        <StdOut>Given the default rows are:
+  --- table step argument ---
+  | id | name | region |
+  | 1  | a    | eu     |
+  | 2  | b    | us     |
+  | 3  | c    | eu     |
+  | 4  | d    | us     |
+-&gt; done: IcebergSteps.GivenDefaultRows(&lt;table&gt;) (0.0s)
+Given a format v3 table keyed by "id" holding the default rows
+-&gt; done: IcebergSteps.GivenTableWithDefaults(3) (0.0s)
+When I delete rows where region is "us" with position deletes
+-&gt; done: IcebergSteps.WhenDeleteWhere("us", PositionDeletes) (0.0s)
+Then the table contains exactly:
+  --- table step argument ---
+  | id | name | region |
+  | 1  | a    | eu     |
+  | 3  | c    | eu     |
+-&gt; done: IcebergSteps.ThenContains(&lt;table&gt;) (0.0s)
+And PyIceberg reads the same rows
+-&gt; done: IcebergSteps.ThenPyIcebergAgrees() (1.2s)</StdOut>
+      </Output>
+    </UnitTestResult>
+    <UnitTestResult executionId="049f93a8-75aa-4217-9964-3c24672e7a8f" testId="87ae4355-6333-e685-16c1-71cfdf93585f" testName="Delete by key(version: &quot;2&quot;, strategy: &quot;equality deletes&quot;, operation: &quot;delete&quot;, __pickleIndex: &quot;2&quot;, exampleTags: [])" computerName="runnervmtai0g" duration="00:00:00.0435639" startTime="2026-10-28T11:46:52.7673533+00:00" endTime="2026-10-28T11:46:52.7673535+00:00" testType="13cdc9d9-ddb5-4fa4-a97d-d965ccfc6d4b" outcome="Passed" testListId="8c84fa94-04c1-424b-9868-57a2d4851a1d" relativeResultsDirectory="049f93a8-75aa-4217-9964-3c24672e7a8f">
+      <Output>
+        <StdOut>Given the default rows are:
+  --- table step argument ---
+  | id | name | region |
+  | 1  | a    | eu     |
+  | 2  | b    | us     |
+  | 3  | c    | eu     |
+  | 4  | d    | us     |
+-&gt; done: IcebergSteps.GivenDefaultRows(&lt;table&gt;) (0.0s)
+Given a format v2 table keyed by "id" holding the default rows
+-&gt; done: IcebergSteps.GivenTableWithDefaults(2) (0.0s)
+When I delete keys 2 and 3 with equality deletes
+-&gt; done: IcebergSteps.WhenDeleteKeys(2, 3, EqualityDeletes) (0.0s)
+Then the table contains exactly:
+  --- table step argument ---
+  | id | name | region |
+  | 1  | a    | eu     |
+  | 4  | d    | us     |
+-&gt; done: IcebergSteps.ThenContains(&lt;table&gt;) (0.0s)
+And the last snapshot operation is "delete"
+-&gt; done: IcebergSteps.ThenOperation("delete") (0.0s)</StdOut>
+      </Output>
+    </UnitTestResult>
+    <UnitTestResult executionId="5f7217ba-d922-4a4a-a4d4-52a5142b05b0" testId="6f019522-adb9-820c-09aa-480281bdc544" testName="Upserts and deletes read identically in Spark(version: &quot;3&quot;, mechanism: &quot;copy-on-write&quot;, __pickleIndex: &quot;3&quot;, exampleTags: [])" computerName="runnervmtai0g" duration="00:00:09.5592694" startTime="2026-10-28T11:47:21.4262086+00:00" endTime="2026-10-28T11:47:21.4262088+00:00" testType="13cdc9d9-ddb5-4fa4-a97d-d965ccfc6d4b" outcome="Passed" testListId="8c84fa94-04c1-424b-9868-57a2d4851a1d" relativeResultsDirectory="5f7217ba-d922-4a4a-a4d4-52a5142b05b0">
+      <Output>
+        <StdOut>Given a format v3 table keyed by "id"
+-&gt; done: IcebergSteps.GivenTable(3) (0.0s)
+And the table contains:
+  --- table step argument ---
+  | id | name  | region |
+  | 1  | alice | eu     |
+  | 2  | bob   | us     |
+  | 3  | carol | eu     |
+  | 4  | dave  | us     |
+-&gt; done: IcebergSteps.GivenRows(&lt;table&gt;) (0.0s)
+When I upsert with copy-on-write:
+  --- table step argument ---
+  | id | name  | region |
+  | 2  | bobby | us     |
+  | 5  | eve   | eu     |
+-&gt; done: IcebergSteps.WhenUpsert(CopyOnWrite, &lt;table&gt;) (0.0s)
+And I delete keys 1 and 3 with copy-on-write
+-&gt; done: IcebergSteps.WhenDeleteKeys(1, 3, CopyOnWrite) (0.0s)
+Then the table contains exactly:
+  --- table step argument ---
+  | id | name  | region |
+  | 2  | bobby | us     |
+  | 4  | dave  | us     |
+  | 5  | eve   | eu     |
+-&gt; done: IcebergSteps.ThenContains(&lt;table&gt;) (0.0s)
+And Spark reads the same rows
+-&gt; done: IcebergSteps.ThenSparkAgrees() (9.5s)</StdOut>
+      </Output>
+    </UnitTestResult>
+    <UnitTestResult executionId="158c4ca2-c4d0-4ba8-a33c-44c2ce09ef41" testId="db34ceab-d694-e383-d69e-c3ce4097b65a" testName="Group replacement swaps whole groups and leaves the rest alone(version: &quot;3&quot;, strategy: &quot;copy-on-write&quot;, pyiceberg: &quot;reads the same rows&quot;, __pickleIndex: &quot;16&quot;, exampleTags: [])" computerName="runnervmtai0g" duration="00:00:02.6760082" startTime="2026-10-28T11:46:46.4421707+00:00" endTime="2026-10-28T11:46:46.4421709+00:00" testType="13cdc9d9-ddb5-4fa4-a97d-d965ccfc6d4b" outcome="Passed" testListId="8c84fa94-04c1-424b-9868-57a2d4851a1d" relativeResultsDirectory="158c4ca2-c4d0-4ba8-a33c-44c2ce09ef41">
+      <Output>
+        <StdOut>Given a format v3 table keyed by "id" and partitioned by "region"
+-&gt; done: IcebergSteps.GivenPartitionedTable(3) (0.0s)
+And the table contains:
+  --- table step argument ---
+  | id | name | region |
+  | 1  | a    | eu     |
+  | 2  | b    | us     |
+  | 3  | c    | eu     |
+  | 4  | d    | apac   |
+-&gt; done: IcebergSteps.GivenRows(&lt;table&gt;) (0.1s)
+When I replace the "region" groups with copy-on-write:
+  --- table step argument ---
+  | id | name | region |
+  | 10 | x    | eu     |
+  | 11 | y    | us     |
+-&gt; done: IcebergSteps.WhenReplaceGroups("region", CopyOnWrite, &lt;table&gt;) (0.0s)
+Then the table contains exactly:
+  --- table step argument ---
+  | id | name | region |
+  | 4  | d    | apac   |
+  | 10 | x    | eu     |
+  | 11 | y    | us     |
+-&gt; done: IcebergSteps.ThenContains(&lt;table&gt;) (0.0s)
+And PyIceberg reads the same rows
+-&gt; done: IcebergSteps.ThenPyIcebergAgrees() (2.5s)</StdOut>
+      </Output>
+    </UnitTestResult>
+    <UnitTestResult executionId="b9c5c8fa-332d-4f80-89f3-6139fa5fb26c" testId="fb1b3301-671b-8aee-5a17-596e11faef10" testName="Concurrent upserts of the same key keep a single row(version: &quot;3&quot;, strategy: &quot;copy-on-write&quot;, __pickleIndex: &quot;3&quot;, exampleTags: [])" computerName="runnervmtai0g" duration="00:00:00.1383604" startTime="2026-10-28T11:46:49.9826632+00:00" endTime="2026-10-28T11:46:49.9826634+00:00" testType="13cdc9d9-ddb5-4fa4-a97d-d965ccfc6d4b" outcome="Passed" testListId="8c84fa94-04c1-424b-9868-57a2d4851a1d" relativeResultsDirectory="b9c5c8fa-332d-4f80-89f3-6139fa5fb26c">
+      <Output>
+        <StdOut>Given a format v3 table keyed by "id"
+-&gt; done: IcebergSteps.GivenTable(3) (0.0s)
+And the table contains:
+  --- table step argument ---
+  | id | name | region |
+  | 1  | a    | eu     |
+-&gt; done: IcebergSteps.GivenRows(&lt;table&gt;) (0.0s)
+And a second writer that has already loaded the table
+-&gt; done: IcebergSteps.GivenSecondWriter() (0.0s)
+When I upsert with copy-on-write:
+  --- table step argument ---
+  | id | name    | region |
+  | 7  | from-me | eu     |
+-&gt; done: IcebergSteps.WhenUpsert(CopyOnWrite, &lt;table&gt;) (0.0s)
+And the second writer upserts with copy-on-write:
+  --- table step argument ---
+  | id | name        | region |
+  | 7  | from-second | eu     |
+-&gt; done: IcebergSteps.WhenSecondUpserts(CopyOnWrite, &lt;table&gt;) (0.1s)
+Then the table contains exactly:
+  --- table step argument ---
+  | id | name        | region |
+  | 1  | a           | eu     |
+  | 7  | from-second | eu     |
+-&gt; done: IcebergSteps.ThenContains(&lt;table&gt;) (0.0s)
+And the second writer needed 2 attempts
+-&gt; done: IcebergSteps.ThenAttempts(2) (0.0s)</StdOut>
+      </Output>
+    </UnitTestResult>
+    <UnitTestResult executionId="cfb8b6ef-699d-4ca6-b36c-144e90fc2263" testId="94cbb6a7-2e76-47ca-3f8a-b5ff478a8ec2" testName="Upsert by key replaces matching rows and inserts new ones(version: &quot;3&quot;, strategy: &quot;copy-on-write&quot;, deleteFiles: &quot;none&quot;, pyiceberg: &quot;reads the same rows&quot;, __pickleIndex: &quot;5&quot;, exampleTags: [])" computerName="runnervmtai0g" duration="00:00:02.9188318" startTime="2026-10-28T11:46:32.0688962+00:00" endTime="2026-10-28T11:46:32.0688963+00:00" testType="13cdc9d9-ddb5-4fa4-a97d-d965ccfc6d4b" outcome="Passed" testListId="8c84fa94-04c1-424b-9868-57a2d4851a1d" relativeResultsDirectory="cfb8b6ef-699d-4ca6-b36c-144e90fc2263">
+      <Output>
+        <StdOut>Given a format v3 table keyed by "id"
+-&gt; done: IcebergSteps.GivenTable(3) (0.0s)
+And the table contains:
+  --- table step argument ---
+  | id | name | region |
+  | 1  | a    | eu     |
+  | 2  | b    | us     |
+  | 3  | c    | eu     |
+-&gt; done: IcebergSteps.GivenRows(&lt;table&gt;) (0.0s)
+When I upsert with copy-on-write:
+  --- table step argument ---
+  | id | name | region |
+  | 2  | b-v2 | us     |
+  | 4  | d    | us     |
+-&gt; done: IcebergSteps.WhenUpsert(CopyOnWrite, &lt;table&gt;) (0.0s)
+Then the table contains exactly:
+  --- table step argument ---
+  | id | name | region |
+  | 1  | a    | eu     |
+  | 2  | b-v2 | us     |
+  | 3  | c    | eu     |
+  | 4  | d    | us     |
+-&gt; done: IcebergSteps.ThenContains(&lt;table&gt;) (0.0s)
+And the last snapshot operation is "overwrite"
+-&gt; done: IcebergSteps.ThenOperation("overwrite") (0.0s)
+And the table's delete files are none
+-&gt; done: IcebergSteps.ThenDeleteFilesAre("none") (0.0s)
+And PyIceberg reads the same rows
+-&gt; done: IcebergSteps.ThenPyIcebergAgrees() (2.8s)</StdOut>
+      </Output>
+    </UnitTestResult>
+    <UnitTestResult executionId="745265b1-1e86-4949-adcc-8012732aa972" testId="34b466e5-8bad-66f0-08d9-e42c2be36e66" testName="Upsert input must not repeat a key" computerName="runnervmtai0g" duration="00:00:00.0261428" startTime="2026-10-28T11:46:54.5541857+00:00" endTime="2026-10-28T11:46:54.5541859+00:00" testType="13cdc9d9-ddb5-4fa4-a97d-d965ccfc6d4b" outcome="Passed" testListId="8c84fa94-04c1-424b-9868-57a2d4851a1d" relativeResultsDirectory="745265b1-1e86-4949-adcc-8012732aa972">
+      <Output>
+        <StdOut>Given a format v2 table keyed by "id"
+-&gt; done: IcebergSteps.GivenTable(2) (0.0s)
+When I upsert with copy-on-write:
+  --- table step argument ---
+  | id | name | region |
+  | 1  | a    | eu     |
+  | 1  | b    | eu     |
+-&gt; done: IcebergSteps.WhenUpsert(CopyOnWrite, &lt;table&gt;) (0.0s)
+Then the write fails with "Duplicate upsert key"
+-&gt; done: IcebergSteps.ThenFails("Duplicate upsert key") (0.0s)</StdOut>
+      </Output>
+    </UnitTestResult>
+    <UnitTestResult executionId="7109ce65-eec6-4a09-9db0-9ab8f81b763e" testId="098b68d5-1aa7-5358-1277-29e432697d14" testName="Delete by predicate(version: &quot;2&quot;, strategy: &quot;copy-on-write&quot;, __pickleIndex: &quot;6&quot;, exampleTags: [])" computerName="runnervmtai0g" duration="00:00:00.7784275" startTime="2026-10-28T11:46:57.1369600+00:00" endTime="2026-10-28T11:46:57.1369602+00:00" testType="13cdc9d9-ddb5-4fa4-a97d-d965ccfc6d4b" outcome="Passed" testListId="8c84fa94-04c1-424b-9868-57a2d4851a1d" relativeResultsDirectory="7109ce65-eec6-4a09-9db0-9ab8f81b763e">
+      <Output>
+        <StdOut>Given the default rows are:
+  --- table step argument ---
+  | id | name | region |
+  | 1  | a    | eu     |
+  | 2  | b    | us     |
+  | 3  | c    | eu     |
+  | 4  | d    | us     |
+-&gt; done: IcebergSteps.GivenDefaultRows(&lt;table&gt;) (0.0s)
+Given a format v2 table keyed by "id" holding the default rows
+-&gt; done: IcebergSteps.GivenTableWithDefaults(2) (0.0s)
+When I delete rows where region is "us" with copy-on-write
+-&gt; done: IcebergSteps.WhenDeleteWhere("us", CopyOnWrite) (0.0s)
+Then the table contains exactly:
+  --- table step argument ---
+  | id | name | region |
+  | 1  | a    | eu     |
+  | 3  | c    | eu     |
+-&gt; done: IcebergSteps.ThenContains(&lt;table&gt;) (0.0s)
+And PyIceberg reads the same rows
+-&gt; done: IcebergSteps.ThenPyIcebergAgrees() (0.8s)</StdOut>
+      </Output>
+    </UnitTestResult>
+    <UnitTestResult executionId="1298a2c5-e9ea-4162-aff1-2df8aea4ea46" testId="7b44a369-169e-03d1-14fa-cf6ad42b8b31" testName="An update that matches nothing commits nothing" computerName="runnervmtai0g" duration="00:00:00.1032161" startTime="2026-10-28T11:46:46.4614831+00:00" endTime="2026-10-28T11:46:46.4614833+00:00" testType="13cdc9d9-ddb5-4fa4-a97d-d965ccfc6d4b" outcome="Passed" testListId="8c84fa94-04c1-424b-9868-57a2d4851a1d" relativeResultsDirectory="1298a2c5-e9ea-4162-aff1-2df8aea4ea46">
+      <Output>
+        <StdOut>Given the default rows are:
+  --- table step argument ---
+  | id | name  | region |
+  | 1  | alice | eu     |
+  | 2  | bob   | us     |
+  | 3  | carol | eu     |
+  | 4  | dave  | us     |
+-&gt; done: IcebergSteps.GivenDefaultRows(&lt;table&gt;) (0.0s)
+Given a format v3 table keyed by "id" holding the default rows
+-&gt; done: IcebergSteps.GivenTableWithDefaults(3) (0.1s)
+When I set name to "nobody" where id is 99 with position deletes
+-&gt; done: UpdateMergeSteps.WhenUpdate("name", "nobody", 99, PositionDeletes) (0.0s)
+Then no snapshot was committed
+-&gt; done: UpdateMergeSteps.ThenNoSnapshot() (0.0s)</StdOut>
+      </Output>
+    </UnitTestResult>
+    <UnitTestResult executionId="d4620557-c626-4c10-bd2f-d6ddde5ae824" testId="a55cd9f5-1c39-b896-b93c-6d6bd997f362" testName="Upsert by key replaces matching rows and inserts new ones(version: &quot;2&quot;, strategy: &quot;position deletes&quot;, deleteFiles: &quot;position delete files&quot;, pyiceberg: &quot;reads the same rows&quot;, __pickleIndex: &quot;3&quot;, exampleTags: [])" computerName="runnervmtai0g" duration="00:00:02.2605041" startTime="2026-10-28T11:46:39.0064353+00:00" endTime="2026-10-28T11:46:39.0064355+00:00" testType="13cdc9d9-ddb5-4fa4-a97d-d965ccfc6d4b" outcome="Passed" testListId="8c84fa94-04c1-424b-9868-57a2d4851a1d" relativeResultsDirectory="d4620557-c626-4c10-bd2f-d6ddde5ae824">
+      <Output>
+        <StdOut>Given a format v2 table keyed by "id"
+-&gt; done: IcebergSteps.GivenTable(2) (0.1s)
+And the table contains:
+  --- table step argument ---
+  | id | name | region |
+  | 1  | a    | eu     |
+  | 2  | b    | us     |
+  | 3  | c    | eu     |
+-&gt; done: IcebergSteps.GivenRows(&lt;table&gt;) (0.0s)
+When I upsert with position deletes:
+  --- table step argument ---
+  | id | name | region |
+  | 2  | b-v2 | us     |
+  | 4  | d    | us     |
+-&gt; done: IcebergSteps.WhenUpsert(PositionDeletes, &lt;table&gt;) (0.0s)
+Then the table contains exactly:
+  --- table step argument ---
+  | id | name | region |
+  | 1  | a    | eu     |
+  | 2  | b-v2 | us     |
+  | 3  | c    | eu     |
+  | 4  | d    | us     |
+-&gt; done: IcebergSteps.ThenContains(&lt;table&gt;) (0.0s)
+And the last snapshot operation is "overwrite"
+-&gt; done: IcebergSteps.ThenOperation("overwrite") (0.0s)
+And the table's delete files are position delete files
+-&gt; done: IcebergSteps.ThenDeleteFilesAre("position delete f...") (0.0s)
+And PyIceberg reads the same rows
+-&gt; done: IcebergSteps.ThenPyIcebergAgrees() (2.1s)</StdOut>
+      </Output>
+    </UnitTestResult>
+    <UnitTestResult executionId="5050475e-38a1-4aca-8bb3-c4a02a50b4b1" testId="4edeaee3-2d88-a678-dba6-c9d26721f50b" testName="Concurrent upserts of the same key keep a single row(version: &quot;2&quot;, strategy: &quot;position deletes&quot;, __pickleIndex: &quot;1&quot;, exampleTags: [])" computerName="runnervmtai0g" duration="00:00:00.1850275" startTime="2026-10-28T11:46:50.1981671+00:00" endTime="2026-10-28T11:46:50.1981673+00:00" testType="13cdc9d9-ddb5-4fa4-a97d-d965ccfc6d4b" outcome="Passed" testListId="8c84fa94-04c1-424b-9868-57a2d4851a1d" relativeResultsDirectory="5050475e-38a1-4aca-8bb3-c4a02a50b4b1">
+      <Output>
+        <StdOut>Given a format v2 table keyed by "id"
+-&gt; done: IcebergSteps.GivenTable(2) (0.0s)
+And the table contains:
+  --- table step argument ---
+  | id | name | region |
+  | 1  | a    | eu     |
+-&gt; done: IcebergSteps.GivenRows(&lt;table&gt;) (0.0s)
+And a second writer that has already loaded the table
+-&gt; done: IcebergSteps.GivenSecondWriter() (0.0s)
+When I upsert with position deletes:
+  --- table step argument ---
+  | id | name    | region |
+  | 7  | from-me | eu     |
+-&gt; done: IcebergSteps.WhenUpsert(PositionDeletes, &lt;table&gt;) (0.0s)
+And the second writer upserts with position deletes:
+  --- table step argument ---
+  | id | name        | region |
+  | 7  | from-second | eu     |
+-&gt; done: IcebergSteps.WhenSecondUpserts(PositionDeletes, &lt;table&gt;) (0.1s)
+Then the table contains exactly:
+  --- table step argument ---
+  | id | name        | region |
+  | 1  | a           | eu     |
+  | 7  | from-second | eu     |
+-&gt; done: IcebergSteps.ThenContains(&lt;table&gt;) (0.0s)
+And the second writer needed 2 attempts
+-&gt; done: IcebergSteps.ThenAttempts(2) (0.0s)</StdOut>
+      </Output>
+    </UnitTestResult>
+    <UnitTestResult executionId="cc2add48-80ff-4398-b5d2-6765b486cfe9" testId="5bee3b44-69ca-6a21-bad4-278906247b5c" testName="Merging a feed updates known keys and inserts new ones(version: &quot;3&quot;, strategy: &quot;equality deletes&quot;, pyiceberg: &quot;refuses the table&quot;, __pickleIndex: &quot;15&quot;, exampleTags: [])" computerName="runnervmtai0g" duration="00:00:05.1653010" startTime="2026-10-28T11:46:27.1011174+00:00" endTime="2026-10-28T11:46:27.1011176+00:00" testType="13cdc9d9-ddb5-4fa4-a97d-d965ccfc6d4b" outcome="Passed" testListId="8c84fa94-04c1-424b-9868-57a2d4851a1d" relativeResultsDirectory="cc2add48-80ff-4398-b5d2-6765b486cfe9">
+      <Output>
+        <StdOut>Given the default rows are:
+  --- table step argument ---
+  | id | name  | region |
+  | 1  | alice | eu     |
+  | 2  | bob   | us     |
+  | 3  | carol | eu     |
+  | 4  | dave  | us     |
+-&gt; done: IcebergSteps.GivenDefaultRows(&lt;table&gt;) (0.0s)
+Given a format v3 table keyed by "id" holding the default rows
+-&gt; done: IcebergSteps.GivenTableWithDefaults(3) (0.4s)
+When I merge the feed with equality deletes, updating matches and inserting new rows:
+  --- table step argument ---
+  | id | name  | region |
+  | 2  | bobby | us     |
+  | 5  | erin  | eu     |
+-&gt; done: UpdateMergeSteps.WhenMerge(EqualityDeletes, &lt;table&gt;) (0.1s)
+Then the change reports 1 updated, 0 deleted and 1 inserted
+-&gt; done: UpdateMergeSteps.ThenCounts(1, 0, 1) (0.0s)
+And the table contains exactly:
+  --- table step argument ---
+  | id | name  | region |
+  | 1  | alice | eu     |
+  | 2  | bobby | us     |
+  | 3  | carol | eu     |
+  | 4  | dave  | us     |
+  | 5  | erin  | eu     |
+-&gt; done: IcebergSteps.ThenContains(&lt;table&gt;) (0.0s)
+And PyIceberg refuses the table
+-&gt; done: IcebergSteps.ThenPyIcebergRefuses() (4.5s)</StdOut>
+      </Output>
+    </UnitTestResult>
+    <UnitTestResult executionId="de93f833-17bd-47b1-8ca6-90d837772ee4" testId="7b3a630f-a48d-df19-6606-567af2a84f30" testName="A writer whose target file disappeared does not resurrect deletes" computerName="runnervmtai0g" duration="00:00:00.1629367" startTime="2026-10-28T11:46:52.5538536+00:00" endTime="2026-10-28T11:46:52.5538538+00:00" testType="13cdc9d9-ddb5-4fa4-a97d-d965ccfc6d4b" outcome="Passed" testListId="8c84fa94-04c1-424b-9868-57a2d4851a1d" relativeResultsDirectory="de93f833-17bd-47b1-8ca6-90d837772ee4">
+      <Output>
+        <StdOut>Given a format v3 table keyed by "id"
+-&gt; done: IcebergSteps.GivenTable(3) (0.0s)
+And the table contains:
+  --- table step argument ---
+  | id | name | region |
+  | 1  | a    | eu     |
+-&gt; done: IcebergSteps.GivenRows(&lt;table&gt;) (0.0s)
+And a second writer that has already loaded the table
+-&gt; done: IcebergSteps.GivenSecondWriter() (0.0s)
+When I delete rows where region is "eu" with copy-on-write
+-&gt; done: IcebergSteps.WhenDeleteWhere("eu", CopyOnWrite) (0.0s)
+And the second writer upserts with position deletes:
+  --- table step argument ---
+  | id | name | region |
+  | 1  | a2   | eu     |
+-&gt; done: IcebergSteps.WhenSecondUpserts(PositionDeletes, &lt;table&gt;) (0.1s)
+Then the table contains exactly:
+  --- table step argument ---
+  | id | name | region |
+  | 1  | a2   | eu     |
+-&gt; done: IcebergSteps.ThenContains(&lt;table&gt;) (0.0s)</StdOut>
+      </Output>
+    </UnitTestResult>
+    <UnitTestResult executionId="6d66ee5f-ef2f-4fea-a357-c55a4aa00a79" testId="15ee8b8a-8a08-2d44-94e2-e35c34c79e18" testName="Later deletes on a v3 table merge into one deletion vector per data file" computerName="runnervmtai0g" duration="00:00:00.7493952" startTime="2026-10-28T11:46:57.9150916+00:00" endTime="2026-10-28T11:46:57.9150918+00:00" testType="13cdc9d9-ddb5-4fa4-a97d-d965ccfc6d4b" outcome="Passed" testListId="8c84fa94-04c1-424b-9868-57a2d4851a1d" relativeResultsDirectory="6d66ee5f-ef2f-4fea-a357-c55a4aa00a79">
+      <Output>
+        <StdOut>Given the default rows are:
+  --- table step argument ---
+  | id | name | region |
+  | 1  | a    | eu     |
+  | 2  | b    | us     |
+  | 3  | c    | eu     |
+  | 4  | d    | us     |
+-&gt; done: IcebergSteps.GivenDefaultRows(&lt;table&gt;) (0.0s)
+Given a format v3 table keyed by "id" holding the default rows
+-&gt; done: IcebergSteps.GivenTableWithDefaults(3) (0.0s)
+When I delete keys 2 and 3 with position deletes
+-&gt; done: IcebergSteps.WhenDeleteKeys(2, 3, PositionDeletes) (0.0s)
+And I delete keys 4 and 4 with position deletes
+-&gt; done: IcebergSteps.WhenDeleteKeys(4, 4, PositionDeletes) (0.0s)
+Then the table contains exactly:
+  --- table step argument ---
+  | id | name | region |
+  | 1  | a    | eu     |
+-&gt; done: IcebergSteps.ThenContains(&lt;table&gt;) (0.0s)
+And every data file has at most one deletion vector
+-&gt; done: IcebergSteps.ThenOneDvPerFile() (0.0s)
+And PyIceberg reads the same rows
+-&gt; done: IcebergSteps.ThenPyIcebergAgrees() (0.7s)</StdOut>
+      </Output>
+    </UnitTestResult>
+    <UnitTestResult executionId="11b1e26a-1624-4eb4-878b-f4f19cf2ac96" testId="d76a7971-1d61-e3b4-32b4-c2aff9d21f04" testName="Equality deletes need the partition columns in the key" computerName="runnervmtai0g" duration="00:00:00.0077500" startTime="2026-10-28T11:46:57.1527671+00:00" endTime="2026-10-28T11:46:57.1527672+00:00" testType="13cdc9d9-ddb5-4fa4-a97d-d965ccfc6d4b" outcome="Passed" testListId="8c84fa94-04c1-424b-9868-57a2d4851a1d" relativeResultsDirectory="11b1e26a-1624-4eb4-878b-f4f19cf2ac96">
+      <Output>
+        <StdOut>Given the default rows are:
+  --- table step argument ---
+  | id | name | region |
+  | 1  | a    | eu     |
+  | 2  | b    | us     |
+  | 3  | c    | eu     |
+  | 4  | d    | us     |
+-&gt; done: IcebergSteps.GivenDefaultRows(&lt;table&gt;) (0.0s)
+Given a format v2 table keyed by "id" and partitioned by "region"
+-&gt; done: IcebergSteps.GivenPartitionedTable(2) (0.0s)
+And the table contains the default rows
+-&gt; done: IcebergSteps.GivenDefaults() (0.0s)
+When I delete keys 2 and 3 with equality deletes
+-&gt; done: IcebergSteps.WhenDeleteKeys(2, 3, EqualityDeletes) (0.0s)
+Then the write fails with "partition source column"
+-&gt; done: IcebergSteps.ThenFails("partition source ...") (0.0s)</StdOut>
+      </Output>
+    </UnitTestResult>
+    <UnitTestResult executionId="4cc2bce8-ddb0-43eb-98ca-ae9b0205754e" testId="e08788e5-a2ea-f4ad-fef3-ed6008be3be7" testName="Group replacement swaps whole groups and leaves the rest alone(version: &quot;3&quot;, strategy: &quot;position deletes&quot;, pyiceberg: &quot;reads the same rows&quot;, __pickleIndex: &quot;17&quot;, exampleTags: [])" computerName="runnervmtai0g" duration="00:00:02.1583414" startTime="2026-10-28T11:46:51.2515507+00:00" endTime="2026-10-28T11:46:51.2515508+00:00" testType="13cdc9d9-ddb5-4fa4-a97d-d965ccfc6d4b" outcome="Passed" testListId="8c84fa94-04c1-424b-9868-57a2d4851a1d" relativeResultsDirectory="4cc2bce8-ddb0-43eb-98ca-ae9b0205754e">
+      <Output>
+        <StdOut>Given a format v3 table keyed by "id" and partitioned by "region"
+-&gt; done: IcebergSteps.GivenPartitionedTable(3) (0.1s)
+And the table contains:
+  --- table step argument ---
+  | id | name | region |
+  | 1  | a    | eu     |
+  | 2  | b    | us     |
+  | 3  | c    | eu     |
+  | 4  | d    | apac   |
+-&gt; done: IcebergSteps.GivenRows(&lt;table&gt;) (0.0s)
+When I replace the "region" groups with position deletes:
+  --- table step argument ---
+  | id | name | region |
+  | 10 | x    | eu     |
+  | 11 | y    | us     |
+-&gt; done: IcebergSteps.WhenReplaceGroups("region", PositionDeletes, &lt;table&gt;) (0.0s)
+Then the table contains exactly:
+  --- table step argument ---
+  | id | name | region |
+  | 4  | d    | apac   |
+  | 10 | x    | eu     |
+  | 11 | y    | us     |
+-&gt; done: IcebergSteps.ThenContains(&lt;table&gt;) (0.0s)
+And PyIceberg reads the same rows
+-&gt; done: IcebergSteps.ThenPyIcebergAgrees() (1.9s)</StdOut>
+      </Output>
+    </UnitTestResult>
+    <UnitTestResult executionId="b5ac1549-da62-4e9d-9602-8b98a6c7f85f" testId="3d75c1c4-4aea-420c-1f66-459d1d941d75" testName="A full feed for a region also removes that region's rows it no longer lists(version: &quot;2&quot;, strategy: &quot;copy-on-write&quot;, __pickleIndex: &quot;16&quot;, exampleTags: [])" computerName="runnervmtai0g" duration="00:00:02.8169325" startTime="2026-10-28T11:46:46.3518998+00:00" endTime="2026-10-28T11:46:46.3519000+00:00" testType="13cdc9d9-ddb5-4fa4-a97d-d965ccfc6d4b" outcome="Passed" testListId="8c84fa94-04c1-424b-9868-57a2d4851a1d" relativeResultsDirectory="b5ac1549-da62-4e9d-9602-8b98a6c7f85f">
+      <Output>
+        <StdOut>Given the default rows are:
+  --- table step argument ---
+  | id | name  | region |
+  | 1  | alice | eu     |
+  | 2  | bob   | us     |
+  | 3  | carol | eu     |
+  | 4  | dave  | us     |
+-&gt; done: IcebergSteps.GivenDefaultRows(&lt;table&gt;) (0.0s)
+Given a format v2 table keyed by "id" holding the default rows
+-&gt; done: IcebergSteps.GivenTableWithDefaults(2) (0.0s)
+When I merge the "eu" feed with copy-on-write, updating matches, inserting new rows and deleting unlisted rows:
+  --- table step argument ---
+  | id | name | region |
+  | 3  | caz  | eu     |
+  | 5  | erin | eu     |
+-&gt; done: UpdateMergeSteps.WhenMergeRegion("eu", CopyOnWrite, &lt;table&gt;) (0.0s)
+Then the change reports 1 updated, 1 deleted and 1 inserted
+-&gt; done: UpdateMergeSteps.ThenCounts(1, 1, 1) (0.0s)
+And the table contains exactly:
+  --- table step argument ---
+  | id | name | region |
+  | 2  | bob  | us     |
+  | 3  | caz  | eu     |
+  | 4  | dave | us     |
+  | 5  | erin | eu     |
+-&gt; done: IcebergSteps.ThenContains(&lt;table&gt;) (0.0s)
+And PyIceberg reads the same rows
+-&gt; done: IcebergSteps.ThenPyIcebergAgrees() (2.6s)</StdOut>
+      </Output>
+    </UnitTestResult>
+    <UnitTestResult executionId="36224c58-1258-4931-a138-3e9a20674135" testId="a61ce480-e197-e95f-66bc-c329a6bd3234" testName="Dropping whole partitions removes their files without reading them" computerName="runnervmtai0g" duration="00:00:00.0234727" startTime="2026-10-28T11:46:57.9434461+00:00" endTime="2026-10-28T11:46:57.9434463+00:00" testType="13cdc9d9-ddb5-4fa4-a97d-d965ccfc6d4b" outcome="Passed" testListId="8c84fa94-04c1-424b-9868-57a2d4851a1d" relativeResultsDirectory="36224c58-1258-4931-a138-3e9a20674135">
+      <Output>
+        <StdOut>Given the default rows are:
+  --- table step argument ---
+  | id | name | region |
+  | 1  | a    | eu     |
+  | 2  | b    | us     |
+  | 3  | c    | eu     |
+  | 4  | d    | us     |
+-&gt; done: IcebergSteps.GivenDefaultRows(&lt;table&gt;) (0.0s)
+Given a format v2 table keyed by "id" and partitioned by "region"
+-&gt; done: IcebergSteps.GivenPartitionedTable(2) (0.0s)
+And the table contains the default rows
+-&gt; done: IcebergSteps.GivenDefaults() (0.0s)
+When I drop the data files where region is "us"
+-&gt; done: IcebergSteps.WhenDropFiles("us") (0.0s)
+Then the table contains exactly:
+  --- table step argument ---
+  | id | name | region |
+  | 1  | a    | eu     |
+  | 3  | c    | eu     |
+-&gt; done: IcebergSteps.ThenContains(&lt;table&gt;) (0.0s)
+And the table has no delete files
+-&gt; done: IcebergSteps.ThenNoDeleteFiles() (0.0s)</StdOut>
+      </Output>
+    </UnitTestResult>
+    <UnitTestResult executionId="64ddc95d-bdf4-4152-9851-f6714648b59b" testId="63708195-0ce7-67f0-c338-015c2754d12d" testName="Merging a feed updates known keys and inserts new ones(version: &quot;2&quot;, strategy: &quot;equality deletes&quot;, pyiceberg: &quot;refuses the table&quot;, __pickleIndex: &quot;12&quot;, exampleTags: [])" computerName="runnervmtai0g" duration="00:00:02.5857058" startTime="2026-10-28T11:46:29.9479966+00:00" endTime="2026-10-28T11:46:29.9479968+00:00" testType="13cdc9d9-ddb5-4fa4-a97d-d965ccfc6d4b" outcome="Passed" testListId="8c84fa94-04c1-424b-9868-57a2d4851a1d" relativeResultsDirectory="64ddc95d-bdf4-4152-9851-f6714648b59b">
+      <Output>
+        <StdOut>Given the default rows are:
+  --- table step argument ---
+  | id | name  | region |
+  | 1  | alice | eu     |
+  | 2  | bob   | us     |
+  | 3  | carol | eu     |
+  | 4  | dave  | us     |
+-&gt; done: IcebergSteps.GivenDefaultRows(&lt;table&gt;) (0.0s)
+Given a format v2 table keyed by "id" holding the default rows
+-&gt; done: IcebergSteps.GivenTableWithDefaults(2) (0.0s)
+When I merge the feed with equality deletes, updating matches and inserting new rows:
+  --- table step argument ---
+  | id | name  | region |
+  | 2  | bobby | us     |
+  | 5  | erin  | eu     |
+-&gt; done: UpdateMergeSteps.WhenMerge(EqualityDeletes, &lt;table&gt;) (0.0s)
+Then the change reports 1 updated, 0 deleted and 1 inserted
+-&gt; done: UpdateMergeSteps.ThenCounts(1, 0, 1) (0.0s)
+And the table contains exactly:
+  --- table step argument ---
+  | id | name  | region |
+  | 1  | alice | eu     |
+  | 2  | bobby | us     |
+  | 3  | carol | eu     |
+  | 4  | dave  | us     |
+  | 5  | erin  | eu     |
+-&gt; done: IcebergSteps.ThenContains(&lt;table&gt;) (0.0s)
+And PyIceberg refuses the table
+-&gt; done: IcebergSteps.ThenPyIcebergRefuses() (2.5s)</StdOut>
+      </Output>
+    </UnitTestResult>
+    <UnitTestResult executionId="b63b79e0-b853-42c2-aaf2-4a4fa94e4f5c" testId="6cb1744e-5794-15a8-fa20-382d6aa4c790" testName="Upsert by key replaces matching rows and inserts new ones(version: &quot;2&quot;, strategy: &quot;copy-on-write&quot;, deleteFiles: &quot;none&quot;, pyiceberg: &quot;reads the same rows&quot;, __pickleIndex: &quot;2&quot;, exampleTags: [])" computerName="runnervmtai0g" duration="00:00:02.2093567" startTime="2026-10-28T11:46:36.7357265+00:00" endTime="2026-10-28T11:46:36.7357281+00:00" testType="13cdc9d9-ddb5-4fa4-a97d-d965ccfc6d4b" outcome="Passed" testListId="8c84fa94-04c1-424b-9868-57a2d4851a1d" relativeResultsDirectory="b63b79e0-b853-42c2-aaf2-4a4fa94e4f5c">
+      <Output>
+        <StdOut>Given a format v2 table keyed by "id"
+-&gt; done: IcebergSteps.GivenTable(2) (0.0s)
+And the table contains:
+  --- table step argument ---
+  | id | name | region |
+  | 1  | a    | eu     |
+  | 2  | b    | us     |
+  | 3  | c    | eu     |
+-&gt; done: IcebergSteps.GivenRows(&lt;table&gt;) (0.0s)
+When I upsert with copy-on-write:
+  --- table step argument ---
+  | id | name | region |
+  | 2  | b-v2 | us     |
+  | 4  | d    | us     |
+-&gt; done: IcebergSteps.WhenUpsert(CopyOnWrite, &lt;table&gt;) (0.0s)
+Then the table contains exactly:
+  --- table step argument ---
+  | id | name | region |
+  | 1  | a    | eu     |
+  | 2  | b-v2 | us     |
+  | 3  | c    | eu     |
+  | 4  | d    | us     |
+-&gt; done: IcebergSteps.ThenContains(&lt;table&gt;) (0.0s)
+And the last snapshot operation is "overwrite"
+-&gt; done: IcebergSteps.ThenOperation("overwrite") (0.0s)
+And the table's delete files are none
+-&gt; done: IcebergSteps.ThenDeleteFilesAre("none") (0.0s)
+And PyIceberg reads the same rows
+-&gt; done: IcebergSteps.ThenPyIcebergAgrees() (2.1s)</StdOut>
+      </Output>
+    </UnitTestResult>
+    <UnitTestResult executionId="bb5f495c-3a70-46bb-ad93-f1072860bc51" testId="0bc07a37-824d-46f2-10fb-4c16e9803dfe" testName="Upgrading to v3 converts position deletes into deletion vectors" computerName="runnervmtai0g" duration="00:00:01.7254198" startTime="2026-10-28T11:46:52.3294591+00:00" endTime="2026-10-28T11:46:52.3294593+00:00" testType="13cdc9d9-ddb5-4fa4-a97d-d965ccfc6d4b" outcome="Passed" testListId="8c84fa94-04c1-424b-9868-57a2d4851a1d" relativeResultsDirectory="bb5f495c-3a70-46bb-ad93-f1072860bc51">
+      <Output>
+        <StdOut>Given a format v2 table keyed by "id"
+-&gt; done: IcebergSteps.GivenTable(2) (0.0s)
+And the table contains:
+  --- table step argument ---
+  | id | name | region |
+  | 1  | a    | eu     |
+  | 2  | b    | us     |
+  | 3  | c    | eu     |
+-&gt; done: IcebergSteps.GivenRows(&lt;table&gt;) (0.0s)
+And I delete keys 1 and 3 with position deletes
+-&gt; done: IcebergSteps.WhenDeleteKeys(1, 3, PositionDeletes) (0.0s)
+When I upgrade the table to format v3
+-&gt; done: IcebergSteps.WhenUpgrade(3) (0.0s)
+And I convert position deletes to deletion vectors
+-&gt; done: IcebergSteps.WhenConvert() (0.0s)
+Then the table contains exactly:
+  --- table step argument ---
+  | id | name | region |
+  | 2  | b    | us     |
+-&gt; done: IcebergSteps.ThenContains(&lt;table&gt;) (0.0s)
+And the table's delete files are deletion vectors
+-&gt; done: IcebergSteps.ThenDeleteFilesAre("deletion vectors") (0.0s)
+And the last snapshot operation is "replace"
+-&gt; done: IcebergSteps.ThenOperation("replace") (0.0s)
+And PyIceberg reads the same rows
+-&gt; done: IcebergSteps.ThenPyIcebergAgrees() (1.7s)</StdOut>
+      </Output>
+    </UnitTestResult>
+    <UnitTestResult executionId="bcab0d8a-41a2-4e4b-8a06-42edc1fd6185" testId="150776cf-2ae9-caed-0c17-033b520ea1bd" testName="Merging a feed updates known keys and inserts new ones(version: &quot;3&quot;, strategy: &quot;copy-on-write&quot;, pyiceberg: &quot;reads the same rows&quot;, __pickleIndex: &quot;13&quot;, exampleTags: [])" computerName="runnervmtai0g" duration="00:00:03.0502917" startTime="2026-10-28T11:46:35.9824329+00:00" endTime="2026-10-28T11:46:35.9824331+00:00" testType="13cdc9d9-ddb5-4fa4-a97d-d965ccfc6d4b" outcome="Passed" testListId="8c84fa94-04c1-424b-9868-57a2d4851a1d" relativeResultsDirectory="bcab0d8a-41a2-4e4b-8a06-42edc1fd6185">
+      <Output>
+        <StdOut>Given the default rows are:
+  --- table step argument ---
+  | id | name  | region |
+  | 1  | alice | eu     |
+  | 2  | bob   | us     |
+  | 3  | carol | eu     |
+  | 4  | dave  | us     |
+-&gt; done: IcebergSteps.GivenDefaultRows(&lt;table&gt;) (0.0s)
+Given a format v3 table keyed by "id" holding the default rows
+-&gt; done: IcebergSteps.GivenTableWithDefaults(3) (0.1s)
+When I merge the feed with copy-on-write, updating matches and inserting new rows:
+  --- table step argument ---
+  | id | name  | region |
+  | 2  | bobby | us     |
+  | 5  | erin  | eu     |
+-&gt; done: UpdateMergeSteps.WhenMerge(CopyOnWrite, &lt;table&gt;) (0.0s)
+Then the change reports 1 updated, 0 deleted and 1 inserted
+-&gt; done: UpdateMergeSteps.ThenCounts(1, 0, 1) (0.0s)
+And the table contains exactly:
+  --- table step argument ---
+  | id | name  | region |
+  | 1  | alice | eu     |
+  | 2  | bobby | us     |
+  | 3  | carol | eu     |
+  | 4  | dave  | us     |
+  | 5  | erin  | eu     |
+-&gt; done: IcebergSteps.ThenContains(&lt;table&gt;) (0.0s)
+And PyIceberg reads the same rows
+-&gt; done: IcebergSteps.ThenPyIcebergAgrees() (2.9s)</StdOut>
+      </Output>
+    </UnitTestResult>
+    <UnitTestResult executionId="792b12d7-075e-4e67-8b2c-a57dce6b3cbb" testId="1edb4c0b-6760-028e-b119-97588abc6f5c" testName="Correcting a value changes only the rows the filter selects(version: &quot;2&quot;, strategy: &quot;copy-on-write&quot;, deleteFiles: &quot;none&quot;, __pickleIndex: &quot;0&quot;, exampleTags: [])" computerName="runnervmtai0g" duration="00:00:02.0881917" startTime="2026-10-28T11:46:50.4043564+00:00" endTime="2026-10-28T11:46:50.4043565+00:00" testType="13cdc9d9-ddb5-4fa4-a97d-d965ccfc6d4b" outcome="Passed" testListId="8c84fa94-04c1-424b-9868-57a2d4851a1d" relativeResultsDirectory="792b12d7-075e-4e67-8b2c-a57dce6b3cbb">
+      <Output>
+        <StdOut>Given the default rows are:
+  --- table step argument ---
+  | id | name  | region |
+  | 1  | alice | eu     |
+  | 2  | bob   | us     |
+  | 3  | carol | eu     |
+  | 4  | dave  | us     |
+-&gt; done: IcebergSteps.GivenDefaultRows(&lt;table&gt;) (0.0s)
+Given a format v2 table keyed by "id" holding the default rows
+-&gt; done: IcebergSteps.GivenTableWithDefaults(2) (0.2s)
+When I set name to "robert" where id is 2 with copy-on-write
+-&gt; done: UpdateMergeSteps.WhenUpdate("name", "robert", 2, CopyOnWrite) (0.0s)
+Then the change reports 1 updated, 0 deleted and 0 inserted
+-&gt; done: UpdateMergeSteps.ThenCounts(1, 0, 0) (0.0s)
+And the table contains exactly:
+  --- table step argument ---
+  | id | name   | region |
+  | 1  | alice  | eu     |
+  | 2  | robert | us     |
+  | 3  | carol  | eu     |
+  | 4  | dave   | us     |
+-&gt; done: IcebergSteps.ThenContains(&lt;table&gt;) (0.0s)
+And the table's delete files are none
+-&gt; done: IcebergSteps.ThenDeleteFilesAre("none") (0.0s)
+And PyIceberg reads the same rows
+-&gt; done: IcebergSteps.ThenPyIcebergAgrees() (1.9s)</StdOut>
+      </Output>
+    </UnitTestResult>
+    <UnitTestResult executionId="e1247e3b-1fb6-4ff1-8d61-f451a6c32e70" testId="2f85d7e0-6faa-4b3f-05e5-347c4b0ea060" testName="A full feed for a region also removes that region's rows it no longer lists(version: &quot;3&quot;, strategy: &quot;position deletes&quot;, __pickleIndex: &quot;17&quot;, exampleTags: [])" computerName="runnervmtai0g" duration="00:00:02.8889592" startTime="2026-10-28T11:46:43.5283991+00:00" endTime="2026-10-28T11:46:43.5283993+00:00" testType="13cdc9d9-ddb5-4fa4-a97d-d965ccfc6d4b" outcome="Passed" testListId="8c84fa94-04c1-424b-9868-57a2d4851a1d" relativeResultsDirectory="e1247e3b-1fb6-4ff1-8d61-f451a6c32e70">
+      <Output>
+        <StdOut>Given the default rows are:
+  --- table step argument ---
+  | id | name  | region |
+  | 1  | alice | eu     |
+  | 2  | bob   | us     |
+  | 3  | carol | eu     |
+  | 4  | dave  | us     |
+-&gt; done: IcebergSteps.GivenDefaultRows(&lt;table&gt;) (0.0s)
+Given a format v3 table keyed by "id" holding the default rows
+-&gt; done: IcebergSteps.GivenTableWithDefaults(3) (0.0s)
+When I merge the "eu" feed with position deletes, updating matches, inserting new rows and deleting unlisted rows:
+  --- table step argument ---
+  | id | name | region |
+  | 3  | caz  | eu     |
+  | 5  | erin | eu     |
+-&gt; done: UpdateMergeSteps.WhenMergeRegion("eu", PositionDeletes, &lt;table&gt;) (0.0s)
+Then the change reports 1 updated, 1 deleted and 1 inserted
+-&gt; done: UpdateMergeSteps.ThenCounts(1, 1, 1) (0.0s)
+And the table contains exactly:
+  --- table step argument ---
+  | id | name | region |
+  | 2  | bob  | us     |
+  | 3  | caz  | eu     |
+  | 4  | dave | us     |
+  | 5  | erin | eu     |
+-&gt; done: IcebergSteps.ThenContains(&lt;table&gt;) (0.0s)
+And PyIceberg reads the same rows
+-&gt; done: IcebergSteps.ThenPyIcebergAgrees() (2.8s)</StdOut>
+      </Output>
+    </UnitTestResult>
+    <UnitTestResult executionId="7a6aa664-3d38-43a2-b709-b0972859f808" testId="9dc12a15-56e0-8b62-0278-3ffaa00ed07d" testName="Upserts and deletes read identically in Spark(version: &quot;3&quot;, mechanism: &quot;position deletes&quot;, __pickleIndex: &quot;2&quot;, exampleTags: [])" computerName="runnervmtai0g" duration="00:00:24.9489835" startTime="2026-10-28T11:46:46.8357742+00:00" endTime="2026-10-28T11:46:46.8357744+00:00" testType="13cdc9d9-ddb5-4fa4-a97d-d965ccfc6d4b" outcome="Passed" testListId="8c84fa94-04c1-424b-9868-57a2d4851a1d" relativeResultsDirectory="7a6aa664-3d38-43a2-b709-b0972859f808">
+      <Output>
+        <StdOut>Given a format v3 table keyed by "id"
+-&gt; done: IcebergSteps.GivenTable(3) (0.1s)
+And the table contains:
+  --- table step argument ---
+  | id | name  | region |
+  | 1  | alice | eu     |
+  | 2  | bob   | us     |
+  | 3  | carol | eu     |
+  | 4  | dave  | us     |
+-&gt; done: IcebergSteps.GivenRows(&lt;table&gt;) (0.3s)
+When I upsert with position deletes:
+  --- table step argument ---
+  | id | name  | region |
+  | 2  | bobby | us     |
+  | 5  | eve   | eu     |
+-&gt; done: IcebergSteps.WhenUpsert(PositionDeletes, &lt;table&gt;) (0.2s)
+And I delete keys 1 and 3 with position deletes
+-&gt; done: IcebergSteps.WhenDeleteKeys(1, 3, PositionDeletes) (0.0s)
+Then the table contains exactly:
+  --- table step argument ---
+  | id | name  | region |
+  | 2  | bobby | us     |
+  | 4  | dave  | us     |
+  | 5  | eve   | eu     |
+-&gt; done: IcebergSteps.ThenContains(&lt;table&gt;) (0.0s)
+And Spark reads the same rows
+-&gt; done: IcebergSteps.ThenSparkAgrees() (24.2s)</StdOut>
+      </Output>
+    </UnitTestResult>
+    <UnitTestResult executionId="cbb73fbe-e872-4599-a6f2-fe2a9d142df3" testId="a6deebb3-0b4e-34e1-6edd-9202f9eac33b" testName="Trino reads our deletes through the REST catalog(version: &quot;2&quot;, mechanism: &quot;equality deletes&quot;, __pickleIndex: &quot;4&quot;, exampleTags: [])" computerName="runnervmtai0g" duration="00:00:03.5357752" startTime="2026-10-28T11:47:25.4858022+00:00" endTime="2026-10-28T11:47:25.4858031+00:00" testType="13cdc9d9-ddb5-4fa4-a97d-d965ccfc6d4b" outcome="Passed" testListId="8c84fa94-04c1-424b-9868-57a2d4851a1d" relativeResultsDirectory="cbb73fbe-e872-4599-a6f2-fe2a9d142df3">
+      <Output>
+        <StdOut>Given the tables live in the shared REST catalog
+-&gt; done: IcebergSteps.GivenSharedCatalog() (0.1s)
+And a format v2 table keyed by "id"
+-&gt; done: IcebergSteps.GivenTable(2) (0.9s)
+And the table contains:
+  --- table step argument ---
+  | id | name  | region |
+  | 1  | alice | eu     |
+  | 2  | bob   | us     |
+  | 3  | carol | eu     |
+-&gt; done: IcebergSteps.GivenRows(&lt;table&gt;) (0.2s)
+When I upsert with equality deletes:
+  --- table step argument ---
+  | id | name  | region |
+  | 2  | bobby | us     |
+  | 4  | dan   | eu     |
+-&gt; done: IcebergSteps.WhenUpsert(EqualityDeletes, &lt;table&gt;) (0.1s)
+And I delete keys 1 and 3 with equality deletes
+-&gt; done: IcebergSteps.WhenDeleteKeys(1, 3, EqualityDeletes) (0.1s)
+Then the table contains exactly:
+  --- table step argument ---
+  | id | name  | region |
+  | 2  | bobby | us     |
+  | 4  | dan   | eu     |
+-&gt; done: IcebergSteps.ThenContains(&lt;table&gt;) (0.0s)
+And Trino reads the same rows
+-&gt; done: IcebergSteps.ThenTrinoAgrees() (2.2s)</StdOut>
+      </Output>
+    </UnitTestResult>
+    <UnitTestResult executionId="e1c987eb-b34d-41b0-99da-4540504a786a" testId="b32467da-c46e-f14f-b3f5-59ebebbc0eee" testName="Equality deletes cannot express an update's filter" computerName="runnervmtai0g" duration="00:00:00.0144265" startTime="2026-10-28T11:46:56.1267480+00:00" endTime="2026-10-28T11:46:56.1267482+00:00" testType="13cdc9d9-ddb5-4fa4-a97d-d965ccfc6d4b" outcome="Passed" testListId="8c84fa94-04c1-424b-9868-57a2d4851a1d" relativeResultsDirectory="e1c987eb-b34d-41b0-99da-4540504a786a">
+      <Output>
+        <StdOut>Given the default rows are:
+  --- table step argument ---
+  | id | name  | region |
+  | 1  | alice | eu     |
+  | 2  | bob   | us     |
+  | 3  | carol | eu     |
+  | 4  | dave  | us     |
+-&gt; done: IcebergSteps.GivenDefaultRows(&lt;table&gt;) (0.0s)
+Given a format v2 table keyed by "id" holding the default rows
+-&gt; done: IcebergSteps.GivenTableWithDefaults(2) (0.0s)
+When I set name to "x" where id is 1 with equality deletes
+-&gt; done: UpdateMergeSteps.WhenUpdate("name", "x", 1, EqualityDeletes) (0.0s)
+Then the write fails with "UPDATE cannot use equality deletes"
+-&gt; done: IcebergSteps.ThenFails("UPDATE cannot use...") (0.0s)</StdOut>
+      </Output>
+    </UnitTestResult>
+    <UnitTestResult executionId="11d28d62-1c93-45ce-a582-8f1b05a7e4f9" testId="d5204e40-de6f-394d-dc79-4842d4fce2c2" testName="Delete by key(version: &quot;2&quot;, strategy: &quot;position deletes&quot;, operation: &quot;delete&quot;, __pickleIndex: &quot;1&quot;, exampleTags: [])" computerName="runnervmtai0g" duration="00:00:00.0393258" startTime="2026-10-28T11:46:52.8999840+00:00" endTime="2026-10-28T11:46:52.8999841+00:00" testType="13cdc9d9-ddb5-4fa4-a97d-d965ccfc6d4b" outcome="Passed" testListId="8c84fa94-04c1-424b-9868-57a2d4851a1d" relativeResultsDirectory="11d28d62-1c93-45ce-a582-8f1b05a7e4f9">
+      <Output>
+        <StdOut>Given the default rows are:
+  --- table step argument ---
+  | id | name | region |
+  | 1  | a    | eu     |
+  | 2  | b    | us     |
+  | 3  | c    | eu     |
+  | 4  | d    | us     |
+-&gt; done: IcebergSteps.GivenDefaultRows(&lt;table&gt;) (0.0s)
+Given a format v2 table keyed by "id" holding the default rows
+-&gt; done: IcebergSteps.GivenTableWithDefaults(2) (0.0s)
+When I delete keys 2 and 3 with position deletes
+-&gt; done: IcebergSteps.WhenDeleteKeys(2, 3, PositionDeletes) (0.0s)
+Then the table contains exactly:
+  --- table step argument ---
+  | id | name | region |
+  | 1  | a    | eu     |
+  | 4  | d    | us     |
+-&gt; done: IcebergSteps.ThenContains(&lt;table&gt;) (0.0s)
+And the last snapshot operation is "delete"
+-&gt; done: IcebergSteps.ThenOperation("delete") (0.0s)</StdOut>
+      </Output>
+    </UnitTestResult>
+    <UnitTestResult executionId="d6459090-99ac-4696-9fba-298b5a1efc5f" testId="48841d6b-2dd7-5ba6-4a0c-2acee178b3c8" testName="Upsert by key replaces matching rows and inserts new ones(version: &quot;3&quot;, strategy: &quot;position deletes&quot;, deleteFiles: &quot;deletion vectors&quot;, pyiceberg: &quot;reads the same rows&quot;, __pickleIndex: &quot;6&quot;, exampleTags: [])" computerName="runnervmtai0g" duration="00:00:02.4441316" startTime="2026-10-28T11:46:34.5143203+00:00" endTime="2026-10-28T11:46:34.5143205+00:00" testType="13cdc9d9-ddb5-4fa4-a97d-d965ccfc6d4b" outcome="Passed" testListId="8c84fa94-04c1-424b-9868-57a2d4851a1d" relativeResultsDirectory="d6459090-99ac-4696-9fba-298b5a1efc5f">
+      <Output>
+        <StdOut>Given a format v3 table keyed by "id"
+-&gt; done: IcebergSteps.GivenTable(3) (0.0s)
+And the table contains:
+  --- table step argument ---
+  | id | name | region |
+  | 1  | a    | eu     |
+  | 2  | b    | us     |
+  | 3  | c    | eu     |
+-&gt; done: IcebergSteps.GivenRows(&lt;table&gt;) (0.0s)
+When I upsert with position deletes:
+  --- table step argument ---
+  | id | name | region |
+  | 2  | b-v2 | us     |
+  | 4  | d    | us     |
+-&gt; done: IcebergSteps.WhenUpsert(PositionDeletes, &lt;table&gt;) (0.0s)
+Then the table contains exactly:
+  --- table step argument ---
+  | id | name | region |
+  | 1  | a    | eu     |
+  | 2  | b-v2 | us     |
+  | 3  | c    | eu     |
+  | 4  | d    | us     |
+-&gt; done: IcebergSteps.ThenContains(&lt;table&gt;) (0.0s)
+And the last snapshot operation is "overwrite"
+-&gt; done: IcebergSteps.ThenOperation("overwrite") (0.0s)
+And the table's delete files are deletion vectors
+-&gt; done: IcebergSteps.ThenDeleteFilesAre("deletion vectors") (0.0s)
+And PyIceberg reads the same rows
+-&gt; done: IcebergSteps.ThenPyIcebergAgrees() (2.4s)</StdOut>
+      </Output>
+    </UnitTestResult>
+    <UnitTestResult executionId="1e5d8fab-5a9a-481c-8fdd-267300a391dc" testId="4dfae43c-6faa-e5ea-9398-5deb8adc8822" testName="Upserts and deletes read identically in Spark(version: &quot;2&quot;, mechanism: &quot;equality deletes&quot;, __pickleIndex: &quot;1&quot;, exampleTags: [])" computerName="runnervmtai0g" duration="00:00:15.0924869" startTime="2026-10-28T11:47:01.9208670+00:00" endTime="2026-10-28T11:47:01.9208672+00:00" testType="13cdc9d9-ddb5-4fa4-a97d-d965ccfc6d4b" outcome="Passed" testListId="8c84fa94-04c1-424b-9868-57a2d4851a1d" relativeResultsDirectory="1e5d8fab-5a9a-481c-8fdd-267300a391dc">
+      <Output>
+        <StdOut>Given a format v2 table keyed by "id"
+-&gt; done: IcebergSteps.GivenTable(2) (0.0s)
+And the table contains:
+  --- table step argument ---
+  | id | name  | region |
+  | 1  | alice | eu     |
+  | 2  | bob   | us     |
+  | 3  | carol | eu     |
+  | 4  | dave  | us     |
+-&gt; done: IcebergSteps.GivenRows(&lt;table&gt;) (0.0s)
+When I upsert with equality deletes:
+  --- table step argument ---
+  | id | name  | region |
+  | 2  | bobby | us     |
+  | 5  | eve   | eu     |
+-&gt; done: IcebergSteps.WhenUpsert(EqualityDeletes, &lt;table&gt;) (0.0s)
+And I delete keys 1 and 3 with equality deletes
+-&gt; done: IcebergSteps.WhenDeleteKeys(1, 3, EqualityDeletes) (0.0s)
+Then the table contains exactly:
+  --- table step argument ---
+  | id | name  | region |
+  | 2  | bobby | us     |
+  | 4  | dave  | us     |
+  | 5  | eve   | eu     |
+-&gt; done: IcebergSteps.ThenContains(&lt;table&gt;) (0.0s)
+And Spark reads the same rows
+-&gt; done: IcebergSteps.ThenSparkAgrees() (15.0s)</StdOut>
+      </Output>
+    </UnitTestResult>
+    <UnitTestResult executionId="93074c83-aa09-44fd-8741-a387c6647365" testId="c50f7f9a-9376-c7a5-de88-7e224557b8fd" testName="Upsert by key replaces matching rows and inserts new ones(version: &quot;3&quot;, strategy: &quot;equality deletes&quot;, deleteFiles: &quot;equality delete files&quot;, pyiceberg: &quot;refuses the table&quot;, __pickleIndex: &quot;7&quot;, exampleTags: [])" computerName="runnervmtai0g" duration="00:00:02.3958838" startTime="2026-10-28T11:46:41.4167734+00:00" endTime="2026-10-28T11:46:41.4167736+00:00" testType="13cdc9d9-ddb5-4fa4-a97d-d965ccfc6d4b" outcome="Passed" testListId="8c84fa94-04c1-424b-9868-57a2d4851a1d" relativeResultsDirectory="93074c83-aa09-44fd-8741-a387c6647365">
+      <Output>
+        <StdOut>Given a format v3 table keyed by "id"
+-&gt; done: IcebergSteps.GivenTable(3) (0.0s)
+And the table contains:
+  --- table step argument ---
+  | id | name | region |
+  | 1  | a    | eu     |
+  | 2  | b    | us     |
+  | 3  | c    | eu     |
+-&gt; done: IcebergSteps.GivenRows(&lt;table&gt;) (0.0s)
+When I upsert with equality deletes:
+  --- table step argument ---
+  | id | name | region |
+  | 2  | b-v2 | us     |
+  | 4  | d    | us     |
+-&gt; done: IcebergSteps.WhenUpsert(EqualityDeletes, &lt;table&gt;) (0.0s)
+Then the table contains exactly:
+  --- table step argument ---
+  | id | name | region |
+  | 1  | a    | eu     |
+  | 2  | b-v2 | us     |
+  | 3  | c    | eu     |
+  | 4  | d    | us     |
+-&gt; done: IcebergSteps.ThenContains(&lt;table&gt;) (0.0s)
+And the last snapshot operation is "overwrite"
+-&gt; done: IcebergSteps.ThenOperation("overwrite") (0.0s)
+And the table's delete files are equality delete files
+-&gt; done: IcebergSteps.ThenDeleteFilesAre("equality delete f...") (0.0s)
+And PyIceberg refuses the table
+-&gt; done: IcebergSteps.ThenPyIcebergRefuses() (2.3s)</StdOut>
+      </Output>
+    </UnitTestResult>
+    <UnitTestResult executionId="df5a8605-4017-4707-aeed-77a957026b62" testId="d83ce616-14f9-0b5b-0d3d-f25e5778b80e" testName="Upserts and deletes read identically in Spark(version: &quot;2&quot;, mechanism: &quot;position deletes&quot;, __pickleIndex: &quot;0&quot;, exampleTags: [])" computerName="runnervmtai0g" duration="00:00:09.9329647" startTime="2026-10-28T11:47:11.8605381+00:00" endTime="2026-10-28T11:47:11.8605383+00:00" testType="13cdc9d9-ddb5-4fa4-a97d-d965ccfc6d4b" outcome="Passed" testListId="8c84fa94-04c1-424b-9868-57a2d4851a1d" relativeResultsDirectory="df5a8605-4017-4707-aeed-77a957026b62">
+      <Output>
+        <StdOut>Given a format v2 table keyed by "id"
+-&gt; done: IcebergSteps.GivenTable(2) (0.0s)
+And the table contains:
+  --- table step argument ---
+  | id | name  | region |
+  | 1  | alice | eu     |
+  | 2  | bob   | us     |
+  | 3  | carol | eu     |
+  | 4  | dave  | us     |
+-&gt; done: IcebergSteps.GivenRows(&lt;table&gt;) (0.0s)
+When I upsert with position deletes:
+  --- table step argument ---
+  | id | name  | region |
+  | 2  | bobby | us     |
+  | 5  | eve   | eu     |
+-&gt; done: IcebergSteps.WhenUpsert(PositionDeletes, &lt;table&gt;) (0.0s)
+And I delete keys 1 and 3 with position deletes
+-&gt; done: IcebergSteps.WhenDeleteKeys(1, 3, PositionDeletes) (0.0s)
+Then the table contains exactly:
+  --- table step argument ---
+  | id | name  | region |
+  | 2  | bobby | us     |
+  | 4  | dave  | us     |
+  | 5  | eve   | eu     |
+-&gt; done: IcebergSteps.ThenContains(&lt;table&gt;) (0.0s)
+And Spark reads the same rows
+-&gt; done: IcebergSteps.ThenSparkAgrees() (9.9s)</StdOut>
+      </Output>
+    </UnitTestResult>
+    <UnitTestResult executionId="1dfdbd5b-80a7-451e-9920-1d5073edbec2" testId="f8ec690e-1e2f-b935-64f2-e2a909456faa" testName="Merging a feed updates known keys and inserts new ones(version: &quot;2&quot;, strategy: &quot;copy-on-write&quot;, pyiceberg: &quot;reads the same rows&quot;, __pickleIndex: &quot;10&quot;, exampleTags: [])" computerName="runnervmtai0g" duration="00:00:02.6777579" startTime="2026-10-28T11:46:38.6689802+00:00" endTime="2026-10-28T11:46:38.6689804+00:00" testType="13cdc9d9-ddb5-4fa4-a97d-d965ccfc6d4b" outcome="Passed" testListId="8c84fa94-04c1-424b-9868-57a2d4851a1d" relativeResultsDirectory="1dfdbd5b-80a7-451e-9920-1d5073edbec2">
+      <Output>
+        <StdOut>Given the default rows are:
+  --- table step argument ---
+  | id | name  | region |
+  | 1  | alice | eu     |
+  | 2  | bob   | us     |
+  | 3  | carol | eu     |
+  | 4  | dave  | us     |
+-&gt; done: IcebergSteps.GivenDefaultRows(&lt;table&gt;) (0.0s)
+Given a format v2 table keyed by "id" holding the default rows
+-&gt; done: IcebergSteps.GivenTableWithDefaults(2) (0.0s)
+When I merge the feed with copy-on-write, updating matches and inserting new rows:
+  --- table step argument ---
+  | id | name  | region |
+  | 2  | bobby | us     |
+  | 5  | erin  | eu     |
+-&gt; done: UpdateMergeSteps.WhenMerge(CopyOnWrite, &lt;table&gt;) (0.1s)
+Then the change reports 1 updated, 0 deleted and 1 inserted
+-&gt; done: UpdateMergeSteps.ThenCounts(1, 0, 1) (0.0s)
+And the table contains exactly:
+  --- table step argument ---
+  | id | name  | region |
+  | 1  | alice | eu     |
+  | 2  | bobby | us     |
+  | 3  | carol | eu     |
+  | 4  | dave  | us     |
+  | 5  | erin  | eu     |
+-&gt; done: IcebergSteps.ThenContains(&lt;table&gt;) (0.0s)
+And PyIceberg reads the same rows
+-&gt; done: IcebergSteps.ThenPyIcebergAgrees() (2.6s)</StdOut>
+      </Output>
+    </UnitTestResult>
+    <UnitTestResult executionId="3ec5bd70-b391-4432-a7ec-e00a5206fbe7" testId="888c8a0b-8e61-9f34-0261-d5c10af9888a" testName="Upserting the same rows twice is idempotent(version: &quot;2&quot;, strategy: &quot;copy-on-write&quot;, __pickleIndex: &quot;8&quot;, exampleTags: [])" computerName="runnervmtai0g" duration="00:00:00.6658212" startTime="2026-10-28T11:46:22.6525022+00:00" endTime="2026-10-28T11:46:22.6525286+00:00" testType="13cdc9d9-ddb5-4fa4-a97d-d965ccfc6d4b" outcome="Passed" testListId="8c84fa94-04c1-424b-9868-57a2d4851a1d" relativeResultsDirectory="3ec5bd70-b391-4432-a7ec-e00a5206fbe7">
+      <Output>
+        <StdOut>Given a format v2 table keyed by "id"
+-&gt; done: IcebergSteps.GivenTable(2) (0.1s)
+And the table contains:
+  --- table step argument ---
+  | id | name | region |
+  | 1  | a    | eu     |
+-&gt; done: IcebergSteps.GivenRows(&lt;table&gt;) (0.3s)
+When I upsert with copy-on-write:
+  --- table step argument ---
+  | id | name | region |
+  | 1  | a2   | eu     |
+-&gt; done: IcebergSteps.WhenUpsert(CopyOnWrite, &lt;table&gt;) (0.1s)
+And I upsert with copy-on-write:
+  --- table step argument ---
+  | id | name | region |
+  | 1  | a2   | eu     |
+-&gt; done: IcebergSteps.WhenUpsert(CopyOnWrite, &lt;table&gt;) (0.0s)
+Then the table contains exactly:
+  --- table step argument ---
+  | id | name | region |
+  | 1  | a2   | eu     |
+-&gt; done: IcebergSteps.ThenContains(&lt;table&gt;) (0.0s)</StdOut>
+      </Output>
+    </UnitTestResult>
+    <UnitTestResult executionId="cc77b937-0314-42af-9a6f-74c8fa63190d" testId="836ea4ad-c354-f74c-9670-e3818117823d" testName="Delete by predicate(version: &quot;2&quot;, strategy: &quot;position deletes&quot;, __pickleIndex: &quot;7&quot;, exampleTags: [])" computerName="runnervmtai0g" duration="00:00:01.2266975" startTime="2026-10-28T11:46:54.1364282+00:00" endTime="2026-10-28T11:46:54.1364284+00:00" testType="13cdc9d9-ddb5-4fa4-a97d-d965ccfc6d4b" outcome="Passed" testListId="8c84fa94-04c1-424b-9868-57a2d4851a1d" relativeResultsDirectory="cc77b937-0314-42af-9a6f-74c8fa63190d">
+      <Output>
+        <StdOut>Given the default rows are:
+  --- table step argument ---
+  | id | name | region |
+  | 1  | a    | eu     |
+  | 2  | b    | us     |
+  | 3  | c    | eu     |
+  | 4  | d    | us     |
+-&gt; done: IcebergSteps.GivenDefaultRows(&lt;table&gt;) (0.0s)
+Given a format v2 table keyed by "id" holding the default rows
+-&gt; done: IcebergSteps.GivenTableWithDefaults(2) (0.0s)
+When I delete rows where region is "us" with position deletes
+-&gt; done: IcebergSteps.WhenDeleteWhere("us", PositionDeletes) (0.0s)
+Then the table contains exactly:
+  --- table step argument ---
+  | id | name | region |
+  | 1  | a    | eu     |
+  | 3  | c    | eu     |
+-&gt; done: IcebergSteps.ThenContains(&lt;table&gt;) (0.0s)
+And PyIceberg reads the same rows
+-&gt; done: IcebergSteps.ThenPyIcebergAgrees() (1.2s)</StdOut>
+      </Output>
+    </UnitTestResult>
+    <UnitTestResult executionId="41a4f7ef-97c9-4ec4-94dd-abb73f7de273" testId="a48114c3-d6da-872b-9057-356eeeaa2dbf" testName="Upserting the same rows twice is idempotent(version: &quot;2&quot;, strategy: &quot;position deletes&quot;, __pickleIndex: &quot;9&quot;, exampleTags: [])" computerName="runnervmtai0g" duration="00:00:00.1044341" startTime="2026-10-28T11:46:22.8065750+00:00" endTime="2026-10-28T11:46:22.8065751+00:00" testType="13cdc9d9-ddb5-4fa4-a97d-d965ccfc6d4b" outcome="Passed" testListId="8c84fa94-04c1-424b-9868-57a2d4851a1d" relativeResultsDirectory="41a4f7ef-97c9-4ec4-94dd-abb73f7de273">
+      <Output>
+        <StdOut>Given a format v2 table keyed by "id"
+-&gt; done: IcebergSteps.GivenTable(2) (0.0s)
+And the table contains:
+  --- table step argument ---
+  | id | name | region |
+  | 1  | a    | eu     |
+-&gt; done: IcebergSteps.GivenRows(&lt;table&gt;) (0.0s)
+When I upsert with position deletes:
+  --- table step argument ---
+  | id | name | region |
+  | 1  | a2   | eu     |
+-&gt; done: IcebergSteps.WhenUpsert(PositionDeletes, &lt;table&gt;) (0.0s)
+And I upsert with position deletes:
+  --- table step argument ---
+  | id | name | region |
+  | 1  | a2   | eu     |
+-&gt; done: IcebergSteps.WhenUpsert(PositionDeletes, &lt;table&gt;) (0.0s)
+Then the table contains exactly:
+  --- table step argument ---
+  | id | name | region |
+  | 1  | a2   | eu     |
+-&gt; done: IcebergSteps.ThenContains(&lt;table&gt;) (0.0s)</StdOut>
+      </Output>
+    </UnitTestResult>
+    <UnitTestResult executionId="9a302c0c-ad9b-41ef-88ee-2d14a1bc752d" testId="ff90250e-785a-bb6c-8b4e-5b315fe592e5" testName="A feed that lists a key twice is rejected before anything is written" computerName="runnervmtai0g" duration="00:00:00.0229814" startTime="2026-10-28T11:46:40.6217318+00:00" endTime="2026-10-28T11:46:40.6217320+00:00" testType="13cdc9d9-ddb5-4fa4-a97d-d965ccfc6d4b" outcome="Passed" testListId="8c84fa94-04c1-424b-9868-57a2d4851a1d" relativeResultsDirectory="9a302c0c-ad9b-41ef-88ee-2d14a1bc752d">
+      <Output>
+        <StdOut>Given the default rows are:
+  --- table step argument ---
+  | id | name  | region |
+  | 1  | alice | eu     |
+  | 2  | bob   | us     |
+  | 3  | carol | eu     |
+  | 4  | dave  | us     |
+-&gt; done: IcebergSteps.GivenDefaultRows(&lt;table&gt;) (0.0s)
+Given a format v2 table keyed by "id" holding the default rows
+-&gt; done: IcebergSteps.GivenTableWithDefaults(2) (0.0s)
+When I merge the feed with copy-on-write, updating matches and inserting new rows:
+  --- table step argument ---
+  | id | name  | region |
+  | 2  | bobby | us     |
+  | 2  | rob   | us     |
+-&gt; done: UpdateMergeSteps.WhenMerge(CopyOnWrite, &lt;table&gt;) (0.0s)
+Then the write fails with "cardinality violation"
+-&gt; done: IcebergSteps.ThenFails("cardinality viola...") (0.0s)
+And the table still holds the default rows and nothing new was written
+-&gt; done: UpdateMergeSteps.ThenUnchanged() (0.0s)</StdOut>
+      </Output>
+    </UnitTestResult>
+    <UnitTestResult executionId="a38b99ce-b2ba-470f-a3af-5d7c2bc148d2" testId="893d4f8f-bd85-d2a7-7a75-53b957a949ed" testName="Merging a feed updates known keys and inserts new ones(version: &quot;2&quot;, strategy: &quot;position deletes&quot;, pyiceberg: &quot;reads the same rows&quot;, __pickleIndex: &quot;11&quot;, exampleTags: [])" computerName="runnervmtai0g" duration="00:00:01.9203162" startTime="2026-10-28T11:46:40.5937752+00:00" endTime="2026-10-28T11:46:40.5937754+00:00" testType="13cdc9d9-ddb5-4fa4-a97d-d965ccfc6d4b" outcome="Passed" testListId="8c84fa94-04c1-424b-9868-57a2d4851a1d" relativeResultsDirectory="a38b99ce-b2ba-470f-a3af-5d7c2bc148d2">
+      <Output>
+        <StdOut>Given the default rows are:
+  --- table step argument ---
+  | id | name  | region |
+  | 1  | alice | eu     |
+  | 2  | bob   | us     |
+  | 3  | carol | eu     |
+  | 4  | dave  | us     |
+-&gt; done: IcebergSteps.GivenDefaultRows(&lt;table&gt;) (0.0s)
+Given a format v2 table keyed by "id" holding the default rows
+-&gt; done: IcebergSteps.GivenTableWithDefaults(2) (0.0s)
+When I merge the feed with position deletes, updating matches and inserting new rows:
+  --- table step argument ---
+  | id | name  | region |
+  | 2  | bobby | us     |
+  | 5  | erin  | eu     |
+-&gt; done: UpdateMergeSteps.WhenMerge(PositionDeletes, &lt;table&gt;) (0.0s)
+Then the change reports 1 updated, 0 deleted and 1 inserted
+-&gt; done: UpdateMergeSteps.ThenCounts(1, 0, 1) (0.0s)
+And the table contains exactly:
+  --- table step argument ---
+  | id | name  | region |
+  | 1  | alice | eu     |
+  | 2  | bobby | us     |
+  | 3  | carol | eu     |
+  | 4  | dave  | us     |
+  | 5  | erin  | eu     |
+-&gt; done: IcebergSteps.ThenContains(&lt;table&gt;) (0.0s)
+And PyIceberg reads the same rows
+-&gt; done: IcebergSteps.ThenPyIcebergAgrees() (1.8s)</StdOut>
+      </Output>
+    </UnitTestResult>
+    <UnitTestResult executionId="0e623b95-8261-447c-97d3-c6fd6dcf76ce" testId="f7cd29b8-2180-2c7c-59ac-c05307318a6c" testName="Merging a feed updates known keys and inserts new ones(version: &quot;3&quot;, strategy: &quot;position deletes&quot;, pyiceberg: &quot;reads the same rows&quot;, __pickleIndex: &quot;14&quot;, exampleTags: [])" computerName="runnervmtai0g" duration="00:00:02.8227663" startTime="2026-10-28T11:46:32.9088418+00:00" endTime="2026-10-28T11:46:32.9088420+00:00" testType="13cdc9d9-ddb5-4fa4-a97d-d965ccfc6d4b" outcome="Passed" testListId="8c84fa94-04c1-424b-9868-57a2d4851a1d" relativeResultsDirectory="0e623b95-8261-447c-97d3-c6fd6dcf76ce">
+      <Output>
+        <StdOut>Given the default rows are:
+  --- table step argument ---
+  | id | name  | region |
+  | 1  | alice | eu     |
+  | 2  | bob   | us     |
+  | 3  | carol | eu     |
+  | 4  | dave  | us     |
+-&gt; done: IcebergSteps.GivenDefaultRows(&lt;table&gt;) (0.0s)
+Given a format v3 table keyed by "id" holding the default rows
+-&gt; done: IcebergSteps.GivenTableWithDefaults(3) (0.0s)
+When I merge the feed with position deletes, updating matches and inserting new rows:
+  --- table step argument ---
+  | id | name  | region |
+  | 2  | bobby | us     |
+  | 5  | erin  | eu     |
+-&gt; done: UpdateMergeSteps.WhenMerge(PositionDeletes, &lt;table&gt;) (0.0s)
+Then the change reports 1 updated, 0 deleted and 1 inserted
+-&gt; done: UpdateMergeSteps.ThenCounts(1, 0, 1) (0.0s)
+And the table contains exactly:
+  --- table step argument ---
+  | id | name  | region |
+  | 1  | alice | eu     |
+  | 2  | bobby | us     |
+  | 3  | carol | eu     |
+  | 4  | dave  | us     |
+  | 5  | erin  | eu     |
+-&gt; done: IcebergSteps.ThenContains(&lt;table&gt;) (0.0s)
+And PyIceberg reads the same rows
+-&gt; done: IcebergSteps.ThenPyIcebergAgrees() (2.8s)</StdOut>
+      </Output>
+    </UnitTestResult>
+    <UnitTestResult executionId="6f470125-b66c-439c-bad8-e7b928e48929" testId="6a95eae2-8acf-2f51-b631-28226a4b8317" testName="Upsert by key replaces matching rows and inserts new ones(version: &quot;2&quot;, strategy: &quot;equality deletes&quot;, deleteFiles: &quot;equality delete files&quot;, pyiceberg: &quot;refuses the table&quot;, __pickleIndex: &quot;4&quot;, exampleTags: [])" computerName="runnervmtai0g" duration="00:00:02.3054369" startTime="2026-10-28T11:46:43.7587983+00:00" endTime="2026-10-28T11:46:43.7587985+00:00" testType="13cdc9d9-ddb5-4fa4-a97d-d965ccfc6d4b" outcome="Passed" testListId="8c84fa94-04c1-424b-9868-57a2d4851a1d" relativeResultsDirectory="6f470125-b66c-439c-bad8-e7b928e48929">
+      <Output>
+        <StdOut>Given a format v2 table keyed by "id"
+-&gt; done: IcebergSteps.GivenTable(2) (0.0s)
+And the table contains:
+  --- table step argument ---
+  | id | name | region |
+  | 1  | a    | eu     |
+  | 2  | b    | us     |
+  | 3  | c    | eu     |
+-&gt; done: IcebergSteps.GivenRows(&lt;table&gt;) (0.0s)
+When I upsert with equality deletes:
+  --- table step argument ---
+  | id | name | region |
+  | 2  | b-v2 | us     |
+  | 4  | d    | us     |
+-&gt; done: IcebergSteps.WhenUpsert(EqualityDeletes, &lt;table&gt;) (0.0s)
+Then the table contains exactly:
+  --- table step argument ---
+  | id | name | region |
+  | 1  | a    | eu     |
+  | 2  | b-v2 | us     |
+  | 3  | c    | eu     |
+  | 4  | d    | us     |
+-&gt; done: IcebergSteps.ThenContains(&lt;table&gt;) (0.0s)
+And the last snapshot operation is "overwrite"
+-&gt; done: IcebergSteps.ThenOperation("overwrite") (0.0s)
+And the table's delete files are equality delete files
+-&gt; done: IcebergSteps.ThenDeleteFilesAre("equality delete f...") (0.0s)
+And PyIceberg refuses the table
+-&gt; done: IcebergSteps.ThenPyIcebergRefuses() (2.3s)</StdOut>
+      </Output>
+    </UnitTestResult>
+    <UnitTestResult executionId="8a707764-8248-453a-ad10-c12dc8ed42f2" testId="512e9041-572d-bc69-9981-dcfad3d83df7" testName="Trino reads our deletes through the REST catalog(version: &quot;2&quot;, mechanism: &quot;position deletes&quot;, __pickleIndex: &quot;5&quot;, exampleTags: [])" computerName="runnervmtai0g" duration="00:00:00.7352432" startTime="2026-10-28T11:47:26.5022082+00:00" endTime="2026-10-28T11:47:26.5022083+00:00" testType="13cdc9d9-ddb5-4fa4-a97d-d965ccfc6d4b" outcome="Passed" testListId="8c84fa94-04c1-424b-9868-57a2d4851a1d" relativeResultsDirectory="8a707764-8248-453a-ad10-c12dc8ed42f2">
+      <Output>
+        <StdOut>Given the tables live in the shared REST catalog
+-&gt; done: IcebergSteps.GivenSharedCatalog() (0.0s)
+And a format v2 table keyed by "id"
+-&gt; done: IcebergSteps.GivenTable(2) (0.0s)
+And the table contains:
+  --- table step argument ---
+  | id | name  | region |
+  | 1  | alice | eu     |
+  | 2  | bob   | us     |
+  | 3  | carol | eu     |
+-&gt; done: IcebergSteps.GivenRows(&lt;table&gt;) (0.0s)
+When I upsert with position deletes:
+  --- table step argument ---
+  | id | name  | region |
+  | 2  | bobby | us     |
+  | 4  | dan   | eu     |
+-&gt; done: IcebergSteps.WhenUpsert(PositionDeletes, &lt;table&gt;) (0.1s)
+And I delete keys 1 and 3 with position deletes
+-&gt; done: IcebergSteps.WhenDeleteKeys(1, 3, PositionDeletes) (0.1s)
+Then the table contains exactly:
+  --- table step argument ---
+  | id | name  | region |
+  | 2  | bobby | us     |
+  | 4  | dan   | eu     |
+-&gt; done: IcebergSteps.ThenContains(&lt;table&gt;) (0.0s)
+And Trino reads the same rows
+-&gt; done: IcebergSteps.ThenTrinoAgrees() (0.5s)</StdOut>
+      </Output>
+    </UnitTestResult>
+    <UnitTestResult executionId="db49ec03-632d-4e91-88fb-45354370ffee" testId="117a9b15-9ee1-5f8e-fe65-4b8c05b67d6e" testName="Pure insertion never touches existing rows(version: &quot;3&quot;, __pickleIndex: &quot;1&quot;, exampleTags: [])" computerName="runnervmtai0g" duration="00:00:03.9659257" startTime="2026-10-28T11:46:27.0648805+00:00" endTime="2026-10-28T11:46:27.0648807+00:00" testType="13cdc9d9-ddb5-4fa4-a97d-d965ccfc6d4b" outcome="Passed" testListId="8c84fa94-04c1-424b-9868-57a2d4851a1d" relativeResultsDirectory="db49ec03-632d-4e91-88fb-45354370ffee">
+      <Output>
+        <StdOut>Given a format v3 table keyed by "id"
+-&gt; done: IcebergSteps.GivenTable(3) (0.0s)
+And the table contains:
+  --- table step argument ---
+  | id | name | region |
+  | 1  | a    | eu     |
+  | 2  | b    | us     |
+-&gt; done: IcebergSteps.GivenRows(&lt;table&gt;) (0.0s)
+When I insert:
+  --- table step argument ---
+  | id | name | region |
+  | 3  | c    | eu     |
+-&gt; done: IcebergSteps.WhenInsert(&lt;table&gt;) (0.0s)
+Then the table contains exactly:
+  --- table step argument ---
+  | id | name | region |
+  | 1  | a    | eu     |
+  | 2  | b    | us     |
+  | 3  | c    | eu     |
+-&gt; done: IcebergSteps.ThenContains(&lt;table&gt;) (0.0s)
+And the last snapshot operation is "append"
+-&gt; done: IcebergSteps.ThenOperation("append") (0.0s)
+And the table has no delete files
+-&gt; done: IcebergSteps.ThenNoDeleteFiles() (0.0s)
+And PyIceberg reads the same rows
+-&gt; done: IcebergSteps.ThenPyIcebergAgrees() (3.9s)</StdOut>
+      </Output>
+    </UnitTestResult>
+    <UnitTestResult executionId="30762ca3-742b-496e-aaa7-ea7043c5bd2b" testId="eddd3987-eda0-cde3-8110-04e12b214aa8" testName="Concurrent upserts of the same key keep a single row(version: &quot;3&quot;, strategy: &quot;position deletes&quot;, __pickleIndex: &quot;4&quot;, exampleTags: [])" computerName="runnervmtai0g" duration="00:00:00.1828109" startTime="2026-10-28T11:46:50.4009284+00:00" endTime="2026-10-28T11:46:50.4009286+00:00" testType="13cdc9d9-ddb5-4fa4-a97d-d965ccfc6d4b" outcome="Passed" testListId="8c84fa94-04c1-424b-9868-57a2d4851a1d" relativeResultsDirectory="30762ca3-742b-496e-aaa7-ea7043c5bd2b">
+      <Output>
+        <StdOut>Given a format v3 table keyed by "id"
+-&gt; done: IcebergSteps.GivenTable(3) (0.0s)
+And the table contains:
+  --- table step argument ---
+  | id | name | region |
+  | 1  | a    | eu     |
+-&gt; done: IcebergSteps.GivenRows(&lt;table&gt;) (0.0s)
+And a second writer that has already loaded the table
+-&gt; done: IcebergSteps.GivenSecondWriter() (0.0s)
+When I upsert with position deletes:
+  --- table step argument ---
+  | id | name    | region |
+  | 7  | from-me | eu     |
+-&gt; done: IcebergSteps.WhenUpsert(PositionDeletes, &lt;table&gt;) (0.0s)
+And the second writer upserts with position deletes:
+  --- table step argument ---
+  | id | name        | region |
+  | 7  | from-second | eu     |
+-&gt; done: IcebergSteps.WhenSecondUpserts(PositionDeletes, &lt;table&gt;) (0.1s)
+Then the table contains exactly:
+  --- table step argument ---
+  | id | name        | region |
+  | 1  | a           | eu     |
+  | 7  | from-second | eu     |
+-&gt; done: IcebergSteps.ThenContains(&lt;table&gt;) (0.0s)
+And the second writer needed 2 attempts
+-&gt; done: IcebergSteps.ThenAttempts(2) (0.0s)</StdOut>
+      </Output>
+    </UnitTestResult>
+    <UnitTestResult executionId="0c052000-6c5c-4ba1-bf30-aad50ee5951c" testId="a5c9ac6c-17b0-f4c6-1d27-c9f468a0af66" testName="A typed insert fills omitted optional and required columns(format: &quot;parquet&quot;, reader: &quot;PyIceberg&quot;, __pickleIndex: &quot;0&quot;, exampleTags: [])" computerName="runnervmtai0g" duration="00:00:05.2214134" startTime="2026-10-28T11:46:27.1314362+00:00" endTime="2026-10-28T11:46:27.1314364+00:00" testType="13cdc9d9-ddb5-4fa4-a97d-d965ccfc6d4b" outcome="Passed" testListId="8c84fa94-04c1-424b-9868-57a2d4851a1d" relativeResultsDirectory="0c052000-6c5c-4ba1-bf30-aad50ee5951c">
+      <Output>
+        <StdOut>Given a format v3 table with typed write defaults using parquet
+-&gt; done: WriteDefaultSteps.GivenDefaults("parquet") (0.1s)
+When I insert a typed row omitting the defaulted columns
+-&gt; done: WriteDefaultSteps.InsertTyped() (0.3s)
+Then the table contains exactly:
+  --- table step argument ---
+  | id | name      | region |
+  | 1  | anonymous | eu     |
+-&gt; done: IcebergSteps.ThenContains(&lt;table&gt;) (0.1s)
+And PyIceberg reads the same rows
+-&gt; done: IcebergSteps.ThenPyIcebergAgrees() (4.6s)</StdOut>
+      </Output>
+    </UnitTestResult>
+    <UnitTestResult executionId="cafee5d4-ad73-45a3-8e95-4a0146b9aafe" testId="5af1316f-5f96-2e1c-1c01-16d655958239" testName="Delete by key(version: &quot;3&quot;, strategy: &quot;copy-on-write&quot;, operation: &quot;overwrite&quot;, __pickleIndex: &quot;3&quot;, exampleTags: [])" computerName="runnervmtai0g" duration="00:00:00.0977631" startTime="2026-10-28T11:46:52.7188549+00:00" endTime="2026-10-28T11:46:52.7188550+00:00" testType="13cdc9d9-ddb5-4fa4-a97d-d965ccfc6d4b" outcome="Passed" testListId="8c84fa94-04c1-424b-9868-57a2d4851a1d" relativeResultsDirectory="cafee5d4-ad73-45a3-8e95-4a0146b9aafe">
+      <Output>
+        <StdOut>Given the default rows are:
+  --- table step argument ---
+  | id | name | region |
+  | 1  | a    | eu     |
+  | 2  | b    | us     |
+  | 3  | c    | eu     |
+  | 4  | d    | us     |
+-&gt; done: IcebergSteps.GivenDefaultRows(&lt;table&gt;) (0.0s)
+Given a format v3 table keyed by "id" holding the default rows
+-&gt; done: IcebergSteps.GivenTableWithDefaults(3) (0.0s)
+When I delete keys 2 and 3 with copy-on-write
+-&gt; done: IcebergSteps.WhenDeleteKeys(2, 3, CopyOnWrite) (0.0s)
+Then the table contains exactly:
+  --- table step argument ---
+  | id | name | region |
+  | 1  | a    | eu     |
+  | 4  | d    | us     |
+-&gt; done: IcebergSteps.ThenContains(&lt;table&gt;) (0.0s)
+And the last snapshot operation is "overwrite"
+-&gt; done: IcebergSteps.ThenOperation("overwrite") (0.0s)</StdOut>
+      </Output>
+    </UnitTestResult>
+    <UnitTestResult executionId="b76f8377-bfdf-4970-9c95-d6395ef9f600" testId="b98031b9-3778-218c-cba7-7b5487a54720" testName="A customer who moves region moves to that region's partition(version: &quot;3&quot;, strategy: &quot;position deletes&quot;, __pickleIndex: &quot;5&quot;, exampleTags: [])" computerName="runnervmtai0g" duration="00:00:01.1355869" startTime="2026-10-28T11:46:55.9880418+00:00" endTime="2026-10-28T11:46:55.9880420+00:00" testType="13cdc9d9-ddb5-4fa4-a97d-d965ccfc6d4b" outcome="Passed" testListId="8c84fa94-04c1-424b-9868-57a2d4851a1d" relativeResultsDirectory="b76f8377-bfdf-4970-9c95-d6395ef9f600">
+      <Output>
+        <StdOut>Given the default rows are:
+  --- table step argument ---
+  | id | name  | region |
+  | 1  | alice | eu     |
+  | 2  | bob   | us     |
+  | 3  | carol | eu     |
+  | 4  | dave  | us     |
+-&gt; done: IcebergSteps.GivenDefaultRows(&lt;table&gt;) (0.0s)
+Given a format v3 table keyed by "id" and partitioned by "region"
+-&gt; done: IcebergSteps.GivenPartitionedTable(3) (0.0s)
+And the table contains the default rows
+-&gt; done: IcebergSteps.GivenDefaults() (0.0s)
+When I set region to "apac" where id is 3 with position deletes
+-&gt; done: UpdateMergeSteps.WhenUpdate("region", "apac", 3, PositionDeletes) (0.0s)
+Then the table contains exactly:
+  --- table step argument ---
+  | id | name  | region |
+  | 1  | alice | eu     |
+  | 2  | bob   | us     |
+  | 3  | carol | apac   |
+  | 4  | dave  | us     |
+-&gt; done: IcebergSteps.ThenContains(&lt;table&gt;) (0.0s)
+And the row with id 3 is stored in the "apac" partition
+-&gt; done: UpdateMergeSteps.ThenPartition(3, "apac") (0.0s)
+And PyIceberg reads the same rows
+-&gt; done: IcebergSteps.ThenPyIcebergAgrees() (1.1s)</StdOut>
+      </Output>
+    </UnitTestResult>
+    <UnitTestResult executionId="9d043806-5f3e-4ea4-9833-b9f4d8f079db" testId="00518b44-9dd0-049b-4f53-ddd0403bda94" testName="Delete by key(version: &quot;2&quot;, strategy: &quot;copy-on-write&quot;, operation: &quot;overwrite&quot;, __pickleIndex: &quot;0&quot;, exampleTags: [])" computerName="runnervmtai0g" duration="00:00:00.0589412" startTime="2026-10-28T11:46:52.8512761+00:00" endTime="2026-10-28T11:46:52.8512764+00:00" testType="13cdc9d9-ddb5-4fa4-a97d-d965ccfc6d4b" outcome="Passed" testListId="8c84fa94-04c1-424b-9868-57a2d4851a1d" relativeResultsDirectory="9d043806-5f3e-4ea4-9833-b9f4d8f079db">
+      <Output>
+        <StdOut>Given the default rows are:
+  --- table step argument ---
+  | id | name | region |
+  | 1  | a    | eu     |
+  | 2  | b    | us     |
+  | 3  | c    | eu     |
+  | 4  | d    | us     |
+-&gt; done: IcebergSteps.GivenDefaultRows(&lt;table&gt;) (0.0s)
+Given a format v2 table keyed by "id" holding the default rows
+-&gt; done: IcebergSteps.GivenTableWithDefaults(2) (0.0s)
+When I delete keys 2 and 3 with copy-on-write
+-&gt; done: IcebergSteps.WhenDeleteKeys(2, 3, CopyOnWrite) (0.0s)
+Then the table contains exactly:
+  --- table step argument ---
+  | id | name | region |
+  | 1  | a    | eu     |
+  | 4  | d    | us     |
+-&gt; done: IcebergSteps.ThenContains(&lt;table&gt;) (0.0s)
+And the last snapshot operation is "overwrite"
+-&gt; done: IcebergSteps.ThenOperation("overwrite") (0.0s)</StdOut>
+      </Output>
+    </UnitTestResult>
+    <UnitTestResult executionId="08672976-904f-4524-9635-7e13cae1d321" testId="1a567087-0ca7-1837-8714-9ad9623445b3" testName="Group replacement swaps whole groups and leaves the rest alone(version: &quot;2&quot;, strategy: &quot;equality deletes&quot;, pyiceberg: &quot;refuses the table&quot;, __pickleIndex: &quot;15&quot;, exampleTags: [])" computerName="runnervmtai0g" duration="00:00:02.5914327" startTime="2026-10-28T11:46:49.0747739+00:00" endTime="2026-10-28T11:46:49.0747741+00:00" testType="13cdc9d9-ddb5-4fa4-a97d-d965ccfc6d4b" outcome="Passed" testListId="8c84fa94-04c1-424b-9868-57a2d4851a1d" relativeResultsDirectory="08672976-904f-4524-9635-7e13cae1d321">
+      <Output>
+        <StdOut>Given a format v2 table keyed by "id" and partitioned by "region"
+-&gt; done: IcebergSteps.GivenPartitionedTable(2) (0.0s)
+And the table contains:
+  --- table step argument ---
+  | id | name | region |
+  | 1  | a    | eu     |
+  | 2  | b    | us     |
+  | 3  | c    | eu     |
+  | 4  | d    | apac   |
+-&gt; done: IcebergSteps.GivenRows(&lt;table&gt;) (0.0s)
+When I replace the "region" groups with equality deletes:
+  --- table step argument ---
+  | id | name | region |
+  | 10 | x    | eu     |
+  | 11 | y    | us     |
+-&gt; done: IcebergSteps.WhenReplaceGroups("region", EqualityDeletes, &lt;table&gt;) (0.0s)
+Then the table contains exactly:
+  --- table step argument ---
+  | id | name | region |
+  | 4  | d    | apac   |
+  | 10 | x    | eu     |
+  | 11 | y    | us     |
+-&gt; done: IcebergSteps.ThenContains(&lt;table&gt;) (0.0s)
+And PyIceberg refuses the table
+-&gt; done: IcebergSteps.ThenPyIcebergRefuses() (2.6s)</StdOut>
+      </Output>
+    </UnitTestResult>
+    <UnitTestResult executionId="b247e36c-86f6-4587-8236-8954b80b8cd7" testId="97802a67-2413-4402-39b7-fed1eea503f8" testName="Delete by key(version: &quot;3&quot;, strategy: &quot;position deletes&quot;, operation: &quot;delete&quot;, __pickleIndex: &quot;4&quot;, exampleTags: [])" computerName="runnervmtai0g" duration="00:00:00.0410720" startTime="2026-10-28T11:46:52.6065312+00:00" endTime="2026-10-28T11:46:52.6065314+00:00" testType="13cdc9d9-ddb5-4fa4-a97d-d965ccfc6d4b" outcome="Passed" testListId="8c84fa94-04c1-424b-9868-57a2d4851a1d" relativeResultsDirectory="b247e36c-86f6-4587-8236-8954b80b8cd7">
+      <Output>
+        <StdOut>Given the default rows are:
+  --- table step argument ---
+  | id | name | region |
+  | 1  | a    | eu     |
+  | 2  | b    | us     |
+  | 3  | c    | eu     |
+  | 4  | d    | us     |
+-&gt; done: IcebergSteps.GivenDefaultRows(&lt;table&gt;) (0.0s)
+Given a format v3 table keyed by "id" holding the default rows
+-&gt; done: IcebergSteps.GivenTableWithDefaults(3) (0.0s)
+When I delete keys 2 and 3 with position deletes
+-&gt; done: IcebergSteps.WhenDeleteKeys(2, 3, PositionDeletes) (0.0s)
+Then the table contains exactly:
+  --- table step argument ---
+  | id | name | region |
+  | 1  | a    | eu     |
+  | 4  | d    | us     |
+-&gt; done: IcebergSteps.ThenContains(&lt;table&gt;) (0.0s)
+And the last snapshot operation is "delete"
+-&gt; done: IcebergSteps.ThenOperation("delete") (0.0s)</StdOut>
+      </Output>
+    </UnitTestResult>
+    <UnitTestResult executionId="c6b41138-d7e0-4281-af56-3f9be46d4542" testId="4b4d140d-796c-3f2b-7ccd-34015f11c59e" testName="Upserting the same rows twice is idempotent(version: &quot;3&quot;, strategy: &quot;position deletes&quot;, __pickleIndex: &quot;11&quot;, exampleTags: [])" computerName="runnervmtai0g" duration="00:00:00.0852673" startTime="2026-10-28T11:46:22.9506593+00:00" endTime="2026-10-28T11:46:22.9506594+00:00" testType="13cdc9d9-ddb5-4fa4-a97d-d965ccfc6d4b" outcome="Passed" testListId="8c84fa94-04c1-424b-9868-57a2d4851a1d" relativeResultsDirectory="c6b41138-d7e0-4281-af56-3f9be46d4542">
+      <Output>
+        <StdOut>Given a format v3 table keyed by "id"
+-&gt; done: IcebergSteps.GivenTable(3) (0.0s)
+And the table contains:
+  --- table step argument ---
+  | id | name | region |
+  | 1  | a    | eu     |
+-&gt; done: IcebergSteps.GivenRows(&lt;table&gt;) (0.0s)
+When I upsert with position deletes:
+  --- table step argument ---
+  | id | name | region |
+  | 1  | a2   | eu     |
+-&gt; done: IcebergSteps.WhenUpsert(PositionDeletes, &lt;table&gt;) (0.0s)
+And I upsert with position deletes:
+  --- table step argument ---
+  | id | name | region |
+  | 1  | a2   | eu     |
+-&gt; done: IcebergSteps.WhenUpsert(PositionDeletes, &lt;table&gt;) (0.0s)
+Then the table contains exactly:
+  --- table step argument ---
+  | id | name | region |
+  | 1  | a2   | eu     |
+-&gt; done: IcebergSteps.ThenContains(&lt;table&gt;) (0.0s)</StdOut>
+      </Output>
+    </UnitTestResult>
+    <UnitTestResult executionId="8ed4fbf3-b0c2-4fd3-b363-9f26c229b5fc" testId="c40a8dc5-f0e5-fa59-31ff-6a5783dc2cf2" testName="Concurrent upserts of the same key keep a single row(version: &quot;2&quot;, strategy: &quot;equality deletes&quot;, __pickleIndex: &quot;2&quot;, exampleTags: [])" computerName="runnervmtai0g" duration="00:00:00.1627478" startTime="2026-10-28T11:46:50.5777681+00:00" endTime="2026-10-28T11:46:50.5777692+00:00" testType="13cdc9d9-ddb5-4fa4-a97d-d965ccfc6d4b" outcome="Passed" testListId="8c84fa94-04c1-424b-9868-57a2d4851a1d" relativeResultsDirectory="8ed4fbf3-b0c2-4fd3-b363-9f26c229b5fc">
+      <Output>
+        <StdOut>Given a format v2 table keyed by "id"
+-&gt; done: IcebergSteps.GivenTable(2) (0.0s)
+And the table contains:
+  --- table step argument ---
+  | id | name | region |
+  | 1  | a    | eu     |
+-&gt; done: IcebergSteps.GivenRows(&lt;table&gt;) (0.0s)
+And a second writer that has already loaded the table
+-&gt; done: IcebergSteps.GivenSecondWriter() (0.0s)
+When I upsert with equality deletes:
+  --- table step argument ---
+  | id | name    | region |
+  | 7  | from-me | eu     |
+-&gt; done: IcebergSteps.WhenUpsert(EqualityDeletes, &lt;table&gt;) (0.0s)
+And the second writer upserts with equality deletes:
+  --- table step argument ---
+  | id | name        | region |
+  | 7  | from-second | eu     |
+-&gt; done: IcebergSteps.WhenSecondUpserts(EqualityDeletes, &lt;table&gt;) (0.1s)
+Then the table contains exactly:
+  --- table step argument ---
+  | id | name        | region |
+  | 1  | a           | eu     |
+  | 7  | from-second | eu     |
+-&gt; done: IcebergSteps.ThenContains(&lt;table&gt;) (0.0s)
+And the second writer needed 2 attempts
+-&gt; done: IcebergSteps.ThenAttempts(2) (0.0s)</StdOut>
+      </Output>
+    </UnitTestResult>
+  </Results>
+  <TestDefinitions>
+    <UnitTest name="Upsert by key replaces matching rows and inserts new ones(version: &quot;3&quot;, strategy: &quot;equality deletes&quot;, deleteFiles: &quot;equality delete files&quot;, pyiceberg: &quot;refuses the table&quot;, __pickleIndex: &quot;7&quot;, exampleTags: [])" storage="/home/runner/work/iceberg.net/iceberg.net/tests/iceberg.net.behaviour.tests/bin/debug/net10.0/iceberg.net.behaviour.tests.dll" id="c50f7f9a-9376-c7a5-de88-7e224557b8fd">
+      <Execution id="93074c83-aa09-44fd-8741-a387c6647365" />
+      <TestMethod codeBase="/home/runner/work/Iceberg.NET/Iceberg.NET/tests/Iceberg.Net.Behaviour.Tests/bin/Debug/net10.0/Iceberg.Net.Behaviour.Tests.dll" adapterTypeName="executor://xunit/VsTestRunner2/netcoreapp" className="Iceberg.Net.Behaviour.Tests.Features.WriteModesFeature" name="UpsertByKeyReplacesMatchingRowsAndInsertsNewOnes" />
+    </UnitTest>
+    <UnitTest name="A full feed for a region also removes that region's rows it no longer lists(version: &quot;2&quot;, strategy: &quot;copy-on-write&quot;, __pickleIndex: &quot;16&quot;, exampleTags: [])" storage="/home/runner/work/iceberg.net/iceberg.net/tests/iceberg.net.behaviour.tests/bin/debug/net10.0/iceberg.net.behaviour.tests.dll" id="3d75c1c4-4aea-420c-1f66-459d1d941d75">
+      <Execution id="b5ac1549-da62-4e9d-9602-8b98a6c7f85f" />
+      <TestMethod codeBase="/home/runner/work/Iceberg.NET/Iceberg.NET/tests/Iceberg.Net.Behaviour.Tests/bin/Debug/net10.0/Iceberg.Net.Behaviour.Tests.dll" adapterTypeName="executor://xunit/VsTestRunner2/netcoreapp" className="Iceberg.Net.Behaviour.Tests.Features.UpdatingAndMergingRowsFeature" name="AFullFeedForARegionAlsoRemovesThatRegionsRowsItNoLongerLists" />
+    </UnitTest>
+    <UnitTest name="Upserts and deletes read identically in Spark(version: &quot;3&quot;, mechanism: &quot;copy-on-write&quot;, __pickleIndex: &quot;3&quot;, exampleTags: [])" storage="/home/runner/work/iceberg.net/iceberg.net/tests/iceberg.net.behaviour.tests/bin/debug/net10.0/iceberg.net.behaviour.tests.dll" id="6f019522-adb9-820c-09aa-480281bdc544">
+      <Execution id="5f7217ba-d922-4a4a-a4d4-52a5142b05b0" />
+      <TestMethod codeBase="/home/runner/work/Iceberg.NET/Iceberg.NET/tests/Iceberg.Net.Behaviour.Tests/bin/Debug/net10.0/Iceberg.Net.Behaviour.Tests.dll" adapterTypeName="executor://xunit/VsTestRunner2/netcoreapp" className="Iceberg.Net.Behaviour.Tests.Features.OtherEnginesSeeWhatWeWriteFeature" name="UpsertsAndDeletesReadIdenticallyInSpark" />
+    </UnitTest>
+    <UnitTest name="Upsert by key replaces matching rows and inserts new ones(version: &quot;2&quot;, strategy: &quot;equality deletes&quot;, deleteFiles: &quot;equality delete files&quot;, pyiceberg: &quot;refuses the table&quot;, __pickleIndex: &quot;4&quot;, exampleTags: [])" storage="/home/runner/work/iceberg.net/iceberg.net/tests/iceberg.net.behaviour.tests/bin/debug/net10.0/iceberg.net.behaviour.tests.dll" id="6a95eae2-8acf-2f51-b631-28226a4b8317">
+      <Execution id="6f470125-b66c-439c-bad8-e7b928e48929" />
+      <TestMethod codeBase="/home/runner/work/Iceberg.NET/Iceberg.NET/tests/Iceberg.Net.Behaviour.Tests/bin/Debug/net10.0/Iceberg.Net.Behaviour.Tests.dll" adapterTypeName="executor://xunit/VsTestRunner2/netcoreapp" className="Iceberg.Net.Behaviour.Tests.Features.WriteModesFeature" name="UpsertByKeyReplacesMatchingRowsAndInsertsNewOnes" />
+    </UnitTest>
+    <UnitTest name="Pure insertion never touches existing rows(version: &quot;2&quot;, __pickleIndex: &quot;0&quot;, exampleTags: [])" storage="/home/runner/work/iceberg.net/iceberg.net/tests/iceberg.net.behaviour.tests/bin/debug/net10.0/iceberg.net.behaviour.tests.dll" id="a5339be4-d9b7-2979-936c-c78d3d57dabf">
+      <Execution id="b80e7c90-beca-4d75-aed3-4a1f1004aefc" />
+      <TestMethod codeBase="/home/runner/work/Iceberg.NET/Iceberg.NET/tests/Iceberg.Net.Behaviour.Tests/bin/Debug/net10.0/Iceberg.Net.Behaviour.Tests.dll" adapterTypeName="executor://xunit/VsTestRunner2/netcoreapp" className="Iceberg.Net.Behaviour.Tests.Features.WriteModesFeature" name="PureInsertionNeverTouchesExistingRows" />
+    </UnitTest>
+    <UnitTest name="Upsert by key replaces matching rows and inserts new ones(version: &quot;3&quot;, strategy: &quot;copy-on-write&quot;, deleteFiles: &quot;none&quot;, pyiceberg: &quot;reads the same rows&quot;, __pickleIndex: &quot;5&quot;, exampleTags: [])" storage="/home/runner/work/iceberg.net/iceberg.net/tests/iceberg.net.behaviour.tests/bin/debug/net10.0/iceberg.net.behaviour.tests.dll" id="94cbb6a7-2e76-47ca-3f8a-b5ff478a8ec2">
+      <Execution id="cfb8b6ef-699d-4ca6-b36c-144e90fc2263" />
+      <TestMethod codeBase="/home/runner/work/Iceberg.NET/Iceberg.NET/tests/Iceberg.Net.Behaviour.Tests/bin/Debug/net10.0/Iceberg.Net.Behaviour.Tests.dll" adapterTypeName="executor://xunit/VsTestRunner2/netcoreapp" className="Iceberg.Net.Behaviour.Tests.Features.WriteModesFeature" name="UpsertByKeyReplacesMatchingRowsAndInsertsNewOnes" />
+    </UnitTest>
+    <UnitTest name="Later deletes on a v3 table merge into one deletion vector per data file" storage="/home/runner/work/iceberg.net/iceberg.net/tests/iceberg.net.behaviour.tests/bin/debug/net10.0/iceberg.net.behaviour.tests.dll" id="15ee8b8a-8a08-2d44-94e2-e35c34c79e18">
+      <Execution id="6d66ee5f-ef2f-4fea-a357-c55a4aa00a79" />
+      <TestMethod codeBase="/home/runner/work/Iceberg.NET/Iceberg.NET/tests/Iceberg.Net.Behaviour.Tests/bin/Debug/net10.0/Iceberg.Net.Behaviour.Tests.dll" adapterTypeName="executor://xunit/VsTestRunner2/netcoreapp" className="Iceberg.Net.Behaviour.Tests.Features.DeletingRowsFeature" name="LaterDeletesOnAV3TableMergeIntoOneDeletionVectorPerDataFile" />
+    </UnitTest>
+    <UnitTest name="Merging a feed updates known keys and inserts new ones(version: &quot;2&quot;, strategy: &quot;equality deletes&quot;, pyiceberg: &quot;refuses the table&quot;, __pickleIndex: &quot;12&quot;, exampleTags: [])" storage="/home/runner/work/iceberg.net/iceberg.net/tests/iceberg.net.behaviour.tests/bin/debug/net10.0/iceberg.net.behaviour.tests.dll" id="63708195-0ce7-67f0-c338-015c2754d12d">
+      <Execution id="64ddc95d-bdf4-4152-9851-f6714648b59b" />
+      <TestMethod codeBase="/home/runner/work/Iceberg.NET/Iceberg.NET/tests/Iceberg.Net.Behaviour.Tests/bin/Debug/net10.0/Iceberg.Net.Behaviour.Tests.dll" adapterTypeName="executor://xunit/VsTestRunner2/netcoreapp" className="Iceberg.Net.Behaviour.Tests.Features.UpdatingAndMergingRowsFeature" name="MergingAFeedUpdatesKnownKeysAndInsertsNewOnes" />
+    </UnitTest>
+    <UnitTest name="A typed insert fills omitted optional and required columns(format: &quot;parquet&quot;, reader: &quot;PyIceberg&quot;, __pickleIndex: &quot;0&quot;, exampleTags: [])" storage="/home/runner/work/iceberg.net/iceberg.net/tests/iceberg.net.behaviour.tests/bin/debug/net10.0/iceberg.net.behaviour.tests.dll" id="a5c9ac6c-17b0-f4c6-1d27-c9f468a0af66">
+      <Execution id="0c052000-6c5c-4ba1-bf30-aad50ee5951c" />
+      <TestMethod codeBase="/home/runner/work/Iceberg.NET/Iceberg.NET/tests/Iceberg.Net.Behaviour.Tests/bin/Debug/net10.0/Iceberg.Net.Behaviour.Tests.dll" adapterTypeName="executor://xunit/VsTestRunner2/netcoreapp" className="Iceberg.Net.Behaviour.Tests.Features.TypedWriteDefaultsFeature" name="ATypedInsertFillsOmittedOptionalAndRequiredColumns" />
+    </UnitTest>
+    <UnitTest name="Trino reads our deletes through the REST catalog(version: &quot;2&quot;, mechanism: &quot;position deletes&quot;, __pickleIndex: &quot;5&quot;, exampleTags: [])" storage="/home/runner/work/iceberg.net/iceberg.net/tests/iceberg.net.behaviour.tests/bin/debug/net10.0/iceberg.net.behaviour.tests.dll" id="512e9041-572d-bc69-9981-dcfad3d83df7">
+      <Execution id="8a707764-8248-453a-ad10-c12dc8ed42f2" />
+      <TestMethod codeBase="/home/runner/work/Iceberg.NET/Iceberg.NET/tests/Iceberg.Net.Behaviour.Tests/bin/Debug/net10.0/Iceberg.Net.Behaviour.Tests.dll" adapterTypeName="executor://xunit/VsTestRunner2/netcoreapp" className="Iceberg.Net.Behaviour.Tests.Features.OtherEnginesSeeWhatWeWriteFeature" name="TrinoReadsOurDeletesThroughTheRESTCatalog" />
+    </UnitTest>
+    <UnitTest name="Correcting a value changes only the rows the filter selects(version: &quot;2&quot;, strategy: &quot;position deletes&quot;, deleteFiles: &quot;position delete files&quot;, __pickleIndex: &quot;1&quot;, exampleTags: [])" storage="/home/runner/work/iceberg.net/iceberg.net/tests/iceberg.net.behaviour.tests/bin/debug/net10.0/iceberg.net.behaviour.tests.dll" id="b18c86d7-560d-dc5d-c064-447b10bacc1e">
+      <Execution id="4a1fc839-2a32-4de5-8e7b-c8f578f0d91c" />
+      <TestMethod codeBase="/home/runner/work/Iceberg.NET/Iceberg.NET/tests/Iceberg.Net.Behaviour.Tests/bin/Debug/net10.0/Iceberg.Net.Behaviour.Tests.dll" adapterTypeName="executor://xunit/VsTestRunner2/netcoreapp" className="Iceberg.Net.Behaviour.Tests.Features.UpdatingAndMergingRowsFeature" name="CorrectingAValueChangesOnlyTheRowsTheFilterSelects" />
+    </UnitTest>
+    <UnitTest name="A typed insert fills omitted optional and required columns(format: &quot;avro&quot;, reader: &quot;Spark&quot;, __pickleIndex: &quot;1&quot;, exampleTags: [])" storage="/home/runner/work/iceberg.net/iceberg.net/tests/iceberg.net.behaviour.tests/bin/debug/net10.0/iceberg.net.behaviour.tests.dll" id="22ec277c-0ea7-471a-9210-19398f41b9a9">
+      <Execution id="48867543-1304-437c-8f3e-e33b132db29b" />
+      <TestMethod codeBase="/home/runner/work/Iceberg.NET/Iceberg.NET/tests/Iceberg.Net.Behaviour.Tests/bin/Debug/net10.0/Iceberg.Net.Behaviour.Tests.dll" adapterTypeName="executor://xunit/VsTestRunner2/netcoreapp" className="Iceberg.Net.Behaviour.Tests.Features.TypedWriteDefaultsFeature" name="ATypedInsertFillsOmittedOptionalAndRequiredColumns" />
+    </UnitTest>
+    <UnitTest name="A customer who moves region moves to that region's partition(version: &quot;2&quot;, strategy: &quot;copy-on-write&quot;, __pickleIndex: &quot;4&quot;, exampleTags: [])" storage="/home/runner/work/iceberg.net/iceberg.net/tests/iceberg.net.behaviour.tests/bin/debug/net10.0/iceberg.net.behaviour.tests.dll" id="a2dfdaf4-89a7-86df-2641-15b585ba5071">
+      <Execution id="fafb40a6-6f98-4277-b614-677fff0adf9a" />
+      <TestMethod codeBase="/home/runner/work/Iceberg.NET/Iceberg.NET/tests/Iceberg.Net.Behaviour.Tests/bin/Debug/net10.0/Iceberg.Net.Behaviour.Tests.dll" adapterTypeName="executor://xunit/VsTestRunner2/netcoreapp" className="Iceberg.Net.Behaviour.Tests.Features.UpdatingAndMergingRowsFeature" name="ACustomerWhoMovesRegionMovesToThatRegionsPartition" />
+    </UnitTest>
+    <UnitTest name="Delete by key(version: &quot;3&quot;, strategy: &quot;equality deletes&quot;, operation: &quot;delete&quot;, __pickleIndex: &quot;5&quot;, exampleTags: [])" storage="/home/runner/work/iceberg.net/iceberg.net/tests/iceberg.net.behaviour.tests/bin/debug/net10.0/iceberg.net.behaviour.tests.dll" id="4a8be8e7-c000-4d18-45c6-5b2e41d5edcf">
+      <Execution id="a333d61e-b7dc-41fa-86d5-b05967e4e4fe" />
+      <TestMethod codeBase="/home/runner/work/Iceberg.NET/Iceberg.NET/tests/Iceberg.Net.Behaviour.Tests/bin/Debug/net10.0/Iceberg.Net.Behaviour.Tests.dll" adapterTypeName="executor://xunit/VsTestRunner2/netcoreapp" className="Iceberg.Net.Behaviour.Tests.Features.DeletingRowsFeature" name="DeleteByKey" />
+    </UnitTest>
+    <UnitTest name="Trino reads our deletes through the REST catalog(version: &quot;3&quot;, mechanism: &quot;copy-on-write&quot;, __pickleIndex: &quot;6&quot;, exampleTags: [])" storage="/home/runner/work/iceberg.net/iceberg.net/tests/iceberg.net.behaviour.tests/bin/debug/net10.0/iceberg.net.behaviour.tests.dll" id="8fd53bd6-98c2-5c77-366e-6af96f48f208">
+      <Execution id="dd1642c7-2ddf-49d0-88ed-0b62896b24df" />
+      <TestMethod codeBase="/home/runner/work/Iceberg.NET/Iceberg.NET/tests/Iceberg.Net.Behaviour.Tests/bin/Debug/net10.0/Iceberg.Net.Behaviour.Tests.dll" adapterTypeName="executor://xunit/VsTestRunner2/netcoreapp" className="Iceberg.Net.Behaviour.Tests.Features.OtherEnginesSeeWhatWeWriteFeature" name="TrinoReadsOurDeletesThroughTheRESTCatalog" />
+    </UnitTest>
+    <UnitTest name="Group replacement swaps whole groups and leaves the rest alone(version: &quot;2&quot;, strategy: &quot;copy-on-write&quot;, pyiceberg: &quot;reads the same rows&quot;, __pickleIndex: &quot;13&quot;, exampleTags: [])" storage="/home/runner/work/iceberg.net/iceberg.net/tests/iceberg.net.behaviour.tests/bin/debug/net10.0/iceberg.net.behaviour.tests.dll" id="7c694602-40d7-f97b-3379-923b1805ba6b">
+      <Execution id="aa15371c-ffc0-47bd-aba2-3ee6d3c1d1f8" />
+      <TestMethod codeBase="/home/runner/work/Iceberg.NET/Iceberg.NET/tests/Iceberg.Net.Behaviour.Tests/bin/Debug/net10.0/Iceberg.Net.Behaviour.Tests.dll" adapterTypeName="executor://xunit/VsTestRunner2/netcoreapp" className="Iceberg.Net.Behaviour.Tests.Features.WriteModesFeature" name="GroupReplacementSwapsWholeGroupsAndLeavesTheRestAlone" />
+    </UnitTest>
+    <UnitTest name="Dropping whole partitions removes their files without reading them" storage="/home/runner/work/iceberg.net/iceberg.net/tests/iceberg.net.behaviour.tests/bin/debug/net10.0/iceberg.net.behaviour.tests.dll" id="a61ce480-e197-e95f-66bc-c329a6bd3234">
+      <Execution id="36224c58-1258-4931-a138-3e9a20674135" />
+      <TestMethod codeBase="/home/runner/work/Iceberg.NET/Iceberg.NET/tests/Iceberg.Net.Behaviour.Tests/bin/Debug/net10.0/Iceberg.Net.Behaviour.Tests.dll" adapterTypeName="executor://xunit/VsTestRunner2/netcoreapp" className="Iceberg.Net.Behaviour.Tests.Features.DeletingRowsFeature" name="DroppingWholePartitionsRemovesTheirFilesWithoutReadingThem" />
+    </UnitTest>
+    <UnitTest name="A writer whose target file disappeared does not resurrect deletes" storage="/home/runner/work/iceberg.net/iceberg.net/tests/iceberg.net.behaviour.tests/bin/debug/net10.0/iceberg.net.behaviour.tests.dll" id="7b3a630f-a48d-df19-6606-567af2a84f30">
+      <Execution id="de93f833-17bd-47b1-8ca6-90d837772ee4" />
+      <TestMethod codeBase="/home/runner/work/Iceberg.NET/Iceberg.NET/tests/Iceberg.Net.Behaviour.Tests/bin/Debug/net10.0/Iceberg.Net.Behaviour.Tests.dll" adapterTypeName="executor://xunit/VsTestRunner2/netcoreapp" className="Iceberg.Net.Behaviour.Tests.Features.ConcurrentWritersAndFormatConversionFeature" name="AWriterWhoseTargetFileDisappearedDoesNotResurrectDeletes" />
+    </UnitTest>
+    <UnitTest name="Updated and merged rows keep their identity(strategy: &quot;copy-on-write&quot;, __pickleIndex: &quot;8&quot;, exampleTags: [])" storage="/home/runner/work/iceberg.net/iceberg.net/tests/iceberg.net.behaviour.tests/bin/debug/net10.0/iceberg.net.behaviour.tests.dll" id="9ffeedc3-93d1-0283-9146-b609a0a616c6">
+      <Execution id="e1d05fef-5446-462f-b540-2077631c013c" />
+      <TestMethod codeBase="/home/runner/work/Iceberg.NET/Iceberg.NET/tests/Iceberg.Net.Behaviour.Tests/bin/Debug/net10.0/Iceberg.Net.Behaviour.Tests.dll" adapterTypeName="executor://xunit/VsTestRunner2/netcoreapp" className="Iceberg.Net.Behaviour.Tests.Features.UpdatingAndMergingRowsFeature" name="UpdatedAndMergedRowsKeepTheirIdentity" />
+    </UnitTest>
+    <UnitTest name="Group replacement swaps whole groups and leaves the rest alone(version: &quot;2&quot;, strategy: &quot;equality deletes&quot;, pyiceberg: &quot;refuses the table&quot;, __pickleIndex: &quot;15&quot;, exampleTags: [])" storage="/home/runner/work/iceberg.net/iceberg.net/tests/iceberg.net.behaviour.tests/bin/debug/net10.0/iceberg.net.behaviour.tests.dll" id="1a567087-0ca7-1837-8714-9ad9623445b3">
+      <Execution id="08672976-904f-4524-9635-7e13cae1d321" />
+      <TestMethod codeBase="/home/runner/work/Iceberg.NET/Iceberg.NET/tests/Iceberg.Net.Behaviour.Tests/bin/Debug/net10.0/Iceberg.Net.Behaviour.Tests.dll" adapterTypeName="executor://xunit/VsTestRunner2/netcoreapp" className="Iceberg.Net.Behaviour.Tests.Features.WriteModesFeature" name="GroupReplacementSwapsWholeGroupsAndLeavesTheRestAlone" />
+    </UnitTest>
+    <UnitTest name="Delete by predicate(version: &quot;3&quot;, strategy: &quot;position deletes&quot;, __pickleIndex: &quot;9&quot;, exampleTags: [])" storage="/home/runner/work/iceberg.net/iceberg.net/tests/iceberg.net.behaviour.tests/bin/debug/net10.0/iceberg.net.behaviour.tests.dll" id="f5789611-4994-6857-3d98-327b18402002">
+      <Execution id="220f3f34-eda3-461d-95ef-1af1f1032d67" />
+      <TestMethod codeBase="/home/runner/work/Iceberg.NET/Iceberg.NET/tests/Iceberg.Net.Behaviour.Tests/bin/Debug/net10.0/Iceberg.Net.Behaviour.Tests.dll" adapterTypeName="executor://xunit/VsTestRunner2/netcoreapp" className="Iceberg.Net.Behaviour.Tests.Features.DeletingRowsFeature" name="DeleteByPredicate" />
+    </UnitTest>
+    <UnitTest name="Concurrent upserts of the same key keep a single row(version: &quot;3&quot;, strategy: &quot;position deletes&quot;, __pickleIndex: &quot;4&quot;, exampleTags: [])" storage="/home/runner/work/iceberg.net/iceberg.net/tests/iceberg.net.behaviour.tests/bin/debug/net10.0/iceberg.net.behaviour.tests.dll" id="eddd3987-eda0-cde3-8110-04e12b214aa8">
+      <Execution id="30762ca3-742b-496e-aaa7-ea7043c5bd2b" />
+      <TestMethod codeBase="/home/runner/work/Iceberg.NET/Iceberg.NET/tests/Iceberg.Net.Behaviour.Tests/bin/Debug/net10.0/Iceberg.Net.Behaviour.Tests.dll" adapterTypeName="executor://xunit/VsTestRunner2/netcoreapp" className="Iceberg.Net.Behaviour.Tests.Features.ConcurrentWritersAndFormatConversionFeature" name="ConcurrentUpsertsOfTheSameKeyKeepASingleRow" />
+    </UnitTest>
+    <UnitTest name="Group replacement swaps whole groups and leaves the rest alone(version: &quot;3&quot;, strategy: &quot;position deletes&quot;, pyiceberg: &quot;reads the same rows&quot;, __pickleIndex: &quot;17&quot;, exampleTags: [])" storage="/home/runner/work/iceberg.net/iceberg.net/tests/iceberg.net.behaviour.tests/bin/debug/net10.0/iceberg.net.behaviour.tests.dll" id="e08788e5-a2ea-f4ad-fef3-ed6008be3be7">
+      <Execution id="4cc2bce8-ddb0-43eb-98ca-ae9b0205754e" />
+      <TestMethod codeBase="/home/runner/work/Iceberg.NET/Iceberg.NET/tests/Iceberg.Net.Behaviour.Tests/bin/Debug/net10.0/Iceberg.Net.Behaviour.Tests.dll" adapterTypeName="executor://xunit/VsTestRunner2/netcoreapp" className="Iceberg.Net.Behaviour.Tests.Features.WriteModesFeature" name="GroupReplacementSwapsWholeGroupsAndLeavesTheRestAlone" />
+    </UnitTest>
+    <UnitTest name="Equality deletes cannot express an update's filter" storage="/home/runner/work/iceberg.net/iceberg.net/tests/iceberg.net.behaviour.tests/bin/debug/net10.0/iceberg.net.behaviour.tests.dll" id="b32467da-c46e-f14f-b3f5-59ebebbc0eee">
+      <Execution id="e1c987eb-b34d-41b0-99da-4540504a786a" />
+      <TestMethod codeBase="/home/runner/work/Iceberg.NET/Iceberg.NET/tests/Iceberg.Net.Behaviour.Tests/bin/Debug/net10.0/Iceberg.Net.Behaviour.Tests.dll" adapterTypeName="executor://xunit/VsTestRunner2/netcoreapp" className="Iceberg.Net.Behaviour.Tests.Features.UpdatingAndMergingRowsFeature" name="EqualityDeletesCannotExpressAnUpdatesFilter" />
+    </UnitTest>
+    <UnitTest name="Equality deletes cannot express a predicate" storage="/home/runner/work/iceberg.net/iceberg.net/tests/iceberg.net.behaviour.tests/bin/debug/net10.0/iceberg.net.behaviour.tests.dll" id="56d92541-055b-a9a3-4c84-ec709934cdab">
+      <Execution id="bdd4fc7c-13f9-4c25-bbce-c5c50006dcc7" />
+      <TestMethod codeBase="/home/runner/work/Iceberg.NET/Iceberg.NET/tests/Iceberg.Net.Behaviour.Tests/bin/Debug/net10.0/Iceberg.Net.Behaviour.Tests.dll" adapterTypeName="executor://xunit/VsTestRunner2/netcoreapp" className="Iceberg.Net.Behaviour.Tests.Features.DeletingRowsFeature" name="EqualityDeletesCannotExpressAPredicate" />
+    </UnitTest>
+    <UnitTest name="Merging a feed updates known keys and inserts new ones(version: &quot;2&quot;, strategy: &quot;copy-on-write&quot;, pyiceberg: &quot;reads the same rows&quot;, __pickleIndex: &quot;10&quot;, exampleTags: [])" storage="/home/runner/work/iceberg.net/iceberg.net/tests/iceberg.net.behaviour.tests/bin/debug/net10.0/iceberg.net.behaviour.tests.dll" id="f8ec690e-1e2f-b935-64f2-e2a909456faa">
+      <Execution id="1dfdbd5b-80a7-451e-9920-1d5073edbec2" />
+      <TestMethod codeBase="/home/runner/work/Iceberg.NET/Iceberg.NET/tests/Iceberg.Net.Behaviour.Tests/bin/Debug/net10.0/Iceberg.Net.Behaviour.Tests.dll" adapterTypeName="executor://xunit/VsTestRunner2/netcoreapp" className="Iceberg.Net.Behaviour.Tests.Features.UpdatingAndMergingRowsFeature" name="MergingAFeedUpdatesKnownKeysAndInsertsNewOnes" />
+    </UnitTest>
+    <UnitTest name="Updated and merged rows keep their identity(strategy: &quot;position deletes&quot;, __pickleIndex: &quot;9&quot;, exampleTags: [])" storage="/home/runner/work/iceberg.net/iceberg.net/tests/iceberg.net.behaviour.tests/bin/debug/net10.0/iceberg.net.behaviour.tests.dll" id="45ef2f5a-d296-c398-dfb8-5bca150249ff">
+      <Execution id="aca8962b-16fa-4e36-bfc8-1de10e1bf6b6" />
+      <TestMethod codeBase="/home/runner/work/Iceberg.NET/Iceberg.NET/tests/Iceberg.Net.Behaviour.Tests/bin/Debug/net10.0/Iceberg.Net.Behaviour.Tests.dll" adapterTypeName="executor://xunit/VsTestRunner2/netcoreapp" className="Iceberg.Net.Behaviour.Tests.Features.UpdatingAndMergingRowsFeature" name="UpdatedAndMergedRowsKeepTheirIdentity" />
+    </UnitTest>
+    <UnitTest name="Delete by key(version: &quot;2&quot;, strategy: &quot;position deletes&quot;, operation: &quot;delete&quot;, __pickleIndex: &quot;1&quot;, exampleTags: [])" storage="/home/runner/work/iceberg.net/iceberg.net/tests/iceberg.net.behaviour.tests/bin/debug/net10.0/iceberg.net.behaviour.tests.dll" id="d5204e40-de6f-394d-dc79-4842d4fce2c2">
+      <Execution id="11d28d62-1c93-45ce-a582-8f1b05a7e4f9" />
+      <TestMethod codeBase="/home/runner/work/Iceberg.NET/Iceberg.NET/tests/Iceberg.Net.Behaviour.Tests/bin/Debug/net10.0/Iceberg.Net.Behaviour.Tests.dll" adapterTypeName="executor://xunit/VsTestRunner2/netcoreapp" className="Iceberg.Net.Behaviour.Tests.Features.DeletingRowsFeature" name="DeleteByKey" />
+    </UnitTest>
+    <UnitTest name="Upserts and deletes read identically in Spark(version: &quot;2&quot;, mechanism: &quot;equality deletes&quot;, __pickleIndex: &quot;1&quot;, exampleTags: [])" storage="/home/runner/work/iceberg.net/iceberg.net/tests/iceberg.net.behaviour.tests/bin/debug/net10.0/iceberg.net.behaviour.tests.dll" id="4dfae43c-6faa-e5ea-9398-5deb8adc8822">
+      <Execution id="1e5d8fab-5a9a-481c-8fdd-267300a391dc" />
+      <TestMethod codeBase="/home/runner/work/Iceberg.NET/Iceberg.NET/tests/Iceberg.Net.Behaviour.Tests/bin/Debug/net10.0/Iceberg.Net.Behaviour.Tests.dll" adapterTypeName="executor://xunit/VsTestRunner2/netcoreapp" className="Iceberg.Net.Behaviour.Tests.Features.OtherEnginesSeeWhatWeWriteFeature" name="UpsertsAndDeletesReadIdenticallyInSpark" />
+    </UnitTest>
+    <UnitTest name="Delete by key(version: &quot;3&quot;, strategy: &quot;copy-on-write&quot;, operation: &quot;overwrite&quot;, __pickleIndex: &quot;3&quot;, exampleTags: [])" storage="/home/runner/work/iceberg.net/iceberg.net/tests/iceberg.net.behaviour.tests/bin/debug/net10.0/iceberg.net.behaviour.tests.dll" id="5af1316f-5f96-2e1c-1c01-16d655958239">
+      <Execution id="cafee5d4-ad73-45a3-8e95-4a0146b9aafe" />
+      <TestMethod codeBase="/home/runner/work/Iceberg.NET/Iceberg.NET/tests/Iceberg.Net.Behaviour.Tests/bin/Debug/net10.0/Iceberg.Net.Behaviour.Tests.dll" adapterTypeName="executor://xunit/VsTestRunner2/netcoreapp" className="Iceberg.Net.Behaviour.Tests.Features.DeletingRowsFeature" name="DeleteByKey" />
+    </UnitTest>
+    <UnitTest name="Equality deletes need the partition columns in the key" storage="/home/runner/work/iceberg.net/iceberg.net/tests/iceberg.net.behaviour.tests/bin/debug/net10.0/iceberg.net.behaviour.tests.dll" id="d76a7971-1d61-e3b4-32b4-c2aff9d21f04">
+      <Execution id="11b1e26a-1624-4eb4-878b-f4f19cf2ac96" />
+      <TestMethod codeBase="/home/runner/work/Iceberg.NET/Iceberg.NET/tests/Iceberg.Net.Behaviour.Tests/bin/Debug/net10.0/Iceberg.Net.Behaviour.Tests.dll" adapterTypeName="executor://xunit/VsTestRunner2/netcoreapp" className="Iceberg.Net.Behaviour.Tests.Features.DeletingRowsFeature" name="EqualityDeletesNeedThePartitionColumnsInTheKey" />
+    </UnitTest>
+    <UnitTest name="Delete by key(version: &quot;3&quot;, strategy: &quot;position deletes&quot;, operation: &quot;delete&quot;, __pickleIndex: &quot;4&quot;, exampleTags: [])" storage="/home/runner/work/iceberg.net/iceberg.net/tests/iceberg.net.behaviour.tests/bin/debug/net10.0/iceberg.net.behaviour.tests.dll" id="97802a67-2413-4402-39b7-fed1eea503f8">
+      <Execution id="b247e36c-86f6-4587-8236-8954b80b8cd7" />
+      <TestMethod codeBase="/home/runner/work/Iceberg.NET/Iceberg.NET/tests/Iceberg.Net.Behaviour.Tests/bin/Debug/net10.0/Iceberg.Net.Behaviour.Tests.dll" adapterTypeName="executor://xunit/VsTestRunner2/netcoreapp" className="Iceberg.Net.Behaviour.Tests.Features.DeletingRowsFeature" name="DeleteByKey" />
+    </UnitTest>
+    <UnitTest name="Group replacement swaps whole groups and leaves the rest alone(version: &quot;2&quot;, strategy: &quot;position deletes&quot;, pyiceberg: &quot;reads the same rows&quot;, __pickleIndex: &quot;14&quot;, exampleTags: [])" storage="/home/runner/work/iceberg.net/iceberg.net/tests/iceberg.net.behaviour.tests/bin/debug/net10.0/iceberg.net.behaviour.tests.dll" id="83104d74-db71-2171-cb0e-2b06440932f8">
+      <Execution id="f06daa11-100f-4568-b02e-c26756dacc97" />
+      <TestMethod codeBase="/home/runner/work/Iceberg.NET/Iceberg.NET/tests/Iceberg.Net.Behaviour.Tests/bin/Debug/net10.0/Iceberg.Net.Behaviour.Tests.dll" adapterTypeName="executor://xunit/VsTestRunner2/netcoreapp" className="Iceberg.Net.Behaviour.Tests.Features.WriteModesFeature" name="GroupReplacementSwapsWholeGroupsAndLeavesTheRestAlone" />
+    </UnitTest>
+    <UnitTest name="Concurrent upserts of the same key keep a single row(version: &quot;2&quot;, strategy: &quot;equality deletes&quot;, __pickleIndex: &quot;2&quot;, exampleTags: [])" storage="/home/runner/work/iceberg.net/iceberg.net/tests/iceberg.net.behaviour.tests/bin/debug/net10.0/iceberg.net.behaviour.tests.dll" id="c40a8dc5-f0e5-fa59-31ff-6a5783dc2cf2">
+      <Execution id="8ed4fbf3-b0c2-4fd3-b363-9f26c229b5fc" />
+      <TestMethod codeBase="/home/runner/work/Iceberg.NET/Iceberg.NET/tests/Iceberg.Net.Behaviour.Tests/bin/Debug/net10.0/Iceberg.Net.Behaviour.Tests.dll" adapterTypeName="executor://xunit/VsTestRunner2/netcoreapp" className="Iceberg.Net.Behaviour.Tests.Features.ConcurrentWritersAndFormatConversionFeature" name="ConcurrentUpsertsOfTheSameKeyKeepASingleRow" />
+    </UnitTest>
+    <UnitTest name="A feed that lists a key twice is rejected before anything is written" storage="/home/runner/work/iceberg.net/iceberg.net/tests/iceberg.net.behaviour.tests/bin/debug/net10.0/iceberg.net.behaviour.tests.dll" id="ff90250e-785a-bb6c-8b4e-5b315fe592e5">
+      <Execution id="9a302c0c-ad9b-41ef-88ee-2d14a1bc752d" />
+      <TestMethod codeBase="/home/runner/work/Iceberg.NET/Iceberg.NET/tests/Iceberg.Net.Behaviour.Tests/bin/Debug/net10.0/Iceberg.Net.Behaviour.Tests.dll" adapterTypeName="executor://xunit/VsTestRunner2/netcoreapp" className="Iceberg.Net.Behaviour.Tests.Features.UpdatingAndMergingRowsFeature" name="AFeedThatListsAKeyTwiceIsRejectedBeforeAnythingIsWritten" />
+    </UnitTest>
+    <UnitTest name="Concurrent upserts of the same key keep a single row(version: &quot;2&quot;, strategy: &quot;position deletes&quot;, __pickleIndex: &quot;1&quot;, exampleTags: [])" storage="/home/runner/work/iceberg.net/iceberg.net/tests/iceberg.net.behaviour.tests/bin/debug/net10.0/iceberg.net.behaviour.tests.dll" id="4edeaee3-2d88-a678-dba6-c9d26721f50b">
+      <Execution id="5050475e-38a1-4aca-8bb3-c4a02a50b4b1" />
+      <TestMethod codeBase="/home/runner/work/Iceberg.NET/Iceberg.NET/tests/Iceberg.Net.Behaviour.Tests/bin/Debug/net10.0/Iceberg.Net.Behaviour.Tests.dll" adapterTypeName="executor://xunit/VsTestRunner2/netcoreapp" className="Iceberg.Net.Behaviour.Tests.Features.ConcurrentWritersAndFormatConversionFeature" name="ConcurrentUpsertsOfTheSameKeyKeepASingleRow" />
+    </UnitTest>
+    <UnitTest name="Group replacement swaps whole groups and leaves the rest alone(version: &quot;3&quot;, strategy: &quot;copy-on-write&quot;, pyiceberg: &quot;reads the same rows&quot;, __pickleIndex: &quot;16&quot;, exampleTags: [])" storage="/home/runner/work/iceberg.net/iceberg.net/tests/iceberg.net.behaviour.tests/bin/debug/net10.0/iceberg.net.behaviour.tests.dll" id="db34ceab-d694-e383-d69e-c3ce4097b65a">
+      <Execution id="158c4ca2-c4d0-4ba8-a33c-44c2ce09ef41" />
+      <TestMethod codeBase="/home/runner/work/Iceberg.NET/Iceberg.NET/tests/Iceberg.Net.Behaviour.Tests/bin/Debug/net10.0/Iceberg.Net.Behaviour.Tests.dll" adapterTypeName="executor://xunit/VsTestRunner2/netcoreapp" className="Iceberg.Net.Behaviour.Tests.Features.WriteModesFeature" name="GroupReplacementSwapsWholeGroupsAndLeavesTheRestAlone" />
+    </UnitTest>
+    <UnitTest name="Correcting a value changes only the rows the filter selects(version: &quot;2&quot;, strategy: &quot;copy-on-write&quot;, deleteFiles: &quot;none&quot;, __pickleIndex: &quot;0&quot;, exampleTags: [])" storage="/home/runner/work/iceberg.net/iceberg.net/tests/iceberg.net.behaviour.tests/bin/debug/net10.0/iceberg.net.behaviour.tests.dll" id="1edb4c0b-6760-028e-b119-97588abc6f5c">
+      <Execution id="792b12d7-075e-4e67-8b2c-a57dce6b3cbb" />
+      <TestMethod codeBase="/home/runner/work/Iceberg.NET/Iceberg.NET/tests/Iceberg.Net.Behaviour.Tests/bin/Debug/net10.0/Iceberg.Net.Behaviour.Tests.dll" adapterTypeName="executor://xunit/VsTestRunner2/netcoreapp" className="Iceberg.Net.Behaviour.Tests.Features.UpdatingAndMergingRowsFeature" name="CorrectingAValueChangesOnlyTheRowsTheFilterSelects" />
+    </UnitTest>
+    <UnitTest name="Upserts and deletes read identically in Spark(version: &quot;3&quot;, mechanism: &quot;position deletes&quot;, __pickleIndex: &quot;2&quot;, exampleTags: [])" storage="/home/runner/work/iceberg.net/iceberg.net/tests/iceberg.net.behaviour.tests/bin/debug/net10.0/iceberg.net.behaviour.tests.dll" id="9dc12a15-56e0-8b62-0278-3ffaa00ed07d">
+      <Execution id="7a6aa664-3d38-43a2-b709-b0972859f808" />
+      <TestMethod codeBase="/home/runner/work/Iceberg.NET/Iceberg.NET/tests/Iceberg.Net.Behaviour.Tests/bin/Debug/net10.0/Iceberg.Net.Behaviour.Tests.dll" adapterTypeName="executor://xunit/VsTestRunner2/netcoreapp" className="Iceberg.Net.Behaviour.Tests.Features.OtherEnginesSeeWhatWeWriteFeature" name="UpsertsAndDeletesReadIdenticallyInSpark" />
+    </UnitTest>
+    <UnitTest name="Upserting the same rows twice is idempotent(version: &quot;2&quot;, strategy: &quot;position deletes&quot;, __pickleIndex: &quot;9&quot;, exampleTags: [])" storage="/home/runner/work/iceberg.net/iceberg.net/tests/iceberg.net.behaviour.tests/bin/debug/net10.0/iceberg.net.behaviour.tests.dll" id="a48114c3-d6da-872b-9057-356eeeaa2dbf">
+      <Execution id="41a4f7ef-97c9-4ec4-94dd-abb73f7de273" />
+      <TestMethod codeBase="/home/runner/work/Iceberg.NET/Iceberg.NET/tests/Iceberg.Net.Behaviour.Tests/bin/Debug/net10.0/Iceberg.Net.Behaviour.Tests.dll" adapterTypeName="executor://xunit/VsTestRunner2/netcoreapp" className="Iceberg.Net.Behaviour.Tests.Features.WriteModesFeature" name="UpsertingTheSameRowsTwiceIsIdempotent" />
+    </UnitTest>
+    <UnitTest name="Delete by predicate(version: &quot;3&quot;, strategy: &quot;copy-on-write&quot;, __pickleIndex: &quot;8&quot;, exampleTags: [])" storage="/home/runner/work/iceberg.net/iceberg.net/tests/iceberg.net.behaviour.tests/bin/debug/net10.0/iceberg.net.behaviour.tests.dll" id="40369559-1095-155f-a640-6b2b34393f0a">
+      <Execution id="eabb5095-72bf-4883-bc3c-043a6da374a5" />
+      <TestMethod codeBase="/home/runner/work/Iceberg.NET/Iceberg.NET/tests/Iceberg.Net.Behaviour.Tests/bin/Debug/net10.0/Iceberg.Net.Behaviour.Tests.dll" adapterTypeName="executor://xunit/VsTestRunner2/netcoreapp" className="Iceberg.Net.Behaviour.Tests.Features.DeletingRowsFeature" name="DeleteByPredicate" />
+    </UnitTest>
+    <UnitTest name="A full feed for a region also removes that region's rows it no longer lists(version: &quot;3&quot;, strategy: &quot;position deletes&quot;, __pickleIndex: &quot;17&quot;, exampleTags: [])" storage="/home/runner/work/iceberg.net/iceberg.net/tests/iceberg.net.behaviour.tests/bin/debug/net10.0/iceberg.net.behaviour.tests.dll" id="2f85d7e0-6faa-4b3f-05e5-347c4b0ea060">
+      <Execution id="e1247e3b-1fb6-4ff1-8d61-f451a6c32e70" />
+      <TestMethod codeBase="/home/runner/work/Iceberg.NET/Iceberg.NET/tests/Iceberg.Net.Behaviour.Tests/bin/Debug/net10.0/Iceberg.Net.Behaviour.Tests.dll" adapterTypeName="executor://xunit/VsTestRunner2/netcoreapp" className="Iceberg.Net.Behaviour.Tests.Features.UpdatingAndMergingRowsFeature" name="AFullFeedForARegionAlsoRemovesThatRegionsRowsItNoLongerLists" />
+    </UnitTest>
+    <UnitTest name="Upserting the same rows twice is idempotent(version: &quot;2&quot;, strategy: &quot;copy-on-write&quot;, __pickleIndex: &quot;8&quot;, exampleTags: [])" storage="/home/runner/work/iceberg.net/iceberg.net/tests/iceberg.net.behaviour.tests/bin/debug/net10.0/iceberg.net.behaviour.tests.dll" id="888c8a0b-8e61-9f34-0261-d5c10af9888a">
+      <Execution id="3ec5bd70-b391-4432-a7ec-e00a5206fbe7" />
+      <TestMethod codeBase="/home/runner/work/Iceberg.NET/Iceberg.NET/tests/Iceberg.Net.Behaviour.Tests/bin/Debug/net10.0/Iceberg.Net.Behaviour.Tests.dll" adapterTypeName="executor://xunit/VsTestRunner2/netcoreapp" className="Iceberg.Net.Behaviour.Tests.Features.WriteModesFeature" name="UpsertingTheSameRowsTwiceIsIdempotent" />
+    </UnitTest>
+    <UnitTest name="Upserts and deletes read identically in Spark(version: &quot;2&quot;, mechanism: &quot;position deletes&quot;, __pickleIndex: &quot;0&quot;, exampleTags: [])" storage="/home/runner/work/iceberg.net/iceberg.net/tests/iceberg.net.behaviour.tests/bin/debug/net10.0/iceberg.net.behaviour.tests.dll" id="d83ce616-14f9-0b5b-0d3d-f25e5778b80e">
+      <Execution id="df5a8605-4017-4707-aeed-77a957026b62" />
+      <TestMethod codeBase="/home/runner/work/Iceberg.NET/Iceberg.NET/tests/Iceberg.Net.Behaviour.Tests/bin/Debug/net10.0/Iceberg.Net.Behaviour.Tests.dll" adapterTypeName="executor://xunit/VsTestRunner2/netcoreapp" className="Iceberg.Net.Behaviour.Tests.Features.OtherEnginesSeeWhatWeWriteFeature" name="UpsertsAndDeletesReadIdenticallyInSpark" />
+    </UnitTest>
+    <UnitTest name="Delete by predicate(version: &quot;2&quot;, strategy: &quot;position deletes&quot;, __pickleIndex: &quot;7&quot;, exampleTags: [])" storage="/home/runner/work/iceberg.net/iceberg.net/tests/iceberg.net.behaviour.tests/bin/debug/net10.0/iceberg.net.behaviour.tests.dll" id="836ea4ad-c354-f74c-9670-e3818117823d">
+      <Execution id="cc77b937-0314-42af-9a6f-74c8fa63190d" />
+      <TestMethod codeBase="/home/runner/work/Iceberg.NET/Iceberg.NET/tests/Iceberg.Net.Behaviour.Tests/bin/Debug/net10.0/Iceberg.Net.Behaviour.Tests.dll" adapterTypeName="executor://xunit/VsTestRunner2/netcoreapp" className="Iceberg.Net.Behaviour.Tests.Features.DeletingRowsFeature" name="DeleteByPredicate" />
+    </UnitTest>
+    <UnitTest name="Concurrent upserts of the same key keep a single row(version: &quot;3&quot;, strategy: &quot;copy-on-write&quot;, __pickleIndex: &quot;3&quot;, exampleTags: [])" storage="/home/runner/work/iceberg.net/iceberg.net/tests/iceberg.net.behaviour.tests/bin/debug/net10.0/iceberg.net.behaviour.tests.dll" id="fb1b3301-671b-8aee-5a17-596e11faef10">
+      <Execution id="b9c5c8fa-332d-4f80-89f3-6139fa5fb26c" />
+      <TestMethod codeBase="/home/runner/work/Iceberg.NET/Iceberg.NET/tests/Iceberg.Net.Behaviour.Tests/bin/Debug/net10.0/Iceberg.Net.Behaviour.Tests.dll" adapterTypeName="executor://xunit/VsTestRunner2/netcoreapp" className="Iceberg.Net.Behaviour.Tests.Features.ConcurrentWritersAndFormatConversionFeature" name="ConcurrentUpsertsOfTheSameKeyKeepASingleRow" />
+    </UnitTest>
+    <UnitTest name="Upgrading to v3 converts position deletes into deletion vectors" storage="/home/runner/work/iceberg.net/iceberg.net/tests/iceberg.net.behaviour.tests/bin/debug/net10.0/iceberg.net.behaviour.tests.dll" id="0bc07a37-824d-46f2-10fb-4c16e9803dfe">
+      <Execution id="bb5f495c-3a70-46bb-ad93-f1072860bc51" />
+      <TestMethod codeBase="/home/runner/work/Iceberg.NET/Iceberg.NET/tests/Iceberg.Net.Behaviour.Tests/bin/Debug/net10.0/Iceberg.Net.Behaviour.Tests.dll" adapterTypeName="executor://xunit/VsTestRunner2/netcoreapp" className="Iceberg.Net.Behaviour.Tests.Features.ConcurrentWritersAndFormatConversionFeature" name="UpgradingToV3ConvertsPositionDeletesIntoDeletionVectors" />
+    </UnitTest>
+    <UnitTest name="Upserting the same rows twice is idempotent(version: &quot;2&quot;, strategy: &quot;equality deletes&quot;, __pickleIndex: &quot;10&quot;, exampleTags: [])" storage="/home/runner/work/iceberg.net/iceberg.net/tests/iceberg.net.behaviour.tests/bin/debug/net10.0/iceberg.net.behaviour.tests.dll" id="543ed6c2-6e50-e67d-a1f6-6adcc1da4104">
+      <Execution id="2afba832-6ad6-4180-8208-0ea4828495f5" />
+      <TestMethod codeBase="/home/runner/work/Iceberg.NET/Iceberg.NET/tests/Iceberg.Net.Behaviour.Tests/bin/Debug/net10.0/Iceberg.Net.Behaviour.Tests.dll" adapterTypeName="executor://xunit/VsTestRunner2/netcoreapp" className="Iceberg.Net.Behaviour.Tests.Features.WriteModesFeature" name="UpsertingTheSameRowsTwiceIsIdempotent" />
+    </UnitTest>
+    <UnitTest name="Merging a feed updates known keys and inserts new ones(version: &quot;2&quot;, strategy: &quot;position deletes&quot;, pyiceberg: &quot;reads the same rows&quot;, __pickleIndex: &quot;11&quot;, exampleTags: [])" storage="/home/runner/work/iceberg.net/iceberg.net/tests/iceberg.net.behaviour.tests/bin/debug/net10.0/iceberg.net.behaviour.tests.dll" id="893d4f8f-bd85-d2a7-7a75-53b957a949ed">
+      <Execution id="a38b99ce-b2ba-470f-a3af-5d7c2bc148d2" />
+      <TestMethod codeBase="/home/runner/work/Iceberg.NET/Iceberg.NET/tests/Iceberg.Net.Behaviour.Tests/bin/Debug/net10.0/Iceberg.Net.Behaviour.Tests.dll" adapterTypeName="executor://xunit/VsTestRunner2/netcoreapp" className="Iceberg.Net.Behaviour.Tests.Features.UpdatingAndMergingRowsFeature" name="MergingAFeedUpdatesKnownKeysAndInsertsNewOnes" />
+    </UnitTest>
+    <UnitTest name="Upsert input must not repeat a key" storage="/home/runner/work/iceberg.net/iceberg.net/tests/iceberg.net.behaviour.tests/bin/debug/net10.0/iceberg.net.behaviour.tests.dll" id="34b466e5-8bad-66f0-08d9-e42c2be36e66">
+      <Execution id="745265b1-1e86-4949-adcc-8012732aa972" />
+      <TestMethod codeBase="/home/runner/work/Iceberg.NET/Iceberg.NET/tests/Iceberg.Net.Behaviour.Tests/bin/Debug/net10.0/Iceberg.Net.Behaviour.Tests.dll" adapterTypeName="executor://xunit/VsTestRunner2/netcoreapp" className="Iceberg.Net.Behaviour.Tests.Features.WriteModesFeature" name="UpsertInputMustNotRepeatAKey" />
+    </UnitTest>
+    <UnitTest name="Upsert by key replaces matching rows and inserts new ones(version: &quot;2&quot;, strategy: &quot;position deletes&quot;, deleteFiles: &quot;position delete files&quot;, pyiceberg: &quot;reads the same rows&quot;, __pickleIndex: &quot;3&quot;, exampleTags: [])" storage="/home/runner/work/iceberg.net/iceberg.net/tests/iceberg.net.behaviour.tests/bin/debug/net10.0/iceberg.net.behaviour.tests.dll" id="a55cd9f5-1c39-b896-b93c-6d6bd997f362">
+      <Execution id="d4620557-c626-4c10-bd2f-d6ddde5ae824" />
+      <TestMethod codeBase="/home/runner/work/Iceberg.NET/Iceberg.NET/tests/Iceberg.Net.Behaviour.Tests/bin/Debug/net10.0/Iceberg.Net.Behaviour.Tests.dll" adapterTypeName="executor://xunit/VsTestRunner2/netcoreapp" className="Iceberg.Net.Behaviour.Tests.Features.WriteModesFeature" name="UpsertByKeyReplacesMatchingRowsAndInsertsNewOnes" />
+    </UnitTest>
+    <UnitTest name="Trino reads our deletes through the REST catalog(version: &quot;2&quot;, mechanism: &quot;equality deletes&quot;, __pickleIndex: &quot;4&quot;, exampleTags: [])" storage="/home/runner/work/iceberg.net/iceberg.net/tests/iceberg.net.behaviour.tests/bin/debug/net10.0/iceberg.net.behaviour.tests.dll" id="a6deebb3-0b4e-34e1-6edd-9202f9eac33b">
+      <Execution id="cbb73fbe-e872-4599-a6f2-fe2a9d142df3" />
+      <TestMethod codeBase="/home/runner/work/Iceberg.NET/Iceberg.NET/tests/Iceberg.Net.Behaviour.Tests/bin/Debug/net10.0/Iceberg.Net.Behaviour.Tests.dll" adapterTypeName="executor://xunit/VsTestRunner2/netcoreapp" className="Iceberg.Net.Behaviour.Tests.Features.OtherEnginesSeeWhatWeWriteFeature" name="TrinoReadsOurDeletesThroughTheRESTCatalog" />
+    </UnitTest>
+    <UnitTest name="Upserting the same rows twice is idempotent(version: &quot;3&quot;, strategy: &quot;position deletes&quot;, __pickleIndex: &quot;11&quot;, exampleTags: [])" storage="/home/runner/work/iceberg.net/iceberg.net/tests/iceberg.net.behaviour.tests/bin/debug/net10.0/iceberg.net.behaviour.tests.dll" id="4b4d140d-796c-3f2b-7ccd-34015f11c59e">
+      <Execution id="c6b41138-d7e0-4281-af56-3f9be46d4542" />
+      <TestMethod codeBase="/home/runner/work/Iceberg.NET/Iceberg.NET/tests/Iceberg.Net.Behaviour.Tests/bin/Debug/net10.0/Iceberg.Net.Behaviour.Tests.dll" adapterTypeName="executor://xunit/VsTestRunner2/netcoreapp" className="Iceberg.Net.Behaviour.Tests.Features.WriteModesFeature" name="UpsertingTheSameRowsTwiceIsIdempotent" />
+    </UnitTest>
+    <UnitTest name="Merging a feed updates known keys and inserts new ones(version: &quot;3&quot;, strategy: &quot;equality deletes&quot;, pyiceberg: &quot;refuses the table&quot;, __pickleIndex: &quot;15&quot;, exampleTags: [])" storage="/home/runner/work/iceberg.net/iceberg.net/tests/iceberg.net.behaviour.tests/bin/debug/net10.0/iceberg.net.behaviour.tests.dll" id="5bee3b44-69ca-6a21-bad4-278906247b5c">
+      <Execution id="cc2add48-80ff-4398-b5d2-6765b486cfe9" />
+      <TestMethod codeBase="/home/runner/work/Iceberg.NET/Iceberg.NET/tests/Iceberg.Net.Behaviour.Tests/bin/Debug/net10.0/Iceberg.Net.Behaviour.Tests.dll" adapterTypeName="executor://xunit/VsTestRunner2/netcoreapp" className="Iceberg.Net.Behaviour.Tests.Features.UpdatingAndMergingRowsFeature" name="MergingAFeedUpdatesKnownKeysAndInsertsNewOnes" />
+    </UnitTest>
+    <UnitTest name="Delete by key(version: &quot;2&quot;, strategy: &quot;equality deletes&quot;, operation: &quot;delete&quot;, __pickleIndex: &quot;2&quot;, exampleTags: [])" storage="/home/runner/work/iceberg.net/iceberg.net/tests/iceberg.net.behaviour.tests/bin/debug/net10.0/iceberg.net.behaviour.tests.dll" id="87ae4355-6333-e685-16c1-71cfdf93585f">
+      <Execution id="049f93a8-75aa-4217-9964-3c24672e7a8f" />
+      <TestMethod codeBase="/home/runner/work/Iceberg.NET/Iceberg.NET/tests/Iceberg.Net.Behaviour.Tests/bin/Debug/net10.0/Iceberg.Net.Behaviour.Tests.dll" adapterTypeName="executor://xunit/VsTestRunner2/netcoreapp" className="Iceberg.Net.Behaviour.Tests.Features.DeletingRowsFeature" name="DeleteByKey" />
+    </UnitTest>
+    <UnitTest name="Delete by predicate(version: &quot;2&quot;, strategy: &quot;copy-on-write&quot;, __pickleIndex: &quot;6&quot;, exampleTags: [])" storage="/home/runner/work/iceberg.net/iceberg.net/tests/iceberg.net.behaviour.tests/bin/debug/net10.0/iceberg.net.behaviour.tests.dll" id="098b68d5-1aa7-5358-1277-29e432697d14">
+      <Execution id="7109ce65-eec6-4a09-9db0-9ab8f81b763e" />
+      <TestMethod codeBase="/home/runner/work/Iceberg.NET/Iceberg.NET/tests/Iceberg.Net.Behaviour.Tests/bin/Debug/net10.0/Iceberg.Net.Behaviour.Tests.dll" adapterTypeName="executor://xunit/VsTestRunner2/netcoreapp" className="Iceberg.Net.Behaviour.Tests.Features.DeletingRowsFeature" name="DeleteByPredicate" />
+    </UnitTest>
+    <UnitTest name="Pure insertion never touches existing rows(version: &quot;3&quot;, __pickleIndex: &quot;1&quot;, exampleTags: [])" storage="/home/runner/work/iceberg.net/iceberg.net/tests/iceberg.net.behaviour.tests/bin/debug/net10.0/iceberg.net.behaviour.tests.dll" id="117a9b15-9ee1-5f8e-fe65-4b8c05b67d6e">
+      <Execution id="db49ec03-632d-4e91-88fb-45354370ffee" />
+      <TestMethod codeBase="/home/runner/work/Iceberg.NET/Iceberg.NET/tests/Iceberg.Net.Behaviour.Tests/bin/Debug/net10.0/Iceberg.Net.Behaviour.Tests.dll" adapterTypeName="executor://xunit/VsTestRunner2/netcoreapp" className="Iceberg.Net.Behaviour.Tests.Features.WriteModesFeature" name="PureInsertionNeverTouchesExistingRows" />
+    </UnitTest>
+    <UnitTest name="Merging a feed updates known keys and inserts new ones(version: &quot;3&quot;, strategy: &quot;position deletes&quot;, pyiceberg: &quot;reads the same rows&quot;, __pickleIndex: &quot;14&quot;, exampleTags: [])" storage="/home/runner/work/iceberg.net/iceberg.net/tests/iceberg.net.behaviour.tests/bin/debug/net10.0/iceberg.net.behaviour.tests.dll" id="f7cd29b8-2180-2c7c-59ac-c05307318a6c">
+      <Execution id="0e623b95-8261-447c-97d3-c6fd6dcf76ce" />
+      <TestMethod codeBase="/home/runner/work/Iceberg.NET/Iceberg.NET/tests/Iceberg.Net.Behaviour.Tests/bin/Debug/net10.0/Iceberg.Net.Behaviour.Tests.dll" adapterTypeName="executor://xunit/VsTestRunner2/netcoreapp" className="Iceberg.Net.Behaviour.Tests.Features.UpdatingAndMergingRowsFeature" name="MergingAFeedUpdatesKnownKeysAndInsertsNewOnes" />
+    </UnitTest>
+    <UnitTest name="A customer who moves region moves to that region's partition(version: &quot;3&quot;, strategy: &quot;position deletes&quot;, __pickleIndex: &quot;5&quot;, exampleTags: [])" storage="/home/runner/work/iceberg.net/iceberg.net/tests/iceberg.net.behaviour.tests/bin/debug/net10.0/iceberg.net.behaviour.tests.dll" id="b98031b9-3778-218c-cba7-7b5487a54720">
+      <Execution id="b76f8377-bfdf-4970-9c95-d6395ef9f600" />
+      <TestMethod codeBase="/home/runner/work/Iceberg.NET/Iceberg.NET/tests/Iceberg.Net.Behaviour.Tests/bin/Debug/net10.0/Iceberg.Net.Behaviour.Tests.dll" adapterTypeName="executor://xunit/VsTestRunner2/netcoreapp" className="Iceberg.Net.Behaviour.Tests.Features.UpdatingAndMergingRowsFeature" name="ACustomerWhoMovesRegionMovesToThatRegionsPartition" />
+    </UnitTest>
+    <UnitTest name="Concurrent upserts of the same key keep a single row(version: &quot;2&quot;, strategy: &quot;copy-on-write&quot;, __pickleIndex: &quot;0&quot;, exampleTags: [])" storage="/home/runner/work/iceberg.net/iceberg.net/tests/iceberg.net.behaviour.tests/bin/debug/net10.0/iceberg.net.behaviour.tests.dll" id="d0641248-2a07-b4d1-2df2-9ad3edfa426c">
+      <Execution id="12ec95e8-9211-453c-8da9-0a4a2dfe3227" />
+      <TestMethod codeBase="/home/runner/work/Iceberg.NET/Iceberg.NET/tests/Iceberg.Net.Behaviour.Tests/bin/Debug/net10.0/Iceberg.Net.Behaviour.Tests.dll" adapterTypeName="executor://xunit/VsTestRunner2/netcoreapp" className="Iceberg.Net.Behaviour.Tests.Features.ConcurrentWritersAndFormatConversionFeature" name="ConcurrentUpsertsOfTheSameKeyKeepASingleRow" />
+    </UnitTest>
+    <UnitTest name="An update that matches nothing commits nothing" storage="/home/runner/work/iceberg.net/iceberg.net/tests/iceberg.net.behaviour.tests/bin/debug/net10.0/iceberg.net.behaviour.tests.dll" id="7b44a369-169e-03d1-14fa-cf6ad42b8b31">
+      <Execution id="1298a2c5-e9ea-4162-aff1-2df8aea4ea46" />
+      <TestMethod codeBase="/home/runner/work/Iceberg.NET/Iceberg.NET/tests/Iceberg.Net.Behaviour.Tests/bin/Debug/net10.0/Iceberg.Net.Behaviour.Tests.dll" adapterTypeName="executor://xunit/VsTestRunner2/netcoreapp" className="Iceberg.Net.Behaviour.Tests.Features.UpdatingAndMergingRowsFeature" name="AnUpdateThatMatchesNothingCommitsNothing" />
+    </UnitTest>
+    <UnitTest name="Correcting a value changes only the rows the filter selects(version: &quot;3&quot;, strategy: &quot;copy-on-write&quot;, deleteFiles: &quot;none&quot;, __pickleIndex: &quot;2&quot;, exampleTags: [])" storage="/home/runner/work/iceberg.net/iceberg.net/tests/iceberg.net.behaviour.tests/bin/debug/net10.0/iceberg.net.behaviour.tests.dll" id="8caae6ea-9b9b-65b0-35e4-da0ede3a2291">
+      <Execution id="5c26b2c9-db44-4a3b-897e-8b4b7c54d329" />
+      <TestMethod codeBase="/home/runner/work/Iceberg.NET/Iceberg.NET/tests/Iceberg.Net.Behaviour.Tests/bin/Debug/net10.0/Iceberg.Net.Behaviour.Tests.dll" adapterTypeName="executor://xunit/VsTestRunner2/netcoreapp" className="Iceberg.Net.Behaviour.Tests.Features.UpdatingAndMergingRowsFeature" name="CorrectingAValueChangesOnlyTheRowsTheFilterSelects" />
+    </UnitTest>
+    <UnitTest name="Merging a feed updates known keys and inserts new ones(version: &quot;3&quot;, strategy: &quot;copy-on-write&quot;, pyiceberg: &quot;reads the same rows&quot;, __pickleIndex: &quot;13&quot;, exampleTags: [])" storage="/home/runner/work/iceberg.net/iceberg.net/tests/iceberg.net.behaviour.tests/bin/debug/net10.0/iceberg.net.behaviour.tests.dll" id="150776cf-2ae9-caed-0c17-033b520ea1bd">
+      <Execution id="bcab0d8a-41a2-4e4b-8a06-42edc1fd6185" />
+      <TestMethod codeBase="/home/runner/work/Iceberg.NET/Iceberg.NET/tests/Iceberg.Net.Behaviour.Tests/bin/Debug/net10.0/Iceberg.Net.Behaviour.Tests.dll" adapterTypeName="executor://xunit/VsTestRunner2/netcoreapp" className="Iceberg.Net.Behaviour.Tests.Features.UpdatingAndMergingRowsFeature" name="MergingAFeedUpdatesKnownKeysAndInsertsNewOnes" />
+    </UnitTest>
+    <UnitTest name="Correcting a value changes only the rows the filter selects(version: &quot;3&quot;, strategy: &quot;position deletes&quot;, deleteFiles: &quot;deletion vectors&quot;, __pickleIndex: &quot;3&quot;, exampleTags: [])" storage="/home/runner/work/iceberg.net/iceberg.net/tests/iceberg.net.behaviour.tests/bin/debug/net10.0/iceberg.net.behaviour.tests.dll" id="4bd2ef3f-183c-1dea-29be-e99e90dc6c58">
+      <Execution id="f4d3c0c3-0f13-4051-bf4b-4b68bfa7391a" />
+      <TestMethod codeBase="/home/runner/work/Iceberg.NET/Iceberg.NET/tests/Iceberg.Net.Behaviour.Tests/bin/Debug/net10.0/Iceberg.Net.Behaviour.Tests.dll" adapterTypeName="executor://xunit/VsTestRunner2/netcoreapp" className="Iceberg.Net.Behaviour.Tests.Features.UpdatingAndMergingRowsFeature" name="CorrectingAValueChangesOnlyTheRowsTheFilterSelects" />
+    </UnitTest>
+    <UnitTest name="Upsert by key replaces matching rows and inserts new ones(version: &quot;2&quot;, strategy: &quot;copy-on-write&quot;, deleteFiles: &quot;none&quot;, pyiceberg: &quot;reads the same rows&quot;, __pickleIndex: &quot;2&quot;, exampleTags: [])" storage="/home/runner/work/iceberg.net/iceberg.net/tests/iceberg.net.behaviour.tests/bin/debug/net10.0/iceberg.net.behaviour.tests.dll" id="6cb1744e-5794-15a8-fa20-382d6aa4c790">
+      <Execution id="b63b79e0-b853-42c2-aaf2-4a4fa94e4f5c" />
+      <TestMethod codeBase="/home/runner/work/Iceberg.NET/Iceberg.NET/tests/Iceberg.Net.Behaviour.Tests/bin/Debug/net10.0/Iceberg.Net.Behaviour.Tests.dll" adapterTypeName="executor://xunit/VsTestRunner2/netcoreapp" className="Iceberg.Net.Behaviour.Tests.Features.WriteModesFeature" name="UpsertByKeyReplacesMatchingRowsAndInsertsNewOnes" />
+    </UnitTest>
+    <UnitTest name="Upsert by key replaces matching rows and inserts new ones(version: &quot;3&quot;, strategy: &quot;position deletes&quot;, deleteFiles: &quot;deletion vectors&quot;, pyiceberg: &quot;reads the same rows&quot;, __pickleIndex: &quot;6&quot;, exampleTags: [])" storage="/home/runner/work/iceberg.net/iceberg.net/tests/iceberg.net.behaviour.tests/bin/debug/net10.0/iceberg.net.behaviour.tests.dll" id="48841d6b-2dd7-5ba6-4a0c-2acee178b3c8">
+      <Execution id="d6459090-99ac-4696-9fba-298b5a1efc5f" />
+      <TestMethod codeBase="/home/runner/work/Iceberg.NET/Iceberg.NET/tests/Iceberg.Net.Behaviour.Tests/bin/Debug/net10.0/Iceberg.Net.Behaviour.Tests.dll" adapterTypeName="executor://xunit/VsTestRunner2/netcoreapp" className="Iceberg.Net.Behaviour.Tests.Features.WriteModesFeature" name="UpsertByKeyReplacesMatchingRowsAndInsertsNewOnes" />
+    </UnitTest>
+    <UnitTest name="Delete by key(version: &quot;2&quot;, strategy: &quot;copy-on-write&quot;, operation: &quot;overwrite&quot;, __pickleIndex: &quot;0&quot;, exampleTags: [])" storage="/home/runner/work/iceberg.net/iceberg.net/tests/iceberg.net.behaviour.tests/bin/debug/net10.0/iceberg.net.behaviour.tests.dll" id="00518b44-9dd0-049b-4f53-ddd0403bda94">
+      <Execution id="9d043806-5f3e-4ea4-9833-b9f4d8f079db" />
+      <TestMethod codeBase="/home/runner/work/Iceberg.NET/Iceberg.NET/tests/Iceberg.Net.Behaviour.Tests/bin/Debug/net10.0/Iceberg.Net.Behaviour.Tests.dll" adapterTypeName="executor://xunit/VsTestRunner2/netcoreapp" className="Iceberg.Net.Behaviour.Tests.Features.DeletingRowsFeature" name="DeleteByKey" />
+    </UnitTest>
+  </TestDefinitions>
+  <TestEntries>
+    <TestEntry testId="45ef2f5a-d296-c398-dfb8-5bca150249ff" executionId="aca8962b-16fa-4e36-bfc8-1de10e1bf6b6" testListId="8c84fa94-04c1-424b-9868-57a2d4851a1d" />
+    <TestEntry testId="b18c86d7-560d-dc5d-c064-447b10bacc1e" executionId="4a1fc839-2a32-4de5-8e7b-c8f578f0d91c" testListId="8c84fa94-04c1-424b-9868-57a2d4851a1d" />
+    <TestEntry testId="4a8be8e7-c000-4d18-45c6-5b2e41d5edcf" executionId="a333d61e-b7dc-41fa-86d5-b05967e4e4fe" testListId="8c84fa94-04c1-424b-9868-57a2d4851a1d" />
+    <TestEntry testId="543ed6c2-6e50-e67d-a1f6-6adcc1da4104" executionId="2afba832-6ad6-4180-8208-0ea4828495f5" testListId="8c84fa94-04c1-424b-9868-57a2d4851a1d" />
+    <TestEntry testId="40369559-1095-155f-a640-6b2b34393f0a" executionId="eabb5095-72bf-4883-bc3c-043a6da374a5" testListId="8c84fa94-04c1-424b-9868-57a2d4851a1d" />
+    <TestEntry testId="8caae6ea-9b9b-65b0-35e4-da0ede3a2291" executionId="5c26b2c9-db44-4a3b-897e-8b4b7c54d329" testListId="8c84fa94-04c1-424b-9868-57a2d4851a1d" />
+    <TestEntry testId="8fd53bd6-98c2-5c77-366e-6af96f48f208" executionId="dd1642c7-2ddf-49d0-88ed-0b62896b24df" testListId="8c84fa94-04c1-424b-9868-57a2d4851a1d" />
+    <TestEntry testId="9ffeedc3-93d1-0283-9146-b609a0a616c6" executionId="e1d05fef-5446-462f-b540-2077631c013c" testListId="8c84fa94-04c1-424b-9868-57a2d4851a1d" />
+    <TestEntry testId="a5339be4-d9b7-2979-936c-c78d3d57dabf" executionId="b80e7c90-beca-4d75-aed3-4a1f1004aefc" testListId="8c84fa94-04c1-424b-9868-57a2d4851a1d" />
+    <TestEntry testId="d0641248-2a07-b4d1-2df2-9ad3edfa426c" executionId="12ec95e8-9211-453c-8da9-0a4a2dfe3227" testListId="8c84fa94-04c1-424b-9868-57a2d4851a1d" />
+    <TestEntry testId="a2dfdaf4-89a7-86df-2641-15b585ba5071" executionId="fafb40a6-6f98-4277-b614-677fff0adf9a" testListId="8c84fa94-04c1-424b-9868-57a2d4851a1d" />
+    <TestEntry testId="7c694602-40d7-f97b-3379-923b1805ba6b" executionId="aa15371c-ffc0-47bd-aba2-3ee6d3c1d1f8" testListId="8c84fa94-04c1-424b-9868-57a2d4851a1d" />
+    <TestEntry testId="22ec277c-0ea7-471a-9210-19398f41b9a9" executionId="48867543-1304-437c-8f3e-e33b132db29b" testListId="8c84fa94-04c1-424b-9868-57a2d4851a1d" />
+    <TestEntry testId="83104d74-db71-2171-cb0e-2b06440932f8" executionId="f06daa11-100f-4568-b02e-c26756dacc97" testListId="8c84fa94-04c1-424b-9868-57a2d4851a1d" />
+    <TestEntry testId="4bd2ef3f-183c-1dea-29be-e99e90dc6c58" executionId="f4d3c0c3-0f13-4051-bf4b-4b68bfa7391a" testListId="8c84fa94-04c1-424b-9868-57a2d4851a1d" />
+    <TestEntry testId="56d92541-055b-a9a3-4c84-ec709934cdab" executionId="bdd4fc7c-13f9-4c25-bbce-c5c50006dcc7" testListId="8c84fa94-04c1-424b-9868-57a2d4851a1d" />
+    <TestEntry testId="f5789611-4994-6857-3d98-327b18402002" executionId="220f3f34-eda3-461d-95ef-1af1f1032d67" testListId="8c84fa94-04c1-424b-9868-57a2d4851a1d" />
+    <TestEntry testId="87ae4355-6333-e685-16c1-71cfdf93585f" executionId="049f93a8-75aa-4217-9964-3c24672e7a8f" testListId="8c84fa94-04c1-424b-9868-57a2d4851a1d" />
+    <TestEntry testId="6f019522-adb9-820c-09aa-480281bdc544" executionId="5f7217ba-d922-4a4a-a4d4-52a5142b05b0" testListId="8c84fa94-04c1-424b-9868-57a2d4851a1d" />
+    <TestEntry testId="db34ceab-d694-e383-d69e-c3ce4097b65a" executionId="158c4ca2-c4d0-4ba8-a33c-44c2ce09ef41" testListId="8c84fa94-04c1-424b-9868-57a2d4851a1d" />
+    <TestEntry testId="fb1b3301-671b-8aee-5a17-596e11faef10" executionId="b9c5c8fa-332d-4f80-89f3-6139fa5fb26c" testListId="8c84fa94-04c1-424b-9868-57a2d4851a1d" />
+    <TestEntry testId="94cbb6a7-2e76-47ca-3f8a-b5ff478a8ec2" executionId="cfb8b6ef-699d-4ca6-b36c-144e90fc2263" testListId="8c84fa94-04c1-424b-9868-57a2d4851a1d" />
+    <TestEntry testId="34b466e5-8bad-66f0-08d9-e42c2be36e66" executionId="745265b1-1e86-4949-adcc-8012732aa972" testListId="8c84fa94-04c1-424b-9868-57a2d4851a1d" />
+    <TestEntry testId="098b68d5-1aa7-5358-1277-29e432697d14" executionId="7109ce65-eec6-4a09-9db0-9ab8f81b763e" testListId="8c84fa94-04c1-424b-9868-57a2d4851a1d" />
+    <TestEntry testId="7b44a369-169e-03d1-14fa-cf6ad42b8b31" executionId="1298a2c5-e9ea-4162-aff1-2df8aea4ea46" testListId="8c84fa94-04c1-424b-9868-57a2d4851a1d" />
+    <TestEntry testId="a55cd9f5-1c39-b896-b93c-6d6bd997f362" executionId="d4620557-c626-4c10-bd2f-d6ddde5ae824" testListId="8c84fa94-04c1-424b-9868-57a2d4851a1d" />
+    <TestEntry testId="4edeaee3-2d88-a678-dba6-c9d26721f50b" executionId="5050475e-38a1-4aca-8bb3-c4a02a50b4b1" testListId="8c84fa94-04c1-424b-9868-57a2d4851a1d" />
+    <TestEntry testId="5bee3b44-69ca-6a21-bad4-278906247b5c" executionId="cc2add48-80ff-4398-b5d2-6765b486cfe9" testListId="8c84fa94-04c1-424b-9868-57a2d4851a1d" />
+    <TestEntry testId="7b3a630f-a48d-df19-6606-567af2a84f30" executionId="de93f833-17bd-47b1-8ca6-90d837772ee4" testListId="8c84fa94-04c1-424b-9868-57a2d4851a1d" />
+    <TestEntry testId="15ee8b8a-8a08-2d44-94e2-e35c34c79e18" executionId="6d66ee5f-ef2f-4fea-a357-c55a4aa00a79" testListId="8c84fa94-04c1-424b-9868-57a2d4851a1d" />
+    <TestEntry testId="d76a7971-1d61-e3b4-32b4-c2aff9d21f04" executionId="11b1e26a-1624-4eb4-878b-f4f19cf2ac96" testListId="8c84fa94-04c1-424b-9868-57a2d4851a1d" />
+    <TestEntry testId="e08788e5-a2ea-f4ad-fef3-ed6008be3be7" executionId="4cc2bce8-ddb0-43eb-98ca-ae9b0205754e" testListId="8c84fa94-04c1-424b-9868-57a2d4851a1d" />
+    <TestEntry testId="3d75c1c4-4aea-420c-1f66-459d1d941d75" executionId="b5ac1549-da62-4e9d-9602-8b98a6c7f85f" testListId="8c84fa94-04c1-424b-9868-57a2d4851a1d" />
+    <TestEntry testId="a61ce480-e197-e95f-66bc-c329a6bd3234" executionId="36224c58-1258-4931-a138-3e9a20674135" testListId="8c84fa94-04c1-424b-9868-57a2d4851a1d" />
+    <TestEntry testId="63708195-0ce7-67f0-c338-015c2754d12d" executionId="64ddc95d-bdf4-4152-9851-f6714648b59b" testListId="8c84fa94-04c1-424b-9868-57a2d4851a1d" />
+    <TestEntry testId="6cb1744e-5794-15a8-fa20-382d6aa4c790" executionId="b63b79e0-b853-42c2-aaf2-4a4fa94e4f5c" testListId="8c84fa94-04c1-424b-9868-57a2d4851a1d" />
+    <TestEntry testId="0bc07a37-824d-46f2-10fb-4c16e9803dfe" executionId="bb5f495c-3a70-46bb-ad93-f1072860bc51" testListId="8c84fa94-04c1-424b-9868-57a2d4851a1d" />
+    <TestEntry testId="150776cf-2ae9-caed-0c17-033b520ea1bd" executionId="bcab0d8a-41a2-4e4b-8a06-42edc1fd6185" testListId="8c84fa94-04c1-424b-9868-57a2d4851a1d" />
+    <TestEntry testId="1edb4c0b-6760-028e-b119-97588abc6f5c" executionId="792b12d7-075e-4e67-8b2c-a57dce6b3cbb" testListId="8c84fa94-04c1-424b-9868-57a2d4851a1d" />
+    <TestEntry testId="2f85d7e0-6faa-4b3f-05e5-347c4b0ea060" executionId="e1247e3b-1fb6-4ff1-8d61-f451a6c32e70" testListId="8c84fa94-04c1-424b-9868-57a2d4851a1d" />
+    <TestEntry testId="9dc12a15-56e0-8b62-0278-3ffaa00ed07d" executionId="7a6aa664-3d38-43a2-b709-b0972859f808" testListId="8c84fa94-04c1-424b-9868-57a2d4851a1d" />
+    <TestEntry testId="a6deebb3-0b4e-34e1-6edd-9202f9eac33b" executionId="cbb73fbe-e872-4599-a6f2-fe2a9d142df3" testListId="8c84fa94-04c1-424b-9868-57a2d4851a1d" />
+    <TestEntry testId="b32467da-c46e-f14f-b3f5-59ebebbc0eee" executionId="e1c987eb-b34d-41b0-99da-4540504a786a" testListId="8c84fa94-04c1-424b-9868-57a2d4851a1d" />
+    <TestEntry testId="d5204e40-de6f-394d-dc79-4842d4fce2c2" executionId="11d28d62-1c93-45ce-a582-8f1b05a7e4f9" testListId="8c84fa94-04c1-424b-9868-57a2d4851a1d" />
+    <TestEntry testId="48841d6b-2dd7-5ba6-4a0c-2acee178b3c8" executionId="d6459090-99ac-4696-9fba-298b5a1efc5f" testListId="8c84fa94-04c1-424b-9868-57a2d4851a1d" />
+    <TestEntry testId="4dfae43c-6faa-e5ea-9398-5deb8adc8822" executionId="1e5d8fab-5a9a-481c-8fdd-267300a391dc" testListId="8c84fa94-04c1-424b-9868-57a2d4851a1d" />
+    <TestEntry testId="c50f7f9a-9376-c7a5-de88-7e224557b8fd" executionId="93074c83-aa09-44fd-8741-a387c6647365" testListId="8c84fa94-04c1-424b-9868-57a2d4851a1d" />
+    <TestEntry testId="d83ce616-14f9-0b5b-0d3d-f25e5778b80e" executionId="df5a8605-4017-4707-aeed-77a957026b62" testListId="8c84fa94-04c1-424b-9868-57a2d4851a1d" />
+    <TestEntry testId="f8ec690e-1e2f-b935-64f2-e2a909456faa" executionId="1dfdbd5b-80a7-451e-9920-1d5073edbec2" testListId="8c84fa94-04c1-424b-9868-57a2d4851a1d" />
+    <TestEntry testId="888c8a0b-8e61-9f34-0261-d5c10af9888a" executionId="3ec5bd70-b391-4432-a7ec-e00a5206fbe7" testListId="8c84fa94-04c1-424b-9868-57a2d4851a1d" />
+    <TestEntry testId="836ea4ad-c354-f74c-9670-e3818117823d" executionId="cc77b937-0314-42af-9a6f-74c8fa63190d" testListId="8c84fa94-04c1-424b-9868-57a2d4851a1d" />
+    <TestEntry testId="a48114c3-d6da-872b-9057-356eeeaa2dbf" executionId="41a4f7ef-97c9-4ec4-94dd-abb73f7de273" testListId="8c84fa94-04c1-424b-9868-57a2d4851a1d" />
+    <TestEntry testId="ff90250e-785a-bb6c-8b4e-5b315fe592e5" executionId="9a302c0c-ad9b-41ef-88ee-2d14a1bc752d" testListId="8c84fa94-04c1-424b-9868-57a2d4851a1d" />
+    <TestEntry testId="893d4f8f-bd85-d2a7-7a75-53b957a949ed" executionId="a38b99ce-b2ba-470f-a3af-5d7c2bc148d2" testListId="8c84fa94-04c1-424b-9868-57a2d4851a1d" />
+    <TestEntry testId="f7cd29b8-2180-2c7c-59ac-c05307318a6c" executionId="0e623b95-8261-447c-97d3-c6fd6dcf76ce" testListId="8c84fa94-04c1-424b-9868-57a2d4851a1d" />
+    <TestEntry testId="6a95eae2-8acf-2f51-b631-28226a4b8317" executionId="6f470125-b66c-439c-bad8-e7b928e48929" testListId="8c84fa94-04c1-424b-9868-57a2d4851a1d" />
+    <TestEntry testId="512e9041-572d-bc69-9981-dcfad3d83df7" executionId="8a707764-8248-453a-ad10-c12dc8ed42f2" testListId="8c84fa94-04c1-424b-9868-57a2d4851a1d" />
+    <TestEntry testId="117a9b15-9ee1-5f8e-fe65-4b8c05b67d6e" executionId="db49ec03-632d-4e91-88fb-45354370ffee" testListId="8c84fa94-04c1-424b-9868-57a2d4851a1d" />
+    <TestEntry testId="eddd3987-eda0-cde3-8110-04e12b214aa8" executionId="30762ca3-742b-496e-aaa7-ea7043c5bd2b" testListId="8c84fa94-04c1-424b-9868-57a2d4851a1d" />
+    <TestEntry testId="a5c9ac6c-17b0-f4c6-1d27-c9f468a0af66" executionId="0c052000-6c5c-4ba1-bf30-aad50ee5951c" testListId="8c84fa94-04c1-424b-9868-57a2d4851a1d" />
+    <TestEntry testId="5af1316f-5f96-2e1c-1c01-16d655958239" executionId="cafee5d4-ad73-45a3-8e95-4a0146b9aafe" testListId="8c84fa94-04c1-424b-9868-57a2d4851a1d" />
+    <TestEntry testId="b98031b9-3778-218c-cba7-7b5487a54720" executionId="b76f8377-bfdf-4970-9c95-d6395ef9f600" testListId="8c84fa94-04c1-424b-9868-57a2d4851a1d" />
+    <TestEntry testId="00518b44-9dd0-049b-4f53-ddd0403bda94" executionId="9d043806-5f3e-4ea4-9833-b9f4d8f079db" testListId="8c84fa94-04c1-424b-9868-57a2d4851a1d" />
+    <TestEntry testId="1a567087-0ca7-1837-8714-9ad9623445b3" executionId="08672976-904f-4524-9635-7e13cae1d321" testListId="8c84fa94-04c1-424b-9868-57a2d4851a1d" />
+    <TestEntry testId="97802a67-2413-4402-39b7-fed1eea503f8" executionId="b247e36c-86f6-4587-8236-8954b80b8cd7" testListId="8c84fa94-04c1-424b-9868-57a2d4851a1d" />
+    <TestEntry testId="4b4d140d-796c-3f2b-7ccd-34015f11c59e" executionId="c6b41138-d7e0-4281-af56-3f9be46d4542" testListId="8c84fa94-04c1-424b-9868-57a2d4851a1d" />
+    <TestEntry testId="c40a8dc5-f0e5-fa59-31ff-6a5783dc2cf2" executionId="8ed4fbf3-b0c2-4fd3-b363-9f26c229b5fc" testListId="8c84fa94-04c1-424b-9868-57a2d4851a1d" />
+  </TestEntries>
+  <TestLists>
+    <TestList name="Results Not in a List" id="8c84fa94-04c1-424b-9868-57a2d4851a1d" />
+    <TestList name="All Loaded Results" id="19431567-8539-422a-85d7-44ee4e166bda" />
+  </TestLists>
+  <ResultSummary outcome="Completed">
+    <Counters total="67" executed="67" passed="67" failed="0" error="0" timeout="0" aborted="0" inconclusive="0" passedButRunAborted="0" notRunnable="0" notExecuted="0" disconnected="0" warning="0" completed="0" inProgress="0" pending="0" />
+    <Output>
+      <StdOut>[xUnit.net 00:00:00.00] xUnit.net VSTest Adapter v2.8.2+699d445a1a (64-bit .NET 10.0.14)
+[xUnit.net 00:00:00.10]   Discovering: Iceberg.Net.Behaviour.Tests
+[xUnit.net 00:00:00.21]   Discovered:  Iceberg.Net.Behaviour.Tests
+[xUnit.net 00:00:00.22]   Starting:    Iceberg.Net.Behaviour.Tests
+-&gt; Loading plugin /home/runner/work/Iceberg.NET/Iceberg.NET/tests/Iceberg.Net.Behaviour.Tests/bin/Debug/net10.0/Iceberg.Net.Behaviour.Tests.dll
+-&gt; Loading plugin /home/runner/work/Iceberg.NET/Iceberg.NET/tests/Iceberg.Net.Behaviour.Tests/bin/Debug/net10.0/Reqnroll.xUnit.ReqnrollPlugin.dll
+-&gt; Using default config
+[xUnit.net 00:01:05.88]   Finished:    Iceberg.Net.Behaviour.Tests
+</StdOut>
+    </Output>
+  </ResultSummary>
+</TestRun>

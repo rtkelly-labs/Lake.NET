@@ -1,0 +1,98 @@
+{
+  "id": "9f4feafe-d541-49a5-8bb6-c89b5571e98e",
+  "ok": true,
+  "result": {
+    "worktree": {
+      "id": "e1ed8dc8-c926-44b5-b032-b19aead71219::/Users/ryankelly/code/personal/rig/temp/rig/estate-packages",
+      "identity": {
+        "key": "wt2:local:84f5b9e6-a6b9-453f-acb2-d4ffa9cbb0ab",
+        "executionHostId": "local",
+        "instanceId": "84f5b9e6-a6b9-453f-acb2-d4ffa9cbb0ab"
+      },
+      "instanceId": "84f5b9e6-a6b9-453f-acb2-d4ffa9cbb0ab",
+      "repoId": "e1ed8dc8-c926-44b5-b032-b19aead71219",
+      "projectId": "github:rtkelly13/rig",
+      "hostId": "local",
+      "projectHostSetupId": "e1ed8dc8-c926-44b5-b032-b19aead71219",
+      "creatorProvenance": {
+        "kind": "host"
+      },
+      "path": "/Users/ryankelly/code/personal/rig/temp/rig/estate-packages",
+      "head": "002b15ff18bf22e8af5eebfb27acdd93c48308da",
+      "branch": "refs/heads/rtkelly13/estate-packages",
+      "isBare": false,
+      "isMainWorktree": false,
+      "displayName": "estate-packages",
+      "displayNameMode": "fixed",
+      "comment": "lake-plan R3",
+      "linkedIssue": 386,
+      "linkedPR": null,
+      "linkedLinearIssue": null,
+      "linkedLinearIssueWorkspaceId": null,
+      "linkedLinearIssueOrganizationUrlKey": null,
+      "linkedGitLabMR": null,
+      "linkedGitLabIssue": null,
+      "linkedBitbucketPR": null,
+      "linkedAzureDevOpsPR": null,
+      "linkedGiteaPR": null,
+      "linkedWorkItem": null,
+      "linkedItems": [
+        {
+          "provider": "github",
+          "type": "issue",
+          "number": 386
+        }
+      ],
+      "linkedTaskSourceContext": null,
+      "isArchived": false,
+      "isUnread": false,
+      "isPinned": false,
+      "sortOrder": 1793187588757,
+      "lastActivityAt": 1793187595659,
+      "createdAt": 1793187595659,
+      "createdWithAgent": "antigravity",
+      "cliProvenance": {
+        "kind": "created-by-cli",
+        "createdAt": 1793187593578,
+        "callerTerminalHandle": "term_17755edd-1833-4540-8b36-6a90dac884aa",
+        "startupAgent": "antigravity"
+      },
+      "baseRef": "refs/remotes/origin/main",
+      "workspaceStatus": "in-progress",
+      "parentWorktreeId": null,
+      "childWorktreeIds": [],
+      "lineage": null,
+      "git": {
+        "path": "/Users/ryankelly/code/personal/rig/temp/rig/estate-packages",
+        "head": "002b15ff18bf22e8af5eebfb27acdd93c48308da",
+        "branch": "refs/heads/rtkelly13/estate-packages",
+        "isBare": false,
+        "isMainWorktree": false
+      }
+    },
+    "lineage": null,
+    "workspaceLineage": null,
+    "launch": {
+      "outcome": {
+        "kind": "terminal",
+        "handle": "term_f0baa599-8e8d-480f-9d91-187504f79c00",
+        "paneKey": "58d0b0e8-62eb-422c-af56-2a0e8ddae029:d3c56d9e-1488-4d92-8e47-ac7a41bb26d7"
+      },
+      "worktreeId": "e1ed8dc8-c926-44b5-b032-b19aead71219::/Users/ryankelly/code/personal/rig/temp/rig/estate-packages",
+      "receipt": {
+        "mode": "terminal",
+        "preferred": "terminal",
+        "reason": "user_default",
+        "detail": "Started a terminal agent, the default for new agent tabs in your settings."
+      },
+      "prompt": {
+        "delivery": "submit",
+        "outcome": "handed-to-terminal"
+      },
+      "operationId": "1793187593576-b29de497e8af491093ce9e449c54b0cf"
+    }
+  },
+  "_meta": {
+    "runtimeId": "0e88f733-a98b-4e81-8090-c812ad14883e"
+  }
+}

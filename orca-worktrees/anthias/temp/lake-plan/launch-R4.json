@@ -1,0 +1,98 @@
+{
+  "id": "13329974-b417-4ff8-9da7-faa0536c64c1",
+  "ok": true,
+  "result": {
+    "worktree": {
+      "id": "e1ed8dc8-c926-44b5-b032-b19aead71219::/Users/ryankelly/code/personal/rig/temp/rig/estate-rename-repo",
+      "identity": {
+        "key": "wt2:local:846b36ee-1167-4b2c-9b2f-b4f64a141de8",
+        "executionHostId": "local",
+        "instanceId": "846b36ee-1167-4b2c-9b2f-b4f64a141de8"
+      },
+      "instanceId": "846b36ee-1167-4b2c-9b2f-b4f64a141de8",
+      "repoId": "e1ed8dc8-c926-44b5-b032-b19aead71219",
+      "projectId": "github:rtkelly13/rig",
+      "hostId": "local",
+      "projectHostSetupId": "e1ed8dc8-c926-44b5-b032-b19aead71219",
+      "creatorProvenance": {
+        "kind": "host"
+      },
+      "path": "/Users/ryankelly/code/personal/rig/temp/rig/estate-rename-repo",
+      "head": "002b15ff18bf22e8af5eebfb27acdd93c48308da",
+      "branch": "refs/heads/rtkelly13/estate-rename-repo",
+      "isBare": false,
+      "isMainWorktree": false,
+      "displayName": "estate-rename-repo",
+      "displayNameMode": "fixed",
+      "comment": "lake-plan R4",
+      "linkedIssue": 387,
+      "linkedPR": null,
+      "linkedLinearIssue": null,
+      "linkedLinearIssueWorkspaceId": null,
+      "linkedLinearIssueOrganizationUrlKey": null,
+      "linkedGitLabMR": null,
+      "linkedGitLabIssue": null,
+      "linkedBitbucketPR": null,
+      "linkedAzureDevOpsPR": null,
+      "linkedGiteaPR": null,
+      "linkedWorkItem": null,
+      "linkedItems": [
+        {
+          "provider": "github",
+          "type": "issue",
+          "number": 387
+        }
+      ],
+      "linkedTaskSourceContext": null,
+      "isArchived": false,
+      "isUnread": false,
+      "isPinned": false,
+      "sortOrder": 1793187589408,
+      "lastActivityAt": 1793187597305,
+      "createdAt": 1793187597305,
+      "createdWithAgent": "antigravity",
+      "cliProvenance": {
+        "kind": "created-by-cli",
+        "createdAt": 1793187596047,
+        "callerTerminalHandle": "term_17755edd-1833-4540-8b36-6a90dac884aa",
+        "startupAgent": "antigravity"
+      },
+      "baseRef": "refs/remotes/origin/main",
+      "workspaceStatus": "in-progress",
+      "parentWorktreeId": null,
+      "childWorktreeIds": [],
+      "lineage": null,
+      "git": {
+        "path": "/Users/ryankelly/code/personal/rig/temp/rig/estate-rename-repo",
+        "head": "002b15ff18bf22e8af5eebfb27acdd93c48308da",
+        "branch": "refs/heads/rtkelly13/estate-rename-repo",
+        "isBare": false,
+        "isMainWorktree": false
+      }
+    },
+    "lineage": null,
+    "workspaceLineage": null,
+    "launch": {
+      "outcome": {
+        "kind": "terminal",
+        "handle": "term_33b2e0c7-183d-4992-8a2c-4389eaeb7544",
+        "paneKey": "056563b4-185a-4247-87b2-83f2cea78729:1d886c19-ab94-4e25-a897-49fe0e2d8c0c"
+      },
+      "worktreeId": "e1ed8dc8-c926-44b5-b032-b19aead71219::/Users/ryankelly/code/personal/rig/temp/rig/estate-rename-repo",
+      "receipt": {
+        "mode": "terminal",
+        "preferred": "terminal",
+        "reason": "user_default",
+        "detail": "Started a terminal agent, the default for new agent tabs in your settings."
+      },
+      "prompt": {
+        "delivery": "submit",
+        "outcome": "handed-to-terminal"
+      },
+      "operationId": "1793187596046-db94a0a1d3ac4ac7a7b2629725e44504"
+    }
+  },
+  "_meta": {
+    "runtimeId": "0e88f733-a98b-4e81-8090-c812ad14883e"
+  }
+}

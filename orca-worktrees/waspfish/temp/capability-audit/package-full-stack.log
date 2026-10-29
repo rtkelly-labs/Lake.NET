@@ -1,0 +1,18 @@
+  Determining projects to restore...
+  Restored /Users/ryankelly/orca/workspaces/Iceberg.NET/waspfish/temp/package-smoke.jYz3u9/app/app.csproj (in 1.55 sec).
+package smoke test OK: 2 snapshots
+  Determining projects to restore...
+  Restored /Users/ryankelly/orca/workspaces/Iceberg.NET/waspfish/temp/package-smoke.jYz3u9/typed/typed.csproj (in 146 ms).
+typed package OK
+
+Build succeeded.
+    0 Warning(s)
+    0 Error(s)
+
+Time Elapsed 00:00:00.84
+netstandard2.0 consumer builds
+  Determining projects to restore...
+  Restored /Users/ryankelly/orca/workspaces/Iceberg.NET/waspfish/temp/package-smoke.jYz3u9/full-stack/app.csproj (in 351 ms).
+EF Core, Arrow, Spark and Athena packages OK
+EF Core, Arrow, Spark and Athena packages OK
+Published server OK: OpenAPI, SQLite table persistence and idempotent replay across restart

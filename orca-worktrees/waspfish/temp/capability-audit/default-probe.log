@@ -1,0 +1,2 @@
+required=False: extra=null; expected write default=7
+required=True: ArgumentException: Required column Extra contains nulls

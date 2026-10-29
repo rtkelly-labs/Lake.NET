@@ -1,0 +1,806 @@
+Refreshing run status every 30 seconds. Press Ctrl+C to quit.
+
+* rtkelly13/eval-formal-methods-conformance ci rtkelly-labs/Lake.NET#48 · 40736024861
+Triggered via pull_request about 1 minute ago
+
+JOBS
+* cross-engine (ID 122984683601)
+  ✓ Set up job
+  ✓ Run actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0
+  ✓ Run actions/setup-dotnet@a98b56852c35b8e3190ac28c8c2271da59106c68
+  ✓ Run astral-sh/setup-uv@e58605a9b6da7c637471fab8847a5e5a6b8df081
+  ✓ Start emulators (moto, REST fixture, Polaris, Trino, Gravitino, Nessie, Lakekeeper) and fetch the Spark oracle
+  ✓ Install PyIceberg and DuckDB oracles
+  * Cross-engine suite (ecosystem, BDD specification, REST catalog server)
+  * Emulator logs on failure
+  * Post Run astral-sh/setup-uv@e58605a9b6da7c637471fab8847a5e5a6b8df081
+  * Post Run actions/setup-dotnet@a98b56852c35b8e3190ac28c8c2271da59106c68
+  * Post Run actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0
+✓ formal in 21s (ID 122984683937)
+  ✓ Set up job
+  ✓ Run actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0
+  ✓ Run actions/setup-java@b6effb05e454b25005698d916606bdc6ffcbf961
+  ✓ Check commit model, negative controls and C# replay witness
+  ✓ Run actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9
+  ✓ Post Run actions/setup-java@b6effb05e454b25005698d916606bdc6ffcbf961
+  ✓ Post Run actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0
+  ✓ Complete job
+* regression (ID 122984684018)
+  ✓ Set up job
+  ✓ Run actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0
+  ✓ Run actions/setup-dotnet@a98b56852c35b8e3190ac28c8c2271da59106c68
+  ✓ Run astral-sh/setup-uv@e58605a9b6da7c637471fab8847a5e5a6b8df081
+  ✓ Start emulators (moto, REST fixture, Polaris, Trino, Gravitino, Nessie, Lakekeeper) and fetch the Spark oracle
+  ✓ Install PyIceberg oracle
+  * Regression suite (REST protocol, L1/L2 regression against the emulators)
+  * Emulator logs on failure
+  * Post Run astral-sh/setup-uv@e58605a9b6da7c637471fab8847a5e5a6b8df081
+  * Post Run actions/setup-dotnet@a98b56852c35b8e3190ac28c8c2271da59106c68
+  * Post Run actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0
+* unit (ID 122984684038)
+  ✓ Set up job
+  ✓ Run actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0
+  ✓ Lint file extensions and naming conventions
+  ✓ Run actions/setup-dotnet@a98b56852c35b8e3190ac28c8c2271da59106c68
+  ✓ CHANGELOG.md is well formed (the release reads its version from it)
+  ✓ Spec traceability matrix (fails on links to unknown sections)
+  ✓ Run actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9
+  * Unit suite (spec, netstandard2.0, LINQ, EF Core, REST catalog behaviour)
+  * Run actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9
+  * Pack the libraries and smoke-test the packages
+  * Run actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9
+  * Post Run actions/setup-dotnet@a98b56852c35b8e3190ac28c8c2271da59106c68
+  * Post Run actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0
+
+ANNOTATIONS
+- "The ubuntu-latest label will migrate to Ubuntu 26 beginning October 19, 2026. For more information, see https://github.com/actions/runner-images/issues/14748"
+formal: .github#1
+
+Refreshing run status every 30 seconds. Press Ctrl+C to quit.
+
+* rtkelly13/eval-formal-methods-conformance ci rtkelly-labs/Lake.NET#48 · 40736024861
+Triggered via pull_request about 2 minutes ago
+
+JOBS
+* cross-engine (ID 122984683601)
+  ✓ Set up job
+  ✓ Run actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0
+  ✓ Run actions/setup-dotnet@a98b56852c35b8e3190ac28c8c2271da59106c68
+  ✓ Run astral-sh/setup-uv@e58605a9b6da7c637471fab8847a5e5a6b8df081
+  ✓ Start emulators (moto, REST fixture, Polaris, Trino, Gravitino, Nessie, Lakekeeper) and fetch the Spark oracle
+  ✓ Install PyIceberg and DuckDB oracles
+  * Cross-engine suite (ecosystem, BDD specification, REST catalog server)
+  * Emulator logs on failure
+  * Post Run astral-sh/setup-uv@e58605a9b6da7c637471fab8847a5e5a6b8df081
+  * Post Run actions/setup-dotnet@a98b56852c35b8e3190ac28c8c2271da59106c68
+  * Post Run actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0
+✓ formal in 21s (ID 122984683937)
+  ✓ Set up job
+  ✓ Run actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0
+  ✓ Run actions/setup-java@b6effb05e454b25005698d916606bdc6ffcbf961
+  ✓ Check commit model, negative controls and C# replay witness
+  ✓ Run actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9
+  ✓ Post Run actions/setup-java@b6effb05e454b25005698d916606bdc6ffcbf961
+  ✓ Post Run actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0
+  ✓ Complete job
+* regression (ID 122984684018)
+  ✓ Set up job
+  ✓ Run actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0
+  ✓ Run actions/setup-dotnet@a98b56852c35b8e3190ac28c8c2271da59106c68
+  ✓ Run astral-sh/setup-uv@e58605a9b6da7c637471fab8847a5e5a6b8df081
+  ✓ Start emulators (moto, REST fixture, Polaris, Trino, Gravitino, Nessie, Lakekeeper) and fetch the Spark oracle
+  ✓ Install PyIceberg oracle
+  * Regression suite (REST protocol, L1/L2 regression against the emulators)
+  * Emulator logs on failure
+  * Post Run astral-sh/setup-uv@e58605a9b6da7c637471fab8847a5e5a6b8df081
+  * Post Run actions/setup-dotnet@a98b56852c35b8e3190ac28c8c2271da59106c68
+  * Post Run actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0
+* unit (ID 122984684038)
+  ✓ Set up job
+  ✓ Run actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0
+  ✓ Lint file extensions and naming conventions
+  ✓ Run actions/setup-dotnet@a98b56852c35b8e3190ac28c8c2271da59106c68
+  ✓ CHANGELOG.md is well formed (the release reads its version from it)
+  ✓ Spec traceability matrix (fails on links to unknown sections)
+  ✓ Run actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9
+  * Unit suite (spec, netstandard2.0, LINQ, EF Core, REST catalog behaviour)
+  * Run actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9
+  * Pack the libraries and smoke-test the packages
+  * Run actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9
+  * Post Run actions/setup-dotnet@a98b56852c35b8e3190ac28c8c2271da59106c68
+  * Post Run actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0
+
+ANNOTATIONS
+- "The ubuntu-latest label will migrate to Ubuntu 26 beginning October 19, 2026. For more information, see https://github.com/actions/runner-images/issues/14748"
+formal: .github#1
+
+Refreshing run status every 30 seconds. Press Ctrl+C to quit.
+
+* rtkelly13/eval-formal-methods-conformance ci rtkelly-labs/Lake.NET#48 · 40736024861
+Triggered via pull_request about 2 minutes ago
+
+JOBS
+* cross-engine (ID 122984683601)
+  ✓ Set up job
+  ✓ Run actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0
+  ✓ Run actions/setup-dotnet@a98b56852c35b8e3190ac28c8c2271da59106c68
+  ✓ Run astral-sh/setup-uv@e58605a9b6da7c637471fab8847a5e5a6b8df081
+  ✓ Start emulators (moto, REST fixture, Polaris, Trino, Gravitino, Nessie, Lakekeeper) and fetch the Spark oracle
+  ✓ Install PyIceberg and DuckDB oracles
+  * Cross-engine suite (ecosystem, BDD specification, REST catalog server)
+  * Emulator logs on failure
+  * Post Run astral-sh/setup-uv@e58605a9b6da7c637471fab8847a5e5a6b8df081
+  * Post Run actions/setup-dotnet@a98b56852c35b8e3190ac28c8c2271da59106c68
+  * Post Run actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0
+✓ formal in 21s (ID 122984683937)
+  ✓ Set up job
+  ✓ Run actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0
+  ✓ Run actions/setup-java@b6effb05e454b25005698d916606bdc6ffcbf961
+  ✓ Check commit model, negative controls and C# replay witness
+  ✓ Run actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9
+  ✓ Post Run actions/setup-java@b6effb05e454b25005698d916606bdc6ffcbf961
+  ✓ Post Run actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0
+  ✓ Complete job
+* regression (ID 122984684018)
+  ✓ Set up job
+  ✓ Run actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0
+  ✓ Run actions/setup-dotnet@a98b56852c35b8e3190ac28c8c2271da59106c68
+  ✓ Run astral-sh/setup-uv@e58605a9b6da7c637471fab8847a5e5a6b8df081
+  ✓ Start emulators (moto, REST fixture, Polaris, Trino, Gravitino, Nessie, Lakekeeper) and fetch the Spark oracle
+  ✓ Install PyIceberg oracle
+  * Regression suite (REST protocol, L1/L2 regression against the emulators)
+  * Emulator logs on failure
+  * Post Run astral-sh/setup-uv@e58605a9b6da7c637471fab8847a5e5a6b8df081
+  * Post Run actions/setup-dotnet@a98b56852c35b8e3190ac28c8c2271da59106c68
+  * Post Run actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0
+* unit (ID 122984684038)
+  ✓ Set up job
+  ✓ Run actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0
+  ✓ Lint file extensions and naming conventions
+  ✓ Run actions/setup-dotnet@a98b56852c35b8e3190ac28c8c2271da59106c68
+  ✓ CHANGELOG.md is well formed (the release reads its version from it)
+  ✓ Spec traceability matrix (fails on links to unknown sections)
+  ✓ Run actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9
+  ✓ Unit suite (spec, netstandard2.0, LINQ, EF Core, REST catalog behaviour)
+  ✓ Run actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9
+  * Pack the libraries and smoke-test the packages
+  * Run actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9
+  * Post Run actions/setup-dotnet@a98b56852c35b8e3190ac28c8c2271da59106c68
+  * Post Run actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0
+
+ANNOTATIONS
+- "The ubuntu-latest label will migrate to Ubuntu 26 beginning October 19, 2026. For more information, see https://github.com/actions/runner-images/issues/14748"
+formal: .github#1
+
+Refreshing run status every 30 seconds. Press Ctrl+C to quit.
+
+* rtkelly13/eval-formal-methods-conformance ci rtkelly-labs/Lake.NET#48 · 40736024861
+Triggered via pull_request about 3 minutes ago
+
+JOBS
+* cross-engine (ID 122984683601)
+  ✓ Set up job
+  ✓ Run actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0
+  ✓ Run actions/setup-dotnet@a98b56852c35b8e3190ac28c8c2271da59106c68
+  ✓ Run astral-sh/setup-uv@e58605a9b6da7c637471fab8847a5e5a6b8df081
+  ✓ Start emulators (moto, REST fixture, Polaris, Trino, Gravitino, Nessie, Lakekeeper) and fetch the Spark oracle
+  ✓ Install PyIceberg and DuckDB oracles
+  * Cross-engine suite (ecosystem, BDD specification, REST catalog server)
+  * Emulator logs on failure
+  * Post Run astral-sh/setup-uv@e58605a9b6da7c637471fab8847a5e5a6b8df081
+  * Post Run actions/setup-dotnet@a98b56852c35b8e3190ac28c8c2271da59106c68
+  * Post Run actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0
+✓ formal in 21s (ID 122984683937)
+  ✓ Set up job
+  ✓ Run actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0
+  ✓ Run actions/setup-java@b6effb05e454b25005698d916606bdc6ffcbf961
+  ✓ Check commit model, negative controls and C# replay witness
+  ✓ Run actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9
+  ✓ Post Run actions/setup-java@b6effb05e454b25005698d916606bdc6ffcbf961
+  ✓ Post Run actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0
+  ✓ Complete job
+* regression (ID 122984684018)
+  ✓ Set up job
+  ✓ Run actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0
+  ✓ Run actions/setup-dotnet@a98b56852c35b8e3190ac28c8c2271da59106c68
+  ✓ Run astral-sh/setup-uv@e58605a9b6da7c637471fab8847a5e5a6b8df081
+  ✓ Start emulators (moto, REST fixture, Polaris, Trino, Gravitino, Nessie, Lakekeeper) and fetch the Spark oracle
+  ✓ Install PyIceberg oracle
+  * Regression suite (REST protocol, L1/L2 regression against the emulators)
+  * Emulator logs on failure
+  * Post Run astral-sh/setup-uv@e58605a9b6da7c637471fab8847a5e5a6b8df081
+  * Post Run actions/setup-dotnet@a98b56852c35b8e3190ac28c8c2271da59106c68
+  * Post Run actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0
+✓ unit in 2m56s (ID 122984684038)
+  ✓ Set up job
+  ✓ Run actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0
+  ✓ Lint file extensions and naming conventions
+  ✓ Run actions/setup-dotnet@a98b56852c35b8e3190ac28c8c2271da59106c68
+  ✓ CHANGELOG.md is well formed (the release reads its version from it)
+  ✓ Spec traceability matrix (fails on links to unknown sections)
+  ✓ Run actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9
+  ✓ Unit suite (spec, netstandard2.0, LINQ, EF Core, REST catalog behaviour)
+  ✓ Run actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9
+  ✓ Pack the libraries and smoke-test the packages
+  ✓ Run actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9
+  ✓ Post Run actions/setup-dotnet@a98b56852c35b8e3190ac28c8c2271da59106c68
+  ✓ Post Run actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0
+  ✓ Complete job
+
+ANNOTATIONS
+- "The ubuntu-latest label will migrate to Ubuntu 26 beginning October 19, 2026. For more information, see https://github.com/actions/runner-images/issues/14748"
+formal: .github#1
+
+- "The ubuntu-latest label will migrate to Ubuntu 26 beginning October 19, 2026. For more information, see https://github.com/actions/runner-images/issues/14748"
+unit: .github#1
+
+Refreshing run status every 30 seconds. Press Ctrl+C to quit.
+
+* rtkelly13/eval-formal-methods-conformance ci rtkelly-labs/Lake.NET#48 · 40736024861
+Triggered via pull_request about 3 minutes ago
+
+JOBS
+* cross-engine (ID 122984683601)
+  ✓ Set up job
+  ✓ Run actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0
+  ✓ Run actions/setup-dotnet@a98b56852c35b8e3190ac28c8c2271da59106c68
+  ✓ Run astral-sh/setup-uv@e58605a9b6da7c637471fab8847a5e5a6b8df081
+  ✓ Start emulators (moto, REST fixture, Polaris, Trino, Gravitino, Nessie, Lakekeeper) and fetch the Spark oracle
+  ✓ Install PyIceberg and DuckDB oracles
+  * Cross-engine suite (ecosystem, BDD specification, REST catalog server)
+  * Emulator logs on failure
+  * Post Run astral-sh/setup-uv@e58605a9b6da7c637471fab8847a5e5a6b8df081
+  * Post Run actions/setup-dotnet@a98b56852c35b8e3190ac28c8c2271da59106c68
+  * Post Run actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0
+✓ formal in 21s (ID 122984683937)
+  ✓ Set up job
+  ✓ Run actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0
+  ✓ Run actions/setup-java@b6effb05e454b25005698d916606bdc6ffcbf961
+  ✓ Check commit model, negative controls and C# replay witness
+  ✓ Run actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9
+  ✓ Post Run actions/setup-java@b6effb05e454b25005698d916606bdc6ffcbf961
+  ✓ Post Run actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0
+  ✓ Complete job
+* regression (ID 122984684018)
+  ✓ Set up job
+  ✓ Run actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0
+  ✓ Run actions/setup-dotnet@a98b56852c35b8e3190ac28c8c2271da59106c68
+  ✓ Run astral-sh/setup-uv@e58605a9b6da7c637471fab8847a5e5a6b8df081
+  ✓ Start emulators (moto, REST fixture, Polaris, Trino, Gravitino, Nessie, Lakekeeper) and fetch the Spark oracle
+  ✓ Install PyIceberg oracle
+  * Regression suite (REST protocol, L1/L2 regression against the emulators)
+  * Emulator logs on failure
+  * Post Run astral-sh/setup-uv@e58605a9b6da7c637471fab8847a5e5a6b8df081
+  * Post Run actions/setup-dotnet@a98b56852c35b8e3190ac28c8c2271da59106c68
+  * Post Run actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0
+✓ unit in 2m56s (ID 122984684038)
+  ✓ Set up job
+  ✓ Run actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0
+  ✓ Lint file extensions and naming conventions
+  ✓ Run actions/setup-dotnet@a98b56852c35b8e3190ac28c8c2271da59106c68
+  ✓ CHANGELOG.md is well formed (the release reads its version from it)
+  ✓ Spec traceability matrix (fails on links to unknown sections)
+  ✓ Run actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9
+  ✓ Unit suite (spec, netstandard2.0, LINQ, EF Core, REST catalog behaviour)
+  ✓ Run actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9
+  ✓ Pack the libraries and smoke-test the packages
+  ✓ Run actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9
+  ✓ Post Run actions/setup-dotnet@a98b56852c35b8e3190ac28c8c2271da59106c68
+  ✓ Post Run actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0
+  ✓ Complete job
+
+ANNOTATIONS
+- "The ubuntu-latest label will migrate to Ubuntu 26 beginning October 19, 2026. For more information, see https://github.com/actions/runner-images/issues/14748"
+formal: .github#1
+
+- "The ubuntu-latest label will migrate to Ubuntu 26 beginning October 19, 2026. For more information, see https://github.com/actions/runner-images/issues/14748"
+unit: .github#1
+
+Refreshing run status every 30 seconds. Press Ctrl+C to quit.
+
+* rtkelly13/eval-formal-methods-conformance ci rtkelly-labs/Lake.NET#48 · 40736024861
+Triggered via pull_request about 4 minutes ago
+
+JOBS
+* cross-engine (ID 122984683601)
+  ✓ Set up job
+  ✓ Run actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0
+  ✓ Run actions/setup-dotnet@a98b56852c35b8e3190ac28c8c2271da59106c68
+  ✓ Run astral-sh/setup-uv@e58605a9b6da7c637471fab8847a5e5a6b8df081
+  ✓ Start emulators (moto, REST fixture, Polaris, Trino, Gravitino, Nessie, Lakekeeper) and fetch the Spark oracle
+  ✓ Install PyIceberg and DuckDB oracles
+  * Cross-engine suite (ecosystem, BDD specification, REST catalog server)
+  * Emulator logs on failure
+  * Post Run astral-sh/setup-uv@e58605a9b6da7c637471fab8847a5e5a6b8df081
+  * Post Run actions/setup-dotnet@a98b56852c35b8e3190ac28c8c2271da59106c68
+  * Post Run actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0
+✓ formal in 21s (ID 122984683937)
+  ✓ Set up job
+  ✓ Run actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0
+  ✓ Run actions/setup-java@b6effb05e454b25005698d916606bdc6ffcbf961
+  ✓ Check commit model, negative controls and C# replay witness
+  ✓ Run actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9
+  ✓ Post Run actions/setup-java@b6effb05e454b25005698d916606bdc6ffcbf961
+  ✓ Post Run actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0
+  ✓ Complete job
+* regression (ID 122984684018)
+  ✓ Set up job
+  ✓ Run actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0
+  ✓ Run actions/setup-dotnet@a98b56852c35b8e3190ac28c8c2271da59106c68
+  ✓ Run astral-sh/setup-uv@e58605a9b6da7c637471fab8847a5e5a6b8df081
+  ✓ Start emulators (moto, REST fixture, Polaris, Trino, Gravitino, Nessie, Lakekeeper) and fetch the Spark oracle
+  ✓ Install PyIceberg oracle
+  * Regression suite (REST protocol, L1/L2 regression against the emulators)
+  * Emulator logs on failure
+  * Post Run astral-sh/setup-uv@e58605a9b6da7c637471fab8847a5e5a6b8df081
+  * Post Run actions/setup-dotnet@a98b56852c35b8e3190ac28c8c2271da59106c68
+  * Post Run actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0
+✓ unit in 2m56s (ID 122984684038)
+  ✓ Set up job
+  ✓ Run actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0
+  ✓ Lint file extensions and naming conventions
+  ✓ Run actions/setup-dotnet@a98b56852c35b8e3190ac28c8c2271da59106c68
+  ✓ CHANGELOG.md is well formed (the release reads its version from it)
+  ✓ Spec traceability matrix (fails on links to unknown sections)
+  ✓ Run actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9
+  ✓ Unit suite (spec, netstandard2.0, LINQ, EF Core, REST catalog behaviour)
+  ✓ Run actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9
+  ✓ Pack the libraries and smoke-test the packages
+  ✓ Run actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9
+  ✓ Post Run actions/setup-dotnet@a98b56852c35b8e3190ac28c8c2271da59106c68
+  ✓ Post Run actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0
+  ✓ Complete job
+
+ANNOTATIONS
+- "The ubuntu-latest label will migrate to Ubuntu 26 beginning October 19, 2026. For more information, see https://github.com/actions/runner-images/issues/14748"
+formal: .github#1
+
+- "The ubuntu-latest label will migrate to Ubuntu 26 beginning October 19, 2026. For more information, see https://github.com/actions/runner-images/issues/14748"
+unit: .github#1
+
+Refreshing run status every 30 seconds. Press Ctrl+C to quit.
+
+* rtkelly13/eval-formal-methods-conformance ci rtkelly-labs/Lake.NET#48 · 40736024861
+Triggered via pull_request about 4 minutes ago
+
+JOBS
+* cross-engine (ID 122984683601)
+  ✓ Set up job
+  ✓ Run actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0
+  ✓ Run actions/setup-dotnet@a98b56852c35b8e3190ac28c8c2271da59106c68
+  ✓ Run astral-sh/setup-uv@e58605a9b6da7c637471fab8847a5e5a6b8df081
+  ✓ Start emulators (moto, REST fixture, Polaris, Trino, Gravitino, Nessie, Lakekeeper) and fetch the Spark oracle
+  ✓ Install PyIceberg and DuckDB oracles
+  * Cross-engine suite (ecosystem, BDD specification, REST catalog server)
+  * Emulator logs on failure
+  * Post Run astral-sh/setup-uv@e58605a9b6da7c637471fab8847a5e5a6b8df081
+  * Post Run actions/setup-dotnet@a98b56852c35b8e3190ac28c8c2271da59106c68
+  * Post Run actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0
+✓ formal in 21s (ID 122984683937)
+  ✓ Set up job
+  ✓ Run actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0
+  ✓ Run actions/setup-java@b6effb05e454b25005698d916606bdc6ffcbf961
+  ✓ Check commit model, negative controls and C# replay witness
+  ✓ Run actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9
+  ✓ Post Run actions/setup-java@b6effb05e454b25005698d916606bdc6ffcbf961
+  ✓ Post Run actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0
+  ✓ Complete job
+* regression (ID 122984684018)
+  ✓ Set up job
+  ✓ Run actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0
+  ✓ Run actions/setup-dotnet@a98b56852c35b8e3190ac28c8c2271da59106c68
+  ✓ Run astral-sh/setup-uv@e58605a9b6da7c637471fab8847a5e5a6b8df081
+  ✓ Start emulators (moto, REST fixture, Polaris, Trino, Gravitino, Nessie, Lakekeeper) and fetch the Spark oracle
+  ✓ Install PyIceberg oracle
+  * Regression suite (REST protocol, L1/L2 regression against the emulators)
+  * Emulator logs on failure
+  * Post Run astral-sh/setup-uv@e58605a9b6da7c637471fab8847a5e5a6b8df081
+  * Post Run actions/setup-dotnet@a98b56852c35b8e3190ac28c8c2271da59106c68
+  * Post Run actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0
+✓ unit in 2m56s (ID 122984684038)
+  ✓ Set up job
+  ✓ Run actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0
+  ✓ Lint file extensions and naming conventions
+  ✓ Run actions/setup-dotnet@a98b56852c35b8e3190ac28c8c2271da59106c68
+  ✓ CHANGELOG.md is well formed (the release reads its version from it)
+  ✓ Spec traceability matrix (fails on links to unknown sections)
+  ✓ Run actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9
+  ✓ Unit suite (spec, netstandard2.0, LINQ, EF Core, REST catalog behaviour)
+  ✓ Run actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9
+  ✓ Pack the libraries and smoke-test the packages
+  ✓ Run actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9
+  ✓ Post Run actions/setup-dotnet@a98b56852c35b8e3190ac28c8c2271da59106c68
+  ✓ Post Run actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0
+  ✓ Complete job
+
+ANNOTATIONS
+- "The ubuntu-latest label will migrate to Ubuntu 26 beginning October 19, 2026. For more information, see https://github.com/actions/runner-images/issues/14748"
+formal: .github#1
+
+- "The ubuntu-latest label will migrate to Ubuntu 26 beginning October 19, 2026. For more information, see https://github.com/actions/runner-images/issues/14748"
+unit: .github#1
+
+Refreshing run status every 30 seconds. Press Ctrl+C to quit.
+
+* rtkelly13/eval-formal-methods-conformance ci rtkelly-labs/Lake.NET#48 · 40736024861
+Triggered via pull_request about 5 minutes ago
+
+JOBS
+✓ cross-engine in 4m57s (ID 122984683601)
+  ✓ Set up job
+  ✓ Run actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0
+  ✓ Run actions/setup-dotnet@a98b56852c35b8e3190ac28c8c2271da59106c68
+  ✓ Run astral-sh/setup-uv@e58605a9b6da7c637471fab8847a5e5a6b8df081
+  ✓ Start emulators (moto, REST fixture, Polaris, Trino, Gravitino, Nessie, Lakekeeper) and fetch the Spark oracle
+  ✓ Install PyIceberg and DuckDB oracles
+  ✓ Cross-engine suite (ecosystem, BDD specification, REST catalog server)
+  - Emulator logs on failure
+  ✓ Post Run astral-sh/setup-uv@e58605a9b6da7c637471fab8847a5e5a6b8df081
+  ✓ Post Run actions/setup-dotnet@a98b56852c35b8e3190ac28c8c2271da59106c68
+  ✓ Post Run actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0
+  ✓ Complete job
+✓ formal in 21s (ID 122984683937)
+  ✓ Set up job
+  ✓ Run actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0
+  ✓ Run actions/setup-java@b6effb05e454b25005698d916606bdc6ffcbf961
+  ✓ Check commit model, negative controls and C# replay witness
+  ✓ Run actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9
+  ✓ Post Run actions/setup-java@b6effb05e454b25005698d916606bdc6ffcbf961
+  ✓ Post Run actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0
+  ✓ Complete job
+* regression (ID 122984684018)
+  ✓ Set up job
+  ✓ Run actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0
+  ✓ Run actions/setup-dotnet@a98b56852c35b8e3190ac28c8c2271da59106c68
+  ✓ Run astral-sh/setup-uv@e58605a9b6da7c637471fab8847a5e5a6b8df081
+  ✓ Start emulators (moto, REST fixture, Polaris, Trino, Gravitino, Nessie, Lakekeeper) and fetch the Spark oracle
+  ✓ Install PyIceberg oracle
+  * Regression suite (REST protocol, L1/L2 regression against the emulators)
+  * Emulator logs on failure
+  * Post Run astral-sh/setup-uv@e58605a9b6da7c637471fab8847a5e5a6b8df081
+  * Post Run actions/setup-dotnet@a98b56852c35b8e3190ac28c8c2271da59106c68
+  * Post Run actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0
+✓ unit in 2m56s (ID 122984684038)
+  ✓ Set up job
+  ✓ Run actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0
+  ✓ Lint file extensions and naming conventions
+  ✓ Run actions/setup-dotnet@a98b56852c35b8e3190ac28c8c2271da59106c68
+  ✓ CHANGELOG.md is well formed (the release reads its version from it)
+  ✓ Spec traceability matrix (fails on links to unknown sections)
+  ✓ Run actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9
+  ✓ Unit suite (spec, netstandard2.0, LINQ, EF Core, REST catalog behaviour)
+  ✓ Run actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9
+  ✓ Pack the libraries and smoke-test the packages
+  ✓ Run actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9
+  ✓ Post Run actions/setup-dotnet@a98b56852c35b8e3190ac28c8c2271da59106c68
+  ✓ Post Run actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0
+  ✓ Complete job
+
+ANNOTATIONS
+- "The ubuntu-latest label will migrate to Ubuntu 26 beginning October 19, 2026. For more information, see https://github.com/actions/runner-images/issues/14748"
+formal: .github#1
+
+- "The ubuntu-latest label will migrate to Ubuntu 26 beginning October 19, 2026. For more information, see https://github.com/actions/runner-images/issues/14748"
+unit: .github#1
+
+Refreshing run status every 30 seconds. Press Ctrl+C to quit.
+
+* rtkelly13/eval-formal-methods-conformance ci rtkelly-labs/Lake.NET#48 · 40736024861
+Triggered via pull_request about 5 minutes ago
+
+JOBS
+✓ cross-engine in 4m57s (ID 122984683601)
+  ✓ Set up job
+  ✓ Run actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0
+  ✓ Run actions/setup-dotnet@a98b56852c35b8e3190ac28c8c2271da59106c68
+  ✓ Run astral-sh/setup-uv@e58605a9b6da7c637471fab8847a5e5a6b8df081
+  ✓ Start emulators (moto, REST fixture, Polaris, Trino, Gravitino, Nessie, Lakekeeper) and fetch the Spark oracle
+  ✓ Install PyIceberg and DuckDB oracles
+  ✓ Cross-engine suite (ecosystem, BDD specification, REST catalog server)
+  - Emulator logs on failure
+  ✓ Post Run astral-sh/setup-uv@e58605a9b6da7c637471fab8847a5e5a6b8df081
+  ✓ Post Run actions/setup-dotnet@a98b56852c35b8e3190ac28c8c2271da59106c68
+  ✓ Post Run actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0
+  ✓ Complete job
+✓ formal in 21s (ID 122984683937)
+  ✓ Set up job
+  ✓ Run actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0
+  ✓ Run actions/setup-java@b6effb05e454b25005698d916606bdc6ffcbf961
+  ✓ Check commit model, negative controls and C# replay witness
+  ✓ Run actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9
+  ✓ Post Run actions/setup-java@b6effb05e454b25005698d916606bdc6ffcbf961
+  ✓ Post Run actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0
+  ✓ Complete job
+* regression (ID 122984684018)
+  ✓ Set up job
+  ✓ Run actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0
+  ✓ Run actions/setup-dotnet@a98b56852c35b8e3190ac28c8c2271da59106c68
+  ✓ Run astral-sh/setup-uv@e58605a9b6da7c637471fab8847a5e5a6b8df081
+  ✓ Start emulators (moto, REST fixture, Polaris, Trino, Gravitino, Nessie, Lakekeeper) and fetch the Spark oracle
+  ✓ Install PyIceberg oracle
+  * Regression suite (REST protocol, L1/L2 regression against the emulators)
+  * Emulator logs on failure
+  * Post Run astral-sh/setup-uv@e58605a9b6da7c637471fab8847a5e5a6b8df081
+  * Post Run actions/setup-dotnet@a98b56852c35b8e3190ac28c8c2271da59106c68
+  * Post Run actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0
+✓ unit in 2m56s (ID 122984684038)
+  ✓ Set up job
+  ✓ Run actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0
+  ✓ Lint file extensions and naming conventions
+  ✓ Run actions/setup-dotnet@a98b56852c35b8e3190ac28c8c2271da59106c68
+  ✓ CHANGELOG.md is well formed (the release reads its version from it)
+  ✓ Spec traceability matrix (fails on links to unknown sections)
+  ✓ Run actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9
+  ✓ Unit suite (spec, netstandard2.0, LINQ, EF Core, REST catalog behaviour)
+  ✓ Run actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9
+  ✓ Pack the libraries and smoke-test the packages
+  ✓ Run actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9
+  ✓ Post Run actions/setup-dotnet@a98b56852c35b8e3190ac28c8c2271da59106c68
+  ✓ Post Run actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0
+  ✓ Complete job
+
+ANNOTATIONS
+- "The ubuntu-latest label will migrate to Ubuntu 26 beginning October 19, 2026. For more information, see https://github.com/actions/runner-images/issues/14748"
+formal: .github#1
+
+- "The ubuntu-latest label will migrate to Ubuntu 26 beginning October 19, 2026. For more information, see https://github.com/actions/runner-images/issues/14748"
+unit: .github#1
+
+Refreshing run status every 30 seconds. Press Ctrl+C to quit.
+
+* rtkelly13/eval-formal-methods-conformance ci rtkelly-labs/Lake.NET#48 · 40736024861
+Triggered via pull_request about 6 minutes ago
+
+JOBS
+✓ cross-engine in 4m57s (ID 122984683601)
+  ✓ Set up job
+  ✓ Run actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0
+  ✓ Run actions/setup-dotnet@a98b56852c35b8e3190ac28c8c2271da59106c68
+  ✓ Run astral-sh/setup-uv@e58605a9b6da7c637471fab8847a5e5a6b8df081
+  ✓ Start emulators (moto, REST fixture, Polaris, Trino, Gravitino, Nessie, Lakekeeper) and fetch the Spark oracle
+  ✓ Install PyIceberg and DuckDB oracles
+  ✓ Cross-engine suite (ecosystem, BDD specification, REST catalog server)
+  - Emulator logs on failure
+  ✓ Post Run astral-sh/setup-uv@e58605a9b6da7c637471fab8847a5e5a6b8df081
+  ✓ Post Run actions/setup-dotnet@a98b56852c35b8e3190ac28c8c2271da59106c68
+  ✓ Post Run actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0
+  ✓ Complete job
+✓ formal in 21s (ID 122984683937)
+  ✓ Set up job
+  ✓ Run actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0
+  ✓ Run actions/setup-java@b6effb05e454b25005698d916606bdc6ffcbf961
+  ✓ Check commit model, negative controls and C# replay witness
+  ✓ Run actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9
+  ✓ Post Run actions/setup-java@b6effb05e454b25005698d916606bdc6ffcbf961
+  ✓ Post Run actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0
+  ✓ Complete job
+* regression (ID 122984684018)
+  ✓ Set up job
+  ✓ Run actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0
+  ✓ Run actions/setup-dotnet@a98b56852c35b8e3190ac28c8c2271da59106c68
+  ✓ Run astral-sh/setup-uv@e58605a9b6da7c637471fab8847a5e5a6b8df081
+  ✓ Start emulators (moto, REST fixture, Polaris, Trino, Gravitino, Nessie, Lakekeeper) and fetch the Spark oracle
+  ✓ Install PyIceberg oracle
+  * Regression suite (REST protocol, L1/L2 regression against the emulators)
+  * Emulator logs on failure
+  * Post Run astral-sh/setup-uv@e58605a9b6da7c637471fab8847a5e5a6b8df081
+  * Post Run actions/setup-dotnet@a98b56852c35b8e3190ac28c8c2271da59106c68
+  * Post Run actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0
+✓ unit in 2m56s (ID 122984684038)
+  ✓ Set up job
+  ✓ Run actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0
+  ✓ Lint file extensions and naming conventions
+  ✓ Run actions/setup-dotnet@a98b56852c35b8e3190ac28c8c2271da59106c68
+  ✓ CHANGELOG.md is well formed (the release reads its version from it)
+  ✓ Spec traceability matrix (fails on links to unknown sections)
+  ✓ Run actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9
+  ✓ Unit suite (spec, netstandard2.0, LINQ, EF Core, REST catalog behaviour)
+  ✓ Run actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9
+  ✓ Pack the libraries and smoke-test the packages
+  ✓ Run actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9
+  ✓ Post Run actions/setup-dotnet@a98b56852c35b8e3190ac28c8c2271da59106c68
+  ✓ Post Run actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0
+  ✓ Complete job
+
+ANNOTATIONS
+- "The ubuntu-latest label will migrate to Ubuntu 26 beginning October 19, 2026. For more information, see https://github.com/actions/runner-images/issues/14748"
+formal: .github#1
+
+- "The ubuntu-latest label will migrate to Ubuntu 26 beginning October 19, 2026. For more information, see https://github.com/actions/runner-images/issues/14748"
+unit: .github#1
+
+Refreshing run status every 30 seconds. Press Ctrl+C to quit.
+
+* rtkelly13/eval-formal-methods-conformance ci rtkelly-labs/Lake.NET#48 · 40736024861
+Triggered via pull_request about 6 minutes ago
+
+JOBS
+✓ cross-engine in 4m57s (ID 122984683601)
+  ✓ Set up job
+  ✓ Run actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0
+  ✓ Run actions/setup-dotnet@a98b56852c35b8e3190ac28c8c2271da59106c68
+  ✓ Run astral-sh/setup-uv@e58605a9b6da7c637471fab8847a5e5a6b8df081
+  ✓ Start emulators (moto, REST fixture, Polaris, Trino, Gravitino, Nessie, Lakekeeper) and fetch the Spark oracle
+  ✓ Install PyIceberg and DuckDB oracles
+  ✓ Cross-engine suite (ecosystem, BDD specification, REST catalog server)
+  - Emulator logs on failure
+  ✓ Post Run astral-sh/setup-uv@e58605a9b6da7c637471fab8847a5e5a6b8df081
+  ✓ Post Run actions/setup-dotnet@a98b56852c35b8e3190ac28c8c2271da59106c68
+  ✓ Post Run actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0
+  ✓ Complete job
+✓ formal in 21s (ID 122984683937)
+  ✓ Set up job
+  ✓ Run actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0
+  ✓ Run actions/setup-java@b6effb05e454b25005698d916606bdc6ffcbf961
+  ✓ Check commit model, negative controls and C# replay witness
+  ✓ Run actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9
+  ✓ Post Run actions/setup-java@b6effb05e454b25005698d916606bdc6ffcbf961
+  ✓ Post Run actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0
+  ✓ Complete job
+* regression (ID 122984684018)
+  ✓ Set up job
+  ✓ Run actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0
+  ✓ Run actions/setup-dotnet@a98b56852c35b8e3190ac28c8c2271da59106c68
+  ✓ Run astral-sh/setup-uv@e58605a9b6da7c637471fab8847a5e5a6b8df081
+  ✓ Start emulators (moto, REST fixture, Polaris, Trino, Gravitino, Nessie, Lakekeeper) and fetch the Spark oracle
+  ✓ Install PyIceberg oracle
+  * Regression suite (REST protocol, L1/L2 regression against the emulators)
+  * Emulator logs on failure
+  * Post Run astral-sh/setup-uv@e58605a9b6da7c637471fab8847a5e5a6b8df081
+  * Post Run actions/setup-dotnet@a98b56852c35b8e3190ac28c8c2271da59106c68
+  * Post Run actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0
+✓ unit in 2m56s (ID 122984684038)
+  ✓ Set up job
+  ✓ Run actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0
+  ✓ Lint file extensions and naming conventions
+  ✓ Run actions/setup-dotnet@a98b56852c35b8e3190ac28c8c2271da59106c68
+  ✓ CHANGELOG.md is well formed (the release reads its version from it)
+  ✓ Spec traceability matrix (fails on links to unknown sections)
+  ✓ Run actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9
+  ✓ Unit suite (spec, netstandard2.0, LINQ, EF Core, REST catalog behaviour)
+  ✓ Run actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9
+  ✓ Pack the libraries and smoke-test the packages
+  ✓ Run actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9
+  ✓ Post Run actions/setup-dotnet@a98b56852c35b8e3190ac28c8c2271da59106c68
+  ✓ Post Run actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0
+  ✓ Complete job
+
+ANNOTATIONS
+- "The ubuntu-latest label will migrate to Ubuntu 26 beginning October 19, 2026. For more information, see https://github.com/actions/runner-images/issues/14748"
+formal: .github#1
+
+- "The ubuntu-latest label will migrate to Ubuntu 26 beginning October 19, 2026. For more information, see https://github.com/actions/runner-images/issues/14748"
+unit: .github#1
+
+Refreshing run status every 30 seconds. Press Ctrl+C to quit.
+
+* rtkelly13/eval-formal-methods-conformance ci rtkelly-labs/Lake.NET#48 · 40736024861
+Triggered via pull_request about 7 minutes ago
+
+JOBS
+✓ cross-engine in 4m57s (ID 122984683601)
+  ✓ Set up job
+  ✓ Run actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0
+  ✓ Run actions/setup-dotnet@a98b56852c35b8e3190ac28c8c2271da59106c68
+  ✓ Run astral-sh/setup-uv@e58605a9b6da7c637471fab8847a5e5a6b8df081
+  ✓ Start emulators (moto, REST fixture, Polaris, Trino, Gravitino, Nessie, Lakekeeper) and fetch the Spark oracle
+  ✓ Install PyIceberg and DuckDB oracles
+  ✓ Cross-engine suite (ecosystem, BDD specification, REST catalog server)
+  - Emulator logs on failure
+  ✓ Post Run astral-sh/setup-uv@e58605a9b6da7c637471fab8847a5e5a6b8df081
+  ✓ Post Run actions/setup-dotnet@a98b56852c35b8e3190ac28c8c2271da59106c68
+  ✓ Post Run actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0
+  ✓ Complete job
+✓ formal in 21s (ID 122984683937)
+  ✓ Set up job
+  ✓ Run actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0
+  ✓ Run actions/setup-java@b6effb05e454b25005698d916606bdc6ffcbf961
+  ✓ Check commit model, negative controls and C# replay witness
+  ✓ Run actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9
+  ✓ Post Run actions/setup-java@b6effb05e454b25005698d916606bdc6ffcbf961
+  ✓ Post Run actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0
+  ✓ Complete job
+* regression (ID 122984684018)
+  ✓ Set up job
+  ✓ Run actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0
+  ✓ Run actions/setup-dotnet@a98b56852c35b8e3190ac28c8c2271da59106c68
+  ✓ Run astral-sh/setup-uv@e58605a9b6da7c637471fab8847a5e5a6b8df081
+  ✓ Start emulators (moto, REST fixture, Polaris, Trino, Gravitino, Nessie, Lakekeeper) and fetch the Spark oracle
+  ✓ Install PyIceberg oracle
+  * Regression suite (REST protocol, L1/L2 regression against the emulators)
+  * Emulator logs on failure
+  * Post Run astral-sh/setup-uv@e58605a9b6da7c637471fab8847a5e5a6b8df081
+  * Post Run actions/setup-dotnet@a98b56852c35b8e3190ac28c8c2271da59106c68
+  * Post Run actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0
+✓ unit in 2m56s (ID 122984684038)
+  ✓ Set up job
+  ✓ Run actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0
+  ✓ Lint file extensions and naming conventions
+  ✓ Run actions/setup-dotnet@a98b56852c35b8e3190ac28c8c2271da59106c68
+  ✓ CHANGELOG.md is well formed (the release reads its version from it)
+  ✓ Spec traceability matrix (fails on links to unknown sections)
+  ✓ Run actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9
+  ✓ Unit suite (spec, netstandard2.0, LINQ, EF Core, REST catalog behaviour)
+  ✓ Run actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9
+  ✓ Pack the libraries and smoke-test the packages
+  ✓ Run actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9
+  ✓ Post Run actions/setup-dotnet@a98b56852c35b8e3190ac28c8c2271da59106c68
+  ✓ Post Run actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0
+  ✓ Complete job
+
+ANNOTATIONS
+- "The ubuntu-latest label will migrate to Ubuntu 26 beginning October 19, 2026. For more information, see https://github.com/actions/runner-images/issues/14748"
+formal: .github#1
+
+- "The ubuntu-latest label will migrate to Ubuntu 26 beginning October 19, 2026. For more information, see https://github.com/actions/runner-images/issues/14748"
+unit: .github#1
+
+✓ rtkelly13/eval-formal-methods-conformance ci rtkelly-labs/Lake.NET#48 · 40736024861
+Triggered via pull_request about 8 minutes ago
+
+JOBS
+✓ cross-engine in 4m57s (ID 122984683601)
+  ✓ Set up job
+  ✓ Run actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0
+  ✓ Run actions/setup-dotnet@a98b56852c35b8e3190ac28c8c2271da59106c68
+  ✓ Run astral-sh/setup-uv@e58605a9b6da7c637471fab8847a5e5a6b8df081
+  ✓ Start emulators (moto, REST fixture, Polaris, Trino, Gravitino, Nessie, Lakekeeper) and fetch the Spark oracle
+  ✓ Install PyIceberg and DuckDB oracles
+  ✓ Cross-engine suite (ecosystem, BDD specification, REST catalog server)
+  - Emulator logs on failure
+  ✓ Post Run astral-sh/setup-uv@e58605a9b6da7c637471fab8847a5e5a6b8df081
+  ✓ Post Run actions/setup-dotnet@a98b56852c35b8e3190ac28c8c2271da59106c68
+  ✓ Post Run actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0
+  ✓ Complete job
+✓ formal in 21s (ID 122984683937)
+  ✓ Set up job
+  ✓ Run actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0
+  ✓ Run actions/setup-java@b6effb05e454b25005698d916606bdc6ffcbf961
+  ✓ Check commit model, negative controls and C# replay witness
+  ✓ Run actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9
+  ✓ Post Run actions/setup-java@b6effb05e454b25005698d916606bdc6ffcbf961
+  ✓ Post Run actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0
+  ✓ Complete job
+✓ regression in 7m40s (ID 122984684018)
+  ✓ Set up job
+  ✓ Run actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0
+  ✓ Run actions/setup-dotnet@a98b56852c35b8e3190ac28c8c2271da59106c68
+  ✓ Run astral-sh/setup-uv@e58605a9b6da7c637471fab8847a5e5a6b8df081
+  ✓ Start emulators (moto, REST fixture, Polaris, Trino, Gravitino, Nessie, Lakekeeper) and fetch the Spark oracle
+  ✓ Install PyIceberg oracle
+  ✓ Regression suite (REST protocol, L1/L2 regression against the emulators)
+  - Emulator logs on failure
+  ✓ Post Run astral-sh/setup-uv@e58605a9b6da7c637471fab8847a5e5a6b8df081
+  ✓ Post Run actions/setup-dotnet@a98b56852c35b8e3190ac28c8c2271da59106c68
+  ✓ Post Run actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0
+  ✓ Complete job
+✓ unit in 2m56s (ID 122984684038)
+  ✓ Set up job
+  ✓ Run actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0
+  ✓ Lint file extensions and naming conventions
+  ✓ Run actions/setup-dotnet@a98b56852c35b8e3190ac28c8c2271da59106c68
+  ✓ CHANGELOG.md is well formed (the release reads its version from it)
+  ✓ Spec traceability matrix (fails on links to unknown sections)
+  ✓ Run actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9
+  ✓ Unit suite (spec, netstandard2.0, LINQ, EF Core, REST catalog behaviour)
+  ✓ Run actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9
+  ✓ Pack the libraries and smoke-test the packages
+  ✓ Run actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9
+  ✓ Post Run actions/setup-dotnet@a98b56852c35b8e3190ac28c8c2271da59106c68
+  ✓ Post Run actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0
+  ✓ Complete job
+✓ ci in 3s (ID 122989017109)
+  ✓ Set up job
+  ✓ Report the verdict of every job
+  ✓ Complete job
+
+ANNOTATIONS
+- "The ubuntu-latest label will migrate to Ubuntu 26 beginning October 19, 2026. For more information, see https://github.com/actions/runner-images/issues/14748"
+formal: .github#1
+
+- "The ubuntu-latest label will migrate to Ubuntu 26 beginning October 19, 2026. For more information, see https://github.com/actions/runner-images/issues/14748"
+unit: .github#1
+
+- "The ubuntu-latest label will migrate to Ubuntu 26 beginning October 19, 2026. For more information, see https://github.com/actions/runner-images/issues/14748"
+ci: .github#1
+

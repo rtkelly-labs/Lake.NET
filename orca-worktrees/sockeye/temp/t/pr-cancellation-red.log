@@ -1,0 +1,91 @@
+  Iceberg.Net.IO -> /Users/ryankelly/orca/workspaces/Iceberg.NET/sockeye/src/Iceberg.Net.IO/bin/Debug/net10.0/Iceberg.Net.IO.dll
+  Iceberg.Net.Puffin -> /Users/ryankelly/orca/workspaces/Iceberg.NET/sockeye/src/Iceberg.Net.Puffin/bin/Debug/net10.0/Iceberg.Net.Puffin.dll
+  Iceberg.Net.Core -> /Users/ryankelly/orca/workspaces/Iceberg.NET/sockeye/src/Iceberg.Net.Core/bin/Debug/net10.0/Iceberg.Net.Core.dll
+  Iceberg.Net.Avro -> /Users/ryankelly/orca/workspaces/Iceberg.NET/sockeye/src/Iceberg.Net.Avro/bin/Debug/net10.0/Iceberg.Net.Avro.dll
+  Iceberg.Net.Catalog -> /Users/ryankelly/orca/workspaces/Iceberg.NET/sockeye/src/Iceberg.Net.Catalog/bin/Debug/net10.0/Iceberg.Net.Catalog.dll
+  Iceberg.Net.Data -> /Users/ryankelly/orca/workspaces/Iceberg.NET/sockeye/src/Iceberg.Net.Data/bin/Debug/net10.0/Iceberg.Net.Data.dll
+  Iceberg.Net.TestSupport -> /Users/ryankelly/orca/workspaces/Iceberg.NET/sockeye/tests/Iceberg.Net.TestSupport/bin/Debug/net10.0/Iceberg.Net.TestSupport.dll
+  Iceberg.Net.Linq -> /Users/ryankelly/orca/workspaces/Iceberg.NET/sockeye/src/Iceberg.Net.Linq/bin/Debug/net10.0/Iceberg.Net.Linq.dll
+  Iceberg.Net.RestServer -> /Users/ryankelly/orca/workspaces/Iceberg.NET/sockeye/src/Iceberg.Net.RestServer/bin/Debug/net10.0/Iceberg.Net.RestServer.dll
+  Iceberg.Net.EntityFrameworkCore -> /Users/ryankelly/orca/workspaces/Iceberg.NET/sockeye/src/Iceberg.Net.EntityFrameworkCore/bin/Debug/net10.0/Iceberg.Net.EntityFrameworkCore.dll
+  Iceberg.Net.RestServer.Tests -> /Users/ryankelly/orca/workspaces/Iceberg.NET/sockeye/tests/Iceberg.Net.RestServer.Tests/bin/Debug/net10.0/Iceberg.Net.RestServer.Tests.dll
+Test run for /Users/ryankelly/orca/workspaces/Iceberg.NET/sockeye/tests/Iceberg.Net.RestServer.Tests/bin/Debug/net10.0/Iceberg.Net.RestServer.Tests.dll (.NETCoreApp,Version=v10.0)
+A total of 1 test files matched the specified pattern.
+[xUnit.net 00:00:00.71]     Iceberg.Net.RestServer.Tests.IdempotencyTests.Cancellation_during_REST_submission_recovers_or_preserves_uncertainty_without_replay(applied: True, cancelCaller: False) [FAIL]
+[xUnit.net 00:00:00.83]     Iceberg.Net.RestServer.Tests.IdempotencyTests.Cancellation_during_REST_submission_recovers_or_preserves_uncertainty_without_replay(applied: True, cancelCaller: True) [FAIL]
+[xUnit.net 00:00:00.92]     Iceberg.Net.RestServer.Tests.IdempotencyTests.Cancellation_during_REST_submission_recovers_or_preserves_uncertainty_without_replay(applied: False, cancelCaller: True) [FAIL]
+[xUnit.net 00:00:01.02]     Iceberg.Net.RestServer.Tests.IdempotencyTests.Cancellation_during_REST_submission_recovers_or_preserves_uncertainty_without_replay(applied: False, cancelCaller: False) [FAIL]
+  Failed Iceberg.Net.RestServer.Tests.IdempotencyTests.Cancellation_during_REST_submission_recovers_or_preserves_uncertainty_without_replay(applied: True, cancelCaller: False) [568 ms]
+  Error Message:
+   System.OperationCanceledException : cancelled while waiting for commit response
+  Stack Trace:
+     at Iceberg.Net.RestServer.Tests.IdempotencyTests.CancelCommitResponse.SendAsync(HttpRequestMessage request, CancellationToken ct) in /Users/ryankelly/orca/workspaces/Iceberg.NET/sockeye/tests/Iceberg.Net.RestServer.Tests/IdempotencyTests.cs:line 143
+   at System.Net.Http.HttpClient.<SendAsync>g__Core|83_0(HttpRequestMessage request, HttpCompletionOption completionOption, CancellationTokenSource cts, Boolean disposeCts, CancellationTokenSource pendingRequestsCts, CancellationToken originalCancellationToken)
+   at Iceberg.Net.Catalog.RestCatalog.SendAsync(HttpMethod method, String path, JsonNode body, CancellationToken ct, Func`2 conflict, Boolean commit) in /Users/ryankelly/orca/workspaces/Iceberg.NET/sockeye/src/Iceberg.Net.Catalog/RestCatalog.cs:line 571
+   at Iceberg.Net.Catalog.RestCatalog.CommitTableAsync(TableCommit commit, CancellationToken ct) in /Users/ryankelly/orca/workspaces/Iceberg.NET/sockeye/src/Iceberg.Net.Catalog/RestCatalog.cs:line 436
+   at Iceberg.Net.Catalog.Table.CommitAsync(IReadOnlyList`1 requirements, IReadOnlyList`1 updates, CancellationToken ct) in /Users/ryankelly/orca/workspaces/Iceberg.NET/sockeye/src/Iceberg.Net.Catalog/Catalog.cs:line 114
+   at Iceberg.Net.Data.SnapshotProducer.CommitAsync(CancellationToken ct) in /Users/ryankelly/orca/workspaces/Iceberg.NET/sockeye/src/Iceberg.Net.Data/SnapshotProducer.cs:line 319
+   at Iceberg.Net.RestServer.Tests.IdempotencyTests.Cancellation_during_REST_submission_recovers_or_preserves_uncertainty_without_replay(Boolean applied, Boolean cancelCaller) in /Users/ryankelly/orca/workspaces/Iceberg.NET/sockeye/tests/Iceberg.Net.RestServer.Tests/IdempotencyTests.cs:line 163
+   at Iceberg.Net.RestServer.Tests.IdempotencyTests.Cancellation_during_REST_submission_recovers_or_preserves_uncertainty_without_replay(Boolean applied, Boolean cancelCaller) in /Users/ryankelly/orca/workspaces/Iceberg.NET/sockeye/tests/Iceberg.Net.RestServer.Tests/IdempotencyTests.cs:line 176
+--- End of stack trace from previous location ---
+  Failed Iceberg.Net.RestServer.Tests.IdempotencyTests.Cancellation_during_REST_submission_recovers_or_preserves_uncertainty_without_replay(applied: True, cancelCaller: True) [110 ms]
+  Error Message:
+   Assert.Throws() Failure: Exception type was not an exact match
+Expected: typeof(Iceberg.Net.Metadata.CommitStateUnknownException)
+Actual:   typeof(System.Threading.Tasks.TaskCanceledException)
+---- System.Threading.Tasks.TaskCanceledException : cancelled while waiting for commit response
+-------- System.OperationCanceledException : cancelled while waiting for commit response
+  Stack Trace:
+     at Iceberg.Net.RestServer.Tests.IdempotencyTests.Cancellation_during_REST_submission_recovers_or_preserves_uncertainty_without_replay(Boolean applied, Boolean cancelCaller) in /Users/ryankelly/orca/workspaces/Iceberg.NET/sockeye/tests/Iceberg.Net.RestServer.Tests/IdempotencyTests.cs:line 166
+   at Iceberg.Net.RestServer.Tests.IdempotencyTests.Cancellation_during_REST_submission_recovers_or_preserves_uncertainty_without_replay(Boolean applied, Boolean cancelCaller) in /Users/ryankelly/orca/workspaces/Iceberg.NET/sockeye/tests/Iceberg.Net.RestServer.Tests/IdempotencyTests.cs:line 176
+--- End of stack trace from previous location ---
+----- Inner Stack Trace -----
+   at System.Net.Http.HttpClient.HandleFailure(Exception e, Boolean telemetryStarted, HttpResponseMessage response, CancellationTokenSource cts, CancellationToken cancellationToken, CancellationTokenSource pendingRequestsCts)
+   at System.Net.Http.HttpClient.<SendAsync>g__Core|83_0(HttpRequestMessage request, HttpCompletionOption completionOption, CancellationTokenSource cts, Boolean disposeCts, CancellationTokenSource pendingRequestsCts, CancellationToken originalCancellationToken)
+   at Iceberg.Net.Catalog.RestCatalog.SendAsync(HttpMethod method, String path, JsonNode body, CancellationToken ct, Func`2 conflict, Boolean commit) in /Users/ryankelly/orca/workspaces/Iceberg.NET/sockeye/src/Iceberg.Net.Catalog/RestCatalog.cs:line 571
+   at Iceberg.Net.Catalog.RestCatalog.CommitTableAsync(TableCommit commit, CancellationToken ct) in /Users/ryankelly/orca/workspaces/Iceberg.NET/sockeye/src/Iceberg.Net.Catalog/RestCatalog.cs:line 436
+   at Iceberg.Net.Catalog.Table.CommitAsync(IReadOnlyList`1 requirements, IReadOnlyList`1 updates, CancellationToken ct) in /Users/ryankelly/orca/workspaces/Iceberg.NET/sockeye/src/Iceberg.Net.Catalog/Catalog.cs:line 114
+   at Iceberg.Net.Data.SnapshotProducer.CommitAsync(CancellationToken ct) in /Users/ryankelly/orca/workspaces/Iceberg.NET/sockeye/src/Iceberg.Net.Data/SnapshotProducer.cs:line 319
+----- Inner Stack Trace -----
+   at Iceberg.Net.RestServer.Tests.IdempotencyTests.CancelCommitResponse.SendAsync(HttpRequestMessage request, CancellationToken ct) in /Users/ryankelly/orca/workspaces/Iceberg.NET/sockeye/tests/Iceberg.Net.RestServer.Tests/IdempotencyTests.cs:line 143
+   at System.Net.Http.HttpClient.<SendAsync>g__Core|83_0(HttpRequestMessage request, HttpCompletionOption completionOption, CancellationTokenSource cts, Boolean disposeCts, CancellationTokenSource pendingRequestsCts, CancellationToken originalCancellationToken)
+  Failed Iceberg.Net.RestServer.Tests.IdempotencyTests.Cancellation_during_REST_submission_recovers_or_preserves_uncertainty_without_replay(applied: False, cancelCaller: True) [92 ms]
+  Error Message:
+   Assert.Throws() Failure: Exception type was not an exact match
+Expected: typeof(Iceberg.Net.Metadata.CommitStateUnknownException)
+Actual:   typeof(System.Threading.Tasks.TaskCanceledException)
+---- System.Threading.Tasks.TaskCanceledException : cancelled while waiting for commit response
+-------- System.OperationCanceledException : cancelled while waiting for commit response
+  Stack Trace:
+     at Iceberg.Net.RestServer.Tests.IdempotencyTests.Cancellation_during_REST_submission_recovers_or_preserves_uncertainty_without_replay(Boolean applied, Boolean cancelCaller) in /Users/ryankelly/orca/workspaces/Iceberg.NET/sockeye/tests/Iceberg.Net.RestServer.Tests/IdempotencyTests.cs:line 166
+   at Iceberg.Net.RestServer.Tests.IdempotencyTests.Cancellation_during_REST_submission_recovers_or_preserves_uncertainty_without_replay(Boolean applied, Boolean cancelCaller) in /Users/ryankelly/orca/workspaces/Iceberg.NET/sockeye/tests/Iceberg.Net.RestServer.Tests/IdempotencyTests.cs:line 176
+--- End of stack trace from previous location ---
+----- Inner Stack Trace -----
+   at System.Net.Http.HttpClient.HandleFailure(Exception e, Boolean telemetryStarted, HttpResponseMessage response, CancellationTokenSource cts, CancellationToken cancellationToken, CancellationTokenSource pendingRequestsCts)
+   at System.Net.Http.HttpClient.<SendAsync>g__Core|83_0(HttpRequestMessage request, HttpCompletionOption completionOption, CancellationTokenSource cts, Boolean disposeCts, CancellationTokenSource pendingRequestsCts, CancellationToken originalCancellationToken)
+   at Iceberg.Net.Catalog.RestCatalog.SendAsync(HttpMethod method, String path, JsonNode body, CancellationToken ct, Func`2 conflict, Boolean commit) in /Users/ryankelly/orca/workspaces/Iceberg.NET/sockeye/src/Iceberg.Net.Catalog/RestCatalog.cs:line 571
+   at Iceberg.Net.Catalog.RestCatalog.CommitTableAsync(TableCommit commit, CancellationToken ct) in /Users/ryankelly/orca/workspaces/Iceberg.NET/sockeye/src/Iceberg.Net.Catalog/RestCatalog.cs:line 436
+   at Iceberg.Net.Catalog.Table.CommitAsync(IReadOnlyList`1 requirements, IReadOnlyList`1 updates, CancellationToken ct) in /Users/ryankelly/orca/workspaces/Iceberg.NET/sockeye/src/Iceberg.Net.Catalog/Catalog.cs:line 114
+   at Iceberg.Net.Data.SnapshotProducer.CommitAsync(CancellationToken ct) in /Users/ryankelly/orca/workspaces/Iceberg.NET/sockeye/src/Iceberg.Net.Data/SnapshotProducer.cs:line 319
+----- Inner Stack Trace -----
+   at Iceberg.Net.RestServer.Tests.IdempotencyTests.CancelCommitResponse.SendAsync(HttpRequestMessage request, CancellationToken ct) in /Users/ryankelly/orca/workspaces/Iceberg.NET/sockeye/tests/Iceberg.Net.RestServer.Tests/IdempotencyTests.cs:line 143
+   at System.Net.Http.HttpClient.<SendAsync>g__Core|83_0(HttpRequestMessage request, HttpCompletionOption completionOption, CancellationTokenSource cts, Boolean disposeCts, CancellationTokenSource pendingRequestsCts, CancellationToken originalCancellationToken)
+  Failed Iceberg.Net.RestServer.Tests.IdempotencyTests.Cancellation_during_REST_submission_recovers_or_preserves_uncertainty_without_replay(applied: False, cancelCaller: False) [95 ms]
+  Error Message:
+   Assert.Throws() Failure: Exception type was not an exact match
+Expected: typeof(Iceberg.Net.Metadata.CommitStateUnknownException)
+Actual:   typeof(System.OperationCanceledException)
+---- System.OperationCanceledException : cancelled while waiting for commit response
+  Stack Trace:
+     at Iceberg.Net.RestServer.Tests.IdempotencyTests.Cancellation_during_REST_submission_recovers_or_preserves_uncertainty_without_replay(Boolean applied, Boolean cancelCaller) in /Users/ryankelly/orca/workspaces/Iceberg.NET/sockeye/tests/Iceberg.Net.RestServer.Tests/IdempotencyTests.cs:line 166
+   at Iceberg.Net.RestServer.Tests.IdempotencyTests.Cancellation_during_REST_submission_recovers_or_preserves_uncertainty_without_replay(Boolean applied, Boolean cancelCaller) in /Users/ryankelly/orca/workspaces/Iceberg.NET/sockeye/tests/Iceberg.Net.RestServer.Tests/IdempotencyTests.cs:line 176
+--- End of stack trace from previous location ---
+----- Inner Stack Trace -----
+   at Iceberg.Net.RestServer.Tests.IdempotencyTests.CancelCommitResponse.SendAsync(HttpRequestMessage request, CancellationToken ct) in /Users/ryankelly/orca/workspaces/Iceberg.NET/sockeye/tests/Iceberg.Net.RestServer.Tests/IdempotencyTests.cs:line 143
+   at System.Net.Http.HttpClient.<SendAsync>g__Core|83_0(HttpRequestMessage request, HttpCompletionOption completionOption, CancellationTokenSource cts, Boolean disposeCts, CancellationTokenSource pendingRequestsCts, CancellationToken originalCancellationToken)
+   at Iceberg.Net.Catalog.RestCatalog.SendAsync(HttpMethod method, String path, JsonNode body, CancellationToken ct, Func`2 conflict, Boolean commit) in /Users/ryankelly/orca/workspaces/Iceberg.NET/sockeye/src/Iceberg.Net.Catalog/RestCatalog.cs:line 571
+   at Iceberg.Net.Catalog.RestCatalog.CommitTableAsync(TableCommit commit, CancellationToken ct) in /Users/ryankelly/orca/workspaces/Iceberg.NET/sockeye/src/Iceberg.Net.Catalog/RestCatalog.cs:line 436
+   at Iceberg.Net.Catalog.Table.CommitAsync(IReadOnlyList`1 requirements, IReadOnlyList`1 updates, CancellationToken ct) in /Users/ryankelly/orca/workspaces/Iceberg.NET/sockeye/src/Iceberg.Net.Catalog/Catalog.cs:line 114
+   at Iceberg.Net.Data.SnapshotProducer.CommitAsync(CancellationToken ct) in /Users/ryankelly/orca/workspaces/Iceberg.NET/sockeye/src/Iceberg.Net.Data/SnapshotProducer.cs:line 319
+
+Failed!  - Failed:     4, Passed:     1, Skipped:     0, Total:     5, Duration: 982 ms - Iceberg.Net.RestServer.Tests.dll (net10.0)

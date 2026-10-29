@@ -1,0 +1,98 @@
+{
+  "id": "d581c887-5c02-431c-8104-771365d54ed6",
+  "ok": true,
+  "result": {
+    "worktree": {
+      "id": "a62936a2-6eb0-43ce-b302-5fcbcc817c8d::/Users/ryankelly/code/rtkelly-labs/Iceberg.NET/temp/Iceberg.NET/lake-recover-ducklake",
+      "identity": {
+        "key": "wt2:local:1dcf290c-5cfa-4b64-9e2b-01cb62bbb40d",
+        "executionHostId": "local",
+        "instanceId": "1dcf290c-5cfa-4b64-9e2b-01cb62bbb40d"
+      },
+      "instanceId": "1dcf290c-5cfa-4b64-9e2b-01cb62bbb40d",
+      "repoId": "a62936a2-6eb0-43ce-b302-5fcbcc817c8d",
+      "projectId": "github:rtkelly-labs/iceberg.net",
+      "hostId": "local",
+      "projectHostSetupId": "a62936a2-6eb0-43ce-b302-5fcbcc817c8d",
+      "creatorProvenance": {
+        "kind": "host"
+      },
+      "path": "/Users/ryankelly/code/rtkelly-labs/Iceberg.NET/temp/Iceberg.NET/lake-recover-ducklake",
+      "head": "ef5eb9dd25ae5e5b8acad255cf3b91907fbf64ff",
+      "branch": "refs/heads/rtkelly13/lake-recover-ducklake",
+      "isBare": false,
+      "isMainWorktree": false,
+      "displayName": "lake-recover-ducklake",
+      "displayNameMode": "fixed",
+      "comment": "lake-plan U02",
+      "linkedIssue": 33,
+      "linkedPR": null,
+      "linkedLinearIssue": null,
+      "linkedLinearIssueWorkspaceId": null,
+      "linkedLinearIssueOrganizationUrlKey": null,
+      "linkedGitLabMR": null,
+      "linkedGitLabIssue": null,
+      "linkedBitbucketPR": null,
+      "linkedAzureDevOpsPR": null,
+      "linkedGiteaPR": null,
+      "linkedWorkItem": null,
+      "linkedItems": [
+        {
+          "provider": "github",
+          "type": "issue",
+          "number": 33
+        }
+      ],
+      "linkedTaskSourceContext": null,
+      "isArchived": false,
+      "isUnread": false,
+      "isPinned": false,
+      "sortOrder": 1793188095484,
+      "lastActivityAt": 1793188105366,
+      "createdAt": 1793188105366,
+      "createdWithAgent": "codex",
+      "cliProvenance": {
+        "kind": "created-by-cli",
+        "createdAt": 1793188103521,
+        "callerTerminalHandle": "term_17755edd-1833-4540-8b36-6a90dac884aa",
+        "startupAgent": "codex"
+      },
+      "baseRef": "ef5eb9d",
+      "workspaceStatus": "in-progress",
+      "parentWorktreeId": null,
+      "childWorktreeIds": [],
+      "lineage": null,
+      "git": {
+        "path": "/Users/ryankelly/code/rtkelly-labs/Iceberg.NET/temp/Iceberg.NET/lake-recover-ducklake",
+        "head": "ef5eb9dd25ae5e5b8acad255cf3b91907fbf64ff",
+        "branch": "refs/heads/rtkelly13/lake-recover-ducklake",
+        "isBare": false,
+        "isMainWorktree": false
+      }
+    },
+    "lineage": null,
+    "workspaceLineage": null,
+    "launch": {
+      "outcome": {
+        "kind": "terminal",
+        "handle": "term_7f519b97-fccc-4e4f-b0d7-846cf01c4ec1",
+        "paneKey": "6e4ec746-5caf-4f6b-9ae5-7fe90e2b07b3:c9c70e8a-4eeb-483d-9177-08fcf80231cc"
+      },
+      "worktreeId": "a62936a2-6eb0-43ce-b302-5fcbcc817c8d::/Users/ryankelly/code/rtkelly-labs/Iceberg.NET/temp/Iceberg.NET/lake-recover-ducklake",
+      "receipt": {
+        "mode": "terminal",
+        "preferred": "terminal",
+        "reason": "user_default",
+        "detail": "Started a terminal agent, the default for new agent tabs in your settings."
+      },
+      "prompt": {
+        "delivery": "submit",
+        "outcome": "handed-to-terminal"
+      },
+      "operationId": "1793188103514-5467df6b70344061b913193d1103a6a8"
+    }
+  },
+  "_meta": {
+    "runtimeId": "0e88f733-a98b-4e81-8090-c812ad14883e"
+  }
+}

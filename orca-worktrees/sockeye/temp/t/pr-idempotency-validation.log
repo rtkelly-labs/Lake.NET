@@ -1,0 +1,18 @@
+  Determining projects to restore...
+  Restored /Users/ryankelly/orca/workspaces/Iceberg.NET/sockeye/tests/Iceberg.Net.RestServer.Tests/Iceberg.Net.RestServer.Tests.csproj (in 1.63 sec).
+  10 of 11 projects are up-to-date for restore.
+  Iceberg.Net.IO -> /Users/ryankelly/orca/workspaces/Iceberg.NET/sockeye/src/Iceberg.Net.IO/bin/Debug/net10.0/Iceberg.Net.IO.dll
+  Iceberg.Net.Puffin -> /Users/ryankelly/orca/workspaces/Iceberg.NET/sockeye/src/Iceberg.Net.Puffin/bin/Debug/net10.0/Iceberg.Net.Puffin.dll
+  Iceberg.Net.Core -> /Users/ryankelly/orca/workspaces/Iceberg.NET/sockeye/src/Iceberg.Net.Core/bin/Debug/net10.0/Iceberg.Net.Core.dll
+  Iceberg.Net.Avro -> /Users/ryankelly/orca/workspaces/Iceberg.NET/sockeye/src/Iceberg.Net.Avro/bin/Debug/net10.0/Iceberg.Net.Avro.dll
+  Iceberg.Net.Catalog -> /Users/ryankelly/orca/workspaces/Iceberg.NET/sockeye/src/Iceberg.Net.Catalog/bin/Debug/net10.0/Iceberg.Net.Catalog.dll
+  Iceberg.Net.Data -> /Users/ryankelly/orca/workspaces/Iceberg.NET/sockeye/src/Iceberg.Net.Data/bin/Debug/net10.0/Iceberg.Net.Data.dll
+  Iceberg.Net.Linq -> /Users/ryankelly/orca/workspaces/Iceberg.NET/sockeye/src/Iceberg.Net.Linq/bin/Debug/net10.0/Iceberg.Net.Linq.dll
+  Iceberg.Net.TestSupport -> /Users/ryankelly/orca/workspaces/Iceberg.NET/sockeye/tests/Iceberg.Net.TestSupport/bin/Debug/net10.0/Iceberg.Net.TestSupport.dll
+  Iceberg.Net.EntityFrameworkCore -> /Users/ryankelly/orca/workspaces/Iceberg.NET/sockeye/src/Iceberg.Net.EntityFrameworkCore/bin/Debug/net10.0/Iceberg.Net.EntityFrameworkCore.dll
+  Iceberg.Net.RestServer -> /Users/ryankelly/orca/workspaces/Iceberg.NET/sockeye/src/Iceberg.Net.RestServer/bin/Debug/net10.0/Iceberg.Net.RestServer.dll
+  Iceberg.Net.RestServer.Tests -> /Users/ryankelly/orca/workspaces/Iceberg.NET/sockeye/tests/Iceberg.Net.RestServer.Tests/bin/Debug/net10.0/Iceberg.Net.RestServer.Tests.dll
+Test run for /Users/ryankelly/orca/workspaces/Iceberg.NET/sockeye/tests/Iceberg.Net.RestServer.Tests/bin/Debug/net10.0/Iceberg.Net.RestServer.Tests.dll (.NETCoreApp,Version=v10.0)
+A total of 1 test files matched the specified pattern.
+
+Passed!  - Failed:     0, Passed:     6, Skipped:     0, Total:     6, Duration: 2 s - Iceberg.Net.RestServer.Tests.dll (net10.0)

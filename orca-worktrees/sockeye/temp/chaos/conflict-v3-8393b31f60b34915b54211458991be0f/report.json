@@ -1,0 +1,269 @@
+{
+  "experiment": "conflict",
+  "run": "8393b31f60b34915b54211458991be0f",
+  "formatVersion": 3,
+  "traceId": "bf67bb49f77e906020f0af07c2e7bc33",
+  "pipelineSpanId": "4874337afb1e4d8b",
+  "passed": true,
+  "faults": [
+    {
+      "Boundary": "catalog.swap",
+      "Type": "Iceberg.Net.Metadata.CommitFailedException",
+      "TraceId": "bf67bb49f77e906020f0af07c2e7bc33",
+      "SpanId": "49462e3dc1f0eac2",
+      "Timestamp": "2026-10-26T19:22:21.436951+00:00"
+    }
+  ],
+  "callerExceptions": [],
+  "rows": [
+    0,
+    1
+  ],
+  "verificationError": null,
+  "spans": [
+    {
+      "name": "iceberg.catalog.commit_table",
+      "traceId": "bf67bb49f77e906020f0af07c2e7bc33",
+      "spanId": "49462e3dc1f0eac2",
+      "parentSpanId": "0c5df466e24ce6be",
+      "status": "Error",
+      "startedUtc": "2026-10-26T19:22:21.436551Z",
+      "durationMs": 0.799,
+      "tags": {
+        "iceberg.catalog.name": "memory",
+        "iceberg.catalog.type": "ChaosCatalog",
+        "iceberg.catalog.operation": "commit_table",
+        "iceberg.table": "chaos_8393b31f60b34915b54211458991be0f.events",
+        "iceberg.outcome": "error"
+      },
+      "events": [
+        {
+          "name": "chaos.inject",
+          "timestamp": "2026-10-26T19:22:21.436955+00:00",
+          "tags": {
+            "chaos.experiment": "conflict",
+            "chaos.run": "8393b31f60b34915b54211458991be0f",
+            "chaos.boundary": "catalog.swap",
+            "error.type": "Iceberg.Net.Metadata.CommitFailedException"
+          }
+        }
+      ]
+    },
+    {
+      "name": "iceberg.catalog.load_table",
+      "traceId": "bf67bb49f77e906020f0af07c2e7bc33",
+      "spanId": "261bb2b0d8de4d10",
+      "parentSpanId": "0c5df466e24ce6be",
+      "status": "Ok",
+      "startedUtc": "2026-10-26T19:22:21.4374Z",
+      "durationMs": 0.135,
+      "tags": {
+        "iceberg.catalog.name": "memory",
+        "iceberg.catalog.type": "ChaosCatalog",
+        "iceberg.catalog.operation": "load_table",
+        "iceberg.table": "chaos_8393b31f60b34915b54211458991be0f.events"
+      },
+      "events": []
+    },
+    {
+      "name": "iceberg.catalog.commit_table",
+      "traceId": "bf67bb49f77e906020f0af07c2e7bc33",
+      "spanId": "c9aff5d1f38f8ada",
+      "parentSpanId": "0c5df466e24ce6be",
+      "status": "Ok",
+      "startedUtc": "2026-10-26T19:22:21.438575Z",
+      "durationMs": 0.791,
+      "tags": {
+        "iceberg.catalog.name": "memory",
+        "iceberg.catalog.type": "ChaosCatalog",
+        "iceberg.catalog.operation": "commit_table",
+        "iceberg.table": "chaos_8393b31f60b34915b54211458991be0f.events"
+      },
+      "events": []
+    },
+    {
+      "name": "iceberg.commit",
+      "traceId": "bf67bb49f77e906020f0af07c2e7bc33",
+      "spanId": "0c5df466e24ce6be",
+      "parentSpanId": "4874337afb1e4d8b",
+      "status": "Ok",
+      "startedUtc": "2026-10-26T19:22:21.435006Z",
+      "durationMs": 4.635,
+      "tags": {
+        "iceberg.table": "chaos_8393b31f60b34915b54211458991be0f.events",
+        "iceberg.snapshot.id": 661189393260444581,
+        "iceberg.operation": "append",
+        "iceberg.commit.attempts": 2,
+        "iceberg.commit.retries": 1,
+        "iceberg.outcome": "success"
+      },
+      "events": [
+        {
+          "name": "iceberg.commit.retry",
+          "timestamp": "2026-10-26T19:22:21.437387+00:00",
+          "tags": {
+            "iceberg.commit.attempt": 1,
+            "error.type": "Iceberg.Net.Metadata.CommitFailedException"
+          }
+        }
+      ]
+    },
+    {
+      "name": "iceberg.catalog.load_table",
+      "traceId": "bf67bb49f77e906020f0af07c2e7bc33",
+      "spanId": "e9c1ddbe9d2ba073",
+      "parentSpanId": "4874337afb1e4d8b",
+      "status": "Ok",
+      "startedUtc": "2026-10-26T19:22:21.440119Z",
+      "durationMs": 0.202,
+      "tags": {
+        "iceberg.catalog.name": "memory",
+        "iceberg.catalog.type": "ChaosCatalog",
+        "iceberg.catalog.operation": "load_table",
+        "iceberg.table": "chaos_8393b31f60b34915b54211458991be0f.events"
+      },
+      "events": []
+    },
+    {
+      "name": "iceberg.scan.plan",
+      "traceId": "bf67bb49f77e906020f0af07c2e7bc33",
+      "spanId": "9daec7cdbb53789c",
+      "parentSpanId": "2edd4d9c9fa4a5d8",
+      "status": "Unset",
+      "startedUtc": "2026-10-26T19:22:21.440497Z",
+      "durationMs": 0.539,
+      "tags": {
+        "iceberg.table": "chaos_8393b31f60b34915b54211458991be0f.events",
+        "iceberg.snapshot.id": 661189393260444581,
+        "iceberg.scan.manifests.read": 2,
+        "iceberg.scan.manifests.skipped": 0,
+        "iceberg.scan.files.planned": 2,
+        "iceberg.scan.files.pruned.partition": 0,
+        "iceberg.scan.files.pruned.metrics": 0
+      },
+      "events": []
+    },
+    {
+      "name": "iceberg.scan",
+      "traceId": "bf67bb49f77e906020f0af07c2e7bc33",
+      "spanId": "2edd4d9c9fa4a5d8",
+      "parentSpanId": "4874337afb1e4d8b",
+      "status": "Unset",
+      "startedUtc": "2026-10-26T19:22:21.440332Z",
+      "durationMs": 1.017,
+      "tags": {
+        "iceberg.table": "chaos_8393b31f60b34915b54211458991be0f.events",
+        "iceberg.snapshot.id": 661189393260444581,
+        "iceberg.scan.files.read": 2,
+        "iceberg.scan.bytes": 592,
+        "iceberg.scan.rows.returned": 2,
+        "iceberg.scan.rows.deleted": 0
+      },
+      "events": []
+    }
+  ],
+  "measurements": [
+    {
+      "Instrument": "iceberg.commit.retries",
+      "Value": 1,
+      "Tags": {
+        "iceberg.table": "chaos_8393b31f60b34915b54211458991be0f.events",
+        "iceberg.operation": null
+      }
+    },
+    {
+      "Instrument": "iceberg.commit.duration",
+      "Value": 0.004630417,
+      "Tags": {
+        "iceberg.table": "chaos_8393b31f60b34915b54211458991be0f.events",
+        "iceberg.operation": "append",
+        "iceberg.outcome": "success"
+      }
+    },
+    {
+      "Instrument": "iceberg.commit.attempts",
+      "Value": 2,
+      "Tags": {
+        "iceberg.table": "chaos_8393b31f60b34915b54211458991be0f.events",
+        "iceberg.operation": "append",
+        "iceberg.outcome": "success"
+      }
+    },
+    {
+      "Instrument": "iceberg.scan.manifests",
+      "Value": 2,
+      "Tags": {
+        "iceberg.table": "chaos_8393b31f60b34915b54211458991be0f.events",
+        "iceberg.prune.reason": "none"
+      }
+    },
+    {
+      "Instrument": "iceberg.scan.manifests",
+      "Value": 0,
+      "Tags": {
+        "iceberg.table": "chaos_8393b31f60b34915b54211458991be0f.events",
+        "iceberg.prune.reason": "partition_summary"
+      }
+    },
+    {
+      "Instrument": "iceberg.scan.files.planned",
+      "Value": 2,
+      "Tags": {
+        "iceberg.table": "chaos_8393b31f60b34915b54211458991be0f.events"
+      }
+    },
+    {
+      "Instrument": "iceberg.scan.files.pruned",
+      "Value": 0,
+      "Tags": {
+        "iceberg.table": "chaos_8393b31f60b34915b54211458991be0f.events",
+        "iceberg.prune.reason": "partition"
+      }
+    },
+    {
+      "Instrument": "iceberg.scan.files.pruned",
+      "Value": 0,
+      "Tags": {
+        "iceberg.table": "chaos_8393b31f60b34915b54211458991be0f.events",
+        "iceberg.prune.reason": "metrics"
+      }
+    },
+    {
+      "Instrument": "iceberg.scan.planning.duration",
+      "Value": 0.000538834,
+      "Tags": {
+        "iceberg.table": "chaos_8393b31f60b34915b54211458991be0f.events"
+      }
+    },
+    {
+      "Instrument": "iceberg.scan.bytes",
+      "Value": 296,
+      "Tags": {
+        "iceberg.table": "chaos_8393b31f60b34915b54211458991be0f.events"
+      }
+    },
+    {
+      "Instrument": "iceberg.scan.rows",
+      "Value": 1,
+      "Tags": {
+        "iceberg.table": "chaos_8393b31f60b34915b54211458991be0f.events",
+        "iceberg.row.kind": "returned"
+      }
+    },
+    {
+      "Instrument": "iceberg.scan.bytes",
+      "Value": 296,
+      "Tags": {
+        "iceberg.table": "chaos_8393b31f60b34915b54211458991be0f.events"
+      }
+    },
+    {
+      "Instrument": "iceberg.scan.rows",
+      "Value": 1,
+      "Tags": {
+        "iceberg.table": "chaos_8393b31f60b34915b54211458991be0f.events",
+        "iceberg.row.kind": "returned"
+      }
+    }
+  ]
+}

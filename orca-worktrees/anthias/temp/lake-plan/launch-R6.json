@@ -1,0 +1,98 @@
+{
+  "id": "1a332aa0-a780-48b7-83a7-5a7ba9c741a2",
+  "ok": true,
+  "result": {
+    "worktree": {
+      "id": "e1ed8dc8-c926-44b5-b032-b19aead71219::/Users/ryankelly/code/personal/rig/temp/rig/orca-iceberg",
+      "identity": {
+        "key": "wt2:local:70e9850c-7420-4c78-bf77-d7add28e0054",
+        "executionHostId": "local",
+        "instanceId": "70e9850c-7420-4c78-bf77-d7add28e0054"
+      },
+      "instanceId": "70e9850c-7420-4c78-bf77-d7add28e0054",
+      "repoId": "e1ed8dc8-c926-44b5-b032-b19aead71219",
+      "projectId": "github:rtkelly13/rig",
+      "hostId": "local",
+      "projectHostSetupId": "e1ed8dc8-c926-44b5-b032-b19aead71219",
+      "creatorProvenance": {
+        "kind": "host"
+      },
+      "path": "/Users/ryankelly/code/personal/rig/temp/rig/orca-iceberg",
+      "head": "002b15ff18bf22e8af5eebfb27acdd93c48308da",
+      "branch": "refs/heads/rtkelly13/orca-iceberg",
+      "isBare": false,
+      "isMainWorktree": false,
+      "displayName": "orca-iceberg",
+      "displayNameMode": "fixed",
+      "comment": "lake-plan R6",
+      "linkedIssue": 389,
+      "linkedPR": null,
+      "linkedLinearIssue": null,
+      "linkedLinearIssueWorkspaceId": null,
+      "linkedLinearIssueOrganizationUrlKey": null,
+      "linkedGitLabMR": null,
+      "linkedGitLabIssue": null,
+      "linkedBitbucketPR": null,
+      "linkedAzureDevOpsPR": null,
+      "linkedGiteaPR": null,
+      "linkedWorkItem": null,
+      "linkedItems": [
+        {
+          "provider": "github",
+          "type": "issue",
+          "number": 389
+        }
+      ],
+      "linkedTaskSourceContext": null,
+      "isArchived": false,
+      "isUnread": false,
+      "isPinned": false,
+      "sortOrder": 1793187590862,
+      "lastActivityAt": 1793187599725,
+      "createdAt": 1793187599725,
+      "createdWithAgent": "antigravity",
+      "cliProvenance": {
+        "kind": "created-by-cli",
+        "createdAt": 1793187597869,
+        "callerTerminalHandle": "term_17755edd-1833-4540-8b36-6a90dac884aa",
+        "startupAgent": "antigravity"
+      },
+      "baseRef": "refs/remotes/origin/main",
+      "workspaceStatus": "in-progress",
+      "parentWorktreeId": null,
+      "childWorktreeIds": [],
+      "lineage": null,
+      "git": {
+        "path": "/Users/ryankelly/code/personal/rig/temp/rig/orca-iceberg",
+        "head": "002b15ff18bf22e8af5eebfb27acdd93c48308da",
+        "branch": "refs/heads/rtkelly13/orca-iceberg",
+        "isBare": false,
+        "isMainWorktree": false
+      }
+    },
+    "lineage": null,
+    "workspaceLineage": null,
+    "launch": {
+      "outcome": {
+        "kind": "terminal",
+        "handle": "term_39b42680-29e4-45b0-8833-d568cfdacc6c",
+        "paneKey": "87af7d3c-5295-4abe-b844-efd9e9c64878:275c739e-e48b-4be8-b471-c54008882d58"
+      },
+      "worktreeId": "e1ed8dc8-c926-44b5-b032-b19aead71219::/Users/ryankelly/code/personal/rig/temp/rig/orca-iceberg",
+      "receipt": {
+        "mode": "terminal",
+        "preferred": "terminal",
+        "reason": "user_default",
+        "detail": "Started a terminal agent, the default for new agent tabs in your settings."
+      },
+      "prompt": {
+        "delivery": "submit",
+        "outcome": "handed-to-terminal"
+      },
+      "operationId": "1793187597867-608dd38235664ed2859cbe48e95203f3"
+    }
+  },
+  "_meta": {
+    "runtimeId": "0e88f733-a98b-4e81-8090-c812ad14883e"
+  }
+}

@@ -1,0 +1,98 @@
+{
+  "id": "ab350650-d154-4373-93e4-d660e40df33b",
+  "ok": true,
+  "result": {
+    "worktree": {
+      "id": "1d0808a6-d584-497f-8d24-3a120516c9bb::/Users/ryankelly/orca/workspaces/Parquet.SourceGenerator/sg-ccr-triage",
+      "identity": {
+        "key": "wt2:local:076676cc-40be-4780-b00d-a856570c64b6",
+        "executionHostId": "local",
+        "instanceId": "076676cc-40be-4780-b00d-a856570c64b6"
+      },
+      "instanceId": "076676cc-40be-4780-b00d-a856570c64b6",
+      "repoId": "1d0808a6-d584-497f-8d24-3a120516c9bb",
+      "projectId": "github:rtkelly-labs/parquet.sourcegenerator",
+      "hostId": "local",
+      "projectHostSetupId": "1d0808a6-d584-497f-8d24-3a120516c9bb",
+      "creatorProvenance": {
+        "kind": "host"
+      },
+      "path": "/Users/ryankelly/orca/workspaces/Parquet.SourceGenerator/sg-ccr-triage",
+      "head": "0c8b412677ec4e63ebd05d96a81987ea2d48aaa0",
+      "branch": "refs/heads/rtkelly13/sg-ccr-triage",
+      "isBare": false,
+      "isMainWorktree": false,
+      "displayName": "sg-ccr-triage",
+      "displayNameMode": "fixed",
+      "comment": "lake-plan U04",
+      "linkedIssue": 740,
+      "linkedPR": null,
+      "linkedLinearIssue": null,
+      "linkedLinearIssueWorkspaceId": null,
+      "linkedLinearIssueOrganizationUrlKey": null,
+      "linkedGitLabMR": null,
+      "linkedGitLabIssue": null,
+      "linkedBitbucketPR": null,
+      "linkedAzureDevOpsPR": null,
+      "linkedGiteaPR": null,
+      "linkedWorkItem": null,
+      "linkedItems": [
+        {
+          "provider": "github",
+          "type": "issue",
+          "number": 740
+        }
+      ],
+      "linkedTaskSourceContext": null,
+      "isArchived": false,
+      "isUnread": false,
+      "isPinned": false,
+      "sortOrder": 1793188096857,
+      "lastActivityAt": 1793188107760,
+      "createdAt": 1793188107760,
+      "createdWithAgent": "antigravity",
+      "cliProvenance": {
+        "kind": "created-by-cli",
+        "createdAt": 1793188105773,
+        "callerTerminalHandle": "term_17755edd-1833-4540-8b36-6a90dac884aa",
+        "startupAgent": "antigravity"
+      },
+      "baseRef": "refs/remotes/origin/main",
+      "workspaceStatus": "in-progress",
+      "parentWorktreeId": null,
+      "childWorktreeIds": [],
+      "lineage": null,
+      "git": {
+        "path": "/Users/ryankelly/orca/workspaces/Parquet.SourceGenerator/sg-ccr-triage",
+        "head": "0c8b412677ec4e63ebd05d96a81987ea2d48aaa0",
+        "branch": "refs/heads/rtkelly13/sg-ccr-triage",
+        "isBare": false,
+        "isMainWorktree": false
+      }
+    },
+    "lineage": null,
+    "workspaceLineage": null,
+    "launch": {
+      "outcome": {
+        "kind": "terminal",
+        "handle": "term_409c9f63-29c6-4cf1-a39e-1a517f43fa4f",
+        "paneKey": "a4dbc91f-212a-45fd-8a95-aa882a59cfef:32740555-b0de-4733-8c8e-4f6be8c7a0bb"
+      },
+      "worktreeId": "1d0808a6-d584-497f-8d24-3a120516c9bb::/Users/ryankelly/orca/workspaces/Parquet.SourceGenerator/sg-ccr-triage",
+      "receipt": {
+        "mode": "terminal",
+        "preferred": "terminal",
+        "reason": "user_default",
+        "detail": "Started a terminal agent, the default for new agent tabs in your settings."
+      },
+      "prompt": {
+        "delivery": "submit",
+        "outcome": "handed-to-terminal"
+      },
+      "operationId": "1793188105772-24e69816bfee4c4791706ecc7b528486"
+    }
+  },
+  "_meta": {
+    "runtimeId": "0e88f733-a98b-4e81-8090-c812ad14883e"
+  }
+}

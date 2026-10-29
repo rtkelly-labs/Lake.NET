@@ -1,0 +1,33 @@
+  Iceberg.Net.Core -> /Users/ryankelly/orca/workspaces/Iceberg.NET/sockeye/src/Iceberg.Net.Core/bin/Debug/net10.0/Iceberg.Net.Core.dll
+  Iceberg.Net.Avro -> /Users/ryankelly/orca/workspaces/Iceberg.NET/sockeye/src/Iceberg.Net.Avro/bin/Debug/net10.0/Iceberg.Net.Avro.dll
+  Iceberg.Net.Puffin -> /Users/ryankelly/orca/workspaces/Iceberg.NET/sockeye/src/Iceberg.Net.Puffin/bin/Debug/net10.0/Iceberg.Net.Puffin.dll
+  Iceberg.Net.IO -> /Users/ryankelly/orca/workspaces/Iceberg.NET/sockeye/src/Iceberg.Net.IO/bin/Debug/net10.0/Iceberg.Net.IO.dll
+  Iceberg.Net.Catalog -> /Users/ryankelly/orca/workspaces/Iceberg.NET/sockeye/src/Iceberg.Net.Catalog/bin/Debug/net10.0/Iceberg.Net.Catalog.dll
+  Iceberg.Net.Athena -> /Users/ryankelly/orca/workspaces/Iceberg.NET/sockeye/src/Iceberg.Net.Athena/bin/Debug/net10.0/Iceberg.Net.Athena.dll
+  Iceberg.Net.Data -> /Users/ryankelly/orca/workspaces/Iceberg.NET/sockeye/src/Iceberg.Net.Data/bin/Debug/net10.0/Iceberg.Net.Data.dll
+  Iceberg.Net.Spark -> /Users/ryankelly/orca/workspaces/Iceberg.NET/sockeye/src/Iceberg.Net.Spark/bin/Debug/net10.0/Iceberg.Net.Spark.dll
+  Iceberg.Net.TestSupport -> /Users/ryankelly/orca/workspaces/Iceberg.NET/sockeye/tests/Iceberg.Net.TestSupport/bin/Debug/net10.0/Iceberg.Net.TestSupport.dll
+  Iceberg.Net.Ecosystem.Tests -> /Users/ryankelly/orca/workspaces/Iceberg.NET/sockeye/tests/Iceberg.Net.Ecosystem.Tests/bin/Debug/net10.0/Iceberg.Net.Ecosystem.Tests.dll
+Test run for /Users/ryankelly/orca/workspaces/Iceberg.NET/sockeye/tests/Iceberg.Net.Ecosystem.Tests/bin/Debug/net10.0/Iceberg.Net.Ecosystem.Tests.dll (.NETCoreApp,Version=v10.0)
+A total of 1 test files matched the specified pattern.
+[xUnit.net 00:00:00.35]     Iceberg.Net.Ecosystem.Tests.AthenaSqlTests.Unreadable_submission_response_preserves_the_generated_token_for_recovery [FAIL]
+  Failed Iceberg.Net.Ecosystem.Tests.AthenaSqlTests.Unreadable_submission_response_preserves_the_generated_token_for_recovery [48 ms]
+  Error Message:
+   Assert.Throws() Failure: Exception type was not an exact match
+Expected: typeof(Iceberg.Net.Athena.AthenaSubmissionUnknownException)
+Actual:   typeof(Amazon.Runtime.AmazonUnmarshallingException)
+---- Amazon.Runtime.AmazonUnmarshallingException : Error unmarshalling response back from AWS. Request ID: request, Last Parsed Path: QueryExecutionId, HTTP Status Code: 0 0
+-------- System.FormatException : unreadable response
+  Stack Trace:
+     at Iceberg.Net.Ecosystem.Tests.AthenaSqlTests.Unreadable_submission_response_preserves_the_generated_token_for_recovery() in /Users/ryankelly/orca/workspaces/Iceberg.NET/sockeye/tests/Iceberg.Net.Ecosystem.Tests/AthenaSqlTests.cs:line 183
+--- End of stack trace from previous location ---
+----- Inner Stack Trace -----
+   at Iceberg.Net.Ecosystem.Tests.AthenaSqlTests.<>c__DisplayClass12_0.<Unreadable_submission_response_preserves_the_generated_token_for_recovery>b__0(StartQueryExecutionRequest _) in /Users/ryankelly/orca/workspaces/Iceberg.NET/sockeye/tests/Iceberg.Net.Ecosystem.Tests/AthenaSqlTests.cs:line 180
+   at Iceberg.Net.Ecosystem.Tests.FakeCalls.<>c__DisplayClass4_0`2.<On>b__0(Object r) in /Users/ryankelly/orca/workspaces/Iceberg.NET/sockeye/tests/Iceberg.Net.Ecosystem.Tests/FakeAws.cs:line 18
+   at Iceberg.Net.Ecosystem.Tests.FakeCalls.Answer[TResponse](Object request) in /Users/ryankelly/orca/workspaces/Iceberg.NET/sockeye/tests/Iceberg.Net.Ecosystem.Tests/FakeAws.cs:line 28
+--- End of stack trace from previous location ---
+   at Iceberg.Net.Athena.AthenaQueryRunner.StartAsync(String sql, String clientRequestToken, CancellationToken ct) in /Users/ryankelly/orca/workspaces/Iceberg.NET/sockeye/src/Iceberg.Net.Athena/AthenaQueryRunner.cs:line 83
+----- Inner Stack Trace -----
+
+
+Failed!  - Failed:     1, Passed:     0, Skipped:     0, Total:     1, Duration: 48 ms - Iceberg.Net.Ecosystem.Tests.dll (net10.0)
