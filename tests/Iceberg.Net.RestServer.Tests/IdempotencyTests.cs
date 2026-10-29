@@ -122,6 +122,79 @@ public sealed class IdempotencyTests
         }
     }
 
+    private sealed class CancelCommitResponse(HttpMessageHandler inner, CancellationTokenSource caller, bool applyBeforeLoss, bool cancelCaller)
+        : DelegatingHandler(inner)
+    {
+        public bool Armed { get; set; } = true;
+        public int Writes { get; private set; }
+        public string[] PreparedFiles { get; private set; } = [];
+        public string Warehouse { get; set; } = "";
+
+        protected override async Task<HttpResponseMessage> SendAsync(HttpRequestMessage request, CancellationToken ct)
+        {
+            if (request.Method != HttpMethod.Post || !request.RequestUri!.AbsolutePath.EndsWith("/tables/events", StringComparison.Ordinal))
+                return await base.SendAsync(request, ct);
+            Writes++;
+            if (!Armed) return await base.SendAsync(request, ct);
+            Armed = false;
+            if (applyBeforeLoss) (await base.SendAsync(request, ct)).Dispose();
+            PreparedFiles = Directory.GetFiles(Warehouse, "*", SearchOption.AllDirectories);
+            if (cancelCaller) caller.Cancel();
+            throw new OperationCanceledException("cancelled while waiting for commit response", ct);
+        }
+    }
+
+    [Theory]
+    [InlineData(false, false)]
+    [InlineData(false, true)]
+    [InlineData(true, false)]
+    [InlineData(true, true)]
+    [Spec("Commit Conflict Resolution and Retry")]
+    public async Task Cancellation_during_REST_submission_recovers_or_preserves_uncertainty_without_replay(bool applied, bool cancelCaller)
+    {
+        await using var host = ServerHost.Start(settings: new Dictionary<string, string> { ["Idempotency:Enabled"] = "false" });
+        using var cancel = new CancellationTokenSource();
+        CancelCommitResponse? handler = null;
+        using var catalog = await host.ConnectAsync(wrap: inner => handler = new CancelCommitResponse(inner, cancel, applied, cancelCaller) { Warehouse = host.Warehouse });
+        await catalog.CreateNamespaceAsync(Namespace.Of("db"));
+        var table = await catalog.CreateTableAsync(new CreateTableRequest(TableIdentifier.Of("db", "events"), ScanPlanningTests.Schema, ScanPlanningTests.Spec));
+        var producer = SnapshotProducer.Append(table).AddFiles(await TableWriter.WriteAsync(table, ScanPlanningTests.Rows(0, 5)));
+        if (applied && !cancelCaller)
+            await producer.CommitAsync(cancel.Token); // Positive read-only proof resolves an uncancelled status check.
+        else
+        {
+            var error = await Assert.ThrowsAsync<CommitStateUnknownException>(() => producer.CommitAsync(cancel.Token));
+            if (cancelCaller) Assert.IsAssignableFrom<OperationCanceledException>(error.ResolutionFailure);
+            await Assert.ThrowsAsync<CommitStateUnknownException>(() => producer.CommitAsync());
+        }
+        Assert.Equal(1, handler!.Writes);
+        Assert.NotEmpty(handler.PreparedFiles);
+        Assert.All(handler.PreparedFiles, path => Assert.True(File.Exists(path), path));
+        var fresh = await catalog.LoadTableAsync(table.Identifier);
+        Assert.Equal(applied ? 1 : 0, fresh.Metadata.Snapshots.Count);
+        Assert.Equal(applied ? 5 : 0, (await TableScan.ReadAllAsync(fresh)).Count);
+        await TableValidator.AssertValidAsync(fresh, new ValidationOptions { Deep = true, AllSnapshots = true });
+    }
+
+    [Fact]
+    [Spec("Commit Conflict Resolution and Retry")]
+    public async Task Cancellation_before_REST_submission_does_not_poison_the_producer()
+    {
+        await using var host = ServerHost.Start();
+        using var cancel = new CancellationTokenSource();
+        CancelCommitResponse? handler = null;
+        using var catalog = await host.ConnectAsync(wrap: inner => handler = new CancelCommitResponse(inner, cancel, false, false) { Armed = false });
+        await catalog.CreateNamespaceAsync(Namespace.Of("db"));
+        var table = await catalog.CreateTableAsync(new CreateTableRequest(TableIdentifier.Of("db", "events"), ScanPlanningTests.Schema, ScanPlanningTests.Spec));
+        var producer = SnapshotProducer.Append(table).AddFiles(await TableWriter.WriteAsync(table, ScanPlanningTests.Rows(0, 5)));
+        cancel.Cancel();
+        await Assert.ThrowsAnyAsync<OperationCanceledException>(() => producer.CommitAsync(cancel.Token));
+        Assert.Equal(0, handler!.Writes);
+        await producer.CommitAsync();
+        Assert.Equal(1, handler.Writes);
+        Assert.Single((await catalog.LoadTableAsync(table.Identifier)).Metadata.Snapshots);
+    }
+
     [Theory]
     [InlineData(true)]
     [InlineData(false)]

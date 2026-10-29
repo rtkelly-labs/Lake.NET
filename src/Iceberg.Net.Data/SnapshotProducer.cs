@@ -291,6 +291,7 @@ public sealed class SnapshotProducer
     {
         if (_unknownOutcome is { } previous)
             throw new CommitStateUnknownException("Cannot replay a producer whose previous commit outcome is unresolved", previous);
+        ct.ThrowIfCancellationRequested();
         var policy = CommitRetryPolicy.From(_table.Metadata);
         if (_retries is { } r) policy = policy with { NumRetries = r };
         var budget = _retryBudget ?? new CommitRetryBudget(policy);
@@ -314,6 +315,7 @@ public sealed class SnapshotProducer
                         BranchRequirement(_table.Metadata),
                     };
                     if (_deleteWhere is not null) requirements.Add(new UpdateRequirement.AssertDefaultSpecId(_planGuard.SpecId));
+                    ct.ThrowIfCancellationRequested();
                     try
                     {
                         await _table.CommitAsync(requirements, [new MetadataUpdate.AddSnapshot(snapshot), SetBranch(snapshot.SnapshotId)], ct);
@@ -329,6 +331,12 @@ public sealed class SnapshotProducer
                     catch (CommitStateUnknownException unknown)
                     {
                         if (!await CommitRecovery.ConfirmAsync([(_table, snapshot.SnapshotId)], unknown, ct)) throw;
+                    }
+                    catch (OperationCanceledException cancelled)
+                    {
+                        // The catalog may have dispatched the write before the wait was cancelled.
+                        var unknown = new CommitStateUnknownException("Cancellation during catalog commit does not establish whether the snapshot applied", cancelled);
+                        if (!await CommitRecovery.ConfirmAsync([(_table, snapshot.SnapshotId)], unknown, ct)) throw unknown;
                     }
                     _attemptArtifacts.Clear();
                     telemetry.Committed(snapshot.SnapshotId, snapshot.Operation);

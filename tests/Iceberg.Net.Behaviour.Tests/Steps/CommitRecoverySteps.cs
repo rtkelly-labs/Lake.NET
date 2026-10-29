@@ -16,6 +16,7 @@ public sealed class CommitRecoverySteps : IDisposable
     private readonly List<Iceberg.Net.Catalog.Table> _tables = [];
     private readonly List<StagedCommit> _stages = [];
     private Exception? _error;
+    private SnapshotProducer? _producer;
     private string _mode = "single";
 
     [Given(@"^a recovery table in format v(\d) using (single|transaction)$")]
@@ -69,6 +70,35 @@ public sealed class CommitRecoverySteps : IDisposable
             Assert.Equal(new long[] { 0, 1, 2 }, (await TableScan.ReadAllAsync(fresh)).Select(row => (long)row[0]!).Order());
             await TableValidator.AssertValidAsync(fresh, new ValidationOptions { Deep = true, AllSnapshots = true });
         }
+    }
+
+    [When("the caller cancels after the insert is committed but before its response arrives")]
+    public async Task WhenCancelledAfterCommit()
+    {
+        using var cancel = new CancellationTokenSource();
+        _catalog!.Failure = new OperationCanceledException(cancel.Token);
+        _catalog.BeforeError = _ => { cancel.Cancel(); return Task.CompletedTask; };
+        _producer = SnapshotProducer.Append(_tables[0]).AddFiles(await TableWriter.WriteAsync(_tables[0], [[1L]]));
+        _catalog.Armed = true;
+        _error = await Record.ExceptionAsync(() => _producer.CommitAsync(cancel.Token));
+    }
+
+    [Then("the cancelled producer remains unknown and cannot be replayed")]
+    public async Task ThenCancelledProducerCannotReplay()
+    {
+        var error = Assert.IsType<CommitStateUnknownException>(_error);
+        Assert.IsAssignableFrom<OperationCanceledException>(error.ResolutionFailure);
+        await Assert.ThrowsAsync<CommitStateUnknownException>(() => _producer!.CommitAsync());
+    }
+
+    [Then("PyIceberg reads the cancelled insert exactly once")]
+    public async Task ThenCancelledOracle()
+    {
+        var fresh = await _catalog!.LoadTableAsync(_tables[0].Identifier);
+        Assert.Equal(2, fresh.Metadata.Snapshots.Count);
+        await TableValidator.AssertValidAsync(fresh, new ValidationOptions { Deep = true, AllSnapshots = true });
+        var result = await TestEnvironment.Current.OracleAsync("read-metadata", fresh.MetadataLocation!);
+        Assert.Equal(new long[] { 0, 1 }, result["rows"]!.AsArray().Select(row => row!["id"]!.GetValue<long>()).Order());
     }
 
     [Then("uncertain staged files cannot be discarded")]

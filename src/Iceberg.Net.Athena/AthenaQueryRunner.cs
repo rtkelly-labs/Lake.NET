@@ -82,6 +82,7 @@ public sealed class AthenaQueryRunner(IAmazonAthena athena, AthenaQueryOptions o
         };
         try { return (await athena.StartQueryExecutionAsync(request, ct)).QueryExecutionId; }
         catch (Exception error) when (error is IOException or HttpRequestException or TimeoutException or OperationCanceledException
+            or Amazon.Runtime.AmazonUnmarshallingException
             || error is AmazonAthenaException service && ((int)service.StatusCode is >= 500 or 429 || (int)service.StatusCode == 0))
         {
             throw new AthenaSubmissionUnknownException(clientRequestToken, error);

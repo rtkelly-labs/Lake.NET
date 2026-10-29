@@ -173,6 +173,32 @@ public sealed class AthenaSqlTests
     }
 
     [Fact]
+    public async Task Unreadable_submission_response_preserves_the_generated_token_for_recovery()
+    {
+        using var client = new FakeAthena();
+        var failure = new Amazon.Runtime.AmazonUnmarshallingException("request", "QueryExecutionId", new FormatException("unreadable response"));
+        client.Calls.On<StartQueryExecutionRequest, StartQueryExecutionResponse>(_ => throw failure);
+        var options = new AthenaQueryOptions { WorkGroup = "wg", Database = "db", OutputLocation = "s3://results/" };
+        const string sql = "INSERT INTO events VALUES (1)";
+        var error = await Assert.ThrowsAsync<AthenaSubmissionUnknownException>(() => new AthenaQueryRunner(client, options).StartAsync(sql));
+        Assert.Same(failure, error.InnerException);
+        var original = Assert.Single(client.Calls.Sent<StartQueryExecutionRequest>());
+        Assert.Equal(original.ClientRequestToken, error.ClientRequestToken);
+        // An explicit recovery reuses every request parameter rather than starting a new logical submission.
+        client.Calls.On<StartQueryExecutionRequest, StartQueryExecutionResponse>(request =>
+        {
+            Assert.Equal(original.ClientRequestToken, request.ClientRequestToken);
+            Assert.Equal(original.QueryString, request.QueryString);
+            Assert.Equal(original.WorkGroup, request.WorkGroup);
+            Assert.Equal(original.QueryExecutionContext.Database, request.QueryExecutionContext.Database);
+            Assert.Equal(original.ResultConfiguration.OutputLocation, request.ResultConfiguration.OutputLocation);
+            return new StartQueryExecutionResponse { QueryExecutionId = "accepted-execution" };
+        });
+        Assert.Equal("accepted-execution", await new AthenaQueryRunner(client, options).StartAsync(sql, error.ClientRequestToken));
+        Assert.Equal(2, client.Calls.Sent<StartQueryExecutionRequest>().Count());
+    }
+
+    [Fact]
     public async Task Retryable_failed_execution_exposes_service_details_without_resubmitting()
     {
         using var client = new FakeAthena();

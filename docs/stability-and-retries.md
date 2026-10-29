@@ -36,6 +36,8 @@ scope again: earlier statements or external effects may already have succeeded.
 Cancellation before dispatch can still be ordinary cancellation. Once dispatch may have occurred, a cancelled
 client wait does not establish rollback. Neither an HTTP response nor `ServerResponded` proves that the commit
 failed; that flag is diagnostic only.
+`SnapshotProducer` checks cancellation before catalog submission. Cancellation from the submission itself
+uses read-only status recovery; if recovery is also cancelled, the producer remains unknown and cannot be replayed.
 
 The pinned Java implementation provides the reference:
 [GlueTableOperations](https://github.com/apache/iceberg/blob/apache-iceberg-1.12.0/aws/src/main/java/org/apache/iceberg/aws/glue/GlueTableOperations.java)
@@ -124,6 +126,7 @@ reuses the execution ID for a matching request token and rejects changed request
   submission. Recover with the same token and identical parameters.
 - `StartAsync(sql, token)` and `RunAsync(sql, token)` accept that durable identity. On an ambiguous submission,
   `AthenaSubmissionUnknownException.ClientRequestToken` retains it, including when the runner generated it.
+  This includes SDK response-decoding failures: an unreadable response does not establish whether Athena accepted the SQL.
   Recovering a generated token from an exception helps a live process; it is not durable across a process crash.
 - Persist the returned execution ID. `ResumeAsync(id)` polls and retrieves that execution without starting a
   query. `AthenaQueryTimedOutException.QueryExecutionId` supports recovery after a local timeout.

@@ -16,3 +16,15 @@ Feature: Recover uncertain commits without replaying them
       | 3       | single      |
       | 2       | transaction |
       | 3       | transaction |
+
+  Scenario Outline: Cancellation after submission preserves uncertainty and prevents producer replay
+    Given a recovery table in format v<version> using single
+    When the caller cancels after the insert is committed but before its response arrives
+    Then the cancelled producer remains unknown and cannot be replayed
+    And uncertain staged files cannot be discarded
+    And PyIceberg reads the cancelled insert exactly once
+
+    Examples:
+      | version |
+      | 2       |
+      | 3       |
