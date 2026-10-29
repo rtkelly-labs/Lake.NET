@@ -12,7 +12,7 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 
 ### Added
 - `Iceberg.Net.Data.ParquetNet` (not yet packed): Parquet.Net, fully managed (no native binaries), as the Parquet
-  library of `Iceberg.Net.Data`, from Lake.Parquet, the `rtkelly-labs/parquet-dotnet` fork of Parquet.Net, at
+  library of `Iceberg.Net.Data`, from the `rtkelly-labs/parquet-dotnet` fork of Parquet.Net (published as Lake.Parquet), at
   `external/parquet-dotnet` (a git submodule). `ParquetNet.UseAsDefault()`, or `ICEBERG_PARQUET_BACKEND=parquet-net`, switches every read and write;
   ParquetSharp stays the default. Both backends write the same files (schema, field IDs, annotations, statistics,
   Zstd, encryption) and CI runs the unit and DuckLake suites (with DuckDB's oracles) on Parquet.Net too.

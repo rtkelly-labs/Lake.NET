@@ -5,9 +5,9 @@ Iceberg.NET reads and writes Parquet through one of two libraries:
 - **ParquetSharp** (a wrapper over Apache Arrow's C++ `parquet-cpp`), the default;
 - **Parquet.Net**, fully managed (no per-platform native binaries, so it runs wherever .NET does: WASM, mobile, trimmed
   or AOT apps), from the fork [rtkelly-labs/parquet-dotnet](https://github.com/rtkelly-labs/parquet-dotnet), carried as
-  the `external/parquet-dotnet` git submodule ([Backends](#backends)). The fork is published as **Lake.Parquet**
-  (built by Parquet.SourceGenerator from a pinned fork commit; namespace `Parquet` as upstream); the submodule
-  builds the same code under upstream's name.
+  the `external/parquet-dotnet` git submodule ([Backends](#backends)). The fork publishes the same code as
+  **Lake.Parquet** (namespace `Lake.Parquet`, renamed at build time); the submodule builds it under upstream's
+  names (`Parquet`, `Parquet.dll`).
 
 Upstream Parquet.Net could not do what Iceberg.NET and DuckLake need. This page lists those gaps, what the fork does
 about each, and the upstream bugs found on the way: each is a candidate to upstream, by hand.
@@ -67,7 +67,7 @@ Parquet.Net writes a little faster and smaller (its dictionary and Zstd settings
 column on its own (forced GC, best of seven) put all of it on two columns:
 
 - **strings**: Parquet.Net returned each value in its own `char[]`, which the backend then copied into a string. The
-  fork now decodes a page's text into one array (`003c77f`), and the backend keeps one string per distinct value (up
+  fork now decodes a page's text into one array (`lake(0012)`), and the backend keeps one string per distinct value (up
   to 4,096) rather than a new one per row: the string column went from 311 to 174 ms (ParquetSharp 159);
 - **UUIDs**: a `byte[]` per value, then a `Guid` from it. The fork now slices one array per page, and the backend
   decodes `Guid`s straight from the bytes (`PqValues.Uuids`): from 319 to 164 ms (ParquetSharp 185).
@@ -111,61 +111,64 @@ Already covered by Parquet.Net, so not a blocker:
 
 ## Fork status
 
-The fork is published as **Lake.Parquet**, which replaces Parquet.Net (same API and namespace). The fork carries no
-Lake code: Parquet.SourceGenerator's `lake/` folder applies the package identity at build time. The fork follows
-upstream by merging each upstream release (`scripts/lake/sync-upstream.sh`, weekly in its CI) while its changes are
-proposed upstream one at a time; its `docs/lake/maintaining.md` describes both directions.
+The fork is upstream Parquet.Net's history, unchanged, with a stack of commits on top, rebased onto
+upstream's `master` every day ([its `docs/maintaining.md`](https://github.com/rtkelly-labs/parquet-dotnet/blob/master/docs/maintaining.md)):
+`lake(0001)` is its packaging, and each later `lake(NNNN)` commit is one change, with a record in its
+`docs/changes/` saying what it does, why, how it was evaluated and whether it has gone upstream. Every change also
+exists as a branch `lake/change/NNNN-name` (upstream plus that change and what it needs), which is what a person
+proposes upstream, by hand. The fork publishes **Lake.Parquet** (namespace `Lake.Parquet`, so it can sit beside
+Parquet.Net) from the same code.
 
-Branch `ccr-87fadcf9-bxi9wr` of [rtkelly-labs/parquet-dotnet](https://github.com/rtkelly-labs/parquet-dotnet), each
-change with its own tests (fork suite: 772 passed, 3 skipped on net8.0 and net10.0, with `pyarrow` and `pandas` installed for its Arrow interop test;
-CI runs it on Linux, Windows and macOS). For upstreaming, the fork's `docs/upstream-review.md` splits it into review
-units, and `docs/upstream/` has every unit as a verified patch (its tests failing or not compiling without it, the
-suite passing with it), on its own and as an ordered series that applies to upstream `master` without conflicts.
+The submodule pins a commit of the fork's `master`. Because `master` is rebased, every head it moves away from is
+tagged `lake/stack/<date>-<sha>` first, so the pinned commit stays reachable; move the pin forward with
+`git -C external/parquet-dotnet fetch origin master && git -C external/parquet-dotnet checkout origin/master`.
+Fork suite at the pinned commit: 792 passed, 3 skipped on net8.0 and net10.0, with `pyarrow` and `pandas` installed
+for its Arrow interop test; CI runs it on Linux, Windows and macOS (`parquet-net-fork`).
 
-| Gap | Fork commit | What changed |
+| Gap | Fork change | What changed |
 |---|---|---|
-| 1, 2 field IDs | `927bf99` | `FieldId` moved from `DataField` to `Field`; decoded from `SchemaElement.field_id` for every field, and written on list, map and struct groups |
-| 3 physical values | `7ecfa00` | `DataField.PhysicalClrType` (`bool`, `int`, `long`, `float`, `double`, `ReadOnlyMemory<byte>`): `ReadRawAsync<T>`/`WriteAsync<T>` accept it for any column, with the logical annotation kept, so `TIMESTAMP(NANOS)` reads as `long` nanoseconds |
-| 5 `fixed[n]` | `54efd9a` | `DataField.FixedLength` writes `byte[]`/`ReadOnlyMemory<byte>` as `FIXED_LEN_BYTE_ARRAY(n)` (and is set on read) |
-| 8 no statistics | `54efd9a` | `ParquetOptions.WriteStatistics = false` leaves statistics out of column chunks and page headers |
-| 4 encryption | `344675a` | `ParquetOptions.Encryption`/`Decryption`: AES_GCM_V1 and AES_GCM_CTR_V1, encrypted (`PARE`) or signed plaintext footers, the footer key for every column or separate column keys, key metadata and a key retriever, AAD prefixes stored or supplied. AES from the BCL, no new dependency. Interop both ways with parquet-cpp in all five modes (fixtures written by ParquetSharp are in the fork's tests); DuckDB 1.5.5 reads the GCM files in full scans. 2M rows: write 477 ms plain / 482 ms GCM, read 781 / 921 ms |
-| 6 typed statistics | `35bd5c1` | `DataColumnStatistics.SortOrder` (signed, unsigned, unknown, from the type and the file's column orders), `HasMinMax`, `MinBytes`/`MaxBytes`, `PhysicalMin`/`PhysicalMax`, exactness, `NanCount`; the deprecated `min`/`max` used only for signed numeric columns, nothing for unknown orders |
-| 9 physical schema | `da1574b` | `ParquetReader.Columns`: a descriptor per leaf column (path, ordinal, physical type, FLBA length, logical and converted types, field ID, max levels, sort order), and `ParquetReader.FooterLength` |
-| (backend) raw columns | `f12c75b`, `02925d8`, `326b529` | `RawDataField`: a column declared by its exact physical type, logical and converted type and length, read and written as physical values (text columns also as strings, so dictionary encoding applies) |
-| 7 legacy lists | `ff03dcc` | Backward-compatibility rules 2 and 3 (a repeated group with several fields, or named `array` or `<list>_tuple`, is a struct element); rules 1 and the bare repeated field already worked. Tested on files written by parquet-cpp. Legacy maps (`MAP_KEY_VALUE`, any group name) already worked |
+| 1, 2 field IDs | `lake(0014)` | `FieldId` moved from `DataField` to `Field`; decoded from `SchemaElement.field_id` for every field, and written on list, map and struct groups |
+| 3 physical values | `lake(0017)` | `DataField.PhysicalClrType` (`bool`, `int`, `long`, `float`, `double`, `ReadOnlyMemory<byte>`): `ReadRawAsync<T>`/`WriteAsync<T>` accept it for any column, with the logical annotation kept, so `TIMESTAMP(NANOS)` reads as `long` nanoseconds |
+| 5 `fixed[n]` | `lake(0015)` | `DataField.FixedLength` writes `byte[]`/`ReadOnlyMemory<byte>` as `FIXED_LEN_BYTE_ARRAY(n)` (and is set on read) |
+| 8 no statistics | `lake(0016)` | `ParquetOptions.WriteStatistics = false` leaves statistics out of column chunks and page headers |
+| 4 encryption | `lake(0024)` | `ParquetOptions.Encryption`/`Decryption`: AES_GCM_V1 and AES_GCM_CTR_V1, encrypted (`PARE`) or signed plaintext footers, the footer key for every column or separate column keys, key metadata and a key retriever, AAD prefixes stored or supplied. AES from the BCL, no new dependency. Interop both ways with parquet-cpp in all five modes (fixtures written by ParquetSharp are in the fork's tests); DuckDB 1.5.5 reads the GCM files in full scans. 2M rows: write 477 ms plain / 482 ms GCM, read 781 / 921 ms |
+| 6 typed statistics | `lake(0019)` | `DataColumnStatistics.SortOrder` (signed, unsigned, unknown, from the type and the file's column orders), `HasMinMax`, `MinBytes`/`MaxBytes`, `PhysicalMin`/`PhysicalMax`, exactness, `NanCount`; the deprecated `min`/`max` used only for signed numeric columns, nothing for unknown orders |
+| 9 physical schema | `lake(0020)`, `lake(0021)` | `ParquetReader.Columns`: a descriptor per leaf column (path, ordinal, physical type, FLBA length, logical and converted types, field ID, max levels, sort order), and `ParquetReader.FooterLength` |
+| (backend) raw columns | `lake(0022)` | `RawDataField`: a column declared by its exact physical type, logical and converted type and length, read and written as physical values (text columns also as strings, so dictionary encoding applies) |
+| 7 legacy lists | `lake(0018)` | Backward-compatibility rules 2 and 3 (a repeated group with several fields, or named `array` or `<list>_tuple`, is a struct element); rules 1 and the bare repeated field already worked. Tested on files written by parquet-cpp. Legacy maps (`MAP_KEY_VALUE`, any group name) already worked |
 
 Bugs found on the way, also fixed in the fork. These are worth reporting upstream on their own, by hand:
 
-- **Timestamp statistics in the wrong unit** (`7ecfa00`). Min/max of an `INT64` timestamp column were always encoded
+- **Timestamp statistics in the wrong unit** (`lake(0002)`). Min/max of an `INT64` timestamp column were always encoded
   as milliseconds, whatever the column's unit. A `TIMESTAMP(MICROS)` file written by Parquet.Net has min/max 1000×
   too small, so engines that prune on statistics drop row groups they should keep: DuckDB returns **no rows** for
   `WHERE ts > TIMESTAMP '1970-01-01 00:00:01'` on such a file, and the right rows once the statistics are fixed.
-- **UUID statistics in the wrong byte order** (`7ecfa00`). Min/max of a `UUID` column were `Guid.ToByteArray()`
+- **UUID statistics in the wrong byte order** (`lake(0007)`). Min/max of a `UUID` column were `Guid.ToByteArray()`
   (little-endian fields) rather than the big-endian RFC 4122 bytes the values themselves use.
-- **`List<T?>` deserialization loses data** (`ff03dcc`). `ParquetSerializer` read `[1, null, 2]` back as `[1, 2]` and
+- **`List<T?>` deserialization loses data** (`lake(0004)`). `ParquetSerializer` read `[1, null, 2]` back as `[1, 2]` and
   `[]` as `null`, for lists and arrays of nullable values, including files it wrote itself. The levels on disk were
   right; the assembler created a list only at the item's definition level, one too deep for nullable items.
-- **Decimal and unsigned statistics decode wrongly** (`35bd5c1`). Min/max of decimals stored as `INT32`/`INT64` came
+- **Decimal and unsigned statistics decode wrongly** (`lake(0010)`). Min/max of decimals stored as `INT32`/`INT64` came
   back as raw unscaled integers (the decimal branch was unreachable), and a `uint64` max of 2^64−1 as −1.
-- **The writer leaves `dictionary_page_offset` unset** (`344675a`), pointing `data_page_offset` at the dictionary
+- **The writer leaves `dictionary_page_offset` unset** (`lake(0006)`), pointing `data_page_offset` at the dictionary
   page instead. Readers tolerate it, but encrypted readers need the dictionary page's offset to pick its AAD.
-- **`DATA_PAGE_V2` pages of repeated columns throw** `NotImplementedException` (`bfd86da`), and the values section of
+- **`DATA_PAGE_V2` pages of repeated columns throw** `NotImplementedException` (`lake(0005)`), and the values section of
   compressed v2 pages was decompressed to the whole page's size. Tested on v2 files written by parquet-cpp.
-- **No `column_orders` in the footer** (`792c737`). Without them, parquet-cpp (so pyarrow and DuckDB) and parquet-mr
+- **No `column_orders` in the footer** (`lake(0008)`). Without them, parquet-cpp (so pyarrow and DuckDB) and parquet-mr
   trust the min/max of unsigned-order columns only from writers they know: every string and binary bound Parquet.Net
   wrote was ignored for pruning. pyarrow reports `has_min_max: False` for such a file, and `True` once the footer says
   `TYPE_ORDER`.
-- **Statistics in the wrong order** (`f12c75b`): unsigned columns written as their signed bits compared signed; UUIDs
+- **Statistics in the wrong order** (`lake(0008)`): unsigned columns written as their signed bits compared signed; UUIDs
   compared with `Guid.CompareTo` (mixed-endian fields) rather than as bytes; strings compared by UTF-16 code unit,
   which puts U+E000–U+FFFF after supplementary characters, unlike UTF-8 byte order; float bounds could be NaN, and
   zero bounds were not written as -0.0/+0.0. Byte-array columns (binary, fixed) got no bounds at all, and boolean
-  columns none either (`229f9d7`).
-- **Statistics not what `TYPE_ORDER` requires** (`a28da59`): no `nan_count` on floating point columns (required once
+  columns none either (`lake(0008)`).
+- **Statistics not what `TYPE_ORDER` requires** (`lake(0008)`, `lake(0009)`): no `nan_count` on floating point columns (required once
   the footer declares `TYPE_ORDER`), and the deprecated signed `min`/`max` written for strings and byte arrays too.
   Columns written `BYTE_STREAM_SPLIT` got no min/max at all.
-- **Required maps are written `OPTIONAL`** (`02925d8`): the levels are computed as required, so the file's levels
+- **Required maps are written `OPTIONAL`** (`lake(0003)`): the levels are computed as required, so the file's levels
   disagree with its own schema.
-- **Legacy-named list groups deserialize as null** (`ff03dcc`). When a file's list groups are named differently from
+- **Legacy-named list groups deserialize as null** (`lake(0018)`). When a file's list groups are named differently from
   the class schema's (`array`, `bag`, `<name>_tuple`), the serializer found no column for the property and silently
   left it null. It now falls back to matching on field names.
 
@@ -199,13 +202,13 @@ distinct values, `double`), Zstd, one row group, best of 3 after a warm-up, Rele
 Two things got it there. Parquet.Net dictionary-encodes a string column only when asked
 (`ParquetOptions.ColumnEncodingHints[path] = EncodingHint.Dictionary`); without it the string column alone took
 212–374 ms to read, so a backend should set the hint the way ParquetSharp's default dictionary encoding does. And Zstd
-decompression copied each page twice (fixed in `cbcc43d`): reads went from 399 to about 180 ms. Without
+decompression copied each page twice (fixed in `lake(0011)`): reads went from 399 to about 180 ms. Without
 compression the fork is ahead (write 173 vs 360 ms, read 81 vs 111 ms).
 
 Every gap in the table is closed in the fork, and the [Parquet.Net backend](#backends) runs on it. A bug of the fork's
-own, not upstream's, was found by the backend's parallel reads and fixed in `12b2856`: the Zstd decompressor cache
-(`cbcc43d`) was taken before an `await`, so concurrent reads could share one decompressor ("Data corruption
-detected"). `12b2856` also adds `ParquetOptions.ValidateHeaderMagic`, which the backend turns off over ranged storage
+own, not upstream's, was found by the backend's parallel reads and fixed in `lake(0011)`: the Zstd decompressor cache
+(`lake(0011)`) was taken before an `await`, so concurrent reads could share one decompressor ("Data corruption
+detected"). `lake(0023)` also adds `ParquetOptions.ValidateHeaderMagic`, which the backend turns off over ranged storage
 (parquet-cpp does not read the first four bytes either).
 
 The fork's own GitHub Actions workflow is not enabled (dispatching it returns 404, the default for forks), so its suite
