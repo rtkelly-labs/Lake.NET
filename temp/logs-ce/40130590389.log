@@ -1,0 +1,159 @@
+test	REST catalog server (in-process, PyIceberg and Spark against it)	﻿2026-10-24T20:42:06.3416663Z ##[group]Run dotnet test tests/Iceberg.Net.RestServer.Tests --nologo
+test	REST catalog server (in-process, PyIceberg and Spark against it)	2026-10-24T20:42:06.3417410Z ^[[36;1mdotnet test tests/Iceberg.Net.RestServer.Tests --nologo^[[0m
+test	REST catalog server (in-process, PyIceberg and Spark against it)	2026-10-24T20:42:06.3480977Z shell: /usr/bin/bash -e {0}
+test	REST catalog server (in-process, PyIceberg and Spark against it)	2026-10-24T20:42:06.3481220Z env:
+test	REST catalog server (in-process, PyIceberg and Spark against it)	2026-10-24T20:42:06.3481415Z   DOTNET_ROOT: /usr/share/dotnet
+test	REST catalog server (in-process, PyIceberg and Spark against it)	2026-10-24T20:42:06.3481684Z   UV_CACHE_DIR: /home/runner/work/_temp/setup-uv-cache
+test	REST catalog server (in-process, PyIceberg and Spark against it)	2026-10-24T20:42:06.3482065Z   ICEBERG_PYTHON: /home/runner/work/Iceberg.NET/Iceberg.NET/interop/.venv/bin/python
+test	REST catalog server (in-process, PyIceberg and Spark against it)	2026-10-24T20:42:06.3482395Z ##[endgroup]
+test	REST catalog server (in-process, PyIceberg and Spark against it)	2026-10-24T20:42:06.8960483Z   Determining projects to restore...
+test	REST catalog server (in-process, PyIceberg and Spark against it)	2026-10-24T20:42:08.3394682Z   All projects are up-to-date for restore.
+test	REST catalog server (in-process, PyIceberg and Spark against it)	2026-10-24T20:42:09.0958157Z   Iceberg.Net.Puffin -> /home/runner/work/Iceberg.NET/Iceberg.NET/src/Iceberg.Net.Puffin/bin/Debug/net10.0/Iceberg.Net.Puffin.dll
+test	REST catalog server (in-process, PyIceberg and Spark against it)	2026-10-24T20:42:09.1506093Z   Iceberg.Net.IO -> /home/runner/work/Iceberg.NET/Iceberg.NET/src/Iceberg.Net.IO/bin/Debug/net10.0/Iceberg.Net.IO.dll
+test	REST catalog server (in-process, PyIceberg and Spark against it)	2026-10-24T20:42:09.2192955Z   Iceberg.Net.Core -> /home/runner/work/Iceberg.NET/Iceberg.NET/src/Iceberg.Net.Core/bin/Debug/net10.0/Iceberg.Net.Core.dll
+test	REST catalog server (in-process, PyIceberg and Spark against it)	2026-10-24T20:42:09.4103148Z   Iceberg.Net.Avro -> /home/runner/work/Iceberg.NET/Iceberg.NET/src/Iceberg.Net.Avro/bin/Debug/net10.0/Iceberg.Net.Avro.dll
+test	REST catalog server (in-process, PyIceberg and Spark against it)	2026-10-24T20:42:09.5392762Z   Iceberg.Net.Catalog -> /home/runner/work/Iceberg.NET/Iceberg.NET/src/Iceberg.Net.Catalog/bin/Debug/net10.0/Iceberg.Net.Catalog.dll
+test	REST catalog server (in-process, PyIceberg and Spark against it)	2026-10-24T20:42:09.6341016Z   Iceberg.Net.Data -> /home/runner/work/Iceberg.NET/Iceberg.NET/src/Iceberg.Net.Data/bin/Debug/net10.0/Iceberg.Net.Data.dll
+test	REST catalog server (in-process, PyIceberg and Spark against it)	2026-10-24T20:42:09.7506650Z   Iceberg.Net.TestSupport -> /home/runner/work/Iceberg.NET/Iceberg.NET/tests/Iceberg.Net.TestSupport/bin/Debug/net10.0/Iceberg.Net.TestSupport.dll
+test	REST catalog server (in-process, PyIceberg and Spark against it)	2026-10-24T20:42:09.8738430Z   Iceberg.Net.Linq -> /home/runner/work/Iceberg.NET/Iceberg.NET/src/Iceberg.Net.Linq/bin/Debug/net10.0/Iceberg.Net.Linq.dll
+test	REST catalog server (in-process, PyIceberg and Spark against it)	2026-10-24T20:42:12.1119220Z   Iceberg.Net.EntityFrameworkCore -> /home/runner/work/Iceberg.NET/Iceberg.NET/src/Iceberg.Net.EntityFrameworkCore/bin/Debug/net10.0/Iceberg.Net.EntityFrameworkCore.dll
+test	REST catalog server (in-process, PyIceberg and Spark against it)	2026-10-24T20:42:13.0621546Z   Iceberg.Net.RestServer -> /home/runner/work/Iceberg.NET/Iceberg.NET/src/Iceberg.Net.RestServer/bin/Debug/net10.0/Iceberg.Net.RestServer.dll
+test	REST catalog server (in-process, PyIceberg and Spark against it)	2026-10-24T20:42:15.1285753Z   Iceberg.Net.RestServer.Tests -> /home/runner/work/Iceberg.NET/Iceberg.NET/tests/Iceberg.Net.RestServer.Tests/bin/Debug/net10.0/Iceberg.Net.RestServer.Tests.dll
+test	REST catalog server (in-process, PyIceberg and Spark against it)	2026-10-24T20:42:15.2279370Z Test run for /home/runner/work/Iceberg.NET/Iceberg.NET/tests/Iceberg.Net.RestServer.Tests/bin/Debug/net10.0/Iceberg.Net.RestServer.Tests.dll (.NETCoreApp,Version=v10.0)
+test	REST catalog server (in-process, PyIceberg and Spark against it)	2026-10-24T20:42:15.3616625Z A total of 1 test files matched the specified pattern.
+test	REST catalog server (in-process, PyIceberg and Spark against it)	2026-10-24T20:42:15.9492294Z [xUnit.net 00:00:00.26]     Iceberg.Net.RestServer.Tests.CrossEngineTests.Spark_reads_through_server_side_scan_planning [SKIP]
+test	REST catalog server (in-process, PyIceberg and Spark against it)	2026-10-24T20:42:17.3545160Z   Skipped Iceberg.Net.RestServer.Tests.CrossEngineTests.Spark_reads_through_server_side_scan_planning [1 ms]
+test	REST catalog server (in-process, PyIceberg and Spark against it)	2026-10-24T20:42:20.7490133Z [xUnit.net 00:00:05.06]     Iceberg.Net.RestServer.Tests.AzureCredentialVendingTests.Azurite_enforces_the_vended_tokens [SKIP]
+test	REST catalog server (in-process, PyIceberg and Spark against it)	2026-10-24T20:42:20.7551348Z   Skipped Iceberg.Net.RestServer.Tests.AzureCredentialVendingTests.Azurite_enforces_the_vended_tokens [1 ms]
+test	REST catalog server (in-process, PyIceberg and Spark against it)	2026-10-24T20:42:27.5784006Z [xUnit.net 00:00:11.89]     Iceberg.Net.RestServer.Tests.CrossEngineTests.PyIceberg_signs_s3_requests_through_the_server [FAIL]
+test	REST catalog server (in-process, PyIceberg and Spark against it)	2026-10-24T20:42:27.5840537Z   Failed Iceberg.Net.RestServer.Tests.CrossEngineTests.PyIceberg_signs_s3_requests_through_the_server [5 s]
+test	REST catalog server (in-process, PyIceberg and Spark against it)	2026-10-24T20:42:27.5845691Z   Error Message:
+test	REST catalog server (in-process, PyIceberg and Spark against it)	2026-10-24T20:42:27.5846672Z    System.InvalidOperationException : PyIceberg failed (1): Traceback (most recent call last):
+test	REST catalog server (in-process, PyIceberg and Spark against it)	2026-10-24T20:42:27.5855828Z   File "/home/runner/work/Iceberg.NET/Iceberg.NET/interop/.venv/lib/python3.12/site-packages/s3fs/core.py", line 169, in _error_wrapper
+test	REST catalog server (in-process, PyIceberg and Spark against it)	2026-10-24T20:42:27.5857375Z     return await func(*args, **kwargs)
+test	REST catalog server (in-process, PyIceberg and Spark against it)	2026-10-24T20:42:27.5858544Z            ^^^^^^^^^^^^^^^^^^^^^^^^^^^
+test	REST catalog server (in-process, PyIceberg and Spark against it)	2026-10-24T20:42:27.5859817Z   File "/home/runner/work/Iceberg.NET/Iceberg.NET/interop/.venv/lib/python3.12/site-packages/aiobotocore/context.py", line 36, in wrapper
+test	REST catalog server (in-process, PyIceberg and Spark against it)	2026-10-24T20:42:27.5861012Z     return await func(*args, **kwargs)
+test	REST catalog server (in-process, PyIceberg and Spark against it)	2026-10-24T20:42:27.5861519Z            ^^^^^^^^^^^^^^^^^^^^^^^^^^^
+test	REST catalog server (in-process, PyIceberg and Spark against it)	2026-10-24T20:42:27.5862808Z   File "/home/runner/work/Iceberg.NET/Iceberg.NET/interop/.venv/lib/python3.12/site-packages/aiobotocore/client.py", line 449, in _make_api_call
+test	REST catalog server (in-process, PyIceberg and Spark against it)	2026-10-24T20:42:27.5864179Z     raise error_class(parsed_response, operation_name)
+test	REST catalog server (in-process, PyIceberg and Spark against it)	2026-10-24T20:42:27.5865177Z botocore.exceptions.ClientError: An error occurred (403) when calling the HeadObject operation: Forbidden
+test	REST catalog server (in-process, PyIceberg and Spark against it)	2026-10-24T20:42:27.5865996Z 
+test	REST catalog server (in-process, PyIceberg and Spark against it)	2026-10-24T20:42:27.5866424Z The above exception was the direct cause of the following exception:
+test	REST catalog server (in-process, PyIceberg and Spark against it)	2026-10-24T20:42:27.5866917Z 
+test	REST catalog server (in-process, PyIceberg and Spark against it)	2026-10-24T20:42:27.5867516Z Traceback (most recent call last):
+test	REST catalog server (in-process, PyIceberg and Spark against it)	2026-10-24T20:42:27.5868760Z   File "/home/runner/work/Iceberg.NET/Iceberg.NET/tests/Iceberg.Net.RestServer.Tests/bin/Debug/net10.0/interop/rest_server_client.py", line 204, in <module>
+test	REST catalog server (in-process, PyIceberg and Spark against it)	2026-10-24T20:42:27.5869907Z     main(sys.argv[1:])
+test	REST catalog server (in-process, PyIceberg and Spark against it)	2026-10-24T20:42:27.5871018Z   File "/home/runner/work/Iceberg.NET/Iceberg.NET/tests/Iceberg.Net.RestServer.Tests/bin/Debug/net10.0/interop/rest_server_client.py", line 191, in main
+test	REST catalog server (in-process, PyIceberg and Spark against it)	2026-10-24T20:42:27.5872305Z     result = cmd_signed_append_read(*args[:4], int(args[4]), int(args[5]))
+test	REST catalog server (in-process, PyIceberg and Spark against it)	2026-10-24T20:42:27.5873088Z              ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+test	REST catalog server (in-process, PyIceberg and Spark against it)	2026-10-24T20:42:27.5874583Z   File "/home/runner/work/Iceberg.NET/Iceberg.NET/tests/Iceberg.Net.RestServer.Tests/bin/Debug/net10.0/interop/rest_server_client.py", line 136, in cmd_signed_append_read
+test	REST catalog server (in-process, PyIceberg and Spark against it)	2026-10-24T20:42:27.5875841Z     table.append(rows)
+test	REST catalog server (in-process, PyIceberg and Spark against it)	2026-10-24T20:42:27.5876923Z   File "/home/runner/work/Iceberg.NET/Iceberg.NET/interop/.venv/lib/python3.12/site-packages/pyiceberg/table/__init__.py", line 1724, in append
+test	REST catalog server (in-process, PyIceberg and Spark against it)	2026-10-24T20:42:27.5878491Z     tx.append(df=df, snapshot_properties=snapshot_properties, branch=branch)
+test	REST catalog server (in-process, PyIceberg and Spark against it)	2026-10-24T20:42:27.5879923Z   File "/home/runner/work/Iceberg.NET/Iceberg.NET/interop/.venv/lib/python3.12/site-packages/pyiceberg/table/__init__.py", line 554, in append
+test	REST catalog server (in-process, PyIceberg and Spark against it)	2026-10-24T20:42:27.5881349Z     with self._append_snapshot_producer(snapshot_properties, branch=branch) as append_files:
+test	REST catalog server (in-process, PyIceberg and Spark against it)	2026-10-24T20:42:27.5882888Z   File "/home/runner/work/Iceberg.NET/Iceberg.NET/interop/.venv/lib/python3.12/site-packages/pyiceberg/table/update/__init__.py", line 78, in __exit__
+test	REST catalog server (in-process, PyIceberg and Spark against it)	2026-10-24T20:42:27.5884065Z     self.commit()
+test	REST catalog server (in-process, PyIceberg and Spark against it)	2026-10-24T20:42:27.5885180Z   File "/home/runner/work/Iceberg.NET/Iceberg.NET/interop/.venv/lib/python3.12/site-packages/pyiceberg/table/update/snapshot.py", line 416, in commit
+test	REST catalog server (in-process, PyIceberg and Spark against it)	2026-10-24T20:42:27.5886662Z     super().commit()
+test	REST catalog server (in-process, PyIceberg and Spark against it)	2026-10-24T20:42:27.5887860Z   File "/home/runner/work/Iceberg.NET/Iceberg.NET/interop/.venv/lib/python3.12/site-packages/pyiceberg/table/update/__init__.py", line 73, in commit
+test	REST catalog server (in-process, PyIceberg and Spark against it)	2026-10-24T20:42:27.5889103Z     self._transaction._apply(*self._commit())
+test	REST catalog server (in-process, PyIceberg and Spark against it)	2026-10-24T20:42:27.5889883Z                               ^^^^^^^^^^^^^^
+test	REST catalog server (in-process, PyIceberg and Spark against it)	2026-10-24T20:42:27.5891096Z   File "/home/runner/work/Iceberg.NET/Iceberg.NET/interop/.venv/lib/python3.12/site-packages/pyiceberg/table/update/snapshot.py", line 318, in _commit
+test	REST catalog server (in-process, PyIceberg and Spark against it)	2026-10-24T20:42:27.5892245Z     new_manifests = self._manifests()
+test	REST catalog server (in-process, PyIceberg and Spark against it)	2026-10-24T20:42:27.5892742Z                     ^^^^^^^^^^^^^^^^^
+test	REST catalog server (in-process, PyIceberg and Spark against it)	2026-10-24T20:42:27.5894118Z   File "/home/runner/work/Iceberg.NET/Iceberg.NET/interop/.venv/lib/python3.12/site-packages/pyiceberg/table/update/snapshot.py", line 275, in _manifests
+test	REST catalog server (in-process, PyIceberg and Spark against it)	2026-10-24T20:42:27.5896394Z     return self._process_manifests(added_manifests.result() + delete_manifests.result() + existing_manifests.result())
+test	REST catalog server (in-process, PyIceberg and Spark against it)	2026-10-24T20:42:27.5897833Z                                                                                           ^^^^^^^^^^^^^^^^^^^^^^^^^^^
+test	REST catalog server (in-process, PyIceberg and Spark against it)	2026-10-24T20:42:27.5898826Z   File "/usr/lib/python3.12/concurrent/futures/_base.py", line 449, in result
+test	REST catalog server (in-process, PyIceberg and Spark against it)	2026-10-24T20:42:27.5899722Z     return self.__get_result()
+test	REST catalog server (in-process, PyIceberg and Spark against it)	2026-10-24T20:42:27.5900189Z            ^^^^^^^^^^^^^^^^^^^
+test	REST catalog server (in-process, PyIceberg and Spark against it)	2026-10-24T20:42:27.5900849Z   File "/usr/lib/python3.12/concurrent/futures/_base.py", line 401, in __get_result
+test	REST catalog server (in-process, PyIceberg and Spark against it)	2026-10-24T20:42:27.5901515Z     raise self._exception
+test	REST catalog server (in-process, PyIceberg and Spark against it)	2026-10-24T20:42:27.5902121Z   File "/usr/lib/python3.12/concurrent/futures/thread.py", line 58, in run
+test	REST catalog server (in-process, PyIceberg and Spark against it)	2026-10-24T20:42:27.5902795Z     result = self.fn(*self.args, **self.kwargs)
+test	REST catalog server (in-process, PyIceberg and Spark against it)	2026-10-24T20:42:27.5903336Z              ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+test	REST catalog server (in-process, PyIceberg and Spark against it)	2026-10-24T20:42:27.5904512Z   File "/home/runner/work/Iceberg.NET/Iceberg.NET/interop/.venv/lib/python3.12/site-packages/pyiceberg/table/update/snapshot.py", line 701, in _existing_manifests
+test	REST catalog server (in-process, PyIceberg and Spark against it)	2026-10-24T20:42:27.5905698Z     for manifest in previous_snapshot.manifests(io=self._io):
+test	REST catalog server (in-process, PyIceberg and Spark against it)	2026-10-24T20:42:27.5906335Z                     ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+test	REST catalog server (in-process, PyIceberg and Spark against it)	2026-10-24T20:42:27.5907635Z   File "/home/runner/work/Iceberg.NET/Iceberg.NET/interop/.venv/lib/python3.12/site-packages/pyiceberg/table/snapshots.py", line 289, in manifests
+test	REST catalog server (in-process, PyIceberg and Spark against it)	2026-10-24T20:42:27.5908650Z     return list(_manifests(io, self.manifest_list))
+test	REST catalog server (in-process, PyIceberg and Spark against it)	2026-10-24T20:42:27.5909214Z                 ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+test	REST catalog server (in-process, PyIceberg and Spark against it)	2026-10-24T20:42:27.5910247Z   File "/home/runner/work/Iceberg.NET/Iceberg.NET/interop/.venv/lib/python3.12/site-packages/pyiceberg/manifest.py", line 982, in _manifests
+test	REST catalog server (in-process, PyIceberg and Spark against it)	2026-10-24T20:42:27.5911241Z     manifest_files = list(read_manifest_list(file))
+test	REST catalog server (in-process, PyIceberg and Spark against it)	2026-10-24T20:42:27.5911812Z                      ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+test	REST catalog server (in-process, PyIceberg and Spark against it)	2026-10-24T20:42:27.5912886Z   File "/home/runner/work/Iceberg.NET/Iceberg.NET/interop/.venv/lib/python3.12/site-packages/pyiceberg/manifest.py", line 997, in read_manifest_list
+test	REST catalog server (in-process, PyIceberg and Spark against it)	2026-10-24T20:42:27.5913946Z     with AvroFile[ManifestFile](
+test	REST catalog server (in-process, PyIceberg and Spark against it)	2026-10-24T20:42:27.5914982Z   File "/home/runner/work/Iceberg.NET/Iceberg.NET/interop/.venv/lib/python3.12/site-packages/pyiceberg/avro/file.py", line 174, in __enter__
+test	REST catalog server (in-process, PyIceberg and Spark against it)	2026-10-24T20:42:27.5915965Z     with self.input_file.open() as f:
+test	REST catalog server (in-process, PyIceberg and Spark against it)	2026-10-24T20:42:27.5916480Z          ^^^^^^^^^^^^^^^^^^^^^^
+test	REST catalog server (in-process, PyIceberg and Spark against it)	2026-10-24T20:42:27.5917574Z   File "/home/runner/work/Iceberg.NET/Iceberg.NET/interop/.venv/lib/python3.12/site-packages/pyiceberg/io/fsspec.py", line 378, in open
+test	REST catalog server (in-process, PyIceberg and Spark against it)	2026-10-24T20:42:27.5918570Z     return self._fs.open(self.location, "rb")
+test	REST catalog server (in-process, PyIceberg and Spark against it)	2026-10-24T20:42:27.5919116Z            ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+test	REST catalog server (in-process, PyIceberg and Spark against it)	2026-10-24T20:42:27.5920124Z   File "/home/runner/work/Iceberg.NET/Iceberg.NET/interop/.venv/lib/python3.12/site-packages/fsspec/spec.py", line 1417, in open
+test	REST catalog server (in-process, PyIceberg and Spark against it)	2026-10-24T20:42:27.5921011Z     f = self._open(
+test	REST catalog server (in-process, PyIceberg and Spark against it)	2026-10-24T20:42:27.5921426Z         ^^^^^^^^^^^
+test	REST catalog server (in-process, PyIceberg and Spark against it)	2026-10-24T20:42:27.5922304Z   File "/home/runner/work/Iceberg.NET/Iceberg.NET/interop/.venv/lib/python3.12/site-packages/s3fs/core.py", line 839, in _open
+test	REST catalog server (in-process, PyIceberg and Spark against it)	2026-10-24T20:42:27.5923390Z     return S3File(
+test	REST catalog server (in-process, PyIceberg and Spark against it)	2026-10-24T20:42:27.5923783Z            ^^^^^^^
+test	REST catalog server (in-process, PyIceberg and Spark against it)	2026-10-24T20:42:27.5924669Z   File "/home/runner/work/Iceberg.NET/Iceberg.NET/interop/.venv/lib/python3.12/site-packages/s3fs/core.py", line 2582, in __init__
+test	REST catalog server (in-process, PyIceberg and Spark against it)	2026-10-24T20:42:27.5925438Z     super().__init__(
+test	REST catalog server (in-process, PyIceberg and Spark against it)	2026-10-24T20:42:27.5926234Z   File "/home/runner/work/Iceberg.NET/Iceberg.NET/interop/.venv/lib/python3.12/site-packages/fsspec/spec.py", line 1990, in __init__
+test	REST catalog server (in-process, PyIceberg and Spark against it)	2026-10-24T20:42:27.5927190Z     self.size = self.details["size"]
+test	REST catalog server (in-process, PyIceberg and Spark against it)	2026-10-24T20:42:27.5927654Z                 ^^^^^^^^^^^^
+test	REST catalog server (in-process, PyIceberg and Spark against it)	2026-10-24T20:42:27.5928538Z   File "/home/runner/work/Iceberg.NET/Iceberg.NET/interop/.venv/lib/python3.12/site-packages/fsspec/spec.py", line 2003, in details
+test	REST catalog server (in-process, PyIceberg and Spark against it)	2026-10-24T20:42:27.5929456Z     self._details = self.fs.info(self.path)
+test	REST catalog server (in-process, PyIceberg and Spark against it)	2026-10-24T20:42:27.5929965Z                     ^^^^^^^^^^^^^^^^^^^^^^^
+test	REST catalog server (in-process, PyIceberg and Spark against it)	2026-10-24T20:42:27.5930906Z   File "/home/runner/work/Iceberg.NET/Iceberg.NET/interop/.venv/lib/python3.12/site-packages/fsspec/asyn.py", line 217, in wrapper
+test	REST catalog server (in-process, PyIceberg and Spark against it)	2026-10-24T20:42:27.5931831Z     return sync(self.loop, func, *args, **kwargs)
+test	REST catalog server (in-process, PyIceberg and Spark against it)	2026-10-24T20:42:27.5932390Z            ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+test	REST catalog server (in-process, PyIceberg and Spark against it)	2026-10-24T20:42:27.5933500Z   File "/home/runner/work/Iceberg.NET/Iceberg.NET/interop/.venv/lib/python3.12/site-packages/fsspec/asyn.py", line 106, in sync
+test	REST catalog server (in-process, PyIceberg and Spark against it)	2026-10-24T20:42:27.5934347Z     raise return_result
+test	REST catalog server (in-process, PyIceberg and Spark against it)	2026-10-24T20:42:27.5935238Z   File "/home/runner/work/Iceberg.NET/Iceberg.NET/interop/.venv/lib/python3.12/site-packages/fsspec/asyn.py", line 59, in _runner
+test	REST catalog server (in-process, PyIceberg and Spark against it)	2026-10-24T20:42:27.5936558Z     result[0] = await coro
+test	REST catalog server (in-process, PyIceberg and Spark against it)	2026-10-24T20:42:27.5937001Z                 ^^^^^^^^^^
+test	REST catalog server (in-process, PyIceberg and Spark against it)	2026-10-24T20:42:27.5938046Z   File "/home/runner/work/Iceberg.NET/Iceberg.NET/interop/.venv/lib/python3.12/site-packages/s3fs/core.py", line 1761, in _info
+test	REST catalog server (in-process, PyIceberg and Spark against it)	2026-10-24T20:42:27.5938913Z     out = await self._call_s3(
+test	REST catalog server (in-process, PyIceberg and Spark against it)	2026-10-24T20:42:27.5939394Z           ^^^^^^^^^^^^^^^^^^^^
+test	REST catalog server (in-process, PyIceberg and Spark against it)	2026-10-24T20:42:27.5940393Z   File "/home/runner/work/Iceberg.NET/Iceberg.NET/interop/.venv/lib/python3.12/site-packages/s3fs/core.py", line 466, in _call_s3
+test	REST catalog server (in-process, PyIceberg and Spark against it)	2026-10-24T20:42:27.5941325Z     return await _error_wrapper(
+test	REST catalog server (in-process, PyIceberg and Spark against it)	2026-10-24T20:42:27.5941803Z            ^^^^^^^^^^^^^^^^^^^^^
+test	REST catalog server (in-process, PyIceberg and Spark against it)	2026-10-24T20:42:27.5942773Z   File "/home/runner/work/Iceberg.NET/Iceberg.NET/interop/.venv/lib/python3.12/site-packages/s3fs/core.py", line 216, in _error_wrapper
+test	REST catalog server (in-process, PyIceberg and Spark against it)	2026-10-24T20:42:27.5943595Z     raise err
+test	REST catalog server (in-process, PyIceberg and Spark against it)	2026-10-24T20:42:27.5943982Z PermissionError: Forbidden
+test	REST catalog server (in-process, PyIceberg and Spark against it)	2026-10-24T20:42:27.5944290Z 
+test	REST catalog server (in-process, PyIceberg and Spark against it)	2026-10-24T20:42:27.5944518Z   Stack Trace:
+test	REST catalog server (in-process, PyIceberg and Spark against it)	2026-10-24T20:42:27.5945772Z      at Iceberg.Net.RestServer.Tests.CrossEngineTests.PyIcebergAsync(String[] args) in /home/runner/work/Iceberg.NET/Iceberg.NET/tests/Iceberg.Net.RestServer.Tests/CrossEngineTests.cs:line 82
+test	REST catalog server (in-process, PyIceberg and Spark against it)	2026-10-24T20:42:27.5950424Z    at Iceberg.Net.RestServer.Tests.CrossEngineTests.PyIceberg_signs_s3_requests_through_the_server() in /home/runner/work/Iceberg.NET/Iceberg.NET/tests/Iceberg.Net.RestServer.Tests/CrossEngineTests.cs:line 400
+test	REST catalog server (in-process, PyIceberg and Spark against it)	2026-10-24T20:42:27.5955518Z    at Iceberg.Net.RestServer.Tests.CrossEngineTests.PyIceberg_signs_s3_requests_through_the_server() in /home/runner/work/Iceberg.NET/Iceberg.NET/tests/Iceberg.Net.RestServer.Tests/CrossEngineTests.cs:line 405
+test	REST catalog server (in-process, PyIceberg and Spark against it)	2026-10-24T20:42:27.5957758Z    at Iceberg.Net.RestServer.Tests.CrossEngineTests.PyIceberg_signs_s3_requests_through_the_server() in /home/runner/work/Iceberg.NET/Iceberg.NET/tests/Iceberg.Net.RestServer.Tests/CrossEngineTests.cs:line 405
+test	REST catalog server (in-process, PyIceberg and Spark against it)	2026-10-24T20:42:27.5958902Z --- End of stack trace from previous location ---
+test	REST catalog server (in-process, PyIceberg and Spark against it)	2026-10-24T20:42:29.8478007Z [xUnit.net 00:00:14.16]     Iceberg.Net.RestServer.Tests.CrossEngineTests.Spark_and_the_dotnet_client_share_tables_through_the_server [SKIP]
+test	REST catalog server (in-process, PyIceberg and Spark against it)	2026-10-24T20:42:29.8501553Z   Skipped Iceberg.Net.RestServer.Tests.CrossEngineTests.Spark_and_the_dotnet_client_share_tables_through_the_server [1 ms]
+test	REST catalog server (in-process, PyIceberg and Spark against it)	2026-10-24T20:42:31.7349676Z [xUnit.net 00:00:16.05]     Iceberg.Net.RestServer.Tests.CrossEngineTests.Spark_signs_s3_requests_through_the_server [SKIP]
+test	REST catalog server (in-process, PyIceberg and Spark against it)	2026-10-24T20:42:31.7373863Z [xUnit.net 00:00:16.05]     Iceberg.Net.RestServer.Tests.CrossEngineTests.Spark_incremental_reads_match_server_incremental_plans [SKIP]
+test	REST catalog server (in-process, PyIceberg and Spark against it)	2026-10-24T20:42:31.7990271Z   Skipped Iceberg.Net.RestServer.Tests.CrossEngineTests.Spark_signs_s3_requests_through_the_server [1 ms]
+test	REST catalog server (in-process, PyIceberg and Spark against it)	2026-10-24T20:42:31.7991545Z   Skipped Iceberg.Net.RestServer.Tests.CrossEngineTests.Spark_incremental_reads_match_server_incremental_plans [1 ms]
+test	REST catalog server (in-process, PyIceberg and Spark against it)	2026-10-24T20:42:31.8017405Z 
+test	REST catalog server (in-process, PyIceberg and Spark against it)	2026-10-24T20:42:31.8050318Z Failed!  - Failed:     1, Passed:   119, Skipped:     5, Total:   125, Duration: 15 s - Iceberg.Net.RestServer.Tests.dll (net10.0)
+test	REST catalog server (in-process, PyIceberg and Spark against it)	2026-10-24T20:42:31.8605092Z ##[error]Process completed with exit code 1.
+ci	Report the verdict of every job	﻿2026-10-24T20:42:37.1885182Z ##[group]Run set -uo pipefail
+ci	Report the verdict of every job	2026-10-24T20:42:37.1885916Z ^[[36;1mset -uo pipefail^[[0m
+ci	Report the verdict of every job	2026-10-24T20:42:37.1886403Z ^[[36;1mfailed=0^[[0m
+ci	Report the verdict of every job	2026-10-24T20:42:37.1886900Z ^[[36;1mfor job in TEST; do^[[0m
+ci	Report the verdict of every job	2026-10-24T20:42:37.1887524Z ^[[36;1m  result="${!job}"^[[0m
+ci	Report the verdict of every job	2026-10-24T20:42:37.1888363Z ^[[36;1m  if [ "${result}" = "success" ]; then^[[0m
+ci	Report the verdict of every job	2026-10-24T20:42:37.1889070Z ^[[36;1m    echo "✅ ${job}: ${result}"^[[0m
+ci	Report the verdict of every job	2026-10-24T20:42:37.1889656Z ^[[36;1m  else^[[0m
+ci	Report the verdict of every job	2026-10-24T20:42:37.1890255Z ^[[36;1m    echo "::error::${job} did not succeed (${result})"^[[0m
+ci	Report the verdict of every job	2026-10-24T20:42:37.1890924Z ^[[36;1m    failed=1^[[0m
+ci	Report the verdict of every job	2026-10-24T20:42:37.1891415Z ^[[36;1m  fi^[[0m
+ci	Report the verdict of every job	2026-10-24T20:42:37.1891857Z ^[[36;1mdone^[[0m
+ci	Report the verdict of every job	2026-10-24T20:42:37.1892296Z ^[[36;1mexit "${failed}"^[[0m
+ci	Report the verdict of every job	2026-10-24T20:42:37.2664100Z shell: /usr/bin/bash -e {0}
+ci	Report the verdict of every job	2026-10-24T20:42:37.2664735Z env:
+ci	Report the verdict of every job	2026-10-24T20:42:37.2665069Z   TEST: failure
+ci	Report the verdict of every job	2026-10-24T20:42:37.2665412Z ##[endgroup]
+ci	Report the verdict of every job	2026-10-24T20:42:37.2824426Z ##[error]TEST did not succeed (failure)
+ci	Report the verdict of every job	2026-10-24T20:42:37.2835089Z ##[error]Process completed with exit code 1.

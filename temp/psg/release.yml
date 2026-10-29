@@ -1,0 +1,359 @@
+name: Release & Publish NuGet
+
+# CHANGELOG.md is the release authority: scripts/ParseChangelog.cs reads the version
+# and release notes from the first cut version section (`## [x.y.z] - YYYY-MM-DD`).
+# To release, merge a PR that moves [Unreleased] under such a heading, then dispatch
+# this workflow. There is deliberately no version input — a version that is not
+# described in the changelog cannot be published.
+
+on:
+  workflow_dispatch:
+    inputs:
+      dry_run:
+        description: 'Build, pack and verify only — no NuGet push, no GitHub release. Untick to publish for real.'
+        required: false
+        type: boolean
+        # A real publish needs an explicit `false`: an unmodified dispatch is a dry run.
+        default: true
+
+# Least privilege by default: only the `publish` job — the one that exchanges the OIDC token at
+# nuget.org and creates the GitHub release — gets anything beyond read. The `build` job executes
+# repo code (MSBuild targets, tests, scripts), so it must never hold `id-token: write`.
+permissions:
+  contents: read
+
+concurrency:
+  group: release
+  cancel-in-progress: false
+
+jobs:
+  prepare:
+    name: Resolve release from changelog
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+    outputs:
+      version: ${{ steps.changelog.outputs.version }}
+      tag: ${{ steps.changelog.outputs.tag }}
+      is_prerelease: ${{ steps.changelog.outputs.is_prerelease }}
+    steps:
+      # CHANGELOG.md is the release authority and it is cut by merging a PR (see the header
+      # comment), so the only ref a real release can legitimately describe is main. A dry run is
+      # deliberately still allowed from any ref — building and verifying a branch is the useful case.
+      - name: Refuse to release from a non-main ref
+        if: ${{ !inputs.dry_run }}
+        run: |
+          set -euo pipefail
+          if [ "$GITHUB_REF" != "refs/heads/main" ]; then
+            echo "::error::A real release may only be dispatched from main; got '$GITHUB_REF'. Merge the changelog cut to main first, or re-run this dispatch with dry_run enabled."
+            exit 1
+          fi
+          echo "Dispatched from main."
+
+      - name: Checkout repository
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
+
+      - name: Setup .NET SDK
+        uses: actions/setup-dotnet@a98b56852c35b8e3190ac28c8c2271da59106c68 # v6
+        with:
+          dotnet-version: '10.0.x'
+
+      - name: Parse changelog (release mode)
+        id: changelog
+        run: |
+          dotnet run scripts/ParseChangelog.cs --release \
+            --notes-out "$RUNNER_TEMP/release-notes.md" \
+            --github-output "$GITHUB_OUTPUT"
+
+      - name: Refuse to re-release an existing tag
+        env:
+          TAG: ${{ steps.changelog.outputs.tag }}
+        run: |
+          set -euo pipefail
+          if [ -n "$(git ls-remote --tags origin "refs/tags/$TAG")" ]; then
+            echo "::error::Tag $TAG already exists on origin; '$TAG' is already released. Cut a new version section instead."
+            exit 1
+          fi
+          echo "Tag $TAG is free."
+
+      - name: Upload release notes
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7
+        with:
+          name: release-info
+          path: ${{ runner.temp }}/release-notes.md
+          if-no-files-found: error
+
+  build:
+    name: Build & verify packages
+    needs: prepare
+    runs-on: ubuntu-latest
+    # This job runs repo-controlled code. It gets read access and nothing else.
+    permissions:
+      contents: read
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
+        with:
+          fetch-depth: 0
+          lfs: true
+
+      - name: Setup Python
+        uses: actions/setup-python@5fda3b95a4ea91299a34e894583c3862153e4b97 # v7
+        with:
+          python-version: '3.11'
+
+      - name: Install uv
+        uses: astral-sh/setup-uv@c18668ad3cf93ea998bef934396af7bb5c839dc7 # v10.2.0
+        with:
+          # Exact version: the action otherwise installs the latest uv on every run.
+          version: "0.12.21"
+
+      - name: Setup .NET SDK
+        uses: actions/setup-dotnet@a98b56852c35b8e3190ac28c8c2271da59106c68 # v6
+        with:
+          dotnet-version: |
+            8.0.x
+            9.0.x
+            10.0.x
+
+      - name: Verify Benchmark Data LFS Hydration & Provenance Integrity
+        run: dotnet run scripts/VerifyProvenance.cs
+
+      - name: Restore dependencies
+        run: dotnet restore Parquet.SourceGenerator.slnx --locked-mode
+
+      - name: Build Solution (Release)
+        run: |
+          dotnet build Parquet.SourceGenerator.slnx --configuration Release --no-restore \
+            -warnaserror -p:Version=${{ needs.prepare.outputs.version }}
+
+      # The shared action keeps the committed-byte hash gate ahead of generation and sends all
+      # generated compatibility data to RUNNER_TEMP. Its structure is covered by a consistency test.
+      - name: Verify and Generate Test Data
+        uses: ./.github/actions/verify-test-data
+
+      - name: Run Tests
+        # ExternalInterop needs fixtures from PyArrow and DuckDB, which this build does not produce;
+        # CI runs them. With CI=true they would fail, not pass,
+        # when their input is unset (#566), so they are excluded rather than left to pass over nothing.
+        run: dotnet test Parquet.SourceGenerator.slnx --configuration Release --no-build --filter "Category!=ExternalInterop"
+
+      - name: Execute Sample (CoreCLR)
+        run: dotnet run --project samples/Parquet.SourceGenerator.SampleAot/Parquet.SourceGenerator.SampleAot.csproj --configuration Release
+
+      - name: Verify Native AOT (publish + run native binary)
+        run: |
+          set -euo pipefail
+          dotnet publish test/Parquet.SourceGenerator.AotTest/Parquet.SourceGenerator.AotTest.csproj \
+            --configuration Release -r linux-x64 -o ./aot-out 2>&1 | tee aot-publish.log
+
+          test -x ./aot-out/Parquet.SourceGenerator.AotTest \
+            || { echo "FAIL: no native executable produced"; ls -la ./aot-out; exit 1; }
+
+          echo "::group::trim / AOT-analysis warnings reported during publish"
+          grep -E 'warning IL[0-9]+' aot-publish.log || echo "(none)"
+          echo "::endgroup::"
+
+          if grep -E 'warning IL[0-9]+' aot-publish.log | grep -v '/Parquet\.dll ' | grep -q .; then
+            echo "FAIL: trim/AOT warnings not attributable to Parquet.Net:"
+            grep -E 'warning IL[0-9]+' aot-publish.log | grep -v '/Parquet\.dll '
+            exit 1
+          fi
+
+          ./aot-out/Parquet.SourceGenerator.AotTest
+
+      - name: Pack All Packages
+        run: |
+          dotnet pack Parquet.SourceGenerator.slnx --configuration Release --no-build \
+            --output ./artifacts -p:Version=${{ needs.prepare.outputs.version }}
+
+      - name: Verify Package Layout
+        uses: ./.github/actions/verify-package-layout
+        with:
+          version: ${{ needs.prepare.outputs.version }}
+
+      - name: Verify Package Consumption (v6 & Legacy packages on .NET 8 & .NET 9)
+        run: |
+          set -euo pipefail
+          version="${{ needs.prepare.outputs.version }}"
+          echo "Consuming Parquet.SourceGenerator $version and Legacy from local feed"
+          dotnet run --project test/PackageConsumption/PackageConsumption.csproj \
+            --framework net8.0 \
+            --configuration Release \
+            -p:GeneratorPackageVersion="$version" \
+            -p:RestorePackagesPath="$RUNNER_TEMP/consumption-packages-net8"
+
+          dotnet run --project test/PackageConsumption/PackageConsumption.csproj \
+            --framework net9.0 \
+            --configuration Release \
+            -p:GeneratorPackageVersion="$version" \
+            -p:RestorePackagesPath="$RUNNER_TEMP/consumption-packages-net9"
+
+          dotnet run --project test/PackageConsumptionLegacy/PackageConsumptionLegacy.csproj \
+            --framework net8.0 \
+            --configuration Release \
+            -p:GeneratorPackageVersion="$version" \
+            -p:RestorePackagesPath="$RUNNER_TEMP/consumption-packages-legacy-net8"
+
+          dotnet run --project test/PackageConsumptionLegacy/PackageConsumptionLegacy.csproj \
+            --framework net9.0 \
+            --configuration Release \
+            -p:GeneratorPackageVersion="$version" \
+            -p:RestorePackagesPath="$RUNNER_TEMP/consumption-packages-legacy-net9"
+
+      - name: Verify Legacy Package Consumption Compiles on .NET Framework 4.7.2
+        run: |
+          set -euo pipefail
+          version="${{ needs.prepare.outputs.version }}"
+          dotnet build test/PackageConsumptionLegacy/PackageConsumptionLegacy.csproj \
+            --framework net472 \
+            --configuration Release \
+            -p:GeneratorPackageVersion="$version" \
+            -p:RestorePackagesPath="$RUNNER_TEMP/consumption-packages-legacy-net472"
+
+      - name: Upload Packages
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7
+        with:
+          name: nuget-packages
+          path: ./artifacts/*.nupkg
+          if-no-files-found: error
+
+      # The emitted source and public API of every golden model, code metrics and the call graph
+      # for exactly this commit (docs/17-GENERATED-API-BASELINES.md). None of it is checked in, so
+      # the release is where a version's output is kept: it is attached to the GitHub release as
+      # derived-outputs.tar.gz, and consumers such as the docs site fetch it by tag.
+      - name: Produce Derived Outputs
+        env:
+          VERSION: ${{ needs.prepare.outputs.version }}
+          TAG: ${{ needs.prepare.outputs.tag }}
+        run: |
+          set -euo pipefail
+          out="$RUNNER_TEMP/derived"
+          dotnet run scripts/DerivedOutputs.cs -- --out "$out" --version "$VERSION"
+          printf '{"version":"%s","tag":"%s","commit":"%s"}\n' "$VERSION" "$TAG" "$GITHUB_SHA" > "$out/manifest.json"
+          tar -czf "$RUNNER_TEMP/derived-outputs.tar.gz" -C "$out" manifest.json golden metrics callgraph api-model.json
+
+      - name: Upload Derived Outputs
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7
+        with:
+          name: derived-outputs
+          path: ${{ runner.temp }}/derived-outputs.tar.gz
+          if-no-files-found: error
+
+  # The release build below omits several CI gates (CSharpier, ledger, IL, conformance,
+  # generated-analysis), so a release is only as good as the `build` check that CI recorded for
+  # this exact commit. This job refuses a commit whose `build` check run is missing, still
+  # running, or not `success`. It holds `checks: read` and nothing else, and runs no repo code.
+  # On a dry run it reports the same verdict without failing, so a branch can exercise it.
+  verify-ci:
+    name: Verify the commit passed CI
+    runs-on: ubuntu-latest
+    permissions:
+      checks: read
+    steps:
+      - name: Require a successful build check run for this commit
+        env:
+          GH_TOKEN: ${{ github.token }}
+          DRY_RUN: ${{ inputs.dry_run }}
+        run: |
+          set -euo pipefail
+          # filter=latest keeps only the most recent run of each check name, so a re-run that
+          # passed replaces the failed attempt. The app filter ignores a same-named check from
+          # any other integration; branch protection pins the same app (GitHub Actions).
+          json=$(gh api -H "Accept: application/vnd.github+json" \
+            "repos/$GITHUB_REPOSITORY/commits/$GITHUB_SHA/check-runs?check_name=build&filter=latest&per_page=100")
+          found=$(jq '[.check_runs[] | select(.app.slug == "github-actions")] | length' <<<"$json")
+          bad=$(jq '[.check_runs[] | select(.app.slug == "github-actions")
+                     | select(.status != "completed" or .conclusion != "success")] | length' <<<"$json")
+          echo "build check runs for $GITHUB_SHA: found=$found not-successful=$bad"
+          jq -r '.check_runs[] | "  \(.app.slug) \(.name) status=\(.status) conclusion=\(.conclusion)"' <<<"$json"
+
+          problem=""
+          if [ "$found" -eq 0 ]; then
+            problem="no 'build' check run exists for $GITHUB_SHA; CI has not run on this commit"
+          elif [ "$bad" -ne 0 ]; then
+            problem="the 'build' check run for $GITHUB_SHA is pending or did not conclude success"
+          fi
+
+          if [ -z "$problem" ]; then
+            echo "The build check run concluded success."
+          elif [ "$DRY_RUN" = "true" ]; then
+            echo "::warning::$problem (dry run, not failing; a real release would stop here)"
+          else
+            echo "::error::$problem. Wait for CI on this commit, or release a commit that has passed it."
+            exit 1
+          fi
+
+  publish:
+    name: Publish packages
+    needs: [prepare, build, verify-ci]
+    # The ref condition repeats the hard failure in `prepare` as a second, structural brake: the
+    # push to nuget.org and the GitHub release can only ever run against main.
+    if: ${{ !inputs.dry_run && github.ref == 'refs/heads/main' }}
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write # softprops/action-gh-release creates the tag and the GitHub release
+      id-token: write # NuGet/login exchanges the OIDC token (trusted publishing)
+    # The release environment gives deployment history and a scoped-secrets namespace. It is
+    # not an approval gate: required reviewers are org-only, and GitHub forbids self-approval —
+    # solo, nothing can pause this job. The brake is the manual dispatch plus the build job.
+    environment: release
+    steps:
+      - name: Download Packages
+        uses: actions/download-artifact@3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c # v8.0.1
+        with:
+          name: nuget-packages
+          path: ./artifacts
+
+      - name: Download Release Notes
+        uses: actions/download-artifact@3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c # v8.0.1
+        with:
+          name: release-info
+          path: ./release-info
+
+      - name: Download Derived Outputs
+        uses: actions/download-artifact@3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c # v8.0.1
+        with:
+          name: derived-outputs
+          path: ./release-assets
+
+      - name: Login to NuGet via OIDC (Trusted Publishing)
+        uses: NuGet/login@8d196754b4036150537f80ac539e15c2f1028841 # v1
+        id: login
+        with:
+          user: ${{ secrets.NUGET_USER || 'rtk_13' }}
+
+      - name: Push to NuGet
+        env:
+          NUGET_API_KEY: ${{ steps.login.outputs.NUGET_API_KEY }}
+        run: |
+          dotnet nuget push ./artifacts/*.nupkg \
+            --api-key "$NUGET_API_KEY" \
+            --source https://api.nuget.org/v3/index.json \
+            --skip-duplicate \
+            --no-symbols
+
+      # Prereleases land on NuGet.org only; the public GitHub release is reserved for
+      # full versions, so the releases page stays a list of things people should adopt.
+      - name: Create GitHub Release
+        if: ${{ needs.prepare.outputs.is_prerelease == 'false' }}
+        uses: softprops/action-gh-release@efb35369e0ad2afab669f228072c1b0d510eae64 # v3.0.3
+        with:
+          tag_name: ${{ needs.prepare.outputs.tag }}
+          name: ${{ needs.prepare.outputs.version }}
+          target_commitish: ${{ github.sha }}
+          body_path: ./release-info/release-notes.md
+          files: |
+            ./artifacts/*.nupkg
+            ./release-assets/derived-outputs.tar.gz
+
+  # Tell the docs site which tag to render the API grid from. Called directly rather than left to a
+  # `release: published` trigger, because a release created with GITHUB_TOKEN starts no workflows.
+  docs:
+    name: Dispatch docs rebuild for the release
+    needs: [prepare, publish]
+    if: ${{ !inputs.dry_run && needs.prepare.outputs.is_prerelease == 'false' }}
+    uses: ./.github/workflows/docs-dispatch.yml
+    with:
+      tag: ${{ needs.prepare.outputs.tag }}
+    secrets: inherit

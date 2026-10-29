@@ -1,0 +1,1346 @@
+{
+  "openapi": "3.1.1",
+  "info": {
+    "title": "Apache Iceberg REST Catalog API (Iceberg.Net.RestServer)",
+    "version": "0.0.1"
+  },
+  "servers": [
+    {
+      "url": "http://localhost/"
+    }
+  ],
+  "paths": {
+    "/v1/oauth/tokens": {
+      "post": {
+        "tags": [
+          "AuthSetup"
+        ],
+        "summary": "`POST /v1/oauth/tokens`: the client-credentials grant, plus token exchange of a token this server issued\n(how Java clients refresh). Errors use the OAuth2 shape (`{\"error\", \"error_description\"}`), as the spec says.",
+        "operationId": "getToken",
+        "responses": {
+          "200": {
+            "description": "Success"
+          },
+          "400": {
+            "description": "ErrorModel"
+          },
+          "401": {
+            "description": "ErrorModel"
+          }
+        }
+      }
+    },
+    "/v1/config": {
+      "get": {
+        "tags": [
+          "Iceberg.Net.RestServer"
+        ],
+        "operationId": "getConfig",
+        "parameters": [
+          {
+            "name": "warehouse",
+            "in": "query",
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Success"
+          },
+          "401": {
+            "description": "ErrorModel"
+          }
+        }
+      }
+    },
+    "/v1/namespaces": {
+      "get": {
+        "tags": [
+          "Iceberg.Net.RestServer"
+        ],
+        "operationId": "listNamespaces",
+        "parameters": [
+          {
+            "name": "pageToken",
+            "in": "query",
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "name": "pageSize",
+            "in": "query",
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "name": "parent",
+            "in": "query",
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Success"
+          },
+          "400": {
+            "description": "ErrorModel"
+          },
+          "401": {
+            "description": "ErrorModel"
+          },
+          "403": {
+            "description": "ErrorModel"
+          },
+          "404": {
+            "description": "ErrorModel"
+          }
+        }
+      },
+      "post": {
+        "tags": [
+          "Iceberg.Net.RestServer"
+        ],
+        "operationId": "createNamespace",
+        "parameters": [
+          {
+            "name": "Idempotency-Key",
+            "in": "header",
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Success"
+          },
+          "400": {
+            "description": "ErrorModel"
+          },
+          "401": {
+            "description": "ErrorModel"
+          },
+          "403": {
+            "description": "ErrorModel"
+          },
+          "409": {
+            "description": "ErrorModel"
+          }
+        }
+      }
+    },
+    "/v1/namespaces/{namespace}": {
+      "get": {
+        "tags": [
+          "Iceberg.Net.RestServer"
+        ],
+        "operationId": "loadNamespaceMetadata",
+        "parameters": [
+          {
+            "name": "namespace",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Success"
+          },
+          "400": {
+            "description": "ErrorModel"
+          },
+          "401": {
+            "description": "ErrorModel"
+          },
+          "403": {
+            "description": "ErrorModel"
+          },
+          "404": {
+            "description": "ErrorModel"
+          }
+        }
+      },
+      "head": {
+        "tags": [
+          "Iceberg.Net.RestServer"
+        ],
+        "operationId": "namespaceExists",
+        "parameters": [
+          {
+            "name": "namespace",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "204": {
+            "description": "Success"
+          },
+          "400": {
+            "description": "ErrorModel"
+          },
+          "401": {
+            "description": "ErrorModel"
+          },
+          "403": {
+            "description": "ErrorModel"
+          },
+          "404": {
+            "description": "ErrorModel"
+          }
+        }
+      },
+      "delete": {
+        "tags": [
+          "Iceberg.Net.RestServer"
+        ],
+        "operationId": "dropNamespace",
+        "parameters": [
+          {
+            "name": "namespace",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "name": "Idempotency-Key",
+            "in": "header",
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "204": {
+            "description": "Success"
+          },
+          "400": {
+            "description": "ErrorModel"
+          },
+          "401": {
+            "description": "ErrorModel"
+          },
+          "403": {
+            "description": "ErrorModel"
+          },
+          "404": {
+            "description": "ErrorModel"
+          },
+          "409": {
+            "description": "ErrorModel"
+          }
+        }
+      }
+    },
+    "/v1/namespaces/{namespace}/properties": {
+      "post": {
+        "tags": [
+          "Iceberg.Net.RestServer"
+        ],
+        "operationId": "updateProperties",
+        "parameters": [
+          {
+            "name": "namespace",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "name": "Idempotency-Key",
+            "in": "header",
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Success"
+          },
+          "400": {
+            "description": "ErrorModel"
+          },
+          "401": {
+            "description": "ErrorModel"
+          },
+          "403": {
+            "description": "ErrorModel"
+          },
+          "404": {
+            "description": "ErrorModel"
+          },
+          "422": {
+            "description": "ErrorModel"
+          }
+        }
+      }
+    },
+    "/v1/namespaces/{namespace}/tables": {
+      "get": {
+        "tags": [
+          "Iceberg.Net.RestServer"
+        ],
+        "operationId": "listTables",
+        "parameters": [
+          {
+            "name": "namespace",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "name": "pageToken",
+            "in": "query",
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "name": "pageSize",
+            "in": "query",
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Success"
+          },
+          "400": {
+            "description": "ErrorModel"
+          },
+          "401": {
+            "description": "ErrorModel"
+          },
+          "403": {
+            "description": "ErrorModel"
+          },
+          "404": {
+            "description": "ErrorModel"
+          }
+        }
+      },
+      "post": {
+        "tags": [
+          "Iceberg.Net.RestServer"
+        ],
+        "operationId": "createTable",
+        "parameters": [
+          {
+            "name": "namespace",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "name": "X-Iceberg-Access-Delegation",
+            "in": "header",
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "name": "Idempotency-Key",
+            "in": "header",
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Success"
+          },
+          "400": {
+            "description": "ErrorModel"
+          },
+          "401": {
+            "description": "ErrorModel"
+          },
+          "403": {
+            "description": "ErrorModel"
+          },
+          "404": {
+            "description": "ErrorModel"
+          },
+          "409": {
+            "description": "ErrorModel"
+          }
+        }
+      }
+    },
+    "/v1/namespaces/{namespace}/register": {
+      "post": {
+        "tags": [
+          "Iceberg.Net.RestServer"
+        ],
+        "operationId": "registerTable",
+        "parameters": [
+          {
+            "name": "namespace",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "name": "X-Iceberg-Access-Delegation",
+            "in": "header",
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "name": "Idempotency-Key",
+            "in": "header",
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Success"
+          },
+          "400": {
+            "description": "ErrorModel"
+          },
+          "401": {
+            "description": "ErrorModel"
+          },
+          "403": {
+            "description": "ErrorModel"
+          },
+          "404": {
+            "description": "ErrorModel"
+          },
+          "409": {
+            "description": "ErrorModel"
+          }
+        }
+      }
+    },
+    "/v1/namespaces/{namespace}/tables/{table}": {
+      "get": {
+        "tags": [
+          "Iceberg.Net.RestServer"
+        ],
+        "operationId": "loadTable",
+        "parameters": [
+          {
+            "name": "namespace",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "name": "table",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "name": "snapshots",
+            "in": "query",
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "name": "X-Iceberg-Access-Delegation",
+            "in": "header",
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "name": "If-None-Match",
+            "in": "header",
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Success"
+          },
+          "400": {
+            "description": "ErrorModel"
+          },
+          "401": {
+            "description": "ErrorModel"
+          },
+          "403": {
+            "description": "ErrorModel"
+          },
+          "304": {
+            "description": "Not modified (If-None-Match)"
+          },
+          "404": {
+            "description": "ErrorModel"
+          }
+        }
+      },
+      "head": {
+        "tags": [
+          "Iceberg.Net.RestServer"
+        ],
+        "operationId": "tableExists",
+        "parameters": [
+          {
+            "name": "namespace",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "name": "table",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "204": {
+            "description": "Success"
+          },
+          "400": {
+            "description": "ErrorModel"
+          },
+          "401": {
+            "description": "ErrorModel"
+          },
+          "403": {
+            "description": "ErrorModel"
+          },
+          "404": {
+            "description": "ErrorModel"
+          }
+        }
+      },
+      "post": {
+        "tags": [
+          "Iceberg.Net.RestServer"
+        ],
+        "operationId": "updateTable",
+        "parameters": [
+          {
+            "name": "namespace",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "name": "table",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "name": "Idempotency-Key",
+            "in": "header",
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Success"
+          },
+          "400": {
+            "description": "ErrorModel"
+          },
+          "401": {
+            "description": "ErrorModel"
+          },
+          "403": {
+            "description": "ErrorModel"
+          },
+          "404": {
+            "description": "ErrorModel"
+          },
+          "409": {
+            "description": "ErrorModel"
+          },
+          "5XX": {
+            "description": "Server error; for a commit, its outcome is unknown"
+          }
+        }
+      },
+      "delete": {
+        "tags": [
+          "Iceberg.Net.RestServer"
+        ],
+        "operationId": "dropTable",
+        "parameters": [
+          {
+            "name": "namespace",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "name": "table",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "name": "purgeRequested",
+            "in": "query",
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "name": "Idempotency-Key",
+            "in": "header",
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "204": {
+            "description": "Success"
+          },
+          "400": {
+            "description": "ErrorModel"
+          },
+          "401": {
+            "description": "ErrorModel"
+          },
+          "403": {
+            "description": "ErrorModel"
+          },
+          "404": {
+            "description": "ErrorModel"
+          }
+        }
+      }
+    },
+    "/v1/namespaces/{namespace}/tables/{table}/unregister": {
+      "post": {
+        "tags": [
+          "Iceberg.Net.RestServer"
+        ],
+        "operationId": "unregisterTable",
+        "parameters": [
+          {
+            "name": "namespace",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "name": "table",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "name": "Idempotency-Key",
+            "in": "header",
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Success"
+          },
+          "400": {
+            "description": "ErrorModel"
+          },
+          "401": {
+            "description": "ErrorModel"
+          },
+          "403": {
+            "description": "ErrorModel"
+          },
+          "404": {
+            "description": "ErrorModel"
+          }
+        }
+      }
+    },
+    "/v1/namespaces/{namespace}/tables/{table}/metrics": {
+      "post": {
+        "tags": [
+          "Iceberg.Net.RestServer"
+        ],
+        "operationId": "reportMetrics",
+        "parameters": [
+          {
+            "name": "namespace",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "name": "table",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "name": "Idempotency-Key",
+            "in": "header",
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "204": {
+            "description": "Success"
+          },
+          "400": {
+            "description": "ErrorModel"
+          },
+          "401": {
+            "description": "ErrorModel"
+          },
+          "403": {
+            "description": "ErrorModel"
+          },
+          "404": {
+            "description": "ErrorModel"
+          }
+        }
+      }
+    },
+    "/v1/namespaces/{namespace}/tables/{table}/plan": {
+      "post": {
+        "tags": [
+          "Iceberg.Net.RestServer"
+        ],
+        "operationId": "planTableScan",
+        "parameters": [
+          {
+            "name": "namespace",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "name": "table",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Success"
+          },
+          "400": {
+            "description": "ErrorModel"
+          },
+          "401": {
+            "description": "ErrorModel"
+          },
+          "403": {
+            "description": "ErrorModel"
+          },
+          "404": {
+            "description": "ErrorModel"
+          }
+        }
+      }
+    },
+    "/v1/namespaces/{namespace}/tables/{table}/plan/{plan-id}": {
+      "get": {
+        "tags": [
+          "Iceberg.Net.RestServer"
+        ],
+        "operationId": "fetchPlanningResult",
+        "parameters": [
+          {
+            "name": "namespace",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "name": "table",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "name": "plan-id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Success"
+          },
+          "400": {
+            "description": "ErrorModel"
+          },
+          "401": {
+            "description": "ErrorModel"
+          },
+          "403": {
+            "description": "ErrorModel"
+          },
+          "404": {
+            "description": "ErrorModel"
+          }
+        }
+      },
+      "delete": {
+        "tags": [
+          "Iceberg.Net.RestServer"
+        ],
+        "operationId": "cancelPlanning",
+        "parameters": [
+          {
+            "name": "namespace",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "name": "table",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "name": "plan-id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "204": {
+            "description": "Success"
+          },
+          "400": {
+            "description": "ErrorModel"
+          },
+          "401": {
+            "description": "ErrorModel"
+          },
+          "403": {
+            "description": "ErrorModel"
+          },
+          "404": {
+            "description": "ErrorModel"
+          }
+        }
+      }
+    },
+    "/v1/namespaces/{namespace}/tables/{table}/tasks": {
+      "post": {
+        "tags": [
+          "Iceberg.Net.RestServer"
+        ],
+        "operationId": "fetchScanTasks",
+        "parameters": [
+          {
+            "name": "namespace",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "name": "table",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Success"
+          },
+          "400": {
+            "description": "ErrorModel"
+          },
+          "401": {
+            "description": "ErrorModel"
+          },
+          "403": {
+            "description": "ErrorModel"
+          },
+          "404": {
+            "description": "ErrorModel"
+          }
+        }
+      }
+    },
+    "/v1/tables/rename": {
+      "post": {
+        "tags": [
+          "Iceberg.Net.RestServer"
+        ],
+        "operationId": "renameTable",
+        "parameters": [
+          {
+            "name": "Idempotency-Key",
+            "in": "header",
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "204": {
+            "description": "Success"
+          },
+          "400": {
+            "description": "ErrorModel"
+          },
+          "401": {
+            "description": "ErrorModel"
+          },
+          "403": {
+            "description": "ErrorModel"
+          },
+          "404": {
+            "description": "ErrorModel"
+          },
+          "409": {
+            "description": "ErrorModel"
+          }
+        }
+      }
+    },
+    "/v1/transactions/commit": {
+      "post": {
+        "tags": [
+          "Iceberg.Net.RestServer"
+        ],
+        "operationId": "commitTransaction",
+        "parameters": [
+          {
+            "name": "Idempotency-Key",
+            "in": "header",
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "204": {
+            "description": "Success"
+          },
+          "400": {
+            "description": "ErrorModel"
+          },
+          "401": {
+            "description": "ErrorModel"
+          },
+          "403": {
+            "description": "ErrorModel"
+          },
+          "404": {
+            "description": "ErrorModel"
+          },
+          "409": {
+            "description": "ErrorModel"
+          },
+          "5XX": {
+            "description": "Server error; for a commit, its outcome is unknown"
+          }
+        }
+      }
+    },
+    "/v1/namespaces/{namespace}/views": {
+      "get": {
+        "tags": [
+          "Iceberg.Net.RestServer"
+        ],
+        "operationId": "listViews",
+        "parameters": [
+          {
+            "name": "namespace",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "name": "pageToken",
+            "in": "query",
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "name": "pageSize",
+            "in": "query",
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Success"
+          },
+          "400": {
+            "description": "ErrorModel"
+          },
+          "401": {
+            "description": "ErrorModel"
+          },
+          "403": {
+            "description": "ErrorModel"
+          },
+          "404": {
+            "description": "ErrorModel"
+          }
+        }
+      },
+      "post": {
+        "tags": [
+          "Iceberg.Net.RestServer"
+        ],
+        "operationId": "createView",
+        "parameters": [
+          {
+            "name": "namespace",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "name": "Idempotency-Key",
+            "in": "header",
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Success"
+          },
+          "400": {
+            "description": "ErrorModel"
+          },
+          "401": {
+            "description": "ErrorModel"
+          },
+          "403": {
+            "description": "ErrorModel"
+          },
+          "404": {
+            "description": "ErrorModel"
+          },
+          "409": {
+            "description": "ErrorModel"
+          }
+        }
+      }
+    },
+    "/v1/namespaces/{namespace}/views/{view}": {
+      "get": {
+        "tags": [
+          "Iceberg.Net.RestServer"
+        ],
+        "operationId": "loadView",
+        "parameters": [
+          {
+            "name": "namespace",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "name": "view",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Success"
+          },
+          "400": {
+            "description": "ErrorModel"
+          },
+          "401": {
+            "description": "ErrorModel"
+          },
+          "403": {
+            "description": "ErrorModel"
+          },
+          "404": {
+            "description": "ErrorModel"
+          }
+        }
+      },
+      "head": {
+        "tags": [
+          "Iceberg.Net.RestServer"
+        ],
+        "operationId": "viewExists",
+        "parameters": [
+          {
+            "name": "namespace",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "name": "view",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "204": {
+            "description": "Success"
+          },
+          "400": {
+            "description": "ErrorModel"
+          },
+          "401": {
+            "description": "ErrorModel"
+          },
+          "403": {
+            "description": "ErrorModel"
+          },
+          "404": {
+            "description": "ErrorModel"
+          }
+        }
+      },
+      "post": {
+        "tags": [
+          "Iceberg.Net.RestServer"
+        ],
+        "operationId": "replaceView",
+        "parameters": [
+          {
+            "name": "namespace",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "name": "view",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "name": "Idempotency-Key",
+            "in": "header",
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Success"
+          },
+          "400": {
+            "description": "ErrorModel"
+          },
+          "401": {
+            "description": "ErrorModel"
+          },
+          "403": {
+            "description": "ErrorModel"
+          },
+          "404": {
+            "description": "ErrorModel"
+          },
+          "409": {
+            "description": "ErrorModel"
+          }
+        }
+      },
+      "delete": {
+        "tags": [
+          "Iceberg.Net.RestServer"
+        ],
+        "operationId": "dropView",
+        "parameters": [
+          {
+            "name": "namespace",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "name": "view",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "name": "Idempotency-Key",
+            "in": "header",
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "204": {
+            "description": "Success"
+          },
+          "400": {
+            "description": "ErrorModel"
+          },
+          "401": {
+            "description": "ErrorModel"
+          },
+          "403": {
+            "description": "ErrorModel"
+          },
+          "404": {
+            "description": "ErrorModel"
+          }
+        }
+      }
+    },
+    "/v1/views/rename": {
+      "post": {
+        "tags": [
+          "Iceberg.Net.RestServer"
+        ],
+        "operationId": "renameView",
+        "parameters": [
+          {
+            "name": "Idempotency-Key",
+            "in": "header",
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "204": {
+            "description": "Success"
+          },
+          "400": {
+            "description": "ErrorModel"
+          },
+          "401": {
+            "description": "ErrorModel"
+          },
+          "403": {
+            "description": "ErrorModel"
+          },
+          "404": {
+            "description": "ErrorModel"
+          },
+          "409": {
+            "description": "ErrorModel"
+          }
+        }
+      }
+    }
+  },
+  "tags": [
+    {
+      "name": "AuthSetup"
+    },
+    {
+      "name": "Iceberg.Net.RestServer"
+    }
+  ]
+}

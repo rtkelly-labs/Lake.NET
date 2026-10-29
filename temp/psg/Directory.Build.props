@@ -1,0 +1,94 @@
+<Project>
+    <PropertyGroup>
+        <!--
+      Development default only. Releases do not use this: release.yml derives the version from the
+      pushed tag and passes -p:Version, which overrides it. Bumping this number does not release
+      anything, and leaving it alone does not block a release.
+    -->
+        <Version>0.0.1</Version>
+        <LangVersion>latest</LangVersion>
+        <Nullable>enable</Nullable>
+        <ImplicitUsings>enable</ImplicitUsings>
+        <AnalysisLevel>9.0-recommended</AnalysisLevel>
+        <AnalysisMode>Recommended</AnalysisMode>
+        <EnforceCodeStyleInBuild>true</EnforceCodeStyleInBuild>
+        <!--
+      Warnings are NOT errors in local builds. CI passes `-warnaserror` explicitly instead.
+      Enabling it here breaks the build for any contributor on a newer SDK the moment that SDK
+      ships a new analyzer, which is friction paid by everyone to catch problems CI already
+      catches once.
+    -->
+        <RollForward>LatestMajor</RollForward>
+    </PropertyGroup>
+
+    <!--
+      Lock files (#394). A project that has a committed packages.lock.json restores against it, and
+      CI restores in locked mode so a changed dependency graph fails the build instead of
+      resolving silently. Opt-in by file, not by folder: the package-consumption and cross-version
+      projects restore the packages CI has just built, whose hashes change every run, so they must
+      not carry one. CiGateIntegrityTests requires a lock file beside every project in the solution.
+      To change a dependency: edit it, run `dotnet restore` with the force-evaluate switch, commit the lock files.
+    -->
+    <PropertyGroup Condition="Exists('$(MSBuildProjectDirectory)/packages.lock.json')">
+        <RestorePackagesWithLockFile>true</RestorePackagesWithLockFile>
+    </PropertyGroup>
+
+    <!-- MSBuildProjectDirectory uses backslashes on Windows. Keep folder-based
+         dependency selection identical on every runner so committed lock files apply. -->
+    <PropertyGroup>
+        <ProjectDirectoryForConditions>$([System.String]::Copy('$(MSBuildProjectDirectory)').Replace('\', '/'))</ProjectDirectoryForConditions>
+    </PropertyGroup>
+
+    <!-- Package Metadata & SourceLink -->
+    <PropertyGroup>
+        <Authors>Ryan Kelly</Authors>
+        <Copyright>Copyright (c) 2022-2026 Ryan Kelly</Copyright>
+        <PackageLicenseFile>LICENSE</PackageLicenseFile>
+        <PackageProjectUrl>https://github.com/rtkelly-labs/Parquet.SourceGenerator</PackageProjectUrl>
+        <RepositoryUrl>https://github.com/rtkelly-labs/Parquet.SourceGenerator.git</RepositoryUrl>
+        <RepositoryType>git</RepositoryType>
+        <PackageTags>parquet;source-generator;roslyn;aot;performance;serialization;dotnet</PackageTags>
+        <PackageReadmeFile>PACKAGE_README.md</PackageReadmeFile>
+        <PublishRepositoryUrl>true</PublishRepositoryUrl>
+        <EmbedUntrackedSources>true</EmbedUntrackedSources>
+        <ContinuousIntegrationBuild Condition="'$(GITHUB_ACTIONS)' == 'true'"
+            >true</ContinuousIntegrationBuild>
+        <DebugType>embedded</DebugType>
+        <DebugSymbols>true</DebugSymbols>
+    </PropertyGroup>
+
+    <ItemGroup Condition="'$(IsPackable)' != 'false'">
+        <None Include="$(MSBuildThisFileDirectory)PACKAGE_README.md" Pack="true" PackagePath="\" />
+        <None Include="$(MSBuildThisFileDirectory)LICENSE" Pack="true" PackagePath="\" />
+        <PackageReference Include="Microsoft.SourceLink.GitHub" PrivateAssets="All" />
+    </ItemGroup>
+
+    <ItemGroup Condition="'$(IsTestProject)' != 'true' And !$(ProjectDirectoryForConditions.Contains('/test/')) And !$(ProjectDirectoryForConditions.EndsWith('test')) And !$(ProjectDirectoryForConditions.Contains('/benchmarks/')) And !$(ProjectDirectoryForConditions.Contains('/samples/'))">
+        <PackageReference Include="Meziantou.Analyzer" PrivateAssets="All">
+            <IncludeAssets>runtime; build; native; contentfiles; analyzers; buildtransitive</IncludeAssets>
+        </PackageReference>
+    </ItemGroup>
+    <ItemGroup Condition="'$(IsTestProject)' != 'true' And !$(ProjectDirectoryForConditions.Contains('/test/')) And !$(ProjectDirectoryForConditions.EndsWith('test')) And !$(ProjectDirectoryForConditions.Contains('/benchmarks/')) And !$(ProjectDirectoryForConditions.Contains('/samples/'))">
+        <PackageReference Include="Roslynator.Analyzers" PrivateAssets="All" />
+    </ItemGroup>
+
+    <!-- Test, Benchmark, Tools, Samples, and CLI Project Suppressions -->
+    <PropertyGroup Condition="'$(IsTestProject)' == 'true' Or $(ProjectDirectoryForConditions.Contains('/test/')) Or $(ProjectDirectoryForConditions.EndsWith('test')) Or $(ProjectDirectoryForConditions.Contains('/benchmarks/')) Or $(ProjectDirectoryForConditions.Contains('/samples/')) Or $(MSBuildProjectName.Contains('Test')) Or $(MSBuildProjectName.Contains('Benchmark')) Or $(MSBuildProjectName.Contains('Sample')) Or $(MSBuildProjectName.Contains('CLI')) Or $(MSBuildProjectName.Contains('Gates'))">
+        <AnalysisMode>Default</AnalysisMode>
+        <AnalysisLevel>latest-recommended</AnalysisLevel>
+        <!--
+          Disable rules that are not applicable or desirable in test, benchmark, or tooling projects:
+          - CA2007: Do not directly await a Task without ConfigureAwait (unit tests run in test runner context and do not require ConfigureAwait(false))
+          - MA0004: ConfigureAwait(false)
+          - CA1812: Internal class never instantiated (test fixture models, manifests, data classes)
+          - CA1062: Validate arguments of public methods (test helpers don't need redundant defensive null checks)
+          - CA1031: Do not catch general exception types (fuzzing/negative testing deliberately catches generic Exception)
+          - CA1822: Mark members as static (test fixture methods)
+          - CA1823: Unused field (test constants and fixtures)
+          - CA1515: Consider making type internal (test and ABI matrix types)
+          - CA1815: Override Equals and operator == on value types (test structs)
+          - CA1819: Properties should not return arrays (test model property shapes)
+        -->
+        <NoWarn>$(NoWarn);CA2007;MA0004;CA1812;CA1062;CA1031;CA1822;CA1823;CA1515;CA1815;CA1819</NoWarn>
+    </PropertyGroup>
+</Project>

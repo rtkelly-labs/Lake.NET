@@ -1,0 +1,78 @@
+test	REST catalog server (in-process, PyIceberg and Spark against it)	﻿2026-10-24T21:41:17.9635074Z ##[group]Run dotnet test tests/Iceberg.Net.RestServer.Tests --nologo
+test	REST catalog server (in-process, PyIceberg and Spark against it)	2026-10-24T21:41:17.9635640Z ^[[36;1mdotnet test tests/Iceberg.Net.RestServer.Tests --nologo^[[0m
+test	REST catalog server (in-process, PyIceberg and Spark against it)	2026-10-24T21:41:17.9701059Z shell: /usr/bin/bash -e {0}
+test	REST catalog server (in-process, PyIceberg and Spark against it)	2026-10-24T21:41:17.9701347Z env:
+test	REST catalog server (in-process, PyIceberg and Spark against it)	2026-10-24T21:41:17.9701559Z   DOTNET_ROOT: /usr/share/dotnet
+test	REST catalog server (in-process, PyIceberg and Spark against it)	2026-10-24T21:41:17.9701887Z   UV_CACHE_DIR: /home/runner/work/_temp/setup-uv-cache
+test	REST catalog server (in-process, PyIceberg and Spark against it)	2026-10-24T21:41:17.9702372Z   ICEBERG_PYTHON: /home/runner/work/Iceberg.NET/Iceberg.NET/interop/.venv/bin/python
+test	REST catalog server (in-process, PyIceberg and Spark against it)	2026-10-24T21:41:17.9702798Z ##[endgroup]
+test	REST catalog server (in-process, PyIceberg and Spark against it)	2026-10-24T21:41:18.7423336Z   Determining projects to restore...
+test	REST catalog server (in-process, PyIceberg and Spark against it)	2026-10-24T21:41:20.5791385Z   All projects are up-to-date for restore.
+test	REST catalog server (in-process, PyIceberg and Spark against it)	2026-10-24T21:41:21.5873355Z   Iceberg.Net.IO -> /home/runner/work/Iceberg.NET/Iceberg.NET/src/Iceberg.Net.IO/bin/Debug/net10.0/Iceberg.Net.IO.dll
+test	REST catalog server (in-process, PyIceberg and Spark against it)	2026-10-24T21:41:21.6170604Z   Iceberg.Net.Core -> /home/runner/work/Iceberg.NET/Iceberg.NET/src/Iceberg.Net.Core/bin/Debug/net10.0/Iceberg.Net.Core.dll
+test	REST catalog server (in-process, PyIceberg and Spark against it)	2026-10-24T21:41:21.7763877Z   Iceberg.Net.Puffin -> /home/runner/work/Iceberg.NET/Iceberg.NET/src/Iceberg.Net.Puffin/bin/Debug/net10.0/Iceberg.Net.Puffin.dll
+test	REST catalog server (in-process, PyIceberg and Spark against it)	2026-10-24T21:41:21.9265906Z   Iceberg.Net.Avro -> /home/runner/work/Iceberg.NET/Iceberg.NET/src/Iceberg.Net.Avro/bin/Debug/net10.0/Iceberg.Net.Avro.dll
+test	REST catalog server (in-process, PyIceberg and Spark against it)	2026-10-24T21:41:22.0936534Z   Iceberg.Net.Catalog -> /home/runner/work/Iceberg.NET/Iceberg.NET/src/Iceberg.Net.Catalog/bin/Debug/net10.0/Iceberg.Net.Catalog.dll
+test	REST catalog server (in-process, PyIceberg and Spark against it)	2026-10-24T21:41:22.2268200Z   Iceberg.Net.Data -> /home/runner/work/Iceberg.NET/Iceberg.NET/src/Iceberg.Net.Data/bin/Debug/net10.0/Iceberg.Net.Data.dll
+test	REST catalog server (in-process, PyIceberg and Spark against it)	2026-10-24T21:41:22.4548366Z   Iceberg.Net.Linq -> /home/runner/work/Iceberg.NET/Iceberg.NET/src/Iceberg.Net.Linq/bin/Debug/net10.0/Iceberg.Net.Linq.dll
+test	REST catalog server (in-process, PyIceberg and Spark against it)	2026-10-24T21:41:22.4596463Z   Iceberg.Net.TestSupport -> /home/runner/work/Iceberg.NET/Iceberg.NET/tests/Iceberg.Net.TestSupport/bin/Debug/net10.0/Iceberg.Net.TestSupport.dll
+test	REST catalog server (in-process, PyIceberg and Spark against it)	2026-10-24T21:41:22.6784659Z   Iceberg.Net.EntityFrameworkCore -> /home/runner/work/Iceberg.NET/Iceberg.NET/src/Iceberg.Net.EntityFrameworkCore/bin/Debug/net10.0/Iceberg.Net.EntityFrameworkCore.dll
+test	REST catalog server (in-process, PyIceberg and Spark against it)	2026-10-24T21:41:25.5929096Z   Iceberg.Net.RestServer -> /home/runner/work/Iceberg.NET/Iceberg.NET/src/Iceberg.Net.RestServer/bin/Debug/net10.0/Iceberg.Net.RestServer.dll
+test	REST catalog server (in-process, PyIceberg and Spark against it)	2026-10-24T21:41:27.7908256Z   Iceberg.Net.RestServer.Tests -> /home/runner/work/Iceberg.NET/Iceberg.NET/tests/Iceberg.Net.RestServer.Tests/bin/Debug/net10.0/Iceberg.Net.RestServer.Tests.dll
+test	REST catalog server (in-process, PyIceberg and Spark against it)	2026-10-24T21:41:27.8872622Z Test run for /home/runner/work/Iceberg.NET/Iceberg.NET/tests/Iceberg.Net.RestServer.Tests/bin/Debug/net10.0/Iceberg.Net.RestServer.Tests.dll (.NETCoreApp,Version=v10.0)
+test	REST catalog server (in-process, PyIceberg and Spark against it)	2026-10-24T21:41:28.1147437Z A total of 1 test files matched the specified pattern.
+test	REST catalog server (in-process, PyIceberg and Spark against it)	2026-10-24T21:41:35.1407043Z [xUnit.net 00:00:06.38]     Iceberg.Net.RestServer.Tests.CrossEngineTests.Spark_reads_through_server_side_scan_planning [SKIP]
+test	REST catalog server (in-process, PyIceberg and Spark against it)	2026-10-24T21:41:35.1453408Z   Skipped Iceberg.Net.RestServer.Tests.CrossEngineTests.Spark_reads_through_server_side_scan_planning [1 ms]
+test	REST catalog server (in-process, PyIceberg and Spark against it)	2026-10-24T21:41:43.9964856Z [xUnit.net 00:00:15.24]     Iceberg.Net.RestServer.Tests.AzureCredentialVendingTests.Azurite_enforces_the_vended_tokens [SKIP]
+test	REST catalog server (in-process, PyIceberg and Spark against it)	2026-10-24T21:41:45.2904097Z   Skipped Iceberg.Net.RestServer.Tests.AzureCredentialVendingTests.Azurite_enforces_the_vended_tokens [1 ms]
+test	REST catalog server (in-process, PyIceberg and Spark against it)	2026-10-24T21:41:45.4122271Z [xUnit.net 00:00:16.65]     Iceberg.Net.RestServer.Tests.CrossEngineTests.PyIceberg_signs_s3_requests_through_the_server [FAIL]
+test	REST catalog server (in-process, PyIceberg and Spark against it)	2026-10-24T21:41:45.5673246Z   Failed Iceberg.Net.RestServer.Tests.CrossEngineTests.PyIceberg_signs_s3_requests_through_the_server [3 s]
+test	REST catalog server (in-process, PyIceberg and Spark against it)	2026-10-24T21:41:45.5681256Z   Error Message:
+test	REST catalog server (in-process, PyIceberg and Spark against it)	2026-10-24T21:41:45.5683457Z    System.InvalidOperationException : Authentication is on but no Iceberg:Authorization:Grants are configured, which would make every authenticated principal an admin. Configure grants, or set Iceberg:Authorization:AllowAll=true.
+test	REST catalog server (in-process, PyIceberg and Spark against it)	2026-10-24T21:41:45.5685333Z   Stack Trace:
+test	REST catalog server (in-process, PyIceberg and Spark against it)	2026-10-24T21:41:45.5686901Z      at Iceberg.Net.RestServer.Endpoints.ValidateSecurity(RestServerOptions options) in /_/src/Iceberg.Net.RestServer/Endpoints.cs:line 78
+test	REST catalog server (in-process, PyIceberg and Spark against it)	2026-10-24T21:41:45.5689421Z    at Iceberg.Net.RestServer.Endpoints.MapIcebergRestCatalog(WebApplication app) in /_/src/Iceberg.Net.RestServer/Endpoints.cs:line 84
+test	REST catalog server (in-process, PyIceberg and Spark against it)	2026-10-24T21:41:45.5691502Z    at Iceberg.Net.RestServer.RestServer.Build(String[] args, Action`1 configure, Action`1 builder) in /_/src/Iceberg.Net.RestServer/RestServer.cs:line 89
+test	REST catalog server (in-process, PyIceberg and Spark against it)	2026-10-24T21:41:45.5694038Z    at Iceberg.Net.RestServer.Tests.KestrelHost.StartAsync(Action`1 configure, String under, Action`1 services) in /home/runner/work/Iceberg.NET/Iceberg.NET/tests/Iceberg.Net.RestServer.Tests/CrossEngineTests.cs:line 36
+test	REST catalog server (in-process, PyIceberg and Spark against it)	2026-10-24T21:41:45.5697430Z    at Iceberg.Net.RestServer.Tests.CrossEngineTests.PyIceberg_signs_s3_requests_through_the_server() in /home/runner/work/Iceberg.NET/Iceberg.NET/tests/Iceberg.Net.RestServer.Tests/CrossEngineTests.cs:line 387
+test	REST catalog server (in-process, PyIceberg and Spark against it)	2026-10-24T21:41:45.5700115Z    at Iceberg.Net.RestServer.Tests.CrossEngineTests.PyIceberg_signs_s3_requests_through_the_server() in /home/runner/work/Iceberg.NET/Iceberg.NET/tests/Iceberg.Net.RestServer.Tests/CrossEngineTests.cs:line 406
+test	REST catalog server (in-process, PyIceberg and Spark against it)	2026-10-24T21:41:45.5701643Z --- End of stack trace from previous location ---
+test	REST catalog server (in-process, PyIceberg and Spark against it)	2026-10-24T21:41:47.7010026Z [xUnit.net 00:00:18.94]     Iceberg.Net.RestServer.Tests.CrossEngineTests.Spark_and_the_dotnet_client_share_tables_through_the_server [SKIP]
+test	REST catalog server (in-process, PyIceberg and Spark against it)	2026-10-24T21:41:47.7086828Z [xUnit.net 00:00:18.95]     Iceberg.Net.RestServer.Tests.CrossEngineTests.PyIceberg_reads_through_server_side_scan_planning [FAIL]
+test	REST catalog server (in-process, PyIceberg and Spark against it)	2026-10-24T21:41:47.7111888Z [xUnit.net 00:00:18.95]     Iceberg.Net.RestServer.Tests.CrossEngineTests.Spark_signs_s3_requests_through_the_server [SKIP]
+test	REST catalog server (in-process, PyIceberg and Spark against it)	2026-10-24T21:41:47.7135744Z [xUnit.net 00:00:18.96]     Iceberg.Net.RestServer.Tests.CrossEngineTests.Spark_incremental_reads_match_server_incremental_plans [SKIP]
+test	REST catalog server (in-process, PyIceberg and Spark against it)	2026-10-24T21:41:48.1112072Z   Skipped Iceberg.Net.RestServer.Tests.CrossEngineTests.Spark_and_the_dotnet_client_share_tables_through_the_server [1 ms]
+test	REST catalog server (in-process, PyIceberg and Spark against it)	2026-10-24T21:41:48.1114224Z   Failed Iceberg.Net.RestServer.Tests.CrossEngineTests.PyIceberg_reads_through_server_side_scan_planning [7 ms]
+test	REST catalog server (in-process, PyIceberg and Spark against it)	2026-10-24T21:41:48.1115449Z   Error Message:
+test	REST catalog server (in-process, PyIceberg and Spark against it)	2026-10-24T21:41:48.1117853Z    System.InvalidOperationException : Authentication is on but no Iceberg:Authorization:Grants are configured, which would make every authenticated principal an admin. Configure grants, or set Iceberg:Authorization:AllowAll=true.
+test	REST catalog server (in-process, PyIceberg and Spark against it)	2026-10-24T21:41:48.1119912Z   Stack Trace:
+test	REST catalog server (in-process, PyIceberg and Spark against it)	2026-10-24T21:41:48.1121239Z      at Iceberg.Net.RestServer.Endpoints.ValidateSecurity(RestServerOptions options) in /_/src/Iceberg.Net.RestServer/Endpoints.cs:line 78
+test	REST catalog server (in-process, PyIceberg and Spark against it)	2026-10-24T21:41:48.1123342Z    at Iceberg.Net.RestServer.Endpoints.MapIcebergRestCatalog(WebApplication app) in /_/src/Iceberg.Net.RestServer/Endpoints.cs:line 84
+test	REST catalog server (in-process, PyIceberg and Spark against it)	2026-10-24T21:41:48.1125997Z    at Iceberg.Net.RestServer.RestServer.Build(String[] args, Action`1 configure, Action`1 builder) in /_/src/Iceberg.Net.RestServer/RestServer.cs:line 89
+test	REST catalog server (in-process, PyIceberg and Spark against it)	2026-10-24T21:41:48.1129091Z    at Iceberg.Net.RestServer.Tests.KestrelHost.StartAsync(Action`1 configure, String under, Action`1 services) in /home/runner/work/Iceberg.NET/Iceberg.NET/tests/Iceberg.Net.RestServer.Tests/CrossEngineTests.cs:line 36
+test	REST catalog server (in-process, PyIceberg and Spark against it)	2026-10-24T21:41:48.1132400Z    at Iceberg.Net.RestServer.Tests.CrossEngineTests.PyIceberg_reads_through_server_side_scan_planning() in /home/runner/work/Iceberg.NET/Iceberg.NET/tests/Iceberg.Net.RestServer.Tests/CrossEngineTests.cs:line 170
+test	REST catalog server (in-process, PyIceberg and Spark against it)	2026-10-24T21:41:48.1134282Z --- End of stack trace from previous location ---
+test	REST catalog server (in-process, PyIceberg and Spark against it)	2026-10-24T21:41:48.1135499Z   Skipped Iceberg.Net.RestServer.Tests.CrossEngineTests.Spark_signs_s3_requests_through_the_server [1 ms]
+test	REST catalog server (in-process, PyIceberg and Spark against it)	2026-10-24T21:41:48.1137449Z   Skipped Iceberg.Net.RestServer.Tests.CrossEngineTests.Spark_incremental_reads_match_server_incremental_plans [1 ms]
+test	REST catalog server (in-process, PyIceberg and Spark against it)	2026-10-24T21:41:54.1075921Z 
+test	REST catalog server (in-process, PyIceberg and Spark against it)	2026-10-24T21:41:54.1115947Z Failed!  - Failed:     2, Passed:   126, Skipped:     5, Total:   133, Duration: 24 s - Iceberg.Net.RestServer.Tests.dll (net10.0)
+test	REST catalog server (in-process, PyIceberg and Spark against it)	2026-10-24T21:41:54.1815711Z ##[error]Process completed with exit code 1.
+ci	Report the verdict of every job	﻿2026-10-24T21:41:59.8337394Z ##[group]Run set -uo pipefail
+ci	Report the verdict of every job	2026-10-24T21:41:59.8338163Z ^[[36;1mset -uo pipefail^[[0m
+ci	Report the verdict of every job	2026-10-24T21:41:59.8338695Z ^[[36;1mfailed=0^[[0m
+ci	Report the verdict of every job	2026-10-24T21:41:59.8339185Z ^[[36;1mfor job in TEST; do^[[0m
+ci	Report the verdict of every job	2026-10-24T21:41:59.8339880Z ^[[36;1m  result="${!job}"^[[0m
+ci	Report the verdict of every job	2026-10-24T21:41:59.8340455Z ^[[36;1m  if [ "${result}" = "success" ]; then^[[0m
+ci	Report the verdict of every job	2026-10-24T21:41:59.8341792Z ^[[36;1m    echo "✅ ${job}: ${result}"^[[0m
+ci	Report the verdict of every job	2026-10-24T21:41:59.8342979Z ^[[36;1m  else^[[0m
+ci	Report the verdict of every job	2026-10-24T21:41:59.8343959Z ^[[36;1m    echo "::error::${job} did not succeed (${result})"^[[0m
+ci	Report the verdict of every job	2026-10-24T21:41:59.8345093Z ^[[36;1m    failed=1^[[0m
+ci	Report the verdict of every job	2026-10-24T21:41:59.8345998Z ^[[36;1m  fi^[[0m
+ci	Report the verdict of every job	2026-10-24T21:41:59.8346744Z ^[[36;1mdone^[[0m
+ci	Report the verdict of every job	2026-10-24T21:41:59.8347239Z ^[[36;1mexit "${failed}"^[[0m
+ci	Report the verdict of every job	2026-10-24T21:41:59.9653141Z shell: /usr/bin/bash -e {0}
+ci	Report the verdict of every job	2026-10-24T21:41:59.9654544Z env:
+ci	Report the verdict of every job	2026-10-24T21:41:59.9655279Z   TEST: failure
+ci	Report the verdict of every job	2026-10-24T21:41:59.9656009Z ##[endgroup]
+ci	Report the verdict of every job	2026-10-24T21:41:59.9970951Z ##[error]TEST did not succeed (failure)
+ci	Report the verdict of every job	2026-10-24T21:41:59.9988823Z ##[error]Process completed with exit code 1.
