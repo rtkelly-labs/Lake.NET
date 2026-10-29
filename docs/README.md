@@ -19,6 +19,7 @@
 | [upstream/README.md](upstream/README.md) | Proposed upstream tickets (Parquet.Net, PyIceberg, Gravitino) and the Parquet.SourceGenerator patch, ready to file; none filed |
 | [puffin.md](puffin.md) | Puffin files, deletion vectors, Theta sketches, the v2→v3 position-delete converter, NDV statistics |
 | [parquet-sourcegenerator.md](parquet-sourcegenerator.md) | Using Parquet.SourceGenerator as a typed Iceberg write path: measured gaps and where to fix each |
+| [source-generation.md](source-generation.md) | Zero-reflection row mapping and schema derivation via Roslyn source generation: differences from main, AOT safety, and learnings from Parquet.SourceGenerator |
 | [libraries.md](libraries.md) | Libraries under the hood (Avro, Parquet, ORC, compression, Roaring/DVs, Puffin, sketches, Arrow, SigV4) and CLR type pitfalls |
 | [emulation.md](emulation.md) | The local AWS + REST emulation stack, its fidelity shims, and known gaps |
 | [regression-suite.md](regression-suite.md) | Test tiers, running in emulation and AWS, environment variables, CI, shadow comparison |

@@ -5,6 +5,7 @@
     <Nullable>enable</Nullable>
     <IsRoslynComponent>true</IsRoslynComponent>
     <EnforceExtendedAnalyzerRules>true</EnforceExtendedAnalyzerRules>
+    <IsPackable>false</IsPackable>
     <IncludeBuildOutput>false</IncludeBuildOutput>
     <RootNamespace>Iceberg.Net.SourceGenerator</RootNamespace>
     <Description>Roslyn source generator for zero-reflection Iceberg row mapping and compile-time schema derivation.</Description>

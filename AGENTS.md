@@ -23,6 +23,7 @@ Self-contained C# port of Apache Iceberg. Keep it that way: no references to cod
 | Following Iceberg v4 | [docs/iceberg-v4.md](docs/iceberg-v4.md) |
 | Deletes, deletion vectors, Puffin, statistics | [docs/puffin.md](docs/puffin.md) |
 | Adopting files from other Parquet writers (Parquet.SourceGenerator) | [docs/parquet-sourcegenerator.md](docs/parquet-sourcegenerator.md) |
+| Compile-time source generation (zero-reflection mapping, AOT) | [docs/source-generation.md](docs/source-generation.md) |
 
 ## Commands
 
