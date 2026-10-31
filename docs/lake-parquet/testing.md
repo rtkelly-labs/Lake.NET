@@ -130,6 +130,37 @@ dotnet run -c Release -- --filter '*' --exporters json --artifacts /tmp/bench/fo
 cd ../../.. && dotnet run eng/lake/CompareBenchmarks.cs -- /tmp/bench/upstream/results /tmp/bench/fork/results upstream fork
 ```
 
+## Native AOT
+
+Lake.Parquet is supported under native AOT and trimming, and that is enforced and proven, not assumed:
+
+- **Enforced:** the Lake build sets `IsAotCompatible` (`eng/lake/Lake.Parquet.targets`), so any trimming or AOT finding
+  in the package fails the build. With the serializer left out, there is none.
+- **Proven natively:** `eng/lake/Lake.Parquet.AotTests` is published with `PublishAot`, every trimming and AOT warning
+  an error, against the package as published, and runs:
+
+| Mode | What it checks |
+|---|---|
+| `api` | the calls generated readers and writers make (typed fields of every type, nullable reads into `T?[]`, strings as chars and as UTF-8, decimals with their scale, timestamps with their kind, statistics) under every codec, encoding hint and page layout, and with encryption |
+| `cases <from> <count>` | the conformance harness's generated cases, checked by its library-only oracles (values, levels, field IDs, row counts, statistics) |
+| `write`/`read <from> <count> <dir>` | files one build wrote, read by the other: JIT to native and native to JIT |
+| `hashes <from> <count>` | the files written natively are byte for byte the JIT build's (not encrypted ones, whose nonces are random, nor gzip, whose zlib native AOT links itself) |
+| `corpus <dir>` | upstream's test files decoded to the same schema, values and levels as on the JIT |
+
+CI's `aot` job (required by `lake-ci`) runs every mode, 3,000 fixed and 2,000 fresh seeds. Locally:
+
+```bash
+cd eng/lake/Lake.Parquet.AotTests
+dotnet publish -c Release -r linux-x64 -o /tmp/aot          # needs clang and zlib1g-dev
+/tmp/aot/Lake.Parquet.AotTests api
+/tmp/aot/Lake.Parquet.AotTests cases 1 3000
+dotnet run -c Release -- hashes 1 1000 > /tmp/jit.txt && /tmp/aot/Lake.Parquet.AotTests hashes 1 1000 | diff /tmp/jit.txt -
+```
+
+That builds the plain library (upstream's names); CI does the same against the stripped, renamed package, which is
+what ships. A consumer generic over `T` that hands `typeof(T)` to a data field annotates its `T` with
+`[DynamicallyAccessedMembers(DynamicallyAccessedMemberTypes.Interfaces)]`, as the analyzer will say.
+
 ## Profiling
 
 The benchmark project also runs one scenario in a loop for a profiler (`profile <scenario> [seconds]`; the

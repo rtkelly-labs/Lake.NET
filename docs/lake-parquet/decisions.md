@@ -44,17 +44,20 @@ code and its tooling follow it.
 7. **Performance work is on the core path, measured, and changes no file layout by default.** Changes target the calls
    generated readers and writers make (page I/O, compression, encoding, levels, statistics), each with its numbers in
    its record. Anything that changes the files written (data pages within a chunk) is an option, off by default.
-8. **The fork publishes its own package, `Lake.Parquet`**, renamed at build time, beside Parquet.Net rather than in
+8. **Lake.Parquet supports native AOT and trimming, verified on every build.** The package is analyzer-clean with
+   `IsAotCompatible` as a build error, and a native AOT regression suite, sharing the conformance harness's generator,
+   runs it natively against the JIT build (`testing.md`, "Native AOT"). A change that breaks either does not merge.
+9. **The fork publishes its own package, `Lake.Parquet`**, renamed at build time, beside Parquet.Net rather than in
    place of it, with upstream's licence and attribution.
 
 ## Upstream
 
-9. **Changes go upstream by hand only.** Upstream does not accept issues, pull requests or comments written by an LLM.
+10. **Changes go upstream by hand only.** Upstream does not accept issues, pull requests or comments written by an LLM.
    A person proposes a change from its change branch, using its record ([upstreaming.md](upstreaming.md)). The aim is a
    stack that shrinks: a change leaves when upstream has it or an equivalent.
 
 ## Where things live
 
-10. **Decisions live in Lake.NET, detail lives with the change.** This folder is the fork's design and process; the
+11. **Decisions live in Lake.NET, detail lives with the change.** This folder is the fork's design and process; the
     fork carries its code, its tooling, a short `README.md` and `AGENTS.md`, and the per-change records, which are
     written in the change's own pull request.
