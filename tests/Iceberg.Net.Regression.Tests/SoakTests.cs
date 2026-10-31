@@ -121,6 +121,7 @@ public sealed class SoakTests
                 }
             })).ToList();
             var maintenance = new ConcurrentBag<string>();
+            var gcEnabled = TableLocations.IsGcEnabled((await catalog.LoadTableAsync(id)).Metadata);
             tasks.Add(Task.Run(async () =>
             {
                 var table = await catalog.LoadTableAsync(id);
@@ -135,6 +136,15 @@ public sealed class SoakTests
                     catch (Iceberg.Net.Metadata.CommitFailedException)
                     {
                         maintenance.Add("compact-gave-up"); // lost every race to the writers: allowed, and it left no trace
+                    }
+                    if (!gcEnabled)
+                    {
+                        // Nessie creates tables with gc.enabled=false (its branches share files); expiry must refuse
+                        // (ExpireAsync checks before planning anything), and compaction alone runs against the writers.
+                        await Assert.ThrowsAsync<ValidationException>(() => Maintenance.ExpireAsync(table, new ExpireOptions { OlderThanMs = long.MaxValue, RetainLast = 2 }));
+                        maintenance.Add("expire-refused");
+                        await Task.Delay(20);
+                        continue;
                     }
                     try
                     {
@@ -167,7 +177,7 @@ public sealed class SoakTests
             var report = await TableValidator.ValidateAsync(final, new ValidationOptions { Deep = true });
             Assert.True(report.IsValid, report.ToString());
             Assert.True(operations.Count >= Writers, $"only {operations.Count} operations ran");
-            Assert.Contains("expire", maintenance);
+            Assert.Contains(gcEnabled ? "expire" : "expire-refused", maintenance);
             // Liveness, loosely: starvation must stay the exception, not the rule.
             Assert.True(gaveUp.Count * 4 <= operations.Count, $"{gaveUp.Count} operations gave up vs {operations.Count} committed");
         }
