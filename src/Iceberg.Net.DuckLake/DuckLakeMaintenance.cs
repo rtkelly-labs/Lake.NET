@@ -303,15 +303,15 @@ public sealed partial class DuckLakeCatalog
             var files = await db.DataFiles.Select(f => new { f.TableId, f.Path, f.PathIsRelative }).ToListAsync(ct);
             var deletes = await db.DeleteFiles.Select(f => new { f.TableId, f.Path, f.PathIsRelative }).ToListAsync(ct);
             var locations = await TableLocationsAsync(db, files.Select(f => f.TableId).Concat(deletes.Select(d => d.TableId)).Distinct().ToList(), ct);
-            foreach (var f in files.Concat(deletes)) referenced.Add(Normalise(Resolve(locations[f.TableId], f.Path, f.PathIsRelative ?? true)));
-            foreach (var f in await db.FilesScheduledForDeletion.ToListAsync(ct)) referenced.Add(Normalise(f.PathIsRelative == true ? DataPath + f.Path : f.Path));
+            foreach (var f in files.Concat(deletes)) referenced.Add(NormaliseLocation(Resolve(locations[f.TableId], f.Path, f.PathIsRelative ?? true)));
+            foreach (var f in await db.FilesScheduledForDeletion.ToListAsync(ct)) referenced.Add(NormaliseLocation(f.PathIsRelative == true ? DataPath + f.Path : f.Path));
         }
         var cutoff = DateTime.UtcNow - age;
         var orphans = new List<string>();
         await foreach (var f in lister.ListAsync(DataPath, ct))
         {
             if (!f.Location.EndsWith(".parquet", StringComparison.OrdinalIgnoreCase) && !f.Location.EndsWith(".puffin", StringComparison.OrdinalIgnoreCase)) continue;
-            if (f.LastModifiedUtc < cutoff && !referenced.Contains(Normalise(f.Location)) && DuckLakePaths.IsUnder(DataPath, f.Location)) orphans.Add(f.Location);
+            if (f.LastModifiedUtc < cutoff && !referenced.Contains(NormaliseLocation(f.Location)) && DuckLakePaths.IsUnder(DataPath, f.Location)) orphans.Add(f.Location);
         }
         if (!dryRun)
             foreach (var o in orphans)
@@ -321,7 +321,19 @@ public sealed partial class DuckLakeCatalog
             }
         scope.Succeeded();
         return orphans;
+    }
 
-        static string Normalise(string location) => location.Replace('\\', '/').Replace("//", "/");
+    /// <summary>
+    /// A location in the one form the orphan scan compares catalog paths and listed objects in: forward slashes, doubled
+    /// slashes in the path collapsed, and a scheme's <c>://</c> (<c>s3://bucket/…</c>) left as it is.
+    /// </summary>
+    internal static string NormaliseLocation(string location)
+    {
+        var l = location.Replace('\\', '/');
+        var scheme = l.IndexOf("://", StringComparison.Ordinal);
+        var start = scheme > 0 && !l[..scheme].Contains('/') ? scheme + 3 : 0;
+        var path = l[start..];
+        while (path.Contains("//", StringComparison.Ordinal)) path = path.Replace("//", "/", StringComparison.Ordinal);
+        return l[..start] + path;
     }
 }

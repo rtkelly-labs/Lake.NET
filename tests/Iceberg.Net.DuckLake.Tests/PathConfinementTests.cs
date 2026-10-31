@@ -1,5 +1,4 @@
 using Iceberg.Net.DuckLake.TestSupport;
-using Iceberg.Net.IO;
 using Iceberg.Net.TestSupport;
 
 namespace Iceberg.Net.DuckLake.Tests;
@@ -135,30 +134,11 @@ public abstract class PathConfinementTests : IAsyncLifetime
         var orphan = Path.Combine(_lake.DataPath, "main", "t", "ducklake-crashed.parquet");
         await File.WriteAllBytesAsync(orphan, [1, 2, 3]);
         // A store whose listing also returns locations outside the prefix (a misbehaving or shared listing), all old.
-        var io = new OutsideListing(_lake.IO, [sentinel, _lake.DataPath + "main/../../sentinel.parquet"]);
+        var io = new AgedListingIO(_lake.IO, TimeSpan.FromDays(4), [sentinel, _lake.DataPath + "main/../../sentinel.parquet"]);
         var catalog = await DuckLakeCatalog.OpenAsync(_lake.Store, io);
         Assert.Equal([orphan], (await catalog.DeleteOrphanedFilesAsync()).Select(Path.GetFullPath));
         Assert.True(File.Exists(sentinel));
         Assert.False(File.Exists(orphan));
-    }
-
-    /// <summary>A local store whose listing is aged by four days and also returns <paramref name="extra"/>.</summary>
-    private sealed class OutsideListing(LocalFileIO inner, IReadOnlyList<string> extra) : IFileIO, ISupportsListing
-    {
-        public async IAsyncEnumerable<StoredFile> ListAsync(string prefix, [System.Runtime.CompilerServices.EnumeratorCancellation] CancellationToken ct = default)
-        {
-            await foreach (var f in inner.ListAsync(prefix, ct)) yield return f with { LastModifiedUtc = DateTime.UtcNow.AddDays(-4) };
-            foreach (var e in extra) yield return new StoredFile(e, 3, DateTime.UtcNow.AddDays(-4));
-        }
-
-        public Task<byte[]> ReadAllAsync(string location, CancellationToken ct = default) => inner.ReadAllAsync(location, ct);
-        public Task<Stream> OpenReadAsync(string location, CancellationToken ct = default) => inner.OpenReadAsync(location, ct);
-        public Task<byte[]> ReadRangeAsync(string location, long offset, int length, CancellationToken ct = default) => inner.ReadRangeAsync(location, offset, length, ct);
-        public Task<long> LengthAsync(string location, CancellationToken ct = default) => inner.LengthAsync(location, ct);
-        public Task<bool> ExistsAsync(string location, CancellationToken ct = default) => inner.ExistsAsync(location, ct);
-        public Task WriteAsync(string location, ReadOnlyMemory<byte> content, bool overwrite = false, CancellationToken ct = default) => inner.WriteAsync(location, content, overwrite, ct);
-        public Task DeleteAsync(string location, CancellationToken ct = default) => inner.DeleteAsync(location, ct);
-        public void Dispose() { }
     }
 }
 
