@@ -55,5 +55,7 @@ internal static class Targets
         ["roaring"] = b => RoaringPositionBitmap.Deserialize(b),
         ["mumbling"] = b => MumblingBitmap.Deserialize(b),
         ["theta"] = b => ThetaSketch.Deserialize(b),
+        // Any Avro object container file: Iceberg's Avro data files go through the same reader as its manifests.
+        ["avro"] = b => AvroContainer.Read(b),
     };
 }
