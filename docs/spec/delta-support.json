@@ -1,5 +1,5 @@
 {
-  "$comment": "Lake.Delta's support declaration (docs/lake/goal.md G1; docs/lake/verification/gap-review-2026-10.md §8). One entry per Delta table feature. status: supported | refused | planned. A supported feature needs a linked test that honours it; a refused one needs a test showing the refusal (the error users see). Writing to a table that lists a writer feature we don't support must be refused before anything is written: ignoring a writer feature corrupts the table for every other engine. Protocol facts are from the Delta protocol specification and are checked in this repository only once a tagged test exists (docs/lake/delta.md).",
+  "$comment": "Lake.Delta's support declaration (docs/lake/goal.md G1; docs/lake/verification/gap-review-2026-10.md §8). One entry per Delta table feature. status: supported | refused | planned. A supported feature needs a linked test that honours it; a refused one needs a test showing the refusal (the error users see). Writing to a table that lists a writer feature we don't support must be refused before anything is written: ignoring a writer feature corrupts the table for every other engine. Protocol facts are from the Delta protocol specification and are checked in this repository only once a tagged test exists (docs/lake/delta.md). reader: what Lake.Delta's reader does with a table that lists the feature: supported (read, honouring it), refused (DeltaUnsupportedFeatureException naming it, before any data is read), or not-applicable (a writer feature: readers need nothing). DeltaFeatureDeclarationTests (tests/Lake.Delta.Tests) checks reader against DeltaFeatures.SupportedReaderFeatures.",
   "protocol": {
     "spec": "https://github.com/delta-io/delta/blob/master/PROTOCOL.md",
     "pinned": null,
@@ -26,77 +26,93 @@
       "kind": "writer",
       "status": "planned",
       "writerObligation": "Refuse any commit that removes data (remove actions with dataChange=true) while delta.appendOnly=true",
-      "phase": "write"
+      "phase": "write",
+      "reader": "not-applicable"
     },
     {
       "name": "invariants",
       "kind": "writer",
       "status": "planned",
       "writerObligation": "Evaluate column invariants (delta.invariants metadata) on every written row, or refuse to write",
-      "phase": "write"
+      "phase": "write",
+      "reader": "not-applicable"
     },
     {
       "name": "checkConstraints",
       "kind": "writer",
       "status": "planned",
       "writerObligation": "Evaluate delta.constraints.* SQL expressions on every written row, or refuse to write (needs a SQL expression evaluator)",
-      "phase": "write"
+      "phase": "write",
+      "reader": "not-applicable"
     },
     {
       "name": "changeDataFeed",
       "kind": "writer",
       "status": "planned",
       "writerObligation": "When delta.enableChangeDataFeed=true, write cdc files for updates and deletes (or refuse those operations)",
-      "phase": "write"
+      "phase": "write",
+      "reader": "not-applicable"
     },
     {
       "name": "generatedColumns",
       "kind": "writer",
       "status": "planned",
       "writerObligation": "Compute or validate generation expressions for generated columns, or refuse to write",
-      "phase": "write"
+      "phase": "write",
+      "reader": "not-applicable"
     },
     {
       "name": "identityColumns",
       "kind": "writer",
       "status": "planned",
       "writerObligation": "Assign identity values and advance the high-water mark in metadata, or refuse to write",
-      "phase": "write"
+      "phase": "write",
+      "reader": "not-applicable"
     },
     {
       "name": "columnMapping",
       "kind": "reader-writer",
       "status": "planned",
       "writerObligation": "Resolve by physical name (name mode) or field ID (id mode); write physical names and IDs; keep maxColumnId",
-      "phase": "read"
+      "phase": "read",
+      "reader": "supported",
+      "readerEvidence": "DAT column_mapping, iceberg_compat_v1 (name mode); ProtocolGateTests (id mode by field ID; files without IDs refused)"
     },
     {
       "name": "deletionVectors",
       "kind": "reader-writer",
       "status": "planned",
       "writerObligation": "Apply DVs on read; on write, keep DVs consistent with tightBounds and numRecords; Roaring64 bytes shared with Iceberg v3 (to be verified against Delta's DV test files)",
-      "phase": "read"
+      "phase": "read",
+      "reader": "supported",
+      "readerEvidence": "DAT deletion_vectors; delta-rs table-with-dv-small; DeletionVectorTests (u, p, i; portable and native bitmap layouts)"
     },
     {
       "name": "timestampNtz",
       "kind": "reader-writer",
       "status": "planned",
       "writerObligation": "Read and write timestamp without time zone",
-      "phase": "read"
+      "phase": "read",
+      "reader": "supported",
+      "readerEvidence": "DAT timestamp_ntz"
     },
     {
       "name": "v2Checkpoint",
       "kind": "reader-writer",
       "status": "planned",
       "writerObligation": "Read V2 checkpoints with sidecars; write V2 checkpoints when the feature is present",
-      "phase": "read"
+      "phase": "read",
+      "reader": "supported",
+      "readerEvidence": "LogReplayTests.A_V2_checkpoint_with_a_sidecar_is_read (UUID-named JSON checkpoint + sidecar)"
     },
     {
       "name": "vacuumProtocolCheck",
       "kind": "reader-writer",
       "status": "planned",
       "writerObligation": "Vacuum must check the protocol before deleting files",
-      "phase": "maintenance"
+      "phase": "maintenance",
+      "reader": "supported",
+      "readerEvidence": "Readers only acknowledge it; ProtocolGateTests.Writer_only_features_do_not_stop_a_reader"
     },
     {
       "name": "typeWidening",
@@ -104,7 +120,9 @@
       "status": "planned",
       "writerObligation": "Read files written before a widening; record widenings in field metadata",
       "phase": "read",
-      "note": "Defined in PROTOCOL.md sections but missing from its Valid Feature Names appendix at 7197686"
+      "note": "Defined in PROTOCOL.md sections but missing from its Valid Feature Names appendix at 7197686",
+      "reader": "supported",
+      "readerEvidence": "ProtocolGateTests.Type_widening_converts_old_files_to_the_wider_type; unsupported delta.typeChanges refused"
     },
     {
       "name": "variantType",
@@ -112,7 +130,9 @@
       "status": "planned",
       "writerObligation": "Parquet variant encoding (shared with Iceberg v3 once Lake.Data has it)",
       "phase": "read",
-      "note": "Defined in PROTOCOL.md sections but missing from its Valid Feature Names appendix at 7197686"
+      "note": "Defined in PROTOCOL.md sections but missing from its Valid Feature Names appendix at 7197686",
+      "reader": "refused",
+      "readerEvidence": "ProtocolGateTests.Unsupported_reader_features_are_refused_together_by_name; a variant column in the schema is refused too"
     },
     {
       "name": "rowTracking",
@@ -122,14 +142,16 @@
       "phase": "write",
       "requires": [
         "domainMetadata"
-      ]
+      ],
+      "reader": "not-applicable"
     },
     {
       "name": "domainMetadata",
       "kind": "writer",
       "status": "planned",
       "writerObligation": "Preserve domainMetadata actions; conflict-check them",
-      "phase": "write"
+      "phase": "write",
+      "reader": "not-applicable"
     },
     {
       "name": "clustering",
@@ -139,21 +161,24 @@
       "phase": "write",
       "requires": [
         "domainMetadata"
-      ]
+      ],
+      "reader": "not-applicable"
     },
     {
       "name": "inCommitTimestamp",
       "kind": "writer",
       "status": "planned",
       "writerObligation": "Write commitInfo.inCommitTimestamp first in each commit, monotonically increasing; time travel by timestamp uses it",
-      "phase": "write"
+      "phase": "write",
+      "reader": "not-applicable"
     },
     {
       "name": "allowColumnDefaults",
       "kind": "writer",
       "status": "planned",
       "writerObligation": "Fill CURRENT_DEFAULT values for columns omitted on insert, or refuse",
-      "phase": "write"
+      "phase": "write",
+      "reader": "not-applicable"
     },
     {
       "name": "checkpointProtection",
@@ -161,21 +186,24 @@
       "status": "planned",
       "writerObligation": "Do not remove checkpoints or commits the feature protects during log cleanup",
       "phase": "maintenance",
-      "note": "Not in PROTOCOL.md at 7197686; defined by delta-spark (unverified). Kept so a table that lists it is never written without honouring it."
+      "note": "Not in PROTOCOL.md at 7197686; defined by delta-spark (unverified). Kept so a table that lists it is never written without honouring it.",
+      "reader": "not-applicable"
     },
     {
       "name": "icebergCompatV1",
       "kind": "writer",
       "status": "refused",
       "writerObligation": "UniForm: keep Iceberg metadata in step. Out of scope (VISION.md: no format conversion until each format stands alone)",
-      "phase": "write"
+      "phase": "write",
+      "reader": "not-applicable"
     },
     {
       "name": "icebergCompatV2",
       "kind": "writer",
       "status": "refused",
       "writerObligation": "As icebergCompatV1",
-      "phase": "write"
+      "phase": "write",
+      "reader": "not-applicable"
     },
     {
       "name": "variantShredding",
@@ -186,21 +214,26 @@
       ],
       "writerObligation": "Read shredded variant columns; write shredded or unshredded variant consistently with the table's shredding schema",
       "phase": "read",
-      "note": "Defined in PROTOCOL.md sections but missing from its Valid Feature Names appendix at 7197686"
+      "note": "Defined in PROTOCOL.md sections but missing from its Valid Feature Names appendix at 7197686",
+      "reader": "refused",
+      "readerEvidence": "Not in DeltaFeatures.SupportedReaderFeatures: refused like any unknown reader feature"
     },
     {
       "name": "catalogManaged",
       "kind": "reader-writer",
       "status": "refused",
       "writerObligation": "Commits go through the managing catalog, not a direct put-if-absent of the log file; refuse until a catalog-managed commit path exists",
-      "phase": "write"
+      "phase": "write",
+      "reader": "refused",
+      "readerEvidence": "ProtocolGateTests.Unsupported_reader_features_are_refused_together_by_name"
     },
     {
       "name": "materializePartitionColumns",
       "kind": "writer",
       "status": "planned",
       "writerObligation": "Also write partition column values into the data files, not only into partitionValues",
-      "phase": "write"
+      "phase": "write",
+      "reader": "not-applicable"
     }
   ]
 }
