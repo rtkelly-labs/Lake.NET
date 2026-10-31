@@ -8,6 +8,7 @@ on anything older than a release cycle.
 |---|---|
 | [specs/](specs/README.md) | The table specifications (Iceberg, DuckLake, Delta): structures, versions, writer invariants, interop pitfalls, and where Lake.NET implements each part; a side-by-side comparison |
 | [formats/](formats/README.md) | The file formats under them (Parquet, Avro, Puffin and deletion vectors, ORC): layouts, type mappings, statistics, encryption, and both Parquet backends |
+| [cloudflare.md](cloudflare.md) | Cloudflare as storage, catalog and source: R2 against what each format needs, Basin Catalog (formerly R2 Data Catalog) as an Iceberg REST catalog, Basin Pipelines and SQL; risks, setups, and the live test target |
 | [formats-and-engines.md](formats-and-engines.md) | The specs we follow and where they are pinned; each format's reference engines; **which Parquet reader each engine uses**, which decides what interop proves |
 | [dotnet-ecosystem.md](dotnet-ecosystem.md) | Every .NET library we use or should use, its role, and whether we take it, wrap it, fork it or avoid it |
 | [duckdb.md](duckdb.md) | DuckDB's three roles in Lake.NET, the DuckDB 2.0 transition tracker, DuckDB.NET's state and what we would upstream to it |

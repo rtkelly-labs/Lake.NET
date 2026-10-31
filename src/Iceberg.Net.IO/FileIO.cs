@@ -154,6 +154,47 @@ public sealed record S3FileIOOptions
     /// </summary>
     public Func<HttpRequestMessage, CancellationToken, Task>? RequestSigner { get; init; }
 
+    /// <summary>
+    /// Send request checksums only where an operation requires them, instead of the AWS SDK's default (a CRC32 trailer on
+    /// every upload, which needs <c>aws-chunked</c> encoding). Null (the default) decides by endpoint: AWS keeps the SDK's
+    /// checksums; any other endpoint (Cloudflare R2, MinIO, Ceph, emulators) gets them only when required, since
+    /// S3-compatible stores implement the trailing-checksum protocol partly or not at all. R2, for one, documents CRC32
+    /// only as a multipart (composite) checksum (docs/lake/reference/cloudflare.md).
+    /// </summary>
+    public bool? ChecksumsOnlyWhenRequired { get; init; }
+
+    /// <summary>Whether <see cref="ChecksumsOnlyWhenRequired"/>, resolved for this endpoint, turns the SDK's checksums off.</summary>
+    public bool SendsChecksumsOnlyWhenRequired => ChecksumsOnlyWhenRequired ?? RequestSigner is not null || IsThirdPartyEndpoint(Endpoint);
+
+    private static bool IsThirdPartyEndpoint(string? endpoint) =>
+        endpoint is not null && Uri.TryCreate(endpoint, UriKind.Absolute, out var u)
+        && !u.Host.EndsWith(".amazonaws.com", StringComparison.OrdinalIgnoreCase)
+        && !u.Host.EndsWith(".amazonaws.com.cn", StringComparison.OrdinalIgnoreCase);
+
+    /// <summary>
+    /// Cloudflare R2 through its S3 API: <c>https://{account}.r2.cloudflarestorage.com</c> (or the jurisdiction's endpoint,
+    /// e.g. <c>eu</c>), region <c>auto</c>, checksums only when required. R2 evaluates <c>If-None-Match: *</c> on
+    /// <c>PutObject</c> atomically, which is what metadata commits (and Delta's log) rely on. Use an R2 API token's
+    /// S3 access key pair, or temporary credentials with <paramref name="sessionToken"/>.
+    /// </summary>
+    public static S3FileIOOptions ForR2(string accountId, string accessKeyId, string secretAccessKey, string? jurisdiction = null, string? sessionToken = null)
+    {
+        if (string.IsNullOrEmpty(accountId) || !accountId.All(char.IsAsciiLetterOrDigit))
+            throw new ArgumentException("An R2 account ID is letters and digits only", nameof(accountId));
+        if (jurisdiction is not null && (jurisdiction.Length == 0 || !jurisdiction.All(char.IsAsciiLetterLower)))
+            throw new ArgumentException("An R2 jurisdiction is a lower-case name such as 'eu' or 'fedramp'", nameof(jurisdiction));
+        return new S3FileIOOptions
+        {
+            Endpoint = jurisdiction is null ? $"https://{accountId}.r2.cloudflarestorage.com" : $"https://{accountId}.{jurisdiction}.r2.cloudflarestorage.com",
+            Region = "auto",
+            PathStyleAccess = true,
+            AccessKeyId = accessKeyId,
+            SecretAccessKey = secretAccessKey,
+            SessionToken = sessionToken,
+            ChecksumsOnlyWhenRequired = true,
+        };
+    }
+
     private bool PrintMembers(System.Text.StringBuilder builder)
     {
         builder.Append($"Endpoint = {Endpoint}, PathStyleAccess = {PathStyleAccess}, Region = {Region}, AccessKeyId = {AccessKeyId}, ");
@@ -217,12 +258,16 @@ public sealed class S3FileIO : IFileIO, ISupportsListing
         };
         if (options.RequestSigner is { } signer)
         {
+            // Checksum trailers would need aws-chunked uploads, which a remote signer cannot sign for an unknown body
+            // (SendsChecksumsOnlyWhenRequired is always true with a signer).
             config.HttpClientFactory = new HandlerClientFactory(new RemoteSigningHandler(signer, options.HttpHandler ?? new HttpClientHandler()));
-            // Checksum trailers would need aws-chunked uploads, which a remote signer cannot sign for an unknown body.
+        }
+        else if (options.HttpHandler is { } handler) config.HttpClientFactory = new HandlerClientFactory(handler);
+        if (options.SendsChecksumsOnlyWhenRequired)
+        {
             config.RequestChecksumCalculation = Amazon.Runtime.RequestChecksumCalculation.WHEN_REQUIRED;
             config.ResponseChecksumValidation = Amazon.Runtime.ResponseChecksumValidation.WHEN_REQUIRED;
         }
-        else if (options.HttpHandler is { } handler) config.HttpClientFactory = new HandlerClientFactory(handler);
         if (options.Endpoint is not null)
         {
             config.ServiceURL = options.Endpoint;

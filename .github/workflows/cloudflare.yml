@@ -1,0 +1,48 @@
+name: cloudflare
+
+# Live run against Cloudflare R2 (S3 API) and Basin Catalog (formerly R2 Data Catalog): the FileIO contract on R2 and
+# Iceberg tables through Basin Catalog with vended credentials (docs/lake/reference/cloudflare.md). Dormant until
+# configured: skipped while the LAKE_R2_ACCOUNT_ID repository variable is unset. With it set, every other setting is
+# required (LAKE_CLOUDFLARE_REQUIRED=1), so a missing secret fails the run instead of skipping tests.
+#
+# Repository variables:
+#   LAKE_R2_ACCOUNT_ID       Cloudflare account ID
+#   LAKE_R2_BUCKET           a bucket used only by this workflow
+#   LAKE_R2_JURISDICTION     optional: eu or fedramp
+#   LAKE_BASIN_CATALOG_URI   the bucket's catalog URI (wrangler basin catalog enable <bucket>)
+#   LAKE_BASIN_WAREHOUSE     the bucket's warehouse name
+# Repository secrets:
+#   LAKE_R2_ACCESS_KEY_ID, LAKE_R2_SECRET_ACCESS_KEY   an R2 API token's S3 credentials, read-write on the bucket
+#   LAKE_BASIN_TOKEN                                   a Cloudflare API token with catalog and R2 storage read-write
+on:
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: lake-net-cloudflare
+  cancel-in-progress: false
+
+jobs:
+  live:
+    if: vars.LAKE_R2_ACCOUNT_ID != ''
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    env:
+      LAKE_CLOUDFLARE_REQUIRED: "1"
+      LAKE_R2_ACCOUNT_ID: ${{ vars.LAKE_R2_ACCOUNT_ID }}
+      LAKE_R2_BUCKET: ${{ vars.LAKE_R2_BUCKET }}
+      LAKE_R2_JURISDICTION: ${{ vars.LAKE_R2_JURISDICTION }}
+      LAKE_R2_ACCESS_KEY_ID: ${{ secrets.LAKE_R2_ACCESS_KEY_ID }}
+      LAKE_R2_SECRET_ACCESS_KEY: ${{ secrets.LAKE_R2_SECRET_ACCESS_KEY }}
+      LAKE_BASIN_CATALOG_URI: ${{ vars.LAKE_BASIN_CATALOG_URI }}
+      LAKE_BASIN_WAREHOUSE: ${{ vars.LAKE_BASIN_WAREHOUSE }}
+      LAKE_BASIN_TOKEN: ${{ secrets.LAKE_BASIN_TOKEN }}
+    steps:
+      - uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0 # v7.0.0
+      - uses: actions/setup-dotnet@a98b56852c35b8e3190ac28c8c2271da59106c68 # v6
+        with:
+          global-json-file: global.json
+      - name: R2 and Basin Catalog
+        run: dotnet test tests/Iceberg.Net.Regression.Tests --nologo --filter "Category=Cloudflare" --logger "console;verbosity=normal"
