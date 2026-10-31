@@ -61,7 +61,7 @@ Each workstream owns criteria above, and maps to issues labelled `lake-plan`.
 | **W5 Interop and fixtures** | G2, G3 | Golden fixtures of our own releases; DuckDB-written DuckLake fixtures; one engine-version manifest (`interop/engines.json`); ✅ DuckDB in-process Parquet reader in the unit suite |
 | **W6 Data plane** | G7, G12 (backends) | Parquet.Net fork: hostile-input suite, external readers, contract suite gating the daily rebase ([reference/forks.md](reference/forks.md)) |
 | **W7 Shared layers** | G13 | Phase 3 extraction; `IFormatDriver` and `Lake.TestSupport` before any Delta code |
-| **W8 Delta** | all Delta cells | Writer-feature table first, then DAT reader, then writes ([delta.md](delta.md), gap review §8) |
+| **W8 Delta** | all Delta cells | ✅ Writer-feature table ([`docs/spec/delta-support.json`](../spec/delta-support.json), checked by `SupportDeclarationTests`); then the DAT reader, then writes ([delta.md](delta.md), gap review §8) |
 | **W9 Performance** | G11 | Micro and scenario benchmarks; request-count gates; resource envelope |
 | **W10 Release** | G14, G12 | Package validation, API files, Windows/macOS jobs, AOT smoke apps |
 
