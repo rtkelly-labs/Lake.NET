@@ -123,6 +123,24 @@ public sealed partial class CatalogService
         return occupied;
     }
 
+    /// <summary>
+    /// Table directories by metadata file. A metadata file is never rewritten, so its directories never change: caching
+    /// them makes the overlap check of a create read only the tables committed since the last check, not every table's
+    /// metadata every time. Bounded: past <see cref="MaxCachedDirectories"/> entries the cache starts again.
+    /// </summary>
+    private readonly System.Collections.Concurrent.ConcurrentDictionary<string, IReadOnlyList<string>> _directoriesByMetadata = new(StringComparer.Ordinal);
+
+    internal const int MaxCachedDirectories = 100_000;
+
+    private async Task<IReadOnlyList<string>> DirectoriesOfAsync(string metadataLocation, CancellationToken ct)
+    {
+        if (_directoriesByMetadata.TryGetValue(metadataLocation, out var cached)) return cached;
+        var directories = TableDirectories(await ReadMetadataAsync(metadataLocation, ct)).ToList();
+        if (_directoriesByMetadata.Count >= MaxCachedDirectories) _directoriesByMetadata.Clear();
+        _directoriesByMetadata[metadataLocation] = directories;
+        return directories;
+    }
+
     /// <summary>The directories of every table and view in <paramref name="ns"/>, except <paramref name="self"/>.</summary>
     private async Task<List<(string What, string Location)>> OccupiedAsync(Namespace ns, (TableIdentifier Id, CatalogEntryKind Kind)? self, CancellationToken ct)
     {
@@ -132,7 +150,7 @@ public sealed partial class CatalogService
             var id = new TableIdentifier(ns, name);
             if (self is { Kind: CatalogEntryKind.Table } s && s.Id == id) continue;
             if (await Store.GetAsync(id, CatalogEntryKind.Table, ct) is not { } pointer) continue;
-            occupied.AddRange(TableDirectories(await ReadMetadataAsync(pointer, ct)).Select(l => ($"table {id}", l)));
+            occupied.AddRange((await DirectoriesOfAsync(pointer, ct)).Select(l => ($"table {id}", l)));
         }
         foreach (var name in await Store.ListAsync(ns, CatalogEntryKind.View, ct))
         {
