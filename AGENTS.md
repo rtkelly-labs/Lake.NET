@@ -22,6 +22,8 @@ Self-contained C# port of Apache Iceberg. Keep it that way: no references to cod
 | Traces and metrics (OpenTelemetry) | [docs/telemetry.md](docs/telemetry.md) — instrumentation goes through `IcebergTelemetry`, one line per call site |
 | Spark procedures, EMR Serverless / Glue jobs, Athena SQL, DuckDB oracle | [docs/spark-and-athena.md](docs/spark-and-athena.md) |
 | Following Iceberg v4 | [docs/iceberg-v4.md](docs/iceberg-v4.md) |
+| What "done" means for Lake.NET (Iceberg, DuckLake, Delta) and what is open | [docs/lake/goal.md](docs/lake/goal.md), [docs/lake/verification/gap-review-2026-10.md](docs/lake/verification/gap-review-2026-10.md) |
+| .NET libraries we use, adopt or fork; DuckDB and the 2.0 tracker; fork policy | [docs/lake/reference/](docs/lake/reference/README.md) |
 | Deletes, deletion vectors, Puffin, statistics | [docs/puffin.md](docs/puffin.md) |
 | Adopting files from other Parquet writers (Parquet.SourceGenerator) | [docs/parquet-sourcegenerator.md](docs/parquet-sourcegenerator.md) |
 
@@ -34,6 +36,7 @@ Self-contained C# port of Apache Iceberg. Keep it that way: no references to cod
 | One CI suite (`unit`, `cross-engine`, `regression`), or list its projects | `tools/test-projects.sh test <suite>` / `tools/test-projects.sh list [suite]` |
 | Add a test project | `dotnet sln Iceberg.Net.slnx add <csproj>` and set `<CiSuite>` in the csproj: the solution is the one list CI runs, and a test project without a suite fails CI |
 | L0 spec tests | `dotnet test tests/Iceberg.Net.Spec.Tests` |
+| DuckDB in-process Parquet reader (no Python or Docker) | `dotnet test tests/Iceberg.Net.DuckDbNet.Tests` |
 | Typed layer (LINQ) | `dotnet test tests/Iceberg.Net.Linq.Tests` |
 | EF Core provider | `dotnet test tests/Iceberg.Net.EntityFrameworkCore.Tests` |
 | Ecosystem (telemetry, Spark/Athena helpers, Spark + DuckDB oracles) | `ICEBERG_DUCKDB_PYTHON=<python with the interop duckdb group> dotnet test tests/Iceberg.Net.Ecosystem.Tests` |
