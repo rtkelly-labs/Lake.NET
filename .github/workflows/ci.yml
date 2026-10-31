@@ -186,7 +186,7 @@ jobs:
       - name: FileIO conformance on the local filesystem
         shell: bash
         run: dotnet test tests/Iceberg.Net.Regression.Tests --nologo --filter "FullyQualifiedName~LocalFileIOConformanceTests"
-      - name: DuckDB in-process reader and the netstandard2.0 builds
+      - name: DuckDB in-process reader, the netstandard2.0 builds and the Delta reader
         shell: bash
         run: |
           dotnet test tests/Iceberg.Net.DuckDbNet.Tests --nologo
