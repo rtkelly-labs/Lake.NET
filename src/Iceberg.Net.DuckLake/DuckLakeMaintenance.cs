@@ -201,14 +201,20 @@ public sealed partial class DuckLakeCatalog
 
     /// <summary>
     /// Delete the files scheduled for deletion before <paramref name="olderThan"/> (all of them when null) and their
-    /// rows. A file already gone is fine. Returns the locations deleted (or, in a dry run, that would be).
+    /// rows. A file already gone is fine. Only files under <c>data_path</c> are deleted (see
+    /// <see cref="DuckLakeOptions.CleanupOutsideDataPath"/>); other rows stay. Returns the locations deleted (or, in a dry
+    /// run, that would be).
     /// </summary>
     public async Task<IReadOnlyList<string>> CleanupOldFilesAsync(DateTimeOffset? olderThan = null, bool dryRun = false, CancellationToken ct = default)
     {
         using var scope = DuckLakeTelemetry.Start("ducklake.maintenance.cleanup", this);
         await using var db = Context(scope);
+        // Only files under data_path are deleted: a row naming anything else (../x, an absolute path elsewhere) is left
+        // alone, row and file. Files registered in place outside data_path go only when the options allow it.
         var due = (await Guarded("ducklake_files_scheduled_for_deletion", () => db.FilesScheduledForDeletion.ToListAsync(ct)))
-            .Where(f => olderThan is null || f.ScheduleStart < olderThan).ToList();
+            .Where(f => olderThan is null || f.ScheduleStart < olderThan)
+            .Where(f => f.PathIsRelative == true ? f.Path.Length > 0 && DuckLakePaths.IsConfined(f.Path)
+                : DuckLakePaths.IsUnder(DataPath, f.Path) || (Options.CleanupOutsideDataPath && DuckLakePaths.IsCleanAbsolute(f.Path))).ToList();
         var locations = due.Select(f => f.PathIsRelative == true ? DataPath + f.Path : f.Path).ToList();
         if (dryRun || due.Count == 0)
         {
@@ -257,7 +263,7 @@ public sealed partial class DuckLakeCatalog
         await foreach (var f in lister.ListAsync(DataPath, ct))
         {
             if (!f.Location.EndsWith(".parquet", StringComparison.OrdinalIgnoreCase) && !f.Location.EndsWith(".puffin", StringComparison.OrdinalIgnoreCase)) continue;
-            if (f.LastModifiedUtc < cutoff && !referenced.Contains(Normalise(f.Location))) orphans.Add(f.Location);
+            if (f.LastModifiedUtc < cutoff && !referenced.Contains(Normalise(f.Location)) && DuckLakePaths.IsUnder(DataPath, f.Location)) orphans.Add(f.Location);
         }
         if (!dryRun)
             foreach (var o in orphans)
