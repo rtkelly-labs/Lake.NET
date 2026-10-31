@@ -352,7 +352,23 @@ public sealed class ScanPlanner(CatalogService catalog, ScanPlanningOptions opti
     /// </summary>
     private Table TableOf(LoadedTable loaded) =>
         new(null!, loaded.Id, loaded.Metadata with { MetadataFileLocation = loaded.MetadataLocation },
-            new TableConfinedFileIO(catalog.FileIO, loaded.Id, TableLocations.Prefixes(loaded.Metadata)));
+            new TableConfinedFileIO(catalog.FileIO, loaded.Id, PlanningPrefixes(loaded.Metadata)));
+
+    /// <summary>
+    /// The table's directories now, plus the directory of every snapshot's manifest list. Commits refuse a manifest list
+    /// outside the table's directories at the time (<c>RequireOwnFiles</c>), so these were the table's own when written;
+    /// keeping them lets a table whose location or <c>write.metadata.path</c> later moved still plan its older snapshots,
+    /// while a manifest list inside the table still can't name another table's manifests.
+    /// </summary>
+    internal static IReadOnlyList<string> PlanningPrefixes(TableMetadata m)
+    {
+        var prefixes = TableLocations.Prefixes(m).ToList();
+        foreach (var s in m.Snapshots)
+            if (s.ManifestList is { } list && list.LastIndexOf('/') is var slash and > 0
+                && TableLocations.Normalise(list[..slash]).TrimEnd('/') + "/" is var dir && !prefixes.Contains(dir, StringComparer.Ordinal))
+                prefixes.Add(dir);
+        return prefixes;
+    }
 
     /// <summary>Field names of a request, resolved exactly or (with <c>case-sensitive: false</c>) ignoring case.</summary>
     private sealed class NameResolver(Schema schema, bool caseSensitive)

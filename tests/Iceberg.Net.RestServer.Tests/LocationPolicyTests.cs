@@ -368,6 +368,20 @@ public sealed class LocationPolicyTests : IAsyncLifetime
     }
 
     [Fact]
+    public async Task Planning_still_reads_a_tables_own_older_manifests_after_its_location_moves()
+    {
+        var (mine, _) = await TwoTablesWithDataAsync();
+        var rows = (await TableScan.ReadAllAsync(mine)).Count;
+        await _catalog.CommitTableAsync(new TableCommit(mine.Identifier, [new UpdateRequirement.AssertTableUuid(mine.Metadata.TableUuid)],
+            [new MetadataUpdate.SetLocation(Wh("sales", "mine-moved"))]));
+        mine = await _catalog.LoadTableAsync(mine.Identifier);
+        Assert.Equal(Wh("sales", "mine-moved"), mine.Location);
+
+        var plan = await _catalog.PlanTableScanAsync(mine, new ScanPlanRequest());
+        Assert.Equal(rows, plan.Tasks.Sum(t => t.DataFile.RecordCount));
+    }
+
+    [Fact]
     public async Task A_staged_create_cannot_carry_a_snapshot_outside_its_table()
     {
         var (mine, victim) = await TwoTablesWithDataAsync();
