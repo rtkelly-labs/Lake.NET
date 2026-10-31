@@ -47,6 +47,8 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
   and keys in the catalog.
 
 ### Fixed
+- The REST server no longer reads every table's metadata on every create: table directories are cached by (immutable)
+  metadata file, so a create's overlap check reads only tables committed since the last one.
 - Orphan cleanup on Windows took every live file for an orphan: metadata builds local paths with `/` while a directory
   listing returns `\`, and `TableLocations.Normalise` compared them as written. Local paths now normalise to `/` and an
   upper-case drive letter on Windows (found by the new Windows CI job before any release ran it).
