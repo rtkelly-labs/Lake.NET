@@ -338,7 +338,7 @@ public static class Endpoints
                 var id = await AuthorizedAsync(http, CatalogPrivilege.Read, @namespace, table);
                 var loaded = await svc.LoadTableAsync(id, ct);
                 var write = await http.AllowsAsync(CatalogPrivilege.Write, id.Namespace, id.Name);
-                var credentials = await vendor.VendAsync(id, loaded.Metadata.Location, write, ct);
+                var credentials = await vendor.VendAsync(id, VendableLocation(id, loaded.Metadata), write, ct);
                 return Json(new JsonObject { ["storage-credentials"] = new JsonArray(credentials.Select(c => (JsonNode)c.ToJson()).ToArray()) });
             });
         }
@@ -560,7 +560,7 @@ public static class Endpoints
             if (vendor is not NoCredentialVendor && Wants(req, "vended-credentials"))
             {
                 var write = await req.HttpContext.AllowsAsync(CatalogPrivilege.Write, t.Id.Namespace, t.Id.Name);
-                var credentials = await vendor.VendAsync(t.Id, t.Metadata.Location, write, req.HttpContext.RequestAborted);
+                var credentials = await vendor.VendAsync(t.Id, VendableLocation(t.Id, t.Metadata), write, req.HttpContext.RequestAborted);
                 if (credentials.Count > 0)
                 {
                     vended = true;
@@ -578,6 +578,17 @@ public static class Endpoints
         if (etag is not null) req.HttpContext.Response.Headers.ETag = etag;
         return Json(body);
     }
+
+    /// <summary>
+    /// The location credentials are vended for. Locations have been refused <c>*</c>, <c>?</c> and <c>$</c> since they
+    /// were found to widen IAM policies, but a table stored before then (or written to the store directly) can still
+    /// hold one: it loads, and its credentials are refused here with a 422 that says why, before any vendor is asked.
+    /// </summary>
+    private static string VendableLocation(TableIdentifier id, TableMetadata metadata) =>
+        metadata.Location.AsSpan().IndexOfAny(CatalogService.PolicyMetacharacters) < 0
+            ? metadata.Location
+            : throw new UnprocessableEntityException(
+                $"Credentials are not vended for {id}: its location contains '*', '?' or '$', which storage policies read as a wildcard. An admin can move the table to a literal location (register its metadata under one).");
 
     private static IResult ViewResult(LoadedView v, RestServerOptions options) => Json(new JsonObject
     {
