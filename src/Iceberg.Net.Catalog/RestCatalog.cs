@@ -73,6 +73,21 @@ public sealed record RestCatalogOptions
         Properties = new Dictionary<string, string> { ["client.region"] = region },
     };
 
+    /// <summary>
+    /// Cloudflare Basin Catalog (formerly R2 Data Catalog): an Iceberg REST catalog built into an R2 bucket. Authenticate
+    /// with a Cloudflare API token that has both catalog and R2 storage permissions; the catalog vends SigV4 credentials for
+    /// the bucket, which inherit the token's R2 permissions (so a read-only workload needs a token that is read-only on
+    /// storage too). <paramref name="catalogUri"/> and <paramref name="warehouse"/> are what <c>wrangler basin catalog
+    /// enable</c> prints. See docs/lake/reference/cloudflare.md.
+    /// </summary>
+    public static RestCatalogOptions ForBasinCatalog(Uri catalogUri, string warehouse, string token) => new()
+    {
+        Uri = catalogUri.Scheme == Uri.UriSchemeHttps ? catalogUri : throw new ArgumentException("Basin Catalog is served over https", nameof(catalogUri)),
+        Warehouse = string.IsNullOrEmpty(warehouse) ? throw new ArgumentException("A warehouse name is required", nameof(warehouse)) : warehouse,
+        Token = string.IsNullOrEmpty(token) ? throw new ArgumentException("A Cloudflare API token is required", nameof(token)) : token,
+        AccessDelegation = "vended-credentials",
+    };
+
     /// <summary>The S3 Tables Iceberg REST endpoint for a table bucket ARN, signed with SigV4 (<c>s3tables</c>).</summary>
     public static RestCatalogOptions ForS3Tables(string region, string tableBucketArn, Amazon.Runtime.AWSCredentials? credentials = null) => new()
     {

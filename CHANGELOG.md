@@ -29,6 +29,11 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
   REST server) and the next version number continues from it.
 
 ### Added
+- Cloudflare: `S3FileIOOptions.ForR2` (R2's S3 endpoint, region `auto`, jurisdictions, temporary credentials) and
+  `RestCatalogOptions.ForBasinCatalog` (Basin Catalog, formerly R2 Data Catalog, with vended credentials); a live
+  `cloudflare` workflow running the FileIO contract on R2 and Iceberg tables through Basin Catalog.
+- `S3FileIOOptions.ChecksumsOnlyWhenRequired`: off for AWS, on by default for other endpoints, whose S3 implementations
+  don't all accept the AWS SDK's default checksum trailers.
 - `Iceberg.Net.DuckDbNet.Tests`: DuckDB's Parquet reader, in-process through DuckDB.NET, checks the values, field IDs
   and statistics of every file type we write, in the unit suite.
 - `FileIOConformanceTests`: one contract for every FileIO (local and S3), covering concurrent create-if-absent,

@@ -26,6 +26,7 @@ yet, should be) · **Avoid** (considered, rejected).
 |---|---|---|---|
 | AWSSDK.S3 / Glue / STS / Athena / EMR Serverless | S3 FileIO, Glue catalog, credential vending, job runners | **Use** | Client-wide retry quota off; conditional-PUT retry recognised as ours (`ThrottlingTests`) |
 | Azure.Storage.Files.DataLake / Blobs | ADLS FileIO; the REST server's SAS vending already uses the SDK | **Adopt** for a FileIO, or keep `abfss` refused | Today `abfss://` is refused by `ResolvingFileIO` |
+| AWSSDK.S3 against Cloudflare R2 | R2 as an S3-compatible store | **Use** via `S3FileIOOptions.ForR2` | Region `auto`, checksums only when required; Basin Catalog via `RestCatalogOptions.ForBasinCatalog` ([cloudflare.md](cloudflare.md)) |
 | Google.Cloud.Storage.V1 | GCS FileIO | **Adopt** for a FileIO, or keep `gs` refused | The REST server already vends GCS tokens to other engines |
 | Microsoft.Data.Sqlite, Npgsql (+ EF Core providers) | JDBC-style Iceberg catalog; DuckLake catalogs | **Use** | DuckLake's commit protocol depends on PostgreSQL's isolation and unique-violation behaviour: needs fidelity tests (gap review §4 D4) |
 | Entity Framework Core | DuckLake catalog model; Iceberg EF Core provider | **Use** | `DbCommandInterceptor` / `DbTransactionInterceptor` are the fault-injection seam for DuckLake |
