@@ -677,10 +677,11 @@ public sealed partial class DuckLakeTransaction : IAsyncDisposable
                     await CleanUpAsync();
                     throw;
                 }
-                catch (Exception e) when (e is DbException or DbUpdateException)
+                catch (Exception e) when (e is DbException or DbUpdateException || DuckLakeFaults.IsTransient(e))
                 {
                     // Lost the race for the snapshot ID (a unique key), or a transient failure: roll back and try again.
-                    // Anything else is a real error; nothing was committed, so the files go.
+                    // Anything else is a real error; nothing was committed, so the files go. A transient error can also
+                    // arrive wrapped: Npgsql's EF execution strategy surfaces 40001 inside an InvalidOperationException.
                     last = e;
                     await RollbackAsync(tx);
                     if (DuckLakeFaults.IsTransient(e) || await SnapshotTakenAsync(scope, ct)) continue;

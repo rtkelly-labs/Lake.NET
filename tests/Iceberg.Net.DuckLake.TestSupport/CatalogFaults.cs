@@ -68,6 +68,13 @@ public sealed class CatalogFaults : IDbCommandInterceptor, IDbTransactionInterce
     public static Exception SerializationFailure() =>
         new PostgresException("could not serialize access due to concurrent update", "ERROR", "ERROR", PostgresErrorCodes.SerializationFailure);
 
+    /// <summary>
+    /// <paramref name="inner"/> wrapped as EF Core's execution strategy wraps a transient error when it does not retry
+    /// itself (Npgsql's provider does this for <c>40001</c>): the database error is only the inner exception.
+    /// </summary>
+    public static Func<Exception> WrappedByExecutionStrategy(Func<Exception> inner) => () =>
+        new InvalidOperationException("An exception has been raised that is likely due to a transient failure.", inner());
+
     private void Command(bool before)
     {
         Exception? fault = null;
