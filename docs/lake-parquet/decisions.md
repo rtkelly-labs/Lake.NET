@@ -40,7 +40,11 @@ code and its tooling follow it.
 6. **The package is as narrow as its consumers need.** Lake.NET and Parquet.SourceGenerator use the reader, the writer,
    the schema, the footer model and the serialization attributes. The reflection-based `ParquetSerializer` and what
    only it used are left out of the package at build time (upstream's files stay untouched); the plain build and its
-   suite keep them, so nothing upstream tests goes untested.
+   suite keep them, so nothing upstream tests goes untested. Code nothing in the package calls is left out the same
+   way, member by member through the hashed manifest (`eng/lake/strip-members.json`), so that everything the package
+   ships is code the native AOT suite can run: first, upstream's big-endian bit-packing kernels, which only the
+   deprecated `BIT_PACKED` encoding would use and which the reader refuses. A hash that changes, or a caller that
+   appears, fails the build until someone checks the member is still unneeded.
 7. **Performance work is on the core path, measured, and changes no file layout by default.** Changes target the calls
    generated readers and writers make (page I/O, compression, encoding, levels, statistics), each with its numbers in
    its record. Anything that changes the files written (data pages within a chunk) is an option, off by default.
