@@ -113,6 +113,8 @@ public abstract class CatalogFaultTests : IAsyncLifetime
         ["busy-after-command-3"] = (FaultPoint.AfterCommand, 3, CatalogFaults.SqliteBusy, Outcome.Success),
         ["busy-before-commit"] = (FaultPoint.BeforeCommit, 0, CatalogFaults.SqliteBusy, Outcome.Success),
         ["40001-before-command-2"] = (FaultPoint.BeforeCommand, 2, CatalogFaults.SerializationFailure, Outcome.Success),
+        // As Npgsql's EF provider surfaces it (CI's PostgreSQL run): the transient error inside InvalidOperationException.
+        ["wrapped-busy-before-command-2"] = (FaultPoint.BeforeCommand, 2, CatalogFaults.WrappedByExecutionStrategy(CatalogFaults.SqliteBusy), Outcome.Success),
         ["40001-before-commit"] = (FaultPoint.BeforeCommit, 0, CatalogFaults.SerializationFailure, Outcome.Success),
     };
 
