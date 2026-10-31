@@ -44,6 +44,10 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
   v3 deletion-vector blob, so one Roaring64 codec serves both formats.
 - `interop/engines.json`: every reference engine and emulator version in one manifest, enforced by
   `EngineVersionManifestTests` against the compose file, scripts, Python and C# pins.
+- `RequestBudgetTests`: exact storage-request budgets per operation (append, scans, upserts under each delete
+  mechanism, expiry) in `docs/lake/verification/request-budgets.json`, measured with `MeteredFileIO`.
+- `benchmarks/Lake.Benchmarks.Micro` (BenchmarkDotNet: deletion vectors, metadata JSON, Parquet write and scan) and a
+  weekly `benchmarks` workflow.
 - Package validation: every pack compares each published package's API with `0.0.1-alpha.1`.
 - `FileIOConformanceTests`: one contract for every FileIO (local and S3), covering concurrent create-if-absent,
   overwrite, missing objects, exact ranged reads, empty objects, idempotent deletes, listings that page, stay inside

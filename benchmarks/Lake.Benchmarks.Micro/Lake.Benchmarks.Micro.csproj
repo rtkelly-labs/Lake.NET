@@ -1,0 +1,25 @@
+<Project Sdk="Microsoft.NET.Sdk">
+  <!--
+    Micro benchmarks of the hot paths (docs/lake/verification/benchmarks.md): time and allocations per call. Run
+    dotnet run on this project in Release with a filter argument; the weekly benchmarks workflow
+    publishes the results. Deterministic request counts are gated separately by RequestBudgetTests.
+  -->
+  <PropertyGroup>
+    <OutputType>Exe</OutputType>
+    <IsPackable>false</IsPackable>
+    <IsTestProject>false</IsTestProject>
+    <RootNamespace>Lake.Benchmarks.Micro</RootNamespace>
+    <!-- BenchmarkDotNet generates code that the repository's analyzers would otherwise flag. -->
+    <NoWarn>$(NoWarn);CA1822;CA1515;CA1001</NoWarn>
+  </PropertyGroup>
+  <ItemGroup>
+    <PackageReference Include="BenchmarkDotNet" />
+  </ItemGroup>
+  <ItemGroup>
+    <ProjectReference Include="../../src/Iceberg.Net.Core/Iceberg.Net.Core.csproj" />
+    <ProjectReference Include="../../src/Iceberg.Net.IO/Iceberg.Net.IO.csproj" />
+    <ProjectReference Include="../../src/Iceberg.Net.Puffin/Iceberg.Net.Puffin.csproj" />
+    <ProjectReference Include="../../src/Iceberg.Net.Catalog/Iceberg.Net.Catalog.csproj" />
+    <ProjectReference Include="../../src/Iceberg.Net.Data/Iceberg.Net.Data.csproj" />
+  </ItemGroup>
+</Project>

@@ -1,0 +1,40 @@
+{
+  "$comment": "Storage requests per operation (RequestBudgetTests). Exact: update in the PR that changes them, and say why.",
+  "scenarios": {
+    "append_100_rows_4_buckets_v2": {
+      "read": 2,
+      "write": 7
+    },
+    "append_after_10_appends_v2": {
+      "read": 3,
+      "write": 7
+    },
+    "expire_9_of_10_snapshots_v2": {
+      "delete": 9,
+      "read": 30,
+      "write": 1
+    },
+    "full_scan_10_appends_v2": {
+      "range": 40,
+      "read": 11
+    },
+    "pruned_scan_one_bucket_10_appends_v2": {
+      "range": 1,
+      "read": 11
+    },
+    "upsert_10_keys_deletion_vectors_v3": {
+      "range": 4,
+      "read": 14,
+      "write": 9
+    },
+    "upsert_10_keys_equality_deletes_v2": {
+      "read": 9,
+      "write": 12
+    },
+    "upsert_10_keys_position_deletes_v2": {
+      "range": 4,
+      "read": 14,
+      "write": 12
+    }
+  }
+}
