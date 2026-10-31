@@ -20,7 +20,8 @@ items it found that have since been fixed are listed first, so this page stays t
 
 **Found while writing the Delta and Cloudflare references:** `S3FileIO.WriteAsync(overwrite: false)` accepts a `412`
 when the existing object has the same bytes (recovering a create whose response was lost). That is safe for Iceberg's
-unique file names but not for Delta's shared `_delta_log/N.json` names: Lake.Delta needs a strict create.
+unique file names but not for Delta's shared `_delta_log/N.json` names. *Resolved by design:* every Delta commit
+attempt carries a fresh `commitInfo.txnId`, so no two writers write the same bytes (specs/delta.md, invariant 11).
 
 **Still open from that work:** existing tables or namespaces whose location already contains a wildcard now fail to vend (a 500, not a
 clean error); re-validate them at load.

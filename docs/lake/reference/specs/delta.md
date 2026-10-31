@@ -228,9 +228,15 @@ the magic number.
 **Lake.NET hazard for the commit path.** `S3FileIO.WriteAsync(…, overwrite: false)` (`src/Iceberg.Net.IO/FileIO.cs`)
 sends `If-None-Match: *` but treats a 412/409 as **success** when the existing object has identical bytes (it assumes
 "locations are unique per write"). A Delta commit file's location is *not* unique per writer: two writers that
-produce byte-identical `N.json` would both believe they committed. Delta commits need a strict put-if-absent that
-reports "exists" unconditionally (or a commit file that always differs, e.g. a `commitInfo` with a per-attempt
-`txnId`), plus an explicit unknown-outcome path.
+produce byte-identical `N.json` would both believe they committed.
+
+**Decision (2026-10-31):** Lake.Delta keeps the shared create and makes every commit file unique instead. Each commit
+attempt writes `commitInfo.txnId` = a fresh UUID (delta-spark and delta-rs write a `txnId` too), so two writers never
+produce the same bytes. Byte equality then proves the object is this attempt's own, which is exactly the case the
+recovery exists for: a retried `PUT` whose first attempt landed. This keeps one create path for every format and
+needs no new FileIO API. Writer invariant 11 below records it, and the first Lake.Delta commit test must race two
+writers whose actions are otherwise identical. An outcome that stays unknown after retries (no response, object
+absent on read) is surfaced as `CommitStateUnknownException`, as for Iceberg.
 
 ## 8. Writer obligations for row-level features
 
@@ -279,6 +285,7 @@ anything is written.
 | 8 | Respect `appendOnly`, invariants, CHECK, generated, identity, defaults and CDF when active (§8) | Writer Version Requirements |
 | 9 | Row tracking: fresh row IDs unique per version and above the high-water mark; reassigned on retry | Row Tracking |
 | 10 | ICT: `commitInfo` first, timestamps strictly increasing | In-Commit Timestamps |
+| 11 | Every commit attempt's `commitInfo` carries a fresh `txnId`, so no two attempts write the same bytes to `_delta_log/N.json` (Lake.NET's create recovery relies on it, §7) | Lake.NET decision |
 | 11 | Preserve unknown `domainMetadata`; never modify `delta.` domains you don't understand | Domain Metadata |
 | 12 | Checkpoint only after its commit exists; no multi-part with `v2Checkpoint`; a V2 checkpoint puts all file actions inline or all in sidecars | Checkpoints |
 | 13 | Metadata cleanup keeps a checkpoint at the oldest kept version and that version's JSON | Metadata Cleanup |
