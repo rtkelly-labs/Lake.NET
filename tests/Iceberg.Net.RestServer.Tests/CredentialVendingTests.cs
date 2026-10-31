@@ -166,6 +166,62 @@ public sealed class CredentialVendingTests
         Assert.Equal(2, sts.Requests.Count);
     }
 
+    [Theory]
+    [InlineData("bucket", "wh/db/t*")]
+    [InlineData("bucket", "wh/*/t")]
+    [InlineData("bucket", "wh/db/t?")]
+    [InlineData("bucket", "wh/${aws:username}/t")]
+    [InlineData("bucket*", "wh/db/t")]
+    [InlineData("b?cket", "wh/db/t")]
+    public void The_session_policy_refuses_iam_wildcards_and_variables(string bucket, string key)
+    {
+        Assert.Throws<ArgumentException>(() => StsCredentialVendor.SessionPolicy(bucket, key, write: false));
+        Assert.Throws<ArgumentException>(() => StsCredentialVendor.SessionPolicy(bucket, key, write: true));
+    }
+
+    /// <summary>
+    /// Whatever namespace and table names a client tries, a table the server accepts gets a vended policy whose only
+    /// wildcard is the trailing <c>/*</c> on its own prefix: no name can reach another table through IAM pattern matching.
+    /// </summary>
+    [Fact]
+    public async Task Every_accepted_name_vends_a_policy_with_only_the_trailing_wildcard()
+    {
+        var vendor = new RecordingVendor();
+        await using var host = ServerHost.Start(services: s => s.AddSingleton<IStorageCredentialVendor>(vendor));
+        using var catalog = await host.ConnectAsync(accessDelegation: "vended-credentials");
+        const string alphabet = "ab9_-.*?$[]{}%~=+@ é\u00e9";
+        var random = new Random(20261031);
+        string Name() => new(Enumerable.Range(0, random.Next(1, 7)).Select(_ => alphabet[random.Next(alphabet.Length)]).ToArray());
+        int accepted = 0, refused = 0;
+        for (var i = 0; i < 120; i++)
+        {
+            var ns = Namespace.Of($"n{i}", Name());
+            var id = new TableIdentifier(ns, Name());
+            try
+            {
+                await catalog.CreateNamespaceAsync(ns);
+                await catalog.CreateTableAsync(new CreateTableRequest(id, ScanPlanningTests.Schema));
+            }
+            catch (HttpRequestException e) when (e.StatusCode == HttpStatusCode.BadRequest)
+            {
+                refused++;
+                continue;
+            }
+            accepted++;
+            var (_, location, _) = vendor.Calls[^1];
+            var key = "wh/" + Path.GetRelativePath(host.Warehouse, location).Replace('\\', '/');
+            var statements = JsonNode.Parse(StsCredentialVendor.SessionPolicy("bucket", key, write: true))!["Statement"]!.AsArray();
+            foreach (var pattern in new[] { statements[0]!["Resource"]!.GetValue<string>(), statements[1]!["Condition"]!["StringLike"]!["s3:prefix"]!.GetValue<string>() })
+            {
+                Assert.EndsWith("/*", pattern);
+                Assert.Equal(-1, pattern[..^2].IndexOfAny(['*', '?', '$']));
+            }
+        }
+        // Both sides of the property were exercised.
+        Assert.True(accepted > 10, $"{accepted} accepted");
+        Assert.True(refused > 10, $"{refused} refused");
+    }
+
     /// <summary>
     /// Against the emulators' moto: the server keeps its warehouse on S3 and vends STS credentials; the client brings no
     /// keys of its own, so every S3 call it makes uses the vended ones.

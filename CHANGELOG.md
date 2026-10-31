@@ -10,6 +10,13 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 
 ## [Unreleased]
 
+### Security
+- REST catalog server: namespace levels, table and view names (on create and rename) and every location it accepts
+  refuse `*`, `?` and `$`, and the S3 vendor refuses to build a session policy containing them, so no name or location
+  can widen vended STS credentials to other tables. Commits, staged creates and registers refuse manifest lists,
+  statistics and partition statistics outside the table's own directories, which server-side scan planning would
+  otherwise read with the server's access.
+
 ## [0.0.1-alpha.1] - 2026-10-25
 
 The first published build: an early alpha of `Iceberg.Net.Core`, `Avro`, `Puffin`, `IO`, `Catalog`, `Data` and `Linq`,

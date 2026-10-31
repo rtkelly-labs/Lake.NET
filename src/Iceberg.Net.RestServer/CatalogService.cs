@@ -44,9 +44,7 @@ public sealed partial class CatalogService(ICatalogStore store, IFileIO io, Rest
 
     public async Task CreateNamespaceAsync(Namespace ns, IReadOnlyDictionary<string, string> properties, CancellationToken ct)
     {
-        if (ns.Levels.Count == 0 || ns.Levels.Any(l => l.Length == 0)) throw new BadRequestException("Namespace must have at least one non-empty level");
-        foreach (var level in ns.Levels)
-            if (level is "." or ".." || level.Any(c => c is '/' or '\\' || char.IsControl(c))) throw new BadRequestException($"Namespace level '{level}' cannot be used in a storage path");
+        RequireNamespaceLevels(ns);
         if (await Store.LoadNamespaceAsync(ns, ct) is null)
             await RequireNamespaceRootAsync(ns, NamespaceRoot(ns, properties), properties.ContainsKey("location"), ct);
         await Store.CreateNamespaceAsync(ns, properties, ct);
@@ -177,6 +175,7 @@ public sealed partial class CatalogService(ICatalogStore store, IFileIO io, Rest
             throw new BadRequestException($"Cannot read table metadata at {metadataLocation} ({e.GetType().Name})");
         }
         await RequireTableLocationsAsync(id, metadata, ct);
+        RequireOwnFiles(id, null, metadata);
         await Store.SwapAsync([new PointerSwap(id, current, metadataLocation)], CatalogEntryKind.Table, ct);
         return new LoadedTable(id, metadataLocation, metadata);
     }
@@ -213,6 +212,8 @@ public sealed partial class CatalogService(ICatalogStore store, IFileIO io, Rest
 
     public async Task RenameAsync(TableIdentifier from, TableIdentifier to, CatalogEntryKind kind, CancellationToken ct)
     {
+        RequireNamespaceLevels(to.Namespace);
+        RequireEntryName(to.Name, kind == CatalogEntryKind.View ? "View" : "Table");
         if (await Store.GetAsync(from, kind, ct) is null) throw await NotFoundAsync(from, kind.ToString(), ct);
         await Store.RenameAsync(from, to, kind, ct);
     }
@@ -270,6 +271,7 @@ public sealed partial class CatalogService(ICatalogStore store, IFileIO io, Rest
                     results.Add(new LoadedTable(id, currentLocation, current!));
                     continue;
                 }
+                RequireOwnFiles(id, current, updated);
                 var newLocation = updated.MetadataFileLocation ?? MetastoreCatalog.NewMetadataLocation(updated, currentLocation);
                 updated = updated with { MetadataFileLocation = newLocation };
                 await WriteMetadataAsync(newLocation, updated, ct);
