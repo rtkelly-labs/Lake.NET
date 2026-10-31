@@ -135,20 +135,31 @@ cd ../../.. && dotnet run eng/lake/CompareBenchmarks.cs -- /tmp/bench/upstream/r
 Lake.Parquet is supported under native AOT and trimming, and that is enforced and proven, not assumed:
 
 - **Enforced:** the Lake build sets `IsAotCompatible` (`eng/lake/Lake.Parquet.targets`), so any trimming or AOT finding
-  in the package fails the build. With the serializer left out, there is none.
+  in the package fails the build. With the serializer left out, there is none. The analyzers look at every method,
+  called or not, and CI proves it: the `aot` job adds an uncalled method that needs dynamic code to a copy of the
+  package and requires the build to fail with `IL3050`.
 - **Proven natively:** `eng/lake/Lake.Parquet.AotTests` is published with `PublishAot`, every trimming and AOT warning
   an error, against the package as published, and runs:
 
 | Mode | What it checks |
 |---|---|
-| `api` | the calls generated readers and writers make (typed fields of every type, nullable reads into `T?[]`, strings as chars and as UTF-8, decimals with their scale, timestamps with their kind, statistics) under every codec, encoding hint and page layout, and with encryption; enum columns refused alike (they were the serializer's) |
+| `api` | the calls generated readers and writers make (typed fields of every type, nullable reads into `T?[]`, strings as chars and as UTF-8, decimals with their scale, timestamps with their kind, statistics) under every codec, encoding hint and page layout, and with encryption; every generated bit-packing width (0–32, 0–64) and dictionary index width (1–16); `Interval`, `BigDecimal`, `RawDataField`, unseekable output, the schema and metadata API; enum columns refused alike (they were the serializer's) |
 | `cases <from> <count>` | the conformance harness's generated cases, checked by its library-only oracles (values, levels, field IDs, row counts, statistics) |
 | `write`/`read <from> <count> <dir>` | files one build wrote, read by the other: JIT to native and native to JIT |
 | `hashes <from> <count>` | the files written natively are byte for byte the JIT build's; gzip cases compared written uncompressed, since native AOT links its own zlib (the gzip and encrypted files themselves are covered by the cross-build reads) |
 | `corpus <dir>` | upstream's test files decoded to the same schema, values and levels as on the JIT, encrypted ones with their documented keys; the one malformed file (a FIXED_LEN_BYTE_ARRAY with no length, refused by parquet-cpp too) must be refused, and anything else failing fails the run |
 
-CI's `aot` job (required by `lake-ci`) runs every mode, 3,000 fixed and 2,000 fresh seeds, on Linux x64, Windows x64
-and macOS arm64. Locally:
+CI's `aot` job (required by `lake-ci`) runs every mode, 3,000 fixed and 2,000 fresh seeds, on Linux x64 and Windows
+x64; macOS arm64 runners cost ten times as much, so that leg runs on a pull request labelled `macos` or a run
+dispatched with `macos: true` (before a release, at least).
+
+**Coverage.** The modes together cover 56% of the package's lines, and 83% of the code the library can call (the
+generated big-endian bit-packing kernels, a third of all lines, have no caller but upstream's own test). Measure it on
+the JIT build of the suite, which runs the same code: `dotnet-coverage instrument` the copied `Lake.Parquet.dll`,
+then `dotnet-coverage collect --output-format cobertura` around the modes. A change that adds a code path adds the
+`api` check that reaches it.
+
+Locally:
 
 ```bash
 cd eng/lake/Lake.Parquet.AotTests
