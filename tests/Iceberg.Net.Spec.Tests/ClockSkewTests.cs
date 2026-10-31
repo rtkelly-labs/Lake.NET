@@ -129,7 +129,7 @@ public sealed class ClockSkewTests : IDisposable
 
         var result = await Maintenance.ExpireAsync(t, new ExpireOptions { TimeProvider = new FakeTimeProvider(now) });
 
-        Assert.Equal([old1.SnapshotId, old2.SnapshotId], result.Expired.Order());
+        Assert.Equal(new[] { old1.SnapshotId, old2.SnapshotId }.Order(), result.Expired.Order());
         Assert.Empty(result.RemovedRefs); // the branch's head is "younger" than now - max-ref-age
         var kept = (await _catalog.LoadTableAsync(t.Identifier)).Metadata;
         Assert.Contains(kept.Snapshots, s => s.SnapshotId == future.SnapshotId);
