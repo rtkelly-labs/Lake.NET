@@ -19,6 +19,32 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
   directories, so a manifest list inside a table cannot name another table's manifests.
 - `ResolvingFileIO` and `LocalFileIO` refuse storage schemes they have no FileIO for (`gs`, `abfss`, `hdfs`, …)
   instead of reading and writing them as local paths; a relative path starting with `s3` stays local.
+- REST catalog server, authentication: principals are keyed by issuer and subject, so an external IdP user whose `sub`
+  is `root` is `external/root`, never the server's own client `root` (**breaking:** grants for external users must name
+  `external/{sub}`); the IdP's key cannot sign a token in the server's name nor the server's key one in the IdP's; a
+  principal claim inside a token is ignored; with `Auth:Audience` set the server's own tokens are accepted again (they
+  carry no audience); static tokens are compared in constant time. Expired, unsigned (`alg=none`), wrong-issuer,
+  wrong-audience and `exp`-less JWTs are tested to get 401.
+- REST catalog server: a scan plan ID belongs to the principal that planned it; another principal's fetch or cancel is
+  a 404. An authorization matrix test covers every mapped route and fails for a new route until it is listed.
+- REST catalog server: the 16 MiB body limit applies before the idempotency middleware reads and hashes the body (a
+  17 MiB create with an `Idempotency-Key` used to succeed, and without one was a 500); it is now a 413 either way. JSON
+  depth is capped at 64 explicitly. `POST /v1/oauth/tokens` is rate limited per client address
+  (`Auth:TokenRequestsPerMinute`, default 60; 429 with `Retry-After`).
+- REST catalog server: a 400 for an overlapping location no longer names the other table, view or namespace or its
+  location (they may be outside the caller's grants); the details go to the server log.
+- REST catalog server: the remote signer signs an allow-list of headers (no `x-amz-tagging`, no client-chosen KMS key
+  or encryption context, nothing S3 adds later) and only `GET`, `HEAD`, `PUT`, `POST` and `DELETE`.
+- REST catalog server: credentials for a table whose stored location contains `*`, `?` or `$` are refused with an
+  explicit 422 before any vendor is asked (it was a misleading 400 from the STS vendor, and other vendors vended).
+- `RestCatalog`: a server-pushed `s3.endpoint` is trusted only if it is an S3 service endpoint over https with no path
+  (`RestCatalog.IsS3ServiceEndpoint`), not any `*.amazonaws.com` host (API Gateway, ELB, bucket and access-point hosts);
+  redirects are no longer followed (a 307 from the token endpoint re-sent the client secret to its target), also by
+  `SigV4Handler`'s default handler; a server `prefix` that would change the request path (`..`, encoded or not, `?`,
+  `#`, `\`) is refused.
+- `SECURITY.md` has a threat model: the server is open by default, trust boundaries, the scope of vended credentials
+  (Azure container SAS, Cloudflare Basin Catalog's bucket-wide credentials), DuckLake catalog writers fully trusted,
+  and keys in the catalog.
 
 ### Fixed
 - Orphan cleanup on Windows took every live file for an orphan: metadata builds local paths with `/` while a directory
