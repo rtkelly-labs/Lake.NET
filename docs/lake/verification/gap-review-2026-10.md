@@ -19,14 +19,22 @@ items it found that have since been fixed are listed first, so this page stays t
 | E3 No compatibility tests for our own output; no API compatibility check | `test: golden tables written by this library, read by every later version; …` | `OwnGoldenFixtureTests` over `fixtures/lake-net/pre-0.1.0-2026-10-31` (9 tables: v2/v3, every delete mechanism, evolution, refs), required for each release by `release.yml`; package validation against `0.0.1-alpha.1` on every pack (found the unrecorded removal of `PuffinFile.Write`, now a recorded baseline suppression) |
 | P1-8 Engine versions spread over about eight files | `test: one engine-version manifest; …` | `interop/engines.json` + `EngineVersionManifestTests` |
 | PQ2 (part) No independent Parquet reader in the unit suite | same commit | `Iceberg.Net.DuckDbNet.Tests` (DuckDB's reader: values, field IDs, statistics, both directions) |
+| S4 JWT negatives; external `sub=root` got local root's grants | `fix(rest-server): key principals by issuer and subject; JWT negatives` | `JwtTests` (stub IdP: expired, `alg=none`, wrong issuer/audience, no audience, no `exp`, unpublished key, issuer/key swapped → 401; external `root`/`static-token`/forged principal claim → 403). Also found: with `Auth:Audience` set the server refused its own client tokens. Static tokens compared in constant time (not behaviourally testable) |
+| S5 Authorization holes; plan IDs reused by another principal | `fix(rest-server): an authorization matrix over every route; plan IDs belong to their planner` | `AuthorizationMatrixTests` (44 rows × 5 principals over every mapped route, plus an `Idempotency-Key` reused by another principal). Found: another reader could fetch or cancel a plan by ID (now 404). Rename into a namespace without write, register with/without overwrite and views were already enforced. Plan tasks stay unbound by design |
+| S6 Body limit after idempotency buffering; no JSON depth or token rate limit | `fix(rest-server): enforce the body limit before idempotency reads the body; JSON depth; token rate limit` | `LimitsTests` on real Kestrel: 17 MiB → 413 with a key (was 200) and without (was 500); deep JSON → 400 (already true: System.Text.Json's default depth); token burst → 429. Bounded metadata reads per create still open |
+| S7 400s named other tables and their locations | `fix(rest-server): location clashes no longer name the other table or namespace` | `ErrorDisclosureTests` (both fail on the old code) |
+| S8 Client trusted any `*.amazonaws.com` endpoint; redirects; `prefix` of `../x` | `fix(rest-client): trust only S3 service endpoints, follow no redirects, refuse path-changing prefixes` | `RestClientCredentialTests` (25 new cases fail on the old code: 10 hosts, 12 prefixes, 3 redirect codes). Server-chosen table locations not covered |
+| P2 Signer header deny-list; `PATCH`, tagging, KMS key | `fix(rest-server): the remote signer allows listed headers and methods only` | `RemoteSigningTests.The_signer_signs_only_listed_headers_and_methods` |
+| Stored locations with a wildcard failed to vend uncleanly (noted above) | `fix(rest-server): refuse vending for stored locations with IAM wildcards with an explicit 422` | `CredentialVendingTests.A_stored_location_with_an_iam_wildcard_gets_a_clean_refusal_instead_of_credentials` (old: a 400 from the STS vendor, not a 500 as recorded) |
+| P2 `SECURITY.md` threat model | `docs(security): a threat model; changelog and gap review` | — |
 
 **Found while writing the Delta and Cloudflare references:** `S3FileIO.WriteAsync(overwrite: false)` accepts a `412`
 when the existing object has the same bytes (recovering a create whose response was lost). That is safe for Iceberg's
 unique file names but not for Delta's shared `_delta_log/N.json` names. *Resolved by design:* every Delta commit
 attempt carries a fresh `commitInfo.txnId`, so no two writers write the same bytes (specs/delta.md, invariant 11).
 
-**Still open from that work:** existing tables or namespaces whose location already contains a wildcard now fail to vend (a 500, not a
-clean error); re-validate them at load.
+**Closed from that work:** existing tables or namespaces whose location already contains a wildcard now get an explicit
+422 when credentials are asked for (see the table above).
 
 ## What was reviewed
 
