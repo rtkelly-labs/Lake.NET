@@ -19,12 +19,13 @@ namespace Iceberg.Net.RestServer;
 public sealed class TokenService
 {
     private readonly RestServerAuthOptions _options;
-    private readonly HashSet<string> _static;
+    private readonly byte[][] _static;
 
     public TokenService(RestServerAuthOptions options)
     {
         _options = options;
-        _static = new HashSet<string>(options.Tokens, StringComparer.Ordinal);
+        // Hashed, so every comparison is of equal-length values and takes the same time whatever the token.
+        _static = options.Tokens.Select(t => SHA256.HashData(Encoding.UTF8.GetBytes(t))).ToArray();
         var key = options.SigningKey is { Length: > 0 } k ? Encoding.UTF8.GetBytes(k) : RandomNumberGenerator.GetBytes(32);
         if (key.Length < 32) throw new ArgumentException("Iceberg:Auth:SigningKey must be at least 32 bytes");
         SigningKey = new SymmetricSecurityKey(key);
@@ -32,7 +33,21 @@ public sealed class TokenService
 
     public SymmetricSecurityKey SigningKey { get; }
 
-    public bool IsStaticToken(string token) => _static.Contains(token);
+    /// <summary>Whether <paramref name="token"/> is a configured static token, compared in constant time against every one.</summary>
+    public bool IsStaticToken(string token)
+    {
+        var hash = SHA256.HashData(Encoding.UTF8.GetBytes(token));
+        var found = false;
+        foreach (var candidate in _static) found |= CryptographicOperations.FixedTimeEquals(candidate, hash);
+        return found;
+    }
+
+    /// <summary>The issuer of the tokens this server signs (<see cref="RestServerAuthOptions.Issuer"/>).</summary>
+    public string Issuer => _options.Issuer;
+
+    /// <summary>Whether <paramref name="key"/> is this server's own signing key.</summary>
+    public bool IsOwnKey(SecurityKey? key) =>
+        key is SymmetricSecurityKey symmetric && CryptographicOperations.FixedTimeEquals(symmetric.Key, SigningKey.Key);
 
     /// <summary>Whether <paramref name="id"/> / <paramref name="secret"/> are a configured client (compared in constant time).</summary>
     public bool ValidClient(string? id, string? secret)
@@ -119,6 +134,9 @@ public static class AuthSetup
                 ValidIssuers = [options.Issuer],
                 ValidateAudience = options.Audience is not null,
                 ValidAudience = options.Audience,
+                // The server's own tokens carry no audience: the audience is asked of the external issuer's tokens only.
+                AudienceValidator = options.Audience is not { } audience ? null : (audiences, token, _) =>
+                    token.Issuer == options.Issuer || audiences.Contains(audience, StringComparer.Ordinal),
             };
             jwt.Events = new JwtBearerEvents
             {
@@ -127,9 +145,32 @@ public static class AuthSetup
                     var header = ctx.Request.Headers.Authorization.ToString();
                     if (header.StartsWith("Bearer ", StringComparison.OrdinalIgnoreCase) && tokens.IsStaticToken(header["Bearer ".Length..].Trim()))
                     {
-                        ctx.Principal = new ClaimsPrincipal(new ClaimsIdentity([new Claim("sub", "static-token")], "static"));
+                        ctx.Principal = new ClaimsPrincipal(new ClaimsIdentity([new Claim("sub", "static-token"), new Claim(Principals.PrincipalClaim, "static-token")], "static"));
                         ctx.Success();
                     }
+                    return Task.CompletedTask;
+                },
+                // Who the request is: the subject of a token this server issued, or (issuer, subject) of an external one,
+                // so an external user whose sub is "root" is not this server's client "root" (Principals.Name).
+                OnTokenValidated = ctx =>
+                {
+                    if (ctx.Principal?.Identity is not ClaimsIdentity identity) { ctx.Fail("No identity"); return Task.CompletedTask; }
+                    foreach (var forged in identity.FindAll(Principals.PrincipalClaim).ToList()) identity.TryRemoveClaim(forged);
+                    var issuer = ctx.SecurityToken?.Issuer;
+                    var local = string.Equals(issuer, options.Issuer, StringComparison.Ordinal);
+                    // The server's key signs only tokens in its own name, and only its key may sign them: an external
+                    // issuer's key cannot mint a local principal, nor the server's key an external one.
+                    if (local != tokens.IsOwnKey(ctx.SecurityToken?.SigningKey))
+                    {
+                        ctx.Fail("The token's issuer and signing key do not belong together");
+                        return Task.CompletedTask;
+                    }
+                    if (identity.FindFirst("sub")?.Value is not { Length: > 0 } subject)
+                    {
+                        ctx.Fail("The token has no subject");
+                        return Task.CompletedTask;
+                    }
+                    identity.AddClaim(new Claim(Principals.PrincipalClaim, local ? subject : Principals.External(subject)));
                     return Task.CompletedTask;
                 },
                 OnChallenge = async ctx =>

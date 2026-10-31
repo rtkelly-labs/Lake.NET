@@ -106,8 +106,26 @@ public sealed class StaticAuthorizer : IAuthorizer
 /// <summary>Who a request comes from, as authorization and idempotency see it.</summary>
 public static class Principals
 {
+    /// <summary>The claim authentication sets to the request's principal; one in a token itself is discarded.</summary>
+    public const string PrincipalClaim = "iceberg_principal";
+
+    /// <summary>What names the principals of the external OpenID Connect issuer (<see cref="RestServerAuthOptions.Authority"/>).</summary>
+    public const string ExternalPrefix = "external/";
+
+    /// <summary>
+    /// The principal of subject <paramref name="subject"/> of the external issuer: <c>external/{sub}</c>, never the same
+    /// name as one of this server's own clients, whose principal is their bare client ID.
+    /// </summary>
+    public static string External(string subject) => ExternalPrefix + subject;
+
+    /// <summary>
+    /// The principal name grants and idempotency keys are held by: a client ID for tokens this server issued,
+    /// <c>static-token</c>, <c>external/{sub}</c> for the external issuer's tokens, or <c>anonymous</c>.
+    /// </summary>
     public static string Name(ClaimsPrincipal principal) =>
-        principal.Identity?.IsAuthenticated == true ? principal.FindFirst("sub")?.Value ?? principal.Identity.Name ?? "unknown" : "anonymous";
+        principal.Identity?.IsAuthenticated == true
+            ? principal.FindFirst(PrincipalClaim)?.Value ?? principal.FindFirst("sub")?.Value ?? principal.Identity.Name ?? "unknown"
+            : "anonymous";
 
     /// <summary>Throw <see cref="ForbiddenException"/> unless the request's principal holds <paramref name="privilege"/> on the resource.</summary>
     public static async Task RequireAsync(this HttpContext http, CatalogPrivilege privilege, Namespace ns, string? name = null)
