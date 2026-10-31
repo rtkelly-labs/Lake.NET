@@ -17,6 +17,19 @@ public enum CatalogBackend
     Postgres,
 }
 
+/// <summary>Where a test lake's data files live.</summary>
+public enum StorageBackend
+{
+    /// <summary>A temporary directory (<see cref="LocalFileIO"/>).</summary>
+    Local,
+    /// <summary>
+    /// A prefix of the <c>iceberg-regression</c> bucket on the S3 emulator (<see cref="S3FileIO"/>, path-style, test
+    /// credentials) at <c>ICEBERG_S3_ENDPOINT</c> (default <c>http://localhost:5000</c>, moto from <c>emulation/up.sh</c>);
+    /// skipped when unreachable, failed instead under <c>ICEBERG_DUCKLAKE_S3_REQUIRED=1</c>.
+    /// </summary>
+    S3,
+}
+
 /// <summary>
 /// A DuckLake in a temporary directory: a catalog database (a SQLite file beside the data, or a fresh PostgreSQL
 /// database) and a data directory. The PostgreSQL server comes from <c>ICEBERG_DUCKLAKE_POSTGRES</c> (an Npgsql
@@ -31,28 +44,71 @@ public sealed class TestLake : IDisposable
     private DuckLakeStore? _store;
     private string? _database;
 
-    public TestLake(CatalogBackend backend = CatalogBackend.Sqlite, string version = DuckLakeCatalog.FormatVersion)
+    public TestLake(CatalogBackend backend = CatalogBackend.Sqlite, string version = DuckLakeCatalog.FormatVersion, StorageBackend storage = StorageBackend.Local)
     {
         Backend = backend;
         Version = version;
-        Root = Path.Combine(Path.GetTempPath(), "iceberg-dotnet-tests", "ducklake-" + Guid.NewGuid().ToString("N"));
+        Storage = storage;
+        var id = Guid.NewGuid().ToString("N");
+        Root = Path.Combine(Path.GetTempPath(), "iceberg-dotnet-tests", "ducklake-" + id);
         Directory.CreateDirectory(Root);
+        DataPath = storage == StorageBackend.S3 ? $"s3://{S3Bucket}/ducklake-tests/{id}/data/" : Path.Combine(Root, "data") + "/";
     }
 
     public CatalogBackend Backend { get; }
     /// <summary>The format version <see cref="CreateAsync"/> creates.</summary>
     public string Version { get; }
+    public StorageBackend Storage { get; }
+    /// <summary>A local directory for the SQLite catalog and scratch files, whatever the storage.</summary>
     public string Root { get; }
-    public string DataPath => Path.Combine(Root, "data") + "/";
-    public LocalFileIO IO { get; } = new();
+    public string DataPath { get; }
+
+    public const string S3Bucket = "iceberg-regression";
+    public static string S3Endpoint => Environment.GetEnvironmentVariable("ICEBERG_S3_ENDPOINT") is { Length: > 0 } e ? e : "http://localhost:5000";
+
+    private IFileIO? _io;
+
+    /// <summary>The lake's storage; for S3, the first use skips the test when the emulator is unreachable.</summary>
+    public IFileIO IO => _io ??= Storage switch
+    {
+        StorageBackend.S3 => CreateS3(),
+        _ => new LocalFileIO(),
+    };
+
+    private static readonly Lazy<string?> S3Skip = new(() =>
+    {
+        try
+        {
+            using var client = new System.Net.Sockets.TcpClient();
+            var uri = new Uri(S3Endpoint);
+            return client.ConnectAsync(uri.Host, uri.Port).Wait(TimeSpan.FromSeconds(2)) ? null : $"S3 emulator not reachable at {S3Endpoint} (run emulation/up.sh)";
+        }
+        catch (Exception e) when (e is System.Net.Sockets.SocketException or AggregateException or UriFormatException)
+        {
+            return $"S3 emulator not reachable at {S3Endpoint}: {e.Message}";
+        }
+    });
+
+    private static S3FileIO CreateS3()
+    {
+        if (Environment.GetEnvironmentVariable("ICEBERG_DUCKLAKE_S3_REQUIRED") == "1") Assert.True(S3Skip.Value is null, S3Skip.Value);
+        Skip.If(S3Skip.Value is not null, S3Skip.Value);
+        return new S3FileIO(new S3FileIOOptions
+        {
+            Endpoint = S3Endpoint, PathStyleAccess = true, Region = "eu-west-1", AccessKeyId = "test", SecretAccessKey = "test",
+        });
+    }
     public string SqliteFile => Path.Combine(Root, "catalog.sqlite");
 
     public DuckLakeStore Store => _store ??= Backend switch
     {
         // Pooling off: DuckDB opens the same file between our calls, and a pooled handle would outlive the test.
-        CatalogBackend.Sqlite => DuckLakeStore.Sqlite($"Data Source={SqliteFile};Pooling=False"),
-        _ => DuckLakeStore.PostgreSql(CreateDatabase()),
+        CatalogBackend.Sqlite => DuckLakeStore.Sqlite($"Data Source={SqliteFile};Pooling=False", ConfigureStore),
+        _ => DuckLakeStore.PostgreSql(CreateDatabase(), ConfigureStore),
     };
+
+    /// <summary>EF Core options for the store (interceptors such as <see cref="CatalogFaults"/>); set before first use of <see cref="Store"/>.</summary>
+    public Action<Microsoft.EntityFrameworkCore.DbContextOptionsBuilder>? ConfigureStore { get; set; }
 
     /// <summary>Whether the catalog database already exists (DuckDB then attaches without DATA_PATH).</summary>
     public bool CatalogExists => Backend == CatalogBackend.Sqlite ? File.Exists(SqliteFile) : _catalogCreated;
@@ -123,7 +179,22 @@ public sealed class TestLake : IDisposable
         await DuckLakeValidator.AssertValidAsync(catalog, new DuckLakeValidationOptions { Deep = true });
     }
 
-    public IEnumerable<string> Files() => Directory.Exists(DataPath) ? Directory.EnumerateFiles(DataPath, "*", SearchOption.AllDirectories) : [];
+    /// <summary>The objects under <see cref="DataPath"/>, on whichever storage.</summary>
+    public IEnumerable<string> Files()
+    {
+        if (Storage == StorageBackend.Local) return Directory.Exists(DataPath) ? Directory.EnumerateFiles(DataPath, "*", SearchOption.AllDirectories) : [];
+        var files = new List<string>();
+        var list = ((ISupportsListing)IO).ListAsync(DataPath).GetAsyncEnumerator();
+        try
+        {
+            while (list.MoveNextAsync().AsTask().GetAwaiter().GetResult()) files.Add(list.Current.Location);
+        }
+        finally
+        {
+            list.DisposeAsync().AsTask().GetAwaiter().GetResult();
+        }
+        return files;
+    }
 
     private static readonly Lazy<string?> PostgresSkip = new(ProbePostgres);
 
@@ -180,6 +251,15 @@ public sealed class TestLake : IDisposable
             }
             catch (NpgsqlException) { /* best effort */ }
         }
+        if (Storage == StorageBackend.S3 && _io is not null)
+        {
+            try
+            {
+                foreach (var f in Files()) _io.DeleteAsync(f).GetAwaiter().GetResult();
+            }
+            catch (Exception e) when (e is IOException or Amazon.Runtime.AmazonServiceException or HttpRequestException) { /* best effort */ }
+        }
+        _io?.Dispose();
         try { Directory.Delete(Root, recursive: true); }
         catch (IOException) { }
     }

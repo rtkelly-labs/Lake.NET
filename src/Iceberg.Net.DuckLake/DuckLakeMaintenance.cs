@@ -1,3 +1,4 @@
+using System.Data.Common;
 using Iceberg.Net.IO;
 using Microsoft.EntityFrameworkCore;
 
@@ -79,9 +80,38 @@ public sealed partial class DuckLakeCatalog
     public Task<DuckLakeExpiry> ExpireSnapshotsAsync(DateTimeOffset olderThan, bool dryRun = false, CancellationToken ct = default) =>
         ExpireAsync(snapshots => snapshots.Where(s => s.SnapshotTime < olderThan), dryRun, ct);
 
+    /// <summary>
+    /// Expiry in one database transaction, retried after a transient failure (nothing was written). When <c>COMMIT</c>
+    /// fails, the expiry happened if none of the chosen snapshots is left; certainly not after a transient failure, it is
+    /// retried; otherwise the outcome is unknown (<see cref="DuckLakeCommitStateUnknownException"/>; rerunning is safe).
+    /// </summary>
     private async Task<DuckLakeExpiry> ExpireAsync(Func<List<SnapshotEntity>, IEnumerable<SnapshotEntity>> choose, bool dryRun, CancellationToken ct)
     {
         using var scope = DuckLakeTelemetry.Start("ducklake.maintenance.expire", this);
+        for (var attempt = 0; ; attempt++)
+        {
+            try
+            {
+                var expiry = await ExpireOnceAsync(scope, choose, dryRun, ct);
+                scope.Succeeded();
+                return expiry;
+            }
+            catch (Exception e) when (DuckLakeFaults.IsTransient(e) && attempt + 1 < Math.Max(1, Options.MaxCommitAttempts))
+            {
+                scope.Retried(attempt + 2);
+                await Task.Delay(DuckLakeFaults.Backoff(Options, attempt), ct);
+            }
+            catch (Exception e)
+            {
+                scope.Failed(e);
+                throw;
+            }
+        }
+    }
+
+    private async Task<DuckLakeExpiry> ExpireOnceAsync(DuckLakeTelemetry.Scope scope, Func<List<SnapshotEntity>, IEnumerable<SnapshotEntity>> choose, bool dryRun,
+        CancellationToken ct)
+    {
         await using var db = Context(scope);
         await db.Database.OpenConnectionAsync(ct);
         await using var tx = await db.Database.BeginTransactionAsync(ct);
@@ -89,11 +119,7 @@ public sealed partial class DuckLakeCatalog
         if (snapshots.Count == 0) throw new InvalidDataException("ducklake_snapshot is empty");
         var latest = snapshots[^1].SnapshotId;
         var expired = choose(snapshots).Select(s => s.SnapshotId).Where(id => id != latest).Distinct().Order().ToList();
-        if (expired.Count == 0)
-        {
-            scope.Succeeded();
-            return new DuckLakeExpiry([], []);
-        }
+        if (expired.Count == 0) return new DuckLakeExpiry([], []);
         await db.Snapshots.Where(s => expired.Contains(s.SnapshotId)).ExecuteDeleteAsync(ct);
 
         // A versioned row is kept while some retained snapshot s has begin_snapshot <= s < end_snapshot.
@@ -150,7 +176,7 @@ public sealed partial class DuckLakeCatalog
             await db.TableStats.Where(x => goneTables.Contains(x.TableId)).ExecuteDeleteAsync(ct);
             await db.TableColumnStats.Where(x => goneTables.Contains(x.TableId)).ExecuteDeleteAsync(ct);
             await db.SchemaVersions.Where(x => goneTables.Contains(x.TableId)).ExecuteDeleteAsync(ct);
-            foreach (var inlined in await db.InlinedDataTables.Where(x => goneTables.Contains(x.TableId)).Select(x => x.TableName).ToListAsync(ct))
+            foreach (var inlined in (await db.InlinedDataTables.Where(x => goneTables.Contains(x.TableId)).ToListAsync(ct)).Select(DuckLakeInlinedData.Checked))
                 await RawAsync(db, $"DROP TABLE IF EXISTS {Db.Quote(inlined)}", 1, ct);
             await db.InlinedDataTables.Where(x => goneTables.Contains(x.TableId)).ExecuteDeleteAsync(ct);
             foreach (var id in goneTables) await RawAsync(db, $"DROP TABLE IF EXISTS {Db.Quote(InlinedDeleteTable(id))}", 1, ct);
@@ -158,7 +184,7 @@ public sealed partial class DuckLakeCatalog
 
         // Inlined rows deleted before every retained snapshot, and inlined deletions of files that are gone.
         var (rowId, begin, end) = DuckLakeInlinedData.SystemColumns(db.Is11);
-        foreach (var inlined in await db.InlinedDataTables.Select(x => x.TableName).ToListAsync(ct))
+        foreach (var inlined in (await db.InlinedDataTables.ToListAsync(ct)).Select(DuckLakeInlinedData.Checked))
             await RawAsync(db, $"DELETE FROM {Db.Quote(inlined)} WHERE {end} IS NOT NULL AND NOT EXISTS " +
                                $"(SELECT 1 FROM ducklake_snapshot s WHERE s.snapshot_id >= {Db.Quote(inlined)}.{begin} AND s.snapshot_id < {Db.Quote(inlined)}.{end})", 1, ct);
         if (fileIds.Count > 0)
@@ -167,10 +193,32 @@ public sealed partial class DuckLakeCatalog
                     await RawAsync(db, $"DELETE FROM {Db.Quote(InlinedDeleteTable(tableId))} WHERE file_id IN ({IdList(fileIds)})", 1, ct);
 
         await BulkInsert.InsertAsync(db, scheduled, ct);
-        if (dryRun) await tx.RollbackAsync(ct);
-        else await tx.CommitAsync(ct);
-        scope.Succeeded();
-        return new DuckLakeExpiry(expired, scheduled.Select(f => f.PathIsRelative == true ? DataPath + f.Path : f.Path).ToList());
+        var result = new DuckLakeExpiry(expired, scheduled.Select(f => f.PathIsRelative == true ? DataPath + f.Path : f.Path).ToList());
+        if (dryRun)
+        {
+            await tx.RollbackAsync(ct);
+            return result;
+        }
+        try
+        {
+            await tx.CommitAsync(ct);
+        }
+        catch (Exception e) when (e is not OperationCanceledException)
+        {
+            try { await tx.RollbackAsync(CancellationToken.None); }
+            catch (Exception r) when (r is DbException or InvalidOperationException) { /* gone with the connection */ }
+            bool? landed;
+            try
+            {
+                await using var check = Context(scope);
+                landed = !await check.Snapshots.AnyAsync(s => expired.Contains(s.SnapshotId), CancellationToken.None);
+            }
+            catch (Exception c) when (c is DbException or InvalidOperationException) { landed = null; }
+            if (landed == true) return result;
+            if (landed == false && DuckLakeFaults.IsTransient(e)) throw;
+            throw new DuckLakeCommitStateUnknownException("Expiry failed while committing; it may or may not have been applied (rerunning it is safe)", e);
+        }
+        return result;
     }
 
     /// <summary>Each table's directory (relative file paths resolve against it), from its latest catalog row.</summary>
@@ -201,14 +249,20 @@ public sealed partial class DuckLakeCatalog
 
     /// <summary>
     /// Delete the files scheduled for deletion before <paramref name="olderThan"/> (all of them when null) and their
-    /// rows. A file already gone is fine. Returns the locations deleted (or, in a dry run, that would be).
+    /// rows. A file already gone is fine. Only files under <c>data_path</c> are deleted (see
+    /// <see cref="DuckLakeOptions.CleanupOutsideDataPath"/>); other rows stay. Returns the locations deleted (or, in a dry
+    /// run, that would be).
     /// </summary>
     public async Task<IReadOnlyList<string>> CleanupOldFilesAsync(DateTimeOffset? olderThan = null, bool dryRun = false, CancellationToken ct = default)
     {
         using var scope = DuckLakeTelemetry.Start("ducklake.maintenance.cleanup", this);
         await using var db = Context(scope);
+        // Only files under data_path are deleted: a row naming anything else (../x, an absolute path elsewhere) is left
+        // alone, row and file. Files registered in place outside data_path go only when the options allow it.
         var due = (await Guarded("ducklake_files_scheduled_for_deletion", () => db.FilesScheduledForDeletion.ToListAsync(ct)))
-            .Where(f => olderThan is null || f.ScheduleStart < olderThan).ToList();
+            .Where(f => olderThan is null || f.ScheduleStart < olderThan)
+            .Where(f => f.PathIsRelative == true ? f.Path.Length > 0 && DuckLakePaths.IsConfined(f.Path)
+                : DuckLakePaths.IsUnder(NormaliseLocation(DataPath), NormaliseLocation(f.Path)) || (Options.CleanupOutsideDataPath && DuckLakePaths.IsCleanAbsolute(f.Path))).ToList();
         var locations = due.Select(f => f.PathIsRelative == true ? DataPath + f.Path : f.Path).ToList();
         if (dryRun || due.Count == 0)
         {
@@ -249,15 +303,15 @@ public sealed partial class DuckLakeCatalog
             var files = await db.DataFiles.Select(f => new { f.TableId, f.Path, f.PathIsRelative }).ToListAsync(ct);
             var deletes = await db.DeleteFiles.Select(f => new { f.TableId, f.Path, f.PathIsRelative }).ToListAsync(ct);
             var locations = await TableLocationsAsync(db, files.Select(f => f.TableId).Concat(deletes.Select(d => d.TableId)).Distinct().ToList(), ct);
-            foreach (var f in files.Concat(deletes)) referenced.Add(Normalise(Resolve(locations[f.TableId], f.Path, f.PathIsRelative ?? true)));
-            foreach (var f in await db.FilesScheduledForDeletion.ToListAsync(ct)) referenced.Add(Normalise(f.PathIsRelative == true ? DataPath + f.Path : f.Path));
+            foreach (var f in files.Concat(deletes)) referenced.Add(NormaliseLocation(Resolve(locations[f.TableId], f.Path, f.PathIsRelative ?? true)));
+            foreach (var f in await db.FilesScheduledForDeletion.ToListAsync(ct)) referenced.Add(NormaliseLocation(f.PathIsRelative == true ? DataPath + f.Path : f.Path));
         }
         var cutoff = DateTime.UtcNow - age;
         var orphans = new List<string>();
         await foreach (var f in lister.ListAsync(DataPath, ct))
         {
             if (!f.Location.EndsWith(".parquet", StringComparison.OrdinalIgnoreCase) && !f.Location.EndsWith(".puffin", StringComparison.OrdinalIgnoreCase)) continue;
-            if (f.LastModifiedUtc < cutoff && !referenced.Contains(Normalise(f.Location))) orphans.Add(f.Location);
+            if (f.LastModifiedUtc < cutoff && !referenced.Contains(NormaliseLocation(f.Location)) && DuckLakePaths.IsUnder(NormaliseLocation(DataPath), NormaliseLocation(f.Location))) orphans.Add(f.Location);
         }
         if (!dryRun)
             foreach (var o in orphans)
@@ -267,7 +321,23 @@ public sealed partial class DuckLakeCatalog
             }
         scope.Succeeded();
         return orphans;
+    }
 
-        static string Normalise(string location) => location.Replace('\\', '/').Replace("//", "/");
+    /// <summary>
+    /// A location in the one form the orphan scan compares catalog paths and listed objects in: forward slashes, doubled
+    /// slashes in the path collapsed, and a scheme's <c>://</c> (<c>s3://bucket/…</c>) left as it is. A <c>file:</c>
+    /// location is always spelled <c>file:///path</c>: Hadoop's <c>file:/path</c> (a supported data path) and the
+    /// <c>file:///path</c> a local listing returns are one file.
+    /// </summary>
+    internal static string NormaliseLocation(string location)
+    {
+        var l = location.Replace('\\', '/');
+        if (l.StartsWith("file:", StringComparison.OrdinalIgnoreCase))
+            l = "file:///" + l["file:".Length..].TrimStart('/');
+        var scheme = l.IndexOf("://", StringComparison.Ordinal);
+        var start = scheme > 0 && !l[..scheme].Contains('/') ? scheme + 3 : 0;
+        var path = l[start..];
+        while (path.Contains("//", StringComparison.Ordinal)) path = path.Replace("//", "/", StringComparison.Ordinal);
+        return l[..start] + path;
     }
 }

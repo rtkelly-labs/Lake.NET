@@ -9,8 +9,15 @@ namespace Iceberg.Net.DuckLake;
 
 public sealed record DuckLakeColumnDefinition(string Name, DuckLakeType Type, bool Nullable = true);
 
-/// <summary>A concurrent snapshot made a change the spec's conflict rules say this commit cannot be retried over.</summary>
-public sealed class DuckLakeConflictException(string message) : Exception(message);
+/// <summary>
+/// A concurrent snapshot made a change the spec's conflict rules say this commit cannot be retried over, or the commit
+/// gave up after <see cref="DuckLakeOptions.MaxCommitAttempts"/> (the last failure is the inner exception).
+/// </summary>
+public sealed class DuckLakeConflictException : Exception
+{
+    public DuckLakeConflictException(string message) : base(message) { }
+    public DuckLakeConflictException(string message, Exception? inner) : base(message, inner) { }
+}
 
 /// <summary>
 /// The catalog database failed while committing, so whether the snapshot was written is unknown. Files written for
@@ -199,6 +206,7 @@ public sealed partial class DuckLakeTransaction : IAsyncDisposable
         await using var db = await BeginAsync(ct);
         var parts = name.Split('.');
         if (parts.Any(string.IsNullOrEmpty)) throw new ArgumentException($"'{name}' is not a schema name or path", nameof(name));
+        foreach (var part in parts) DuckLakePaths.CheckName(part, "schema");
         var live = await _catalog.SchemasAsync(db, _base!.Value, ct);
         if (live.Any(s => s.Name == name && !(_schemas.TryGetValue(s.Name, out var d) && d.Dropped)) || _schemas.TryGetValue(name, out var p) && !p.Dropped)
             throw new InvalidOperationException($"Schema {name} already exists");
@@ -250,6 +258,7 @@ public sealed partial class DuckLakeTransaction : IAsyncDisposable
 
     public async Task CreateTableAsync(string schema, string name, IReadOnlyList<DuckLakeColumnDefinition> columns, CancellationToken ct = default)
     {
+        DuckLakePaths.CheckName(name, "table");
         if (columns.Count == 0) throw new ArgumentException("A table needs at least one column", nameof(columns));
         if (columns.Select(x => x.Name).Distinct(StringComparer.OrdinalIgnoreCase).Count() != columns.Count)
             throw new ArgumentException("Column names must be unique", nameof(columns));
@@ -635,67 +644,116 @@ public sealed partial class DuckLakeTransaction : IAsyncDisposable
         }
     }
 
+    /// <summary>
+    /// The commit loop. Before <c>COMMIT</c>, a lost race for the snapshot ID and a transient database failure (SQLite
+    /// <c>BUSY</c>/<c>LOCKED</c>, PostgreSQL <c>40001</c>/<c>40P01</c>, a dropped connection) roll back and retry: nothing
+    /// was written, and the files are reused. When <c>COMMIT</c> itself fails, the snapshot is looked for by its
+    /// idempotency token (<see cref="LandedAsync"/>): found, the commit happened and its acknowledgement was lost, so it
+    /// succeeds (a retry would apply it twice); certainly absent after a transient failure, it is retried; otherwise the
+    /// outcome is unknown and the files are kept.
+    /// </summary>
     private async Task<DuckLakeSnapshot> CommitAttemptsAsync(DuckLakeTelemetry.Scope scope, CancellationToken ct)
     {
         Exception? last = null;
-        for (var attempt = 0; attempt < Math.Max(1, _catalog.Options.MaxCommitAttempts); attempt++)
+        var attempts = Math.Max(1, _catalog.Options.MaxCommitAttempts);
+        for (var attempt = 0; attempt < attempts; attempt++)
         {
+            if (attempt > 0) await Task.Delay(Backoff(attempt - 1), ct);
             scope.Retried(attempt + 1);
             DuckLakeSnapshot snapshot;
             await using var db = _catalog.Context(scope);
-            await db.Database.OpenConnectionAsync(ct);
-            await using var tx = await db.Database.BeginTransactionAsync(ct);
+            Microsoft.EntityFrameworkCore.Storage.IDbContextTransaction? tx = null;
             try
             {
-                snapshot = await ApplyAsync(db, ct);
-            }
-            catch (DuckLakeConflictException)
-            {
-                await tx.RollbackAsync(CancellationToken.None);
-                await CleanUpAsync();
-                throw;
-            }
-            catch (Exception e) when (e is DbException or DbUpdateException)
-            {
-                // Lost the race for the snapshot ID (a unique key): roll back and try again. Anything else is a real
-                // error; nothing was committed, so the files go.
-                last = e;
-                await tx.RollbackAsync(CancellationToken.None);
-                if (await SnapshotTakenAsync(scope, ct))
+                try
                 {
-                    await Task.Delay(Backoff(attempt), ct);
-                    continue;
+                    await db.Database.OpenConnectionAsync(ct);
+                    tx = await db.Database.BeginTransactionAsync(ct);
+                    snapshot = await ApplyAsync(db, ct);
                 }
-                await CleanUpAsync();
-                throw;
+                catch (DuckLakeConflictException)
+                {
+                    await RollbackAsync(tx);
+                    await CleanUpAsync();
+                    throw;
+                }
+                catch (Exception e) when (e is DbException or DbUpdateException)
+                {
+                    // Lost the race for the snapshot ID (a unique key), or a transient failure: roll back and try again.
+                    // Anything else is a real error; nothing was committed, so the files go.
+                    last = e;
+                    await RollbackAsync(tx);
+                    if (DuckLakeFaults.IsTransient(e) || await SnapshotTakenAsync(scope, ct)) continue;
+                    await CleanUpAsync();
+                    throw;
+                }
+                catch
+                {
+                    await RollbackAsync(tx);
+                    await CleanUpAsync();
+                    throw;
+                }
+                try
+                {
+                    await tx.CommitAsync(ct);
+                }
+                catch (Exception e) when (e is not OperationCanceledException)
+                {
+                    await RollbackAsync(tx);
+                    switch (await LandedAsync(snapshot, scope))
+                    {
+                        case true:
+                            return snapshot; // committed; only the acknowledgement was lost
+                        case false when DuckLakeFaults.IsTransient(e):
+                            last = e;        // the database refused the COMMIT: nothing landed
+                            continue;
+                        default:
+                            throw new DuckLakeCommitStateUnknownException($"Commit of snapshot {snapshot.SnapshotId} failed; it may or may not have been written", e);
+                    }
+                }
+                return snapshot;
             }
-            catch
+            finally
             {
-                await tx.RollbackAsync(CancellationToken.None);
-                await CleanUpAsync();
-                throw;
+                if (tx is not null) await tx.DisposeAsync();
             }
-            try
-            {
-                await tx.CommitAsync(ct);
-            }
-            catch (Exception e) when (e is not OperationCanceledException)
-            {
-                throw new DuckLakeCommitStateUnknownException($"Commit of snapshot {snapshot.SnapshotId} failed; it may or may not have been written", e);
-            }
-            return snapshot;
         }
         await CleanUpAsync();
-        throw new DuckLakeConflictException($"Gave up after {_catalog.Options.MaxCommitAttempts} attempts: {last?.Message}");
+        throw new DuckLakeConflictException($"Gave up after {attempts} attempts: {last?.Message}", last);
+    }
+
+    private static async Task RollbackAsync(Microsoft.EntityFrameworkCore.Storage.IDbContextTransaction? tx)
+    {
+        if (tx is null) return;
+        try { await tx.RollbackAsync(CancellationToken.None); }
+        catch (Exception e) when (e is DbException or InvalidOperationException) { /* the connection or transaction is gone */ }
+    }
+
+    /// <summary>
+    /// Whether <paramref name="snapshot"/> is in the catalog: its ID with its idempotency token, the commit time (to the
+    /// microsecond the catalog keeps) and the <c>changes_made</c>, author and message this transaction wrote. Another
+    /// writer's snapshot under the same ID differs in at least one of them. Null when the catalog cannot be asked.
+    /// </summary>
+    private async Task<bool?> LandedAsync(DuckLakeSnapshot snapshot, DuckLakeTelemetry.Scope scope)
+    {
+        try
+        {
+            await using var db = _catalog.Context(scope);
+            var id = snapshot.SnapshotId;
+            var row = await db.Snapshots.Where(s => s.SnapshotId == id).Select(s => (DateTimeOffset?)s.SnapshotTime).FirstOrDefaultAsync(CancellationToken.None);
+            if (row is null) return false;
+            var changes = await db.SnapshotChanges.Where(c => c.SnapshotId == id).FirstOrDefaultAsync(CancellationToken.None);
+            return row.Value.UtcTicks == snapshot.Time.UtcTicks && changes is not null
+                && DuckLakeChange.Parse(changes.ChangesMade).SequenceEqual(snapshot.Changes) && changes.Author == Author && changes.CommitMessage == CommitMessage;
+        }
+        catch (Exception e) when (e is DbException or InvalidOperationException or InvalidDataException)
+        {
+            return null;
+        }
     }
 
     /// <summary>Wait before retry <paramref name="attempt"/>: exponential with jitter, so writers that collided do not collide again in step.</summary>
-    private TimeSpan Backoff(int attempt)
-    {
-        var o = _catalog.Options;
-        var ms = Math.Min(o.MaxRetryWait.TotalMilliseconds, o.RetryWait.TotalMilliseconds * Math.Pow(1.5, attempt));
-        return TimeSpan.FromMilliseconds(ms * (0.5 + Random.Shared.NextDouble()));
-    }
+    private TimeSpan Backoff(int attempt) => DuckLakeFaults.Backoff(_catalog.Options, attempt);
 
     private async Task<bool> SnapshotTakenAsync(DuckLakeTelemetry.Scope scope, CancellationToken ct)
     {
@@ -786,7 +844,9 @@ public sealed partial class DuckLakeTransaction : IAsyncDisposable
         // The snapshot row goes in first: it is the row concurrent committers race for (its primary key), so a loser
         // finds out before writing anything else (on PostgreSQL it waits for the winner, then fails at once). Its
         // counters follow from the staged operations alone; the ID assignment below must land on the same values.
-        var time = DateTimeOffset.UtcNow;
+        // To the microsecond, as the catalog keeps it: the time is part of the commit's idempotency token (LandedAsync).
+        var now = DateTimeOffset.UtcNow;
+        var time = new DateTimeOffset(now.UtcTicks - now.UtcTicks % 10, TimeSpan.Zero);
         var snapshotRow = new SnapshotEntity
         {
             SnapshotId = snapshotId, SnapshotTime = time, SchemaVersion = schemaVersion,
@@ -1139,10 +1199,11 @@ public sealed partial class DuckLakeTransaction : IAsyncDisposable
                 var tableId = t.TableId!.Value;
                 var version = versionedTables.Contains(t) ? schemaVersion
                     : await db.SchemaVersions.Where(v => v.TableId == tableId).MaxAsync(v => (long?)v.SchemaVersion, ct) ?? latest.SchemaVersion;
-                var name = await db.InlinedDataTables.Where(x => x.TableId == tableId && x.SchemaVersion == version).Select(x => x.TableName).FirstOrDefaultAsync(ct);
+                var registered = await db.InlinedDataTables.Where(x => x.TableId == tableId && x.SchemaVersion == version).FirstOrDefaultAsync(ct);
+                var name = registered is null ? null : DuckLakeInlinedData.Checked(registered);
                 if (name is null)
                 {
-                    name = $"ducklake_inlined_data_{tableId}_{version}";
+                    name = DuckLakeInlinedData.TableName(tableId, version);
                     await Raw(DuckLakeInlinedData.CreateTableSql(db.Dialect, v11, name, t.Columns));
                     rows.InlinedDataTables.Add(new InlinedDataTableEntity { TableId = tableId, TableName = name, SchemaVersion = version });
                 }

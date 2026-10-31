@@ -188,6 +188,36 @@ public abstract class MaintenanceTests : IAsyncLifetime
 
     [SkippableFact]
     [Spec("ducklake: ducklake_files_scheduled_for_deletion")]
+    public async Task Orphan_cleanup_on_a_Hadoop_style_file_data_path_deletes_only_the_orphan()
+    {
+        // data_path file:/… (Hadoop's form) while the local listing returns file:///…: the two spellings of one file must
+        // match, or every live file looks orphaned (and every listed file looks outside data_path).
+        if (_lake.Storage != StorageBackend.Local) throw new Xunit.SkipException("a local data path");
+        var catalog = await DuckLakeCatalog.CreateAsync(_lake.Store, _lake.IO, "file:" + _lake.DataPath.Replace('\\', '/'), version: _lake.Version);
+        await using (var tx = catalog.BeginTransaction())
+        {
+            await tx.CreateTableAsync("main", "t", [new("id", DuckLakeType.Int64)]);
+            await tx.CommitAsync();
+        }
+        await using (var tx = catalog.BeginTransaction())
+        {
+            await tx.InsertAsync("main", "t", [[1L], [2L]]);
+            await tx.CommitAsync();
+        }
+        var live = Assert.Single(_lake.Files());
+        var orphan = Path.Combine(_lake.DataPath, "main", "t", "ducklake-crashed-writer.parquet");
+        await File.WriteAllBytesAsync(orphan, [1, 2, 3]);
+        foreach (var f in _lake.Files()) File.SetLastWriteTimeUtc(f, DateTime.UtcNow.AddDays(-4));
+
+        var deleted = await catalog.DeleteOrphanedFilesAsync();
+        Assert.Equal([Path.GetFullPath(orphan)], deleted.Select(l => Path.GetFullPath(new Uri(l).LocalPath)));
+        Assert.False(File.Exists(orphan));
+        Assert.True(File.Exists(live));
+        Assert.Equal(2, (await catalog.ReadAsync(await catalog.LoadTableAsync("main", "t"))).Count);
+    }
+
+    [SkippableFact]
+    [Spec("ducklake: ducklake_files_scheduled_for_deletion")]
     public async Task Orphaned_files_are_deleted_only_when_old_enough()
     {
         var catalog = await SmallFilesAsync(commits: 1);
@@ -204,6 +234,71 @@ public abstract class MaintenanceTests : IAsyncLifetime
         Assert.False(File.Exists(orphan));
         Assert.Single(_lake.Files());
         Assert.Equal(3, (await catalog.ReadAsync(await catalog.LoadTableAsync("main", "t"))).Count);
+    }
+
+    [SkippableFact]
+    [Spec("ducklake: ducklake_files_scheduled_for_deletion")]
+    public async Task Cleanup_deletes_only_files_scheduled_strictly_before_olderThan()
+    {
+        var catalog = await SmallFilesAsync(commits: 4);
+        Assert.Single(await catalog.MergeAdjacentFilesAsync()); // schedules the four inputs
+        var ids = (await SqlAsync("SELECT data_file_id FROM ducklake_files_scheduled_for_deletion ORDER BY data_file_id")).Select(r => Convert.ToInt64(r[0])).ToList();
+        Assert.Equal(4, ids.Count);
+        var t0 = new DateTimeOffset(2026, 1, 1, 0, 0, 0, TimeSpan.Zero);
+        var times = new[] { t0, t0.AddTicks(10), t0.AddDays(1), t0.AddDays(2) }; // the second one microsecond after the first
+        for (var i = 0; i < 4; i++)
+            await _lake.ExecAsync($"UPDATE ducklake_files_scheduled_for_deletion SET schedule_start = '{times[i]:yyyy-MM-dd HH:mm:ss.ffffff}+00' WHERE data_file_id = {ids[i]}");
+        async Task<int> Left() => (await SqlAsync("SELECT data_file_id FROM ducklake_files_scheduled_for_deletion")).Count;
+
+        Assert.Empty(await catalog.CleanupOldFilesAsync(olderThan: t0.AddTicks(-10)));
+        Assert.Empty(await catalog.CleanupOldFilesAsync(olderThan: t0));               // scheduled at exactly olderThan: kept
+        Assert.Equal(4, await Left());
+        Assert.Single(await catalog.CleanupOldFilesAsync(olderThan: t0.AddTicks(10)));  // one microsecond later: the first goes
+        Assert.Equal(3, await Left());
+        Assert.Single(await catalog.CleanupOldFilesAsync(olderThan: t0.AddDays(1)));    // the second; the third is at the boundary
+        Assert.Equal(2, await Left());
+        Assert.Equal(2, (await catalog.CleanupOldFilesAsync(dryRun: true)).Count);      // null: everything scheduled
+        Assert.Equal(2, await Left());
+        Assert.Equal(2, (await catalog.CleanupOldFilesAsync()).Count);
+        Assert.Equal(0, await Left());
+        Assert.Single(_lake.Files());
+    }
+
+    [SkippableFact]
+    [Spec("ducklake: Conflict Resolution")]
+    [Spec("ducklake: ducklake_snapshot_changes")]
+    public async Task Writers_commit_after_expiry_removed_their_base_snapshot()
+    {
+        var catalog = await SmallFilesAsync(commits: 2);
+        await using var delete = catalog.BeginTransaction();
+        Assert.Equal(1, await delete.DeleteAsync("main", "t", Expr.Equal("id", 0L)));
+        var baseSnapshot = delete.BaseSnapshotId!.Value;
+        await using (var other = catalog.BeginTransaction())
+        {
+            await other.CreateTableAsync("main", "u", [new("x", DuckLakeType.Int32)]);
+            await other.CommitAsync();
+        }
+        await using (var other = catalog.BeginTransaction())
+        {
+            await other.InsertAsync("main", "u", [[1]]);
+            await other.CommitAsync();
+        }
+        // Expire everything but the latest: the writer's base snapshot is gone; the changes_made of every snapshot since
+        // it stay, so its conflict check still sees them, and its delete (planned against the base) still applies.
+        Assert.Contains(baseSnapshot, (await catalog.ExpireSnapshotsAsync(DateTimeOffset.UtcNow.AddMinutes(1))).ExpiredSnapshots);
+        await delete.CommitAsync();
+        Assert.Equal([1L, 2L, 3L, 4L, 5L], (await catalog.ReadAsync(await catalog.LoadTableAsync("main", "t"))).Select(r => (long)r[0]!).Order());
+
+        // A writer whose base was expired still loses to a conflicting change committed after it.
+        await using var insert = catalog.BeginTransaction();
+        await insert.InsertAsync("main", "u", [[2]]);
+        await using (var other = catalog.BeginTransaction())
+        {
+            await other.DeleteAsync("main", "u", Expr.Equal("x", 1));
+            await other.CommitAsync();
+        }
+        await catalog.ExpireSnapshotsAsync(DateTimeOffset.UtcNow.AddMinutes(1));
+        await Assert.ThrowsAsync<DuckLakeConflictException>(() => insert.CommitAsync());
     }
 
     [SkippableFact]

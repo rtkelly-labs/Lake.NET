@@ -31,6 +31,27 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
   modular encryption with a key per write in `encryption_key`, as DuckDB's `ENCRYPTED`). DuckDB's `ducklake` extension is the cross-engine oracle in both
   directions on both databases, with a BDD specification and model-based property tests; DuckLake spec sections are
   pinned and traced like Iceberg's ([docs/ducklake.md](docs/ducklake.md)).
+- `Iceberg.Net.DuckLake`: `DuckLakeOptions.CleanupOutsideDataPath` (off by default) lets cleanup delete registered files
+  outside `data_path`. Test support: a `StorageBackend` dimension in `TestLake` (local disk, or S3 on the moto emulator),
+  `CatalogFaults` (EF Core command and transaction interceptors injecting catalog database faults) and `AgedListingIO`.
+
+### Fixed
+- `Iceberg.Net.DuckLake` hardening (docs/ducklake/testing.md, "Security" and "Catalog database faults"):
+  - Paths from catalog rows flagged relative may no longer escape their directory (`..`, percent-encoded dots, absolute
+    paths, schemes): a format error. Schema and table names `.`, `..` or containing `/`, `\` or NUL are refused. Cleanup
+    and orphan cleanup never delete outside `data_path`. A rewrite or merge of a file registered in place no longer writes
+    under the registered file's absolute directory appended to the table's.
+  - Inlined-table names read from the catalog must match `ducklake_inlined_data_{table_id}_{schema_version}` before they
+    are read, deleted from or dropped (expiry used to drop whatever table a row named). `DuckDbAttach()` quotes libpq values,
+    so passwords with spaces or quotes round-trip.
+  - Encrypted lakes: a Parquet file without a key is refused instead of read as plaintext; wrong, swapped, mis-sized and
+    non-Base64 keys, flipped bytes and truncated files are format errors without key material in the message.
+  - Commits retry SQLite `BUSY`/`LOCKED` and PostgreSQL `40001`/`40P01` instead of failing (and deleting their files), and
+    recognise a lost `COMMIT` acknowledgement by the snapshot's idempotency token instead of reporting an unknown outcome;
+    expiry likewise. Exhausted attempts carry the last failure as the inner exception.
+  - A table rename now conflicts with a concurrent `ALTER` of the same table, as the spec says; the full ours × theirs
+    conflict table is tested.
+  - The orphan scan keeps `s3://` intact when normalising paths.
 
 ## [0.0.1-alpha.1] - 2026-10-25
 
