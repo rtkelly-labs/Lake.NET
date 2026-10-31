@@ -68,12 +68,17 @@ public sealed class LocalFileIO : IFileIO, ISupportsListing
             var scheme => throw StorageScheme.Unsupported(scheme, location),
         };
 
-    // A missing parent directory is a missing file: callers handle FileNotFoundException alone, as they do for S3.
+    // A missing parent directory is a missing file: callers handle FileNotFoundException alone, as they do for S3. So
+    // is a name this filesystem cannot spell (Windows refuses `*`, `?`, `<` and others with ERROR_INVALID_NAME, where
+    // Linux and S3 answer "not found"): no file by that name can exist here.
     private static FileStream OpenExisting(string location)
     {
         try { return File.OpenRead(PathOf(location)); }
         catch (DirectoryNotFoundException e) { throw new FileNotFoundException($"No such file: {location}", location, e); }
+        catch (IOException e) when (e.HResult == ErrorInvalidName) { throw new FileNotFoundException($"No such file: {location}", location, e); }
     }
+
+    private const int ErrorInvalidName = unchecked((int)0x8007007B);
 
     public async Task<byte[]> ReadAllAsync(string location, CancellationToken ct = default)
     {
