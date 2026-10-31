@@ -40,6 +40,8 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
   written on top by every later version (`OwnGoldenFixtureTests`); a release requires its own set.
 - Code coverage for every test project (coverlet); CI merges the unit suite's reports and fails when a package's line
   coverage drops more than 0.5 points below `docs/lake/verification/coverage-baseline.json` (`tools/coverage_ratchet.py`).
+- `interop/engines.json`: every reference engine and emulator version in one manifest, enforced by
+  `EngineVersionManifestTests` against the compose file, scripts, Python and C# pins.
 - Package validation: every pack compares each published package's API with `0.0.1-alpha.1`.
 - `FileIOConformanceTests`: one contract for every FileIO (local and S3), covering concurrent create-if-absent,
   overwrite, missing objects, exact ranged reads, empty objects, idempotent deletes, listings that page, stay inside
