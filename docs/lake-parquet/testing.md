@@ -112,6 +112,24 @@ buffers, `ReadAsync` into `T?[]`, strings as chars or as their UTF-8 bytes), wit
 `evidence: benchmark` quotes these numbers before and after in its record. The `*_Utf8` benchmarks need the fork
 (`lake(0017)`): upstream rejects `ReadOnlyMemory<byte>` for string fields.
 
+### In CI, and comparing two runs
+
+`.github/workflows/lake-bench.yml` runs every benchmark against the upstream commit the stack is built on and
+against the fork, one after the other on the same runner, for every `staging/*` branch and on demand (`Actions →
+Lake.Parquet benchmarks → Run workflow`, with a `--filter` and the `short` or `medium` job). Its summary is a table of
+each benchmark's time and allocation on both sides and the fork's ratio to upstream; the full BenchmarkDotNet reports
+are its `benchmarks` artifact. Shared runners are noisy, so it is not part of `lake-ci`: compare runs of the workflow,
+and use a quiet machine for the numbers a record quotes.
+
+The same comparison locally, from two runs exported as JSON:
+
+```bash
+cd eng/lake/Lake.Parquet.Benchmarks
+ParquetProject=/path/to/upstream/src/Parquet/Parquet.csproj dotnet run -c Release -- --filter '*' --exporters json --artifacts /tmp/bench/upstream
+dotnet run -c Release -- --filter '*' --exporters json --artifacts /tmp/bench/fork
+cd ../../.. && dotnet run eng/lake/CompareBenchmarks.cs -- /tmp/bench/upstream/results /tmp/bench/fork/results upstream fork
+```
+
 ## Profiling
 
 The benchmark project also runs one scenario in a loop for a profiler (`profile <scenario> [seconds]`; the
