@@ -1,0 +1,22 @@
+<Project Sdk="Microsoft.NET.Sdk">
+  <PropertyGroup>
+    <RootNamespace>Iceberg.Net.DuckLake</RootNamespace>
+    <Description>DuckLake 1.0 and 1.1 tables: a catalog database (SQLite or PostgreSQL, through EF Core) over the same Parquet data plane as Iceberg.Net.Data.</Description>
+    <PackageTags>$(PackageTags);ducklake;duckdb</PackageTags>
+    <!-- Not released yet: the DuckLake layer is an evaluation build-out (docs/ducklake.md). -->
+    <IsPackable>false</IsPackable>
+  </PropertyGroup>
+  <ItemGroup>
+    <ProjectReference Include="../Iceberg.Net.Data/Iceberg.Net.Data.csproj" />
+  </ItemGroup>
+  <ItemGroup>
+    <PackageReference Include="Microsoft.EntityFrameworkCore.Relational" />
+    <PackageReference Include="Microsoft.EntityFrameworkCore.Sqlite" />
+    <PackageReference Include="Npgsql.EntityFrameworkCore.PostgreSQL" />
+  </ItemGroup>
+  <ItemGroup>
+    <InternalsVisibleTo Include="Iceberg.Net.DuckLake.Tests" />
+    <InternalsVisibleTo Include="Iceberg.Net.Fuzz" />
+    <InternalsVisibleTo Include="Iceberg.Net.DuckLake.Behaviour.Tests" />
+  </ItemGroup>
+</Project>

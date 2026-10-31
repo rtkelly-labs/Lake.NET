@@ -24,18 +24,26 @@ Self-contained C# port of Apache Iceberg. Keep it that way: no references to cod
 | Following Iceberg v4 | [docs/iceberg-v4.md](docs/iceberg-v4.md) |
 | Deletes, deletion vectors, Puffin, statistics | [docs/puffin.md](docs/puffin.md) |
 | Adopting files from other Parquet writers (Parquet.SourceGenerator) | [docs/parquet-sourcegenerator.md](docs/parquet-sourcegenerator.md) |
+| DuckLake tables (`Iceberg.Net.DuckLake`), and where DuckDB and the DuckLake spec differ | [docs/ducklake.md](docs/ducklake.md) — behaviour DuckDB can observe needs a case in `CrossEngineTests` (oracle: DuckDB's `ducklake` extension); tag tests `[Spec("ducklake: …")]` |
+| The two Parquet backends (ParquetSharp, and Parquet.Net through the `external/parquet-dotnet` submodule), and what upstream Parquet.Net lacks | [docs/parquet-net-gaps.md](docs/parquet-net-gaps.md) — upstream Parquet.Net refuses LLM-written issues and PRs; changes go to the fork (`rtkelly-labs/parquet-dotnet`, published as Lake.Parquet) or are written by hand |
 
 ## Commands
 
 | What | Command |
 |---|---|
-| Build | `dotnet build` (the solution is `Iceberg.Net.slnx`; add a project with `dotnet sln Iceberg.Net.slnx add <csproj>`) |
+| Build | `git submodule update --init` once (the Parquet.Net fork, Lake.Parquet), then `dotnet build` (the solution is `Iceberg.Net.slnx`; add a project with `dotnet sln Iceberg.Net.slnx add <csproj>`) |
+| Any suite on Parquet.Net instead of ParquetSharp | `ICEBERG_PARQUET_BACKEND=parquet-net dotnet test <project>` (CI's `parquet-net` job runs the unit and DuckLake suites this way) |
+| Compare the two Parquet backends (wall clock) | `dotnet run -c Release --project tools/ParquetBackendBench [rows]` |
 | Everything (L0, typed, EF, BDD, REST server, ecosystem, regression) | `./run-tests.sh emulation` |
 | One CI suite (`unit`, `cross-engine`, `regression`), or list its projects | `tools/test-projects.sh test <suite>` / `tools/test-projects.sh list [suite]` |
 | Add a test project | `dotnet sln Iceberg.Net.slnx add <csproj>` and set `<CiSuite>` in the csproj: the solution is the one list CI runs, and a test project without a suite fails CI |
 | L0 spec tests | `dotnet test tests/Iceberg.Net.Spec.Tests` |
 | Typed layer (LINQ) | `dotnet test tests/Iceberg.Net.Linq.Tests` |
 | EF Core provider | `dotnet test tests/Iceberg.Net.EntityFrameworkCore.Tests` |
+| DuckLake (unit; plus the DuckDB `ducklake` oracle when the Python is set, PostgreSQL catalogs when the server is) | `ICEBERG_DUCKDB_PYTHON=<python with the interop duckdb group> ICEBERG_DUCKLAKE_POSTGRES=<npgsql connection string> dotnet test tests/Iceberg.Net.DuckLake.Tests` |
+| DuckLake BDD specification | same variables, `dotnet test tests/Iceberg.Net.DuckLake.Behaviour.Tests` |
+| DuckLake walk-through | `dotnet run --project examples/DuckLake.Quickstart [directory]` |
+| DuckLake benchmarks (wall clock; SQLite, or PostgreSQL with `--postgres`) | `dotnet run -c Release --project tools/DuckLakeBench [--postgres "<npgsql connection string>"]` |
 | Ecosystem (telemetry, Spark/Athena helpers, Spark + DuckDB oracles) | `ICEBERG_DUCKDB_PYTHON=<python with the interop duckdb group> dotnet test tests/Iceberg.Net.Ecosystem.Tests` |
 | BDD specification (Reqnroll) | `ICEBERG_PYTHON=<python with interop deps> dotnet test tests/Iceberg.Net.Behaviour.Tests` |
 | REST protocol (every operation; cross-server contract with `ICEBERG_TEST_TARGET=emulation`) | `dotnet test tests/Iceberg.Net.RestProtocol.Tests` |
@@ -45,7 +53,7 @@ Self-contained C# port of Apache Iceberg. Keep it that way: no references to cod
 | Regenerate PyIceberg fixtures | `uv run --project interop python -I interop/pyiceberg_oracle.py fixtures tests/Iceberg.Net.Spec.Tests/fixtures/pyiceberg` |
 | Regenerate Puffin/DataSketches/Roaring fixtures | `uv run --project interop python -I interop/pyiceberg_oracle.py puffin-fixtures tests/Iceberg.Net.Spec.Tests/fixtures/puffin` |
 | Regenerate Spark fixtures | see `interop/spark_oracle.py` docstring (`docker run apache/spark … spark_oracle.py fixtures`) |
-| Spec traceability matrix / upstream drift | `python3 tools/spec_trace.py matrix` (writes the gitignored `docs/spec-traceability.md`) / `python3 tools/spec_trace.py drift` |
+| Spec traceability matrix / upstream drift | `python3 tools/spec_trace.py matrix` (writes the gitignored `docs/spec-traceability.md`) / `python3 tools/spec_trace.py drift` (`--ducklake` for the DuckLake spec) |
 | Refresh the reference REST OpenAPI (after moving the pinned ref) | `uv run --with pyyaml --no-project python -I tools/openapi_reference.py` (OpenApiConformanceTests diff the server's `/openapi/v1.json` against it) |
 | Shadow-compare a table with PyIceberg | `dotnet run --project tools/ShadowCompare -- --metadata <metadata.json>` |
 | Mutation testing (slow; nothing else may build meanwhile) | `cd mutation && dotnet stryker --config-file stryker-puffin.json` |

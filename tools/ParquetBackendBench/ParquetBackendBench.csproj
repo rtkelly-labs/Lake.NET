@@ -1,0 +1,12 @@
+<Project Sdk="Microsoft.NET.Sdk">
+  <PropertyGroup>
+    <OutputType>Exe</OutputType>
+    <IsPackable>false</IsPackable>
+    <RootNamespace>Iceberg.Net.Tools.ParquetBackendBench</RootNamespace>
+    <Description>Wall-clock comparison of the two Parquet backends of Iceberg.Net.Data, ParquetSharp and Parquet.Net (docs/parquet-net-gaps.md).</Description>
+  </PropertyGroup>
+  <ItemGroup>
+    <ProjectReference Include="../../src/Iceberg.Net.Data.ParquetNet/Iceberg.Net.Data.ParquetNet.csproj" />
+    <ProjectReference Include="../../src/Iceberg.Net.IO/Iceberg.Net.IO.csproj" />
+  </ItemGroup>
+</Project>

@@ -80,6 +80,24 @@ writes (use the HTTP/AWS instrumentation above); namespace and view calls.
 `ScanMetrics` (on `ScanRequest.Metrics`) remains the per-call API for the same numbers plus row-group counts; the
 meter is the process-wide view.
 
+## DuckLake
+
+`Iceberg.Net.DuckLake` reports through its own `ActivitySource` and `Meter`, named **`Iceberg.Net.DuckLake`**
+([`DuckLakeTelemetry`](../src/Iceberg.Net.DuckLake/DuckLakeTelemetry.cs)); add that name to `AddSource`/`AddMeter`.
+
+| Span | Tags |
+|---|---|
+| `ducklake.transaction.stage` | lookups and scans a transaction makes before it commits; `ducklake.catalog.commands` |
+| `ducklake.commit` | `ducklake.snapshot.id`, `ducklake.commit.attempts`, `ducklake.outcome`, `ducklake.catalog.commands` |
+| `ducklake.scan.plan` | `ducklake.table`, `ducklake.snapshot.id`, `ducklake.scan.files.planned`, `ducklake.scan.files.pruned`, `ducklake.catalog.commands` |
+| `ducklake.scan` | as above (planning included), `ducklake.scan.rows.returned` |
+
+Every span also carries `ducklake.data_path`. `ducklake.catalog.commands` counts the statements sent to the catalog
+database on the span's behalf: against a remote PostgreSQL each is a round trip, so it is the number that sets
+latency (`PerformanceTests` hold it constant as tables grow). Metrics: `ducklake.catalog.commands` (counter, by
+`ducklake.operation`), `ducklake.operation.duration` (histogram, by operation and outcome),
+`ducklake.scan.files.planned` / `ducklake.scan.files.pruned` (counters) and `ducklake.commit.retries` (counter).
+
 ## Adding instrumentation
 
 Keep call sites to one line, add the tag or instrument to `IcebergTelemetry`, document it in the tables above, and

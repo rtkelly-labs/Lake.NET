@@ -1,0 +1,9 @@
+<Project>
+  <!-- Third-party sources (git submodules) build with their own settings, not the repository's
+       (no central package versions, no warnings-as-errors, their own target frameworks). -->
+  <PropertyGroup>
+    <ManagePackageVersionsCentrally>false</ManagePackageVersionsCentrally>
+    <TreatWarningsAsErrors>false</TreatWarningsAsErrors>
+    <IsPackable>false</IsPackable>
+  </PropertyGroup>
+</Project>

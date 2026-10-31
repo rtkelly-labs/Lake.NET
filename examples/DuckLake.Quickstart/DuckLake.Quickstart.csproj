@@ -1,0 +1,11 @@
+<Project Sdk="Microsoft.NET.Sdk">
+  <!-- A runnable walk-through of Iceberg.Net.DuckLake (docs/ducklake.md). Run it with: dotnet run, from this directory, with an optional target directory. -->
+  <PropertyGroup>
+    <OutputType>Exe</OutputType>
+    <IsPackable>false</IsPackable>
+    <RootNamespace>DuckLake.Quickstart</RootNamespace>
+  </PropertyGroup>
+  <ItemGroup>
+    <ProjectReference Include="../../src/Iceberg.Net.DuckLake/Iceberg.Net.DuckLake.csproj" />
+  </ItemGroup>
+</Project>
