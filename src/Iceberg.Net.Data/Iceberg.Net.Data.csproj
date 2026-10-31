@@ -9,4 +9,7 @@
     <ProjectReference Include="../Iceberg.Net.Catalog/Iceberg.Net.Catalog.csproj" />
     <ProjectReference Include="../Iceberg.Net.Puffin/Iceberg.Net.Puffin.csproj" />
   </ItemGroup>
+  <ItemGroup>
+    <InternalsVisibleTo Include="Iceberg.Net.Data.ParquetNet" />
+  </ItemGroup>
 </Project>

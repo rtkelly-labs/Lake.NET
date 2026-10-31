@@ -1,13 +1,16 @@
 """Spec traceability and drift for iceberg-dotnet.
 
     python tools/spec_trace.py snapshot [--ref TAG]   pin upstream spec sections (docs/spec/sections.json)
+    python tools/spec_trace.py snapshot --ducklake [--ref SHA]
+                                                      pin the DuckLake spec (docs/spec/ducklake-sections.json)
     python tools/spec_trace.py matrix [--check]        tests x sections -> docs/spec-traceability.md
-    python tools/spec_trace.py drift [--ref main] [--acknowledge]
+    python tools/spec_trace.py drift [--ref main] [--acknowledge] [--ducklake]
                                                       what changed upstream since the pinned snapshot
 
 Sections are the headings of format/spec.md and format/puffin-spec.md, and the operationIds of the REST OpenAPI
 document, each with a hash of its own text. Tests link to them with [Spec("Row Lineage")] (C#) or @spec:row-lineage
-(Gherkin). `matrix --check` fails on links to sections that do not exist; `drift` exits 1 when pinned sections
+(Gherkin); DuckLake sections with [Spec("ducklake: INSERT")]: the pages of the DuckLake specification (one section
+per page title and heading, across pages) from duckdb/ducklake-web. `matrix --check` fails on links to sections that do not exist; `drift` exits 1 when pinned sections
 changed, disappeared or were added upstream and nobody has reviewed the change yet (docs/spec/acknowledged-drift.json),
 naming the tests that cover each changed section.
 Standard library only: runs anywhere Python 3.10+ does.
@@ -37,6 +40,53 @@ DOCS = {
 }
 PINNED_REF = "apache-iceberg-1.12.0"  # the release the Spark oracle runs (emulation/up.sh --spark)
 
+# DuckLake (src/Iceberg.Net.DuckLake): the 1.1 specification pages ("stable" at the pinned commit), plus the two DuckDB pages that define behaviour the
+# specification relies on (conflict resolution, inlined data), pinned at a duckdb/ducklake-web commit.
+DUCKLAKE_SNAPSHOT = ROOT / "docs" / "spec" / "ducklake-sections.json"
+DUCKLAKE_ACKNOWLEDGED = ROOT / "docs" / "spec" / "ducklake-acknowledged-drift.json"
+DUCKLAKE_RAW = "https://raw.githubusercontent.com/duckdb/ducklake-web/{ref}/{path}"
+DUCKLAKE_PINNED_REF = "9d095946cd3f930774171e3d397116ad504931e8"
+DUCKLAKE_TABLES = [
+    "ducklake_snapshot",
+    "ducklake_snapshot_changes",
+    "ducklake_schema",
+    "ducklake_table",
+    "ducklake_view",
+    "ducklake_column",
+    "ducklake_macro",
+    "ducklake_macro_impl",
+    "ducklake_macro_parameters",
+    "ducklake_data_file",
+    "ducklake_delete_file",
+    "ducklake_files_scheduled_for_deletion",
+    "ducklake_inlined_data_tables",
+    "ducklake_column_mapping",
+    "ducklake_name_mapping",
+    "ducklake_table_stats",
+    "ducklake_table_column_stats",
+    "ducklake_file_column_stats",
+    "ducklake_file_variant_stats",
+    "ducklake_partition_info",
+    "ducklake_partition_column",
+    "ducklake_file_partition_value",
+    "ducklake_sort_info",
+    "ducklake_sort_expression",
+    "ducklake_metadata",
+    "ducklake_tag",
+    "ducklake_column_tag",
+    "ducklake_schema_versions",
+    "ducklake_view_column_tag",
+]
+DUCKLAKE_DOCS = [
+    "docs/stable/specification/introduction.md",
+    "docs/stable/specification/queries.md",
+    "docs/stable/specification/data_types.md",
+    "docs/stable/specification/tables/overview.md",
+    *[f"docs/stable/specification/tables/{t}.md" for t in DUCKLAKE_TABLES],
+    "docs/stable/duckdb/advanced_features/conflict_resolution.md",
+    "docs/stable/duckdb/advanced_features/data_inlining.md",
+]
+
 # Container and prose headings: nothing to test directly (their subsections carry the requirements).
 INFORMATIVE = {
     "iceberg-table-spec",
@@ -52,6 +102,30 @@ INFORMATIVE = {
     "puffin:puffin-file-format",
     "puffin:format-specification",
     "puffin:blob-types",
+}
+
+INFORMATIVE |= {
+    "ducklake:introduction",
+    "ducklake:building-blocks",
+    "ducklake:catalog-database",
+    "ducklake:data-storage",
+    "ducklake:tables",
+    "ducklake:queries",
+    "ducklake:reading-data",
+    "ducklake:writing-data",
+    "ducklake:snapshots",
+    "ducklake:ducklake-schema",
+    "ducklake:macros",
+    "ducklake:data-files-and-tables",
+    "ducklake:data-file-mapping",
+    "ducklake:statistics",
+    "ducklake:partitioning-information",
+    "ducklake:sort-information",
+    "ducklake:auxiliary-tables",
+    "ducklake:full-schema-creation-script",
+    "ducklake:columns",
+    "ducklake:examples",
+    "ducklake:logical-conflicts",
 }
 
 # Sections deliberately not implemented (rendered as such instead of as gaps). Keep in step with docs/spec-coverage.md.
@@ -83,6 +157,31 @@ NOT_IMPLEMENTED = {
             "registerview",
         )
     },
+    # DuckLake: keep in step with docs/ducklake.md ("What is not implemented").
+    **{
+        f"ducklake:{k}": reason
+        for k, reason in {
+            "ducklake_file_variant_stats": "variant type not implemented",
+            "semi-structured-types": "variant type not implemented",
+            "geometry-types": "geometry type not implemented",
+            "extra-statistics": "geometry and variant statistics not implemented",
+            "geometry": "geometry type not implemented",
+            "variant": "variant type not implemented",
+            # DuckDB's own inlining settings and maintenance calls: extension behaviour, not format.
+            **{
+                k: "DuckDB extension setting or function, not part of the format"
+                for k in (
+                    "global-default",
+                    "per-connection-override",
+                    "per-attach-override",
+                    "return-values",
+                    "sorted-flush",
+                    "interaction-with-auto_compact",
+                    "metadata-catalog-support",
+                )
+            },
+        }.items()
+    },
 }
 
 
@@ -108,12 +207,14 @@ def digest(lines: list[str]) -> str:
     return hashlib.sha256(text.encode()).hexdigest()[:16]
 
 
-def markdown_sections(doc: str, text: str) -> list[Section]:
+def markdown_sections(
+    doc: str, text: str, seen: dict[str, int] | None = None
+) -> list[Section]:
     out: list[Section] = []
     current: tuple[str, int] | None = None
     body: list[str] = []
     in_code = False
-    seen: dict[str, int] = {}
+    seen = {} if seen is None else seen
 
     def flush() -> None:
         if current:
@@ -186,8 +287,48 @@ def fetch(ref: str, source: str | None) -> dict[str, list[Section]]:
     return result
 
 
+def fetch_ducklake(ref: str, source: str | None) -> list[Section]:
+    """Every DuckLake page as one document: its front-matter title is a level-1 section, keys are unique across pages."""
+    seen: dict[str, int] = {}
+    out: list[Section] = []
+    for path in DUCKLAKE_DOCS:
+        if source:
+            text = (Path(source) / path).read_text()
+        else:
+            with urllib.request.urlopen(
+                DUCKLAKE_RAW.format(ref=ref, path=path), timeout=60
+            ) as r:  # noqa: S310 - fixed https URL
+                text = r.read().decode()
+        title = re.search(r"^title:\s*(.+?)\s*$", text, re.MULTILINE)
+        body = re.sub(r"\A---\n.*?\n---\n", "", text, flags=re.DOTALL)
+        out += markdown_sections(
+            "ducklake", f"# {title.group(1) if title else path}\n{body}", seen
+        )
+    return out
+
+
 def load_snapshot() -> dict:
-    return json.loads(SNAPSHOT.read_text())
+    snap = json.loads(SNAPSHOT.read_text())
+    if DUCKLAKE_SNAPSHOT.exists():
+        ducklake = json.loads(DUCKLAKE_SNAPSHOT.read_text())
+        snap["sections"]["ducklake"] = ducklake["sections"]["ducklake"]
+        snap["ducklake_ref"] = ducklake["ref"]
+    return snap
+
+
+def cmd_snapshot_ducklake(ref: str, source: str | None) -> int:
+    sections = fetch_ducklake(ref, source)
+    data = {
+        "ref": ref,
+        "repository": "duckdb/ducklake-web",
+        "documents": DUCKLAKE_DOCS,
+        "sections": {"ducklake": [s.__dict__ for s in sections]},
+    }
+    DUCKLAKE_SNAPSHOT.write_text(json.dumps(data, indent=1) + "\n")
+    print(
+        f"pinned {len(sections)} DuckLake sections at {ref} -> {DUCKLAKE_SNAPSHOT.relative_to(ROOT)}"
+    )
+    return 0
 
 
 def cmd_snapshot(ref: str, source: str | None) -> int:
@@ -233,7 +374,7 @@ def links() -> dict[str, list[str]]:
                 for section in pending:
                     doc, _, heading = (
                         section.partition(":")
-                        if section.split(":")[0] in DOCS
+                        if section.split(":")[0] in (*DOCS, "ducklake")
                         else ("spec", "", section)
                     )
                     found.setdefault(key(doc, heading or section), []).append(name)
@@ -267,7 +408,14 @@ def cmd_matrix(check: bool) -> int:
         for k in known
         if k not in NOT_IMPLEMENTED
         and k not in INFORMATIVE
-        and not k.startswith("rest:")
+        and not k.startswith(("rest:", "ducklake:"))
+    ]
+    ducklake = [
+        k
+        for k in known
+        if k.startswith("ducklake:")
+        and k not in NOT_IMPLEMENTED
+        and k not in INFORMATIVE
     ]
     rest = [k for k in known if k.startswith("rest:") and k not in NOT_IMPLEMENTED]
     out = [
@@ -279,6 +427,10 @@ def cmd_matrix(check: bool) -> int:
         f"- Table + Puffin spec sections linked to at least one test: **{sum(1 for k in impl if k in found)} / {len(impl)}** "
         "(excluding informative headings and sections marked not implemented)",
         f"- Implemented REST operations linked: **{sum(1 for k in rest if k in found)} / {len(rest)}**",
+        (
+            f"- DuckLake specification sections linked (pinned at `{snap.get('ducklake_ref', '-')}`, "
+            f"`docs/spec/ducklake-sections.json`): **{sum(1 for k in ducklake if k in found)} / {len(ducklake)}**"
+        ),
         f"- Tests and scenarios carrying links: {len({t for ts in found.values() for t in ts})}",
         "",
         "Status: ✅ linked tests · ⛔ deliberately not implemented · · informative heading · ⬜ no linked test yet.",
@@ -288,6 +440,7 @@ def cmd_matrix(check: bool) -> int:
         "spec": "Table spec (format/spec.md)",
         "puffin": "Puffin (format/puffin-spec.md)",
         "rest": "REST catalog operations (OpenAPI)",
+        "ducklake": "DuckLake 1.1 (duckdb/ducklake-web docs/stable/specification, conflict resolution, data inlining)",
     }
     for doc, secs in snap["sections"].items():
         out += [
@@ -333,21 +486,38 @@ def cmd_matrix(check: bool) -> int:
     return 1 if check and unknown else 0
 
 
-def cmd_drift(ref: str, source: str | None, acknowledge: bool) -> int:
+def cmd_drift(
+    ref: str, source: str | None, acknowledge: bool, ducklake: bool = False
+) -> int:
     """Report upstream changes since the pinned snapshot. Changes already reviewed (recorded in ACKNOWLEDGED with
     --acknowledge) are listed but do not fail; a section that changes again after review fails again."""
     snap = load_snapshot()
-    upstream = fetch(ref, source)
+    if ducklake:
+        docs = {"ducklake": "duckdb/ducklake-web docs/stable"}
+        upstream = {"ducklake": fetch_ducklake(ref, source)}
+        acknowledged, pinned, name = (
+            DUCKLAKE_ACKNOWLEDGED,
+            snap.get("ducklake_ref"),
+            "DuckLake",
+        )
+    else:
+        docs, upstream, acknowledged, pinned, name = (
+            DOCS,
+            fetch(ref, source),
+            ACKNOWLEDGED,
+            snap["ref"],
+            "Iceberg",
+        )
     found = links()
     acked: dict[str, str] = (
-        json.loads(ACKNOWLEDGED.read_text())["sections"]
-        if ACKNOWLEDGED.exists()
+        json.loads(acknowledged.read_text())["sections"]
+        if acknowledged.exists()
         else {}
     )
     current: dict[str, str] = {}
-    report = [f"# Iceberg spec drift: pinned `{snap['ref']}` → `{ref}`", ""]
+    report = [f"# {name} spec drift: pinned `{pinned}` → `{ref}`", ""]
     unreviewed = 0
-    for doc in DOCS:
+    for doc in docs:
         old = {s["key"]: s for s in snap["sections"][doc]}
         new = {s.key: s for s in upstream[doc]}
         added = [k for k in new if k not in old]
@@ -359,7 +529,7 @@ def cmd_drift(ref: str, source: str | None, acknowledge: bool) -> int:
             current[k] = "removed"
         if not (added or removed or changed):
             continue
-        report += [f"## {DOCS[doc]}", ""]
+        report += [f"## {docs[doc]}", ""]
         for label, keys, title in (
             ("Changed", changed, lambda k: new[k].title),
             ("Added", added, lambda k: new[k].title),
@@ -378,12 +548,12 @@ def cmd_drift(ref: str, source: str | None, acknowledge: bool) -> int:
                     )
                 report.append("")
     if acknowledge:
-        ACKNOWLEDGED.write_text(
+        acknowledged.write_text(
             json.dumps({"ref": ref, "sections": current}, indent=1, sort_keys=True)
             + "\n"
         )
         report.append(
-            f"Acknowledged {len(current)} upstream changes -> {ACKNOWLEDGED.relative_to(ROOT)}."
+            f"Acknowledged {len(current)} upstream changes -> {acknowledged.relative_to(ROOT)}."
         )
         unreviewed = 0
     elif not current:
@@ -415,6 +585,9 @@ def main() -> int:
     s.add_argument(
         "--source", help="read the documents from this directory instead of GitHub"
     )
+    s.add_argument(
+        "--ducklake", action="store_true", help="pin the DuckLake specification instead"
+    )
     m = sub.add_parser("matrix")
     m.add_argument(
         "--check", action="store_true", help="fail on links to unknown sections"
@@ -423,16 +596,23 @@ def main() -> int:
     d.add_argument("--ref", default="main")
     d.add_argument("--source")
     d.add_argument(
+        "--ducklake", action="store_true", help="the DuckLake specification instead"
+    )
+    d.add_argument(
         "--acknowledge",
         action="store_true",
         help="record the current upstream changes as reviewed",
     )
     a = p.parse_args()
+    if a.cmd == "snapshot" and a.ducklake:
+        return cmd_snapshot_ducklake(
+            DUCKLAKE_PINNED_REF if a.ref == PINNED_REF else a.ref, a.source
+        )
     if a.cmd == "snapshot":
         return cmd_snapshot(a.ref, a.source)
     if a.cmd == "matrix":
         return cmd_matrix(a.check)
-    return cmd_drift(a.ref, a.source, a.acknowledge)
+    return cmd_drift(a.ref, a.source, a.acknowledge, a.ducklake)
 
 
 if __name__ == "__main__":

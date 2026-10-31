@@ -10,8 +10,11 @@ mode="${1:-emulation}"
 # The suites are the CI jobs; tools/test-projects.sh reads them from Iceberg.Net.slnx.
 ./tools/test-projects.sh test unit   # spec, netstandard2.0, LINQ, EF Core, REST catalog behaviour (no Docker)
 [[ "$mode" == "spec" ]] && exit 0
-# BDD, REST server and ecosystem. PyIceberg/Spark/DuckDB oracle cases skip without ICEBERG_PYTHON, Docker or
-# ICEBERG_DUCKDB_PYTHON.
+# BDD, REST server, ecosystem and DuckLake. PyIceberg/Spark/DuckDB oracle cases skip without ICEBERG_PYTHON, Docker or
+# ICEBERG_DUCKDB_PYTHON; DuckLake's PostgreSQL catalogs skip without ICEBERG_DUCKLAKE_POSTGRES (emulation/up.sh starts one).
+if [[ "$mode" == "emulation" ]]; then
+  export ICEBERG_DUCKLAKE_POSTGRES="${ICEBERG_DUCKLAKE_POSTGRES-Host=localhost;Port=5434;Username=postgres;Password=postgres}"
+fi
 ./tools/test-projects.sh test cross-engine
 
 if [[ "$mode" == "emulation" ]]; then

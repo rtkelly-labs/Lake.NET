@@ -3,6 +3,7 @@
 #
 #   tools/fuzz.sh <target> [seconds]     targets: metadata view-metadata manifest-list manifest puffin
 #                                                 deletion-vector roaring mumbling theta
+#                                                 ducklake-changes ducklake-inlined
 #
 # Needs clang with the libFuzzer runtime (Ubuntu: apt-get install clang libclang-rt-18-dev). Builds
 # libfuzzer-dotnet from a pinned source file, instruments the decoder assemblies, seeds the corpus from the committed
@@ -47,11 +48,12 @@ case $target in
   roaring) printf '\x01\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x3a\x30\x00\x00\x01\x00\x00\x00\x00\x00\x02\x00\x10\x00\x00\x00\x01\x00\x02\x00\x03\x00' > "$corpus/one-container" ;;
   mumbling) printf '\x01\x03\x00\x00\x01\x00\x00\x00\x03\x00\x22\xff' > "$corpus/sparse" ;;
   theta) for f in "$fixtures"/puffin/theta-*.bin; do seed "$f"; done ;;
+  ducklake-changes | ducklake-inlined) seed tests/Iceberg.Net.Fuzz/seeds/$target.txt ;;
   *) echo "unknown target $target" >&2; exit 2 ;;
 esac
 
 # Instrument after seeding: instrumented code only runs under the driver.
-for asm in Iceberg.Net.Core Iceberg.Net.Avro Iceberg.Net.Puffin; do
+for asm in Iceberg.Net.Core Iceberg.Net.Avro Iceberg.Net.Puffin Iceberg.Net.DuckLake; do
   dotnet sharpfuzz "$out/$asm.dll" >/dev/null
 done
 

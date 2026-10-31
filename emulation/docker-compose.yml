@@ -18,8 +18,21 @@
 #           quay.io; LAKEKEEPER_IMAGE points at a locally built one (./lakekeeper_image.sh) where quay.io is unreachable
 #   trino - (profile "trino": ./up.sh --trino) Trino's Iceberg connector over the same REST catalog + S3,
 #           a third independent reader (Java, but not the Iceberg core library's scan planner)
+#   ducklake-db - PostgreSQL for DuckLake catalogs (Iceberg.Net.DuckLake tests: one database per test, created and
+#           dropped by the tests; DuckDB's ducklake extension attaches the same databases). Reached as
+#           ICEBERG_DUCKLAKE_POSTGRES=Host=localhost;Port=5434;Username=postgres;Password=postgres
 name: iceberg-dotnet-emulation
 services:
+  ducklake-db:
+    image: postgres:${DUCKLAKE_PG_TAG:-17}
+    environment: { POSTGRES_PASSWORD: postgres }
+    ports: ["5434:5432"]
+    command: ["postgres", "-c", "max_connections=300"]
+    healthcheck:
+      test: ["CMD", "pg_isready", "-U", "postgres"]
+      interval: 2s
+      retries: 30
+
   moto:
     image: motoserver/moto:${MOTO_TAG:-5.2.4}
     ports: ["${MOTO_PORT:-5000}:5000"]

@@ -14,7 +14,18 @@ dependencies = [
 package = false
 
 [dependency-groups]
-# interop/duckdb_oracle.py (DuckDB's iceberg extension as an oracle): `uv sync --project interop --group duckdb`.
-# The extension itself is downloaded by DuckDB on first use; offline, also install duckdb-extensions,
-# duckdb-extension-iceberg and duckdb-extension-avro at the same version (see docs/spark-and-athena.md).
-duckdb = ["duckdb==1.5.5"]
+# interop/duckdb_oracle.py (DuckDB's iceberg extension as an oracle) and interop/ducklake_oracle.py (DuckDB's ducklake
+# extension, the DuckLake reference implementation): `uv sync --project interop --group duckdb`.
+# The iceberg extension is downloaded by DuckDB on first use; offline, also install duckdb-extension-iceberg and
+# duckdb-extension-avro at the same version (see docs/spark-and-athena.md). The DuckLake oracle's extensions are pinned
+# here as wheels (DuckDB's signed builds, still verified on LOAD), so it also runs where extensions.duckdb.org is blocked.
+duckdb = [
+  "duckdb==1.5.5",
+  "duckdb-extensions==1.5.5",
+  "duckdb-extension-ducklake==1.5.5",
+  "duckdb-extension-sqlite-scanner==1.5.5",
+  "duckdb-extension-postgres-scanner==1.5.5",
+  "duckdb-extension-parquet==1.5.5",
+  # DuckDB's Python client imports pytz to return TIMESTAMP WITH TIME ZONE values (the DuckLake oracle reads them).
+  "pytz==2025.2",
+]

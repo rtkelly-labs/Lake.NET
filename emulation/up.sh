@@ -43,6 +43,7 @@ docker compose "${PROFILES[@]}" up -d --wait "${SCALE[@]}"
 for s in "${SETUPS[@]}"; do docker compose "${PROFILES[@]}" run --rm --no-deps "$s"; done
 echo "moto (S3 + Glue):      http://localhost:${MOTO_PORT:-5000}"
 echo "Iceberg REST fixture:  http://localhost:8181"
+echo "DuckLake PostgreSQL:   Host=localhost;Port=5434;Username=postgres;Password=postgres"
 [[ " ${PROFILES[*]} " == *" trino "* ]] && echo "Trino:                 http://localhost:8080"
 [[ " ${PROFILES[*]} " == *" polaris "* ]] && echo "Polaris (REST):        http://localhost:8182/api/catalog (warehouse regression)"
 [[ " ${PROFILES[*]} " == *" nessie "* ]] && echo "Nessie (REST):         http://localhost:19120/iceberg (prefix main)"

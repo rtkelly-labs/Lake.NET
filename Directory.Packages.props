@@ -24,6 +24,9 @@
     <PackageVersion Include="Microsoft.EntityFrameworkCore" Version="10.0.13" />
     <!-- Only for EF Core's ExecuteUpdate/ExecuteDelete operators and SetPropertyCalls (they live in the relational package); no relational services are used -->
     <PackageVersion Include="Microsoft.EntityFrameworkCore.Relational" Version="10.0.13" />
+    <!-- DuckLake catalog databases (src/Iceberg.Net.DuckLake): the two catalogs DuckDB's ducklake extension can also attach -->
+    <PackageVersion Include="Microsoft.EntityFrameworkCore.Sqlite" Version="10.0.13" />
+    <PackageVersion Include="Npgsql.EntityFrameworkCore.PostgreSQL" Version="10.0.3" />
     <!-- REST catalog server (src/Iceberg.Net.RestServer): bearer/JWT auth; tests host it with WebApplicationFactory -->
     <PackageVersion Include="Microsoft.AspNetCore.Authentication.JwtBearer" Version="10.0.13" />
     <!-- The REST server's own OpenAPI document (/openapi/v1.json), diffed against the reference spec in tests -->

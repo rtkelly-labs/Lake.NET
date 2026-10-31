@@ -12,5 +12,6 @@
     <ProjectReference Include="../../src/Iceberg.Net.Core/Iceberg.Net.Core.csproj" />
     <ProjectReference Include="../../src/Iceberg.Net.Avro/Iceberg.Net.Avro.csproj" />
     <ProjectReference Include="../../src/Iceberg.Net.Puffin/Iceberg.Net.Puffin.csproj" />
+    <ProjectReference Include="../../src/Iceberg.Net.DuckLake/Iceberg.Net.DuckLake.csproj" />
   </ItemGroup>
 </Project>

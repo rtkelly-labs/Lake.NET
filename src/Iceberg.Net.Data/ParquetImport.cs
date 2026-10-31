@@ -1,10 +1,8 @@
 using ParquetSharp;
-using ParquetSharp.IO;
 using Iceberg.Net.Catalog;
 using Iceberg.Net.Manifests;
 using Iceberg.Net.Metadata;
 using Iceberg.Net.Types;
-using TimeUnit = ParquetSharp.TimeUnit;
 
 namespace Iceberg.Net.Data;
 
@@ -34,15 +32,13 @@ public static class ParquetImport
         var mapping = NameMapping.ForTable(table.Metadata.Properties);
         var problems = new List<ImportProblem>();
 
-        using (var input = new ManagedRandomAccessFile(new MemoryStream(bytes)))
-        using (var reader = new ParquetFileReader(input))
+        using (var reader = await ParquetFiles.Backend.OpenAsync(new MemoryStream(bytes), null, ct))
         {
-            var meta = reader.FileMetaData;
-            var columns = Enumerable.Range(0, meta.NumColumns).Select(i => meta.Schema.Column(i)).ToList();
-            var hasIds = columns.Any(c => { using var n = c.SchemaNode; return n.FieldId >= 0; });
+            var columns = ParquetFiles.LeavesOf(reader.Schema);
+            var hasIds = columns.Any(c => c.Node.FieldId >= 0);
             if (!hasIds && mapping is null)
                 problems.Add(new ImportProblem("*", $"the file has no Parquet field IDs and the table has no name mapping; set {NameMapping.Property} (NameMapping.FromSchema) so every engine resolves its columns the same way"));
-            if (columns.Any(c => c.Path.ToDotVector().Length > 1))
+            if (columns.Any(c => c.Path.Contains('.', StringComparison.Ordinal)))
                 problems.Add(new ImportProblem("*", "nested columns are not supported by the importer yet"));
 
             if (problems.Count == 0)
@@ -50,17 +46,14 @@ public static class ParquetImport
                 foreach (var field in schema.Columns)
                 {
                     var column = columns.FirstOrDefault(c =>
-                    {
-                        using var node = c.SchemaNode;
-                        return hasIds ? node.FieldId == field.Id : (mapping!.NamesFor(field.Id) is { Count: > 0 } names ? names : [field.Name]).Contains(c.Path.ToDotString());
-                    });
+                        hasIds ? c.Node.FieldId == field.Id : (mapping!.NamesFor(field.Id) is { Count: > 0 } names ? names : [field.Name]).Contains(c.Path));
                     if (column is null)
                     {
                         if (field.Required && field.InitialDefault is null) problems.Add(new ImportProblem(field.Name, "required column is missing from the file"));
                         continue;
                     }
-                    if (CheckType(field.Type, column) is { } problem) problems.Add(new ImportProblem(field.Name, problem));
-                    if (field.Required && column.MaxDefinitionLevel > 0 && NullCount(reader, columns.IndexOf(column)) > 0)
+                    if (CheckType(field.Type, column.Node) is { } problem) problems.Add(new ImportProblem(field.Name, problem));
+                    if (field.Required && column.MaxDef > 0 && NullCount(reader, columns.IndexOf(column)) > 0)
                         problems.Add(new ImportProblem(field.Name, "column is required in the table but the file contains nulls"));
                 }
             }
@@ -91,53 +84,57 @@ public static class ParquetImport
         };
     }
 
-    private static long NullCount(ParquetFileReader reader, int column)
+    private static long NullCount(IPqReader reader, int column)
     {
         long nulls = 0;
-        for (var rg = 0; rg < reader.FileMetaData.NumRowGroups; rg++)
-        {
-            using var group = reader.RowGroup(rg);
-            nulls += group.MetaData.GetColumnChunkMetaData(column).Statistics?.NullCount ?? 1; // unknown ⇒ assume nulls
-        }
+        for (var rg = 0; rg < reader.RowGroups; rg++)
+            nulls += reader.Chunk(rg, column).Statistics?.NullCount ?? 1; // unknown ⇒ assume nulls
         return nulls;
     }
 
     /// <summary>The Parquet representation Iceberg requires for each type, or the reason this column is not it.</summary>
     public static string? CheckType(IcebergType type, ColumnDescriptor column)
     {
+        using var node = column.SchemaNode;
+        return CheckType(type, ParquetSharpBackend.ToPq(node));
+    }
+
+    internal static string? CheckType(IcebergType type, PqNode column)
+    {
         var physical = column.PhysicalType;
-        using var logical = column.LogicalType;
-        if (physical == PhysicalType.Int96)
+        var logical = column.Logical;
+        if (physical == PqPhysical.Int96)
             return "INT96 timestamps are deprecated and Iceberg writers must not produce them; write INT64 with a TIMESTAMP(MICROS) annotation";
 
         string Expect(string what) => $"expected {what} for Iceberg {type}, found {physical} {Describe(logical)}";
-        static bool SignedInt(LogicalType l, int bits) => l is NoneLogicalType || (l is IntLogicalType i && i.IsSigned && i.BitWidth <= bits);
+        static bool SignedInt(PqLogical l, int bits) => l.Kind == PqLogicalKind.None || (l.Kind == PqLogicalKind.Int && l.Signed && l.BitWidth <= bits);
+        var unsigned = logical is { Kind: PqLogicalKind.Int, Signed: false };
 
         return type.TypeId switch
         {
-            TypeId.Boolean when physical == PhysicalType.Boolean => null,
-            TypeId.Int when physical == PhysicalType.Int32 && SignedInt(logical, 32) => null,
-            TypeId.Int when logical is IntLogicalType { IsSigned: false } => "unsigned integers have no Iceberg type; widen to a signed type",
-            TypeId.Long when (physical == PhysicalType.Int64 && SignedInt(logical, 64)) || (physical == PhysicalType.Int32 && SignedInt(logical, 32)) => null,
-            TypeId.Long when logical is IntLogicalType { IsSigned: false } => "unsigned integers have no Iceberg type; widen to a signed type",
-            TypeId.Float when physical == PhysicalType.Float => null,
-            TypeId.Double when physical is PhysicalType.Double or PhysicalType.Float => null,
-            TypeId.String when physical == PhysicalType.ByteArray && logical is StringLogicalType => null,
-            TypeId.Binary when physical == PhysicalType.ByteArray && logical is NoneLogicalType => null,
-            TypeId.Date when physical == PhysicalType.Int32 && logical is DateLogicalType => null,
-            TypeId.Time when physical == PhysicalType.Int64 && logical is TimeLogicalType { TimeUnit: TimeUnit.Micros } => null,
-            TypeId.Time when logical is TimeLogicalType t => $"TIME({t.TimeUnit}) found; Iceberg time is INT64 TIME(MICROS)",
-            TypeId.Timestamp or TypeId.TimestampTz when physical == PhysicalType.Int64 && logical is TimestampLogicalType ts && ts.TimeUnit == TimeUnit.Micros =>
-                ts.IsAdjustedToUtc == (type.TypeId == TypeId.TimestampTz) ? null
-                    : ts.IsAdjustedToUtc ? "the file's timestamp is UTC-adjusted (timestamptz); the table column is timestamp without time zone"
+            TypeId.Boolean when physical == PqPhysical.Boolean => null,
+            TypeId.Int when physical == PqPhysical.Int32 && SignedInt(logical, 32) => null,
+            TypeId.Int when unsigned => "unsigned integers have no Iceberg type; widen to a signed type",
+            TypeId.Long when (physical == PqPhysical.Int64 && SignedInt(logical, 64)) || (physical == PqPhysical.Int32 && SignedInt(logical, 32)) => null,
+            TypeId.Long when unsigned => "unsigned integers have no Iceberg type; widen to a signed type",
+            TypeId.Float when physical == PqPhysical.Float => null,
+            TypeId.Double when physical is PqPhysical.Double or PqPhysical.Float => null,
+            TypeId.String when physical == PqPhysical.ByteArray && logical.Kind == PqLogicalKind.String => null,
+            TypeId.Binary when physical == PqPhysical.ByteArray && logical.Kind == PqLogicalKind.None => null,
+            TypeId.Date when physical == PqPhysical.Int32 && logical.Kind == PqLogicalKind.Date => null,
+            TypeId.Time when physical == PqPhysical.Int64 && logical is { Kind: PqLogicalKind.Time, Unit: PqTimeUnit.Micros } => null,
+            TypeId.Time when logical.Kind == PqLogicalKind.Time => $"TIME({logical.Unit}) found; Iceberg time is INT64 TIME(MICROS)",
+            TypeId.Timestamp or TypeId.TimestampTz when physical == PqPhysical.Int64 && logical is { Kind: PqLogicalKind.Timestamp, Unit: PqTimeUnit.Micros } =>
+                logical.UtcAdjusted == (type.TypeId == TypeId.TimestampTz) ? null
+                    : logical.UtcAdjusted ? "the file's timestamp is UTC-adjusted (timestamptz); the table column is timestamp without time zone"
                     : "the file's timestamp is not UTC-adjusted (timestamp); the table column is timestamptz",
-            TypeId.Timestamp or TypeId.TimestampTz when logical is TimestampLogicalType ts2 => $"TIMESTAMP({ts2.TimeUnit}) found; Iceberg {type} is microseconds",
-            TypeId.TimestampNs or TypeId.TimestampTzNs when physical == PhysicalType.Int64 && logical is TimestampLogicalType { TimeUnit: TimeUnit.Nanos } tn =>
-                tn.IsAdjustedToUtc == (type.TypeId == TypeId.TimestampTzNs) ? null : "UTC adjustment does not match the column's time zone semantics",
-            TypeId.Uuid when physical == PhysicalType.FixedLenByteArray && column.TypeLength == 16 && logical is UuidLogicalType => null,
-            TypeId.Decimal when logical is DecimalLogicalType d && type is DecimalType dt =>
-                d.Precision == dt.Precision && d.Scale == dt.Scale ? null : $"DECIMAL({d.Precision},{d.Scale}) found; the table column is {type}",
-            TypeId.Fixed when physical == PhysicalType.FixedLenByteArray && type is FixedType f && column.TypeLength == f.Length => null,
+            TypeId.Timestamp or TypeId.TimestampTz when logical.Kind == PqLogicalKind.Timestamp => $"TIMESTAMP({logical.Unit}) found; Iceberg {type} is microseconds",
+            TypeId.TimestampNs or TypeId.TimestampTzNs when physical == PqPhysical.Int64 && logical is { Kind: PqLogicalKind.Timestamp, Unit: PqTimeUnit.Nanos } =>
+                logical.UtcAdjusted == (type.TypeId == TypeId.TimestampTzNs) ? null : "UTC adjustment does not match the column's time zone semantics",
+            TypeId.Uuid when physical == PqPhysical.FixedLenByteArray && column.TypeLength == 16 && logical.Kind == PqLogicalKind.Uuid => null,
+            TypeId.Decimal when logical.Kind == PqLogicalKind.Decimal && type is DecimalType dt =>
+                logical.Precision == dt.Precision && logical.Scale == dt.Scale ? null : $"DECIMAL({logical.Precision},{logical.Scale}) found; the table column is {type}",
+            TypeId.Fixed when physical == PqPhysical.FixedLenByteArray && type is FixedType f && column.TypeLength == f.Length => null,
             _ => Expect(type.TypeId switch
             {
                 TypeId.Boolean => "BOOLEAN",
@@ -158,14 +155,14 @@ public static class ParquetImport
         };
     }
 
-    private static string Describe(LogicalType l) => l switch
+    private static string Describe(PqLogical l) => l.Kind switch
     {
-        NoneLogicalType => "(no annotation)",
-        TimestampLogicalType t => $"TIMESTAMP({t.TimeUnit}, isAdjustedToUTC={t.IsAdjustedToUtc})",
-        TimeLogicalType t => $"TIME({t.TimeUnit})",
-        DecimalLogicalType d => $"DECIMAL({d.Precision},{d.Scale})",
-        IntLogicalType i => $"INT({i.BitWidth}, signed={i.IsSigned})",
-        _ => l.GetType().Name.Replace("LogicalType", "", StringComparison.Ordinal).ToUpperInvariant(),
+        PqLogicalKind.None => "(no annotation)",
+        PqLogicalKind.Timestamp => $"TIMESTAMP({l.Unit}, isAdjustedToUTC={l.UtcAdjusted})",
+        PqLogicalKind.Time => $"TIME({l.Unit})",
+        PqLogicalKind.Decimal => $"DECIMAL({l.Precision},{l.Scale})",
+        PqLogicalKind.Int => $"INT({l.BitWidth}, signed={l.Signed})",
+        _ => l.Kind.ToString().ToUpperInvariant(),
     };
 
     /// <summary>Set the table's default name mapping from its current schema (needed before adopting files without field IDs).</summary>

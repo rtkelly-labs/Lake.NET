@@ -39,6 +39,8 @@ ls:
 
 ignore:
   - .git
+  # third-party sources (git submodules), linted by their own repositories
+  - external
   - .venv
   - "**/.venv"
   - node_modules
