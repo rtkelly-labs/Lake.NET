@@ -218,13 +218,29 @@ public sealed partial class DuckLakeCatalog
         return (key, Convert.ToBase64String(key));
     }
 
-    /// <summary>The key of an encrypted file from its <c>encryption_key</c> (Base64, as DuckDB stores it).</summary>
-    internal byte[]? Key(string? text, string what)
+    /// <summary>
+    /// The key of an encrypted file from its <c>encryption_key</c> (Base64, as DuckDB stores it). In an encrypted lake a
+    /// Parquet file without a key is a format error, never read as plaintext (a planted unencrypted file would be);
+    /// a key that is not Base64 or not an AES key length (16, 24 or 32 bytes) is one too. Messages never carry the key.
+    /// </summary>
+    internal byte[]? Key(string? text, string what, bool parquet = true)
     {
-        if (text is null) return null;
-        try { return Convert.FromBase64String(text); }
-        catch (FormatException e) { throw new InvalidDataException($"{what}: encryption_key is not Base64", e); }
+        if (text is null)
+            return Encrypted && parquet ? throw new InvalidDataException($"{what} has no encryption_key in an encrypted lake; it is not read as plaintext") : null;
+        byte[] key;
+        try { key = Convert.FromBase64String(text); }
+        catch (FormatException) { throw new InvalidDataException($"{what}: encryption_key is not Base64"); }
+        return key.Length is 16 or 24 or 32 ? key : throw new InvalidDataException($"{what}: encryption_key is {key.Length} bytes, not an AES key (16, 24 or 32)");
     }
+
+    /// <summary>
+    /// A Parquet file that cannot be decoded or decrypted (a wrong key, a flipped byte, a truncation) as a format error
+    /// naming the file. The decoder's message is kept: it never contains key material.
+    /// </summary>
+    internal static InvalidDataException Unreadable(string what, string location, Exception e) =>
+        new($"{what} {location} cannot be decrypted or decoded (wrong key, or damaged): {e.Message}", e);
+
+    internal static bool IsDecodeFailure(Exception e) => e is ParquetSharp.ParquetException or EndOfStreamException;
 
     internal DuckLakeDbContext Context(DuckLakeTelemetry.Scope? scope = null) => Store.Context(Version, scope);
 
@@ -509,7 +525,7 @@ public sealed partial class DuckLakeCatalog
             tasks.Add(new DuckLakeFileTask(f.DataFileId, location, f.RecordCount, f.FileSizeBytes, deleteLocation, f.RowIdStart)
             {
                 RowGroupCount = f.RowGroupCount, Key = Key(f.EncryptionKey, $"data file {f.DataFileId}"),
-                DeleteKey = deleteLocation is null ? null : Key(d!.EncryptionKey, $"delete file {d.DeleteFileId}"),
+                DeleteKey = deleteLocation is null ? null : Key(d!.EncryptionKey, $"delete file {d.DeleteFileId}", parquet: !"puffin".Equals(d.Format, StringComparison.OrdinalIgnoreCase)),
             });
             if (f.MappingId is { } m) mapped.Add((tasks.Count - 1, m));
         }
@@ -673,6 +689,27 @@ public sealed partial class DuckLakeCatalog
     /// mapping, by the mapped names, with its Hive partition columns filled in from its path.
     /// </summary>
     internal IAsyncEnumerable<DataFileBatch> ReadDataFileAsync(DuckLakeTable table, string location, DuckLakeNameMap? mapping, Schema projection,
+        DataFileReadOptions options, CancellationToken ct) => Guard("Data file", location, ReadDataFileCoreAsync(table, location, mapping, projection, options, ct), ct);
+
+    /// <summary>Batches of a file, with decode and decryption failures as format errors (<see cref="Unreadable"/>).</summary>
+    internal static async IAsyncEnumerable<T> Guard<T>(string what, string location, IAsyncEnumerable<T> items, [EnumeratorCancellation] CancellationToken ct)
+    {
+        await using var e = items.GetAsyncEnumerator(ct);
+        while (true)
+        {
+            try
+            {
+                if (!await e.MoveNextAsync()) yield break;
+            }
+            catch (Exception x) when (IsDecodeFailure(x))
+            {
+                throw Unreadable(what, location, x);
+            }
+            yield return e.Current;
+        }
+    }
+
+    private IAsyncEnumerable<DataFileBatch> ReadDataFileCoreAsync(DuckLakeTable table, string location, DuckLakeNameMap? mapping, Schema projection,
         DataFileReadOptions options, CancellationToken ct)
     {
         if (mapping is null) return ParquetFiles.ReadBatchesAsync(IO, location, projection, null, options, ct);
