@@ -14,6 +14,7 @@ items it found that have since been fixed are listed first, so this page stays t
 | §9 No dependency-direction test | `test: DuckDB in-process as a second Parquet reader; …` | `DependencyDirectionTests` |
 | Manifests named by an in-table manifest list (found while fixing S2) | `fix(rest-server): scan planning reads only the planned table's files` | `LocationPolicyTests.Planning_refuses_manifests_outside_the_table_named_by_a_manifest_list_inside_it` (fails on the old code) |
 | E4 Fuzz, mutation and upkeep never scheduled; `mumbling` missing from the fuzz matrix | `ci: run fuzzing, mutation testing and upkeep weekly; …` | — |
+| ST1 (part) No storage conformance suite | `test(io): one conformance suite for every FileIO; …` | `FileIOConformanceTests` (local, S3 on moto). Found and fixed: short S3 ranged reads past the end; `DirectoryNotFoundException` for missing local files. MinIO and remote-signed S3 fixtures still to add |
 | PQ2 (part) No independent Parquet reader in the unit suite | same commit | `Iceberg.Net.DuckDbNet.Tests` (DuckDB's reader: values, field IDs, statistics, both directions) |
 
 **Still open from that work:** existing tables or namespaces whose location already contains a wildcard now fail to vend (a 500, not a

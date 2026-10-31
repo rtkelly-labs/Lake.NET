@@ -21,12 +21,19 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
   instead of reading and writing them as local paths; a relative path starting with `s3` stays local.
 
 ### Fixed
+- `S3FileIO.ReadRangeAsync` throws `EndOfStreamException` when S3 returns fewer bytes than asked (a range past the end)
+  instead of returning the short buffer as if it were the range.
+- `LocalFileIO` reports a file whose directory is missing as `FileNotFoundException` (it threw
+  `DirectoryNotFoundException`, which callers that handle missing files don't catch), and deleting one is a no-op.
 - Gzipped metadata is recognised by its content, so Java's `NNNNN-uuid.gz.metadata.json` is read (by catalogs and the
   REST server) and the next version number continues from it.
 
 ### Added
 - `Iceberg.Net.DuckDbNet.Tests`: DuckDB's Parquet reader, in-process through DuckDB.NET, checks the values, field IDs
   and statistics of every file type we write, in the unit suite.
+- `FileIOConformanceTests`: one contract for every FileIO (local and S3), covering concurrent create-if-absent,
+  overwrite, missing objects, exact ranged reads, empty objects, idempotent deletes, listings that page, stay inside
+  their prefix and spell keys exactly as written, and cancellation.
 - `DependencyDirectionTests`: every `src` project has a layer and a role, and references may only point down, stay in
   the shared layers, and never cross formats.
 
