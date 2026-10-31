@@ -52,6 +52,18 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 - Orphan cleanup on Windows took every live file for an orphan: metadata builds local paths with `/` while a directory
   listing returns `\`, and `TableLocations.Normalise` compared them as written. Local paths now normalise to `/` and an
   upper-case drive letter on Windows (found by the new Windows CI job before any release ran it).
+- Expiry no longer throws after its commit when a file cannot be deleted (the first failed delete aborted the cleanup
+  and lost the result, so callers saw an error for snapshots already expired). Cleanup after a commit is best effort:
+  `ExpireResult.FailedDeletes` lists files left behind and `ExpireResult.CleanupError` reports a manifest that could
+  not be read (then nothing is deleted). `DropTableAsync(purge: true)` no longer throws once the table is dropped;
+  `MetastoreCatalog.PurgeTableAsync` returns a `PurgeResult` with what was left. `TableFiles.DeleteAllAsync` tries
+  every file before throwing; `TableFiles.TryDeleteAllAsync` returns the failures instead.
+- A commit whose post-commit cleanup could not read the new snapshot's manifest list (a transient read error) reported
+  the committed append, overwrite, compaction or row delta as failed, so a retry applied it twice. That cleanup is now
+  best effort and skipped when there is nothing stale to remove. Likewise a multi-table `StagedCommit.CommitAllAsync`
+  no longer throws when the refresh after its committed transaction fails.
+- Compaction's cleanup of its own uncommitted files is best effort, so a failed delete no longer replaces the conflict
+  that caused it.
 - `S3FileIO.ReadRangeAsync` throws `EndOfStreamException` when S3 returns fewer bytes than asked (a range past the end)
   instead of returning the short buffer as if it were the range.
 - `LocalFileIO` reports a file whose directory is missing as `FileNotFoundException` (it threw
@@ -67,6 +79,16 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
   `RoaringPositionBitmap`) and `add.stats`. It refuses unsupported reader features by name before reading any data,
   and corrupt logs, checkpoints and DVs fail with `InvalidDataException`. It passes every Delta Acceptance Tests
   (DAT v0.0.3) reader case (`tests/Lake.Delta.Tests`). Writes are not implemented.
+- `ExpireOptions.TimeProvider` and `Maintenance.RemoveOrphanFilesAsync(table, OrphanFilesOptions)` (with
+  `OrphanFilesOptions.TimeProvider`, and an `OrphanFilesResult` that reports `FailedDeletes`): expiry and orphan
+  cleanup read "now" from a `TimeProvider` (default `TimeProvider.System`), so clock skew is testable.
+- Fault model: `FaultInjectingFileIO` faults reads, deletes, torn writes and slow reads as well as writes, at a point
+  or seeded at random. `FaultInjectionTests` runs expiry, orphan cleanup, compaction (full and partial), rewrite
+  position deletes, rewrite manifests, merge-append, branch append, UPDATE, MERGE and a two-table `StagedCommit`
+  under every fault kind, checking before-or-after, deep fsck, that nothing possibly committed is deleted, and that a
+  retry converges. `ClockSkewTests` pins orphan cleanup and expiry under a skewed clock.
+- `ModelBasedTests` generates compaction, rewrite-manifests, partition evolution and add-column steps and runs fsck
+  after every step; `SoakTests` runs a compaction-and-expiry worker alongside the writers.
 - Cloudflare: `S3FileIOOptions.ForR2` (R2's S3 endpoint, region `auto`, jurisdictions, temporary credentials) and
   `RestCatalogOptions.ForBasinCatalog` (Basin Catalog, formerly R2 Data Catalog, with vended credentials); a live
   `cloudflare` workflow running the FileIO contract on R2 and Iceberg tables through Basin Catalog.

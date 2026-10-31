@@ -109,5 +109,11 @@ outcome, look for it in the table's snapshots before retrying. That pattern need
 | Rewrite manifests | `rewrite_manifests` | 🟡 merge-append on commit (Java defaults) keeps counts bounded; standalone rewrite ⬜ |
 | Rollback / cherry-pick / fast-forward, branches and tags | procedures of the same names | ✅ `table.ManageSnapshots()` (Java's ManageSnapshots and CherryPickOperation); branch writes with `SnapshotProducer.ToBranch`. See [snapshot-management.md](snapshot-management.md) |
 
+Cleanup after a commit is best effort and never throws once the commit (or drop) has happened, but for
+cancellation: expiry reports `ExpireResult.FailedDeletes` (and `CleanupError` when it could not tell which files to
+delete, in which case it deletes none), orphan cleanup `OrphanFilesResult.FailedDeletes`, purge a `PurgeResult`. What is
+left is unreferenced, so orphan cleanup finds it. Expiry and orphan cleanup measure ages with
+`ExpireOptions.TimeProvider` / `OrphanFilesOptions.TimeProvider`.
+
 Note:Athena's `OPTIMIZE` and `VACUUM` already cover compaction and expiry for Glue tables, so
 the port does not need to own maintenance to be useful for producers.
