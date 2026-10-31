@@ -374,19 +374,34 @@ public abstract partial class MetastoreCatalog(string name, IFileIO io) : ICatal
     /// releases <c>.metadata.json.gz</c>); neither name is needed: JSON never starts with the gzip magic bytes, so the
     /// content decides.
     /// </summary>
-    public static TableMetadata DecodeMetadata(byte[] bytes, string location)
+    public static TableMetadata DecodeMetadata(byte[] bytes, string location) => DecodeMetadata(bytes, location, MaxDecompressedMetadataBytes);
+
+    /// <summary>
+    /// The largest metadata file a gzipped one may inflate to (256 MiB): far above real tables, small enough that a
+    /// compression bomb registered as a table's metadata can't exhaust a catalog's or the REST server's memory.
+    /// </summary>
+    public const int MaxDecompressedMetadataBytes = 256 * 1024 * 1024;
+
+    public static TableMetadata DecodeMetadata(byte[] bytes, string location, int maxDecompressedBytes)
     {
         if (bytes is [0x1f, 0x8b, ..])
         {
             using var gz = new System.IO.Compression.GZipStream(new MemoryStream(bytes), System.IO.Compression.CompressionMode.Decompress);
             using var ms = new MemoryStream();
-            gz.CopyTo(ms);
+            var buffer = new byte[81920];
+            int n;
+            while ((n = gz.Read(buffer, 0, buffer.Length)) > 0)
+            {
+                if (ms.Length + n > maxDecompressedBytes)
+                    throw new InvalidDataException($"Metadata {location} inflates past {maxDecompressedBytes:N0} bytes; refusing it");
+                ms.Write(buffer, 0, n);
+            }
             bytes = ms.ToArray();
         }
         return MetadataJson.Read(Encoding.UTF8.GetString(bytes), location);
     }
 
-    [GeneratedRegex(@"/(\d+)-[0-9a-fA-F-]+(\.gz)?\.metadata\.json(\.gz)?$")]
+    [GeneratedRegex(@"[/\\](\d+)-[0-9a-fA-F-]+(\.gz)?\.metadata\.json(\.gz)?$")]
     private static partial Regex VersionRe();
 
     /// <summary><c>{location}/metadata/{version:00000}-{uuid}.metadata.json</c>, the Java/PyIceberg naming.</summary>
