@@ -40,12 +40,17 @@ public sealed class LocalFileIO : IFileIO, ISupportsListing
     {
         var root = PathOf(prefix);
         if (!Directory.Exists(root)) yield break;
-        var scheme = prefix.StartsWith("file:", StringComparison.Ordinal) ? "file://" : "";
+        // Each location is the prefix as the caller spelled it plus the relative path, so a listing names a file exactly
+        // as it was written (orphan cleanup compares the two) on every OS: Windows enumerates with backslash separators.
+        var separator = prefix.Contains('/', StringComparison.Ordinal) ? '/' : Path.DirectorySeparatorChar;
+        var head = prefix.TrimEnd('/', '\\') + separator;
         foreach (var path in Directory.EnumerateFiles(root, "*", SearchOption.AllDirectories))
         {
             ct.ThrowIfCancellationRequested();
             var info = new FileInfo(path);
-            yield return new StoredFile(scheme + path, info.Length, info.LastWriteTimeUtc);
+            var relative = Path.GetRelativePath(root, path);
+            if (separator == '/') relative = relative.Replace(Path.DirectorySeparatorChar, '/');
+            yield return new StoredFile(head + relative, info.Length, info.LastWriteTimeUtc);
         }
         await Task.CompletedTask;
     }
