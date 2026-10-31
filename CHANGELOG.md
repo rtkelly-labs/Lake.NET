@@ -21,6 +21,9 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
   instead of reading and writing them as local paths; a relative path starting with `s3` stays local.
 
 ### Fixed
+- Orphan cleanup on Windows took every live file for an orphan: metadata builds local paths with `/` while a directory
+  listing returns `\`, and `TableLocations.Normalise` compared them as written. Local paths now normalise to `/` and an
+  upper-case drive letter on Windows (found by the new Windows CI job before any release ran it).
 - `S3FileIO.ReadRangeAsync` throws `EndOfStreamException` when S3 returns fewer bytes than asked (a range past the end)
   instead of returning the short buffer as if it were the range.
 - `LocalFileIO` reports a file whose directory is missing as `FileNotFoundException` (it threw

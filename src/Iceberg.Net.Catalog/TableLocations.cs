@@ -69,13 +69,29 @@ public static class TableLocations
             throw new ArgumentException($"{what} '{name}' cannot be used in a storage path", nameof(name));
     }
 
-    /// <summary>One spelling per location: <c>s3a://</c>/<c>s3n://</c> as <c>s3://</c>, <c>file:</c> URIs as local paths.</summary>
-    public static string Normalise(string location)
+    /// <summary>
+    /// One spelling per location: <c>s3a://</c>/<c>s3n://</c> as <c>s3://</c>, <c>file:</c> URIs as local paths, and on
+    /// Windows local paths with <c>/</c> separators and an upper-case drive letter. Metadata builds paths with <c>/</c>
+    /// while a Windows directory listing returns <c>\</c>, so without the last step orphan cleanup would take every live
+    /// file for an orphan.
+    /// </summary>
+    public static string Normalise(string location) => Normalise(location, OperatingSystem.IsWindows());
+
+    /// <summary><see cref="Normalise(string)"/> with the Windows rules on or off, so both can be tested anywhere.</summary>
+    public static string Normalise(string location, bool windowsPaths)
     {
         if (location.StartsWith("s3a://", StringComparison.Ordinal) || location.StartsWith("s3n://", StringComparison.Ordinal)) return "s3://" + location[6..];
-        if (location.StartsWith("file://", StringComparison.Ordinal)) return new Uri(location).LocalPath;
-        if (location.StartsWith("file:", StringComparison.Ordinal)) return Uri.UnescapeDataString(location["file:".Length..]);
-        return location;
+        string local;
+        if (location.StartsWith("file://", StringComparison.Ordinal)) local = new Uri(location).LocalPath;
+        else if (location.StartsWith("file:", StringComparison.Ordinal)) local = Uri.UnescapeDataString(location["file:".Length..]);
+        else if (IO.StorageScheme.Of(location) is null) local = location;
+        else return location;
+        if (!windowsPaths) return local;
+        local = local.Replace('\\', '/');
+        if (local.Length >= 2 && local[1] == ':' && char.IsAsciiLetter(local[0])) local = char.ToUpperInvariant(local[0]) + local[1..];
+        // "/C:/x", as a file:///C:/x URI's path reads on some runtimes, is the drive path.
+        if (local.Length >= 3 && local[0] == '/' && local[2] == ':' && char.IsAsciiLetter(local[1])) local = char.ToUpperInvariant(local[1]) + local[2..];
+        return local;
     }
 
     private static bool HasDotSegment(string normalised) => PathPart(normalised).Split('/', '\\').Any(s => s is "." or "..");
