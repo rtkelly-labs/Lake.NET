@@ -25,6 +25,7 @@ Self-contained C# port of Apache Iceberg. Keep it that way: no references to cod
 | Deletes, deletion vectors, Puffin, statistics | [docs/puffin.md](docs/puffin.md) |
 | Adopting files from other Parquet writers (Parquet.SourceGenerator) | [docs/parquet-sourcegenerator.md](docs/parquet-sourcegenerator.md) |
 | DuckLake tables (`Iceberg.Net.DuckLake`), and where DuckDB and the DuckLake spec differ | [docs/ducklake.md](docs/ducklake.md) — behaviour DuckDB can observe needs a case in `CrossEngineTests` (oracle: DuckDB's `ducklake` extension); tag tests `[Spec("ducklake: …")]` |
+| The Parquet.Net fork (Lake.Parquet): its decisions, stack rules, rebaselining, testing, benchmarks; every major decision about the fork is made here, its code follows | [docs/lake-parquet/](docs/lake-parquet/README.md), starting with [decisions.md](docs/lake-parquet/decisions.md) — a decision changes in a Lake.NET PR first; each change's detail is its record in the fork, in that change's PR |
 | The two Parquet backends (ParquetSharp, and Parquet.Net through the `external/parquet-dotnet` submodule), and what upstream Parquet.Net lacks | [docs/parquet-net-gaps.md](docs/parquet-net-gaps.md) — upstream Parquet.Net refuses LLM-written issues and PRs; changes go to the fork (`rtkelly-labs/parquet-dotnet`, published as Lake.Parquet) or are written by hand |
 
 ## Commands

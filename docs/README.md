@@ -20,6 +20,7 @@
 | [upstream/README.md](upstream/README.md) | Proposed upstream tickets (Parquet.Net, PyIceberg, Gravitino) and the Parquet.SourceGenerator patch, ready to file; none filed |
 | [puffin.md](puffin.md) | Puffin files, deletion vectors, Theta sketches, the v2→v3 position-delete converter, NDV statistics |
 | [ducklake.md](ducklake.md) | DuckLake 1.0 on the same data plane (`Iceberg.Net.DuckLake`): what Iceberg.NET contributed and where it got in the way, usage, how the repository's rules apply, where DuckDB and the DuckLake spec differ, what is not implemented |
+| [lake-parquet/](lake-parquet/README.md) | **The Parquet.Net fork, Lake.Parquet:** its decisions, vision, stack rules and record format, rebaselining and history, testing and benchmarks, upstreaming. Decisions are made here; the fork carries code and per-change records |
 | [parquet-sourcegenerator.md](parquet-sourcegenerator.md) | Using Parquet.SourceGenerator as a typed Iceberg write path: measured gaps and where to fix each |
 | [libraries.md](libraries.md) | Libraries under the hood (Avro, Parquet, ORC, compression, Roaring/DVs, Puffin, sketches, Arrow, SigV4) and CLR type pitfalls |
 | [emulation.md](emulation.md) | The local AWS + REST emulation stack, its fidelity shims, and known gaps |
