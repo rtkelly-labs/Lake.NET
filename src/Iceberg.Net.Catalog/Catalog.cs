@@ -259,20 +259,34 @@ public abstract partial class MetastoreCatalog(string name, IFileIO io) : ICatal
 
     public async Task DropTableAsync(TableIdentifier id, bool purge = false, CancellationToken ct = default)
     {
+        if (purge) await PurgeTableAsync(id, ct);
+        else await DropAsync(id, purge: false, ct);
+    }
+
+    /// <summary>
+    /// Drop the table and delete its files (<c>DropTableAsync(id, purge: true)</c>), reporting what could not be deleted.
+    /// The drop is done once this returns; deleting files is best effort (<see cref="TableFiles.PurgeAsync"/>), so a failed
+    /// delete is reported in the result, never thrown after the entry is gone.
+    /// </summary>
+    public async Task<PurgeResult> PurgeTableAsync(TableIdentifier id, CancellationToken ct = default) =>
+        (await DropAsync(id, purge: true, ct))!;
+
+    private async Task<PurgeResult?> DropAsync(TableIdentifier id, bool purge, CancellationToken ct)
+    {
         using var telemetry = IcebergTelemetry.StartCatalogCall(Name, GetType().Name, "drop_table", id.ToString());
         var location = await CurrentMetadataLocationAsync(id, ct) ?? throw new NoSuchTableException($"Table {id} does not exist");
         var metadata = purge ? await ReadMetadataAsync(location, ct) : null;
         await RemoveTableEntryAsync(id, ct);
+        PurgeResult? result = null;
         if (metadata is not null)
         {
             // Entry first, files second: a crash in between leaves orphans, never a table pointing at missing files.
             // As Java's dropTableData, a table without gc.enabled keeps its data files; only metadata goes. Paths outside
             // the table's own directories are never deleted, whatever the metadata names.
-            var files = await TableFiles.ReachableAsync(metadata, FileIO, metadata.Snapshots, ct, dataFiles: TableLocations.IsGcEnabled(metadata));
-            files.UnionWith(metadata.MetadataLog.Select(l => l.MetadataFile).Append(location));
-            await TableFiles.DeleteAllAsync(FileIO, TableLocations.Partition(metadata, files).Inside, ct);
+            result = await TableFiles.PurgeAsync(metadata, location, FileIO, ct);
         }
         telemetry.Succeeded();
+        return result;
     }
 
     public async Task<TableMetadata> CommitTableAsync(TableCommit commit, CancellationToken ct = default)

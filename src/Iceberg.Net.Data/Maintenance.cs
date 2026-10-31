@@ -10,7 +10,13 @@ using Iceberg.Net.Types;
 
 namespace Iceberg.Net.Data;
 /// <param name="Expired">Snapshot IDs removed from the table.</param>
-/// <param name="DeletedFiles">Files only expired snapshots referenced, deleted after the commit.</param>
+/// <param name="DeletedFiles">Files only expired snapshots referenced, deleted after the commit (or already gone).</param>
+/// <remarks>
+/// Deleting files is best effort once the commit has succeeded: a delete that fails is reported in
+/// <see cref="FailedDeletes"/>, and a failure to work out which files to delete in <see cref="CleanupError"/> — never
+/// thrown, because the snapshots are already expired and the caller must learn that. What is left is unreferenced;
+/// orphan-file cleanup removes it.
+/// </remarks>
 public sealed record ExpireResult(IReadOnlyList<long> Expired, IReadOnlyList<string> DeletedFiles)
 {
     /// <summary>Branches and tags removed because their snapshot was older than their max-ref-age.</summary>
@@ -20,6 +26,15 @@ public sealed record ExpireResult(IReadOnlyList<long> Expired, IReadOnlyList<str
     /// directories (<see cref="TableLocations.Prefixes"/>): another table's files, or paths the metadata should not name.
     /// </summary>
     public IReadOnlyList<string> SkippedFiles { get; init; } = [];
+    /// <summary>Files only expired snapshots referenced whose delete failed after the commit; left for orphan-file cleanup.</summary>
+    public IReadOnlyList<string> FailedDeletes { get; init; } = [];
+    /// <summary>
+    /// Set when the files to delete could not be worked out after the commit (a manifest could not be read). Nothing
+    /// was deleted: deleting without the full set of files the retained snapshots reference could remove live files.
+    /// </summary>
+    public Exception? CleanupError { get; init; }
+    /// <summary>The snapshots expired and every file they alone referenced is gone (or was not to be deleted).</summary>
+    public bool CleanupComplete => CleanupError is null && FailedDeletes.Count == 0;
 }
 
 /// <summary>
@@ -103,20 +118,37 @@ public static class Maintenance
 
             var expired = expire.Select(s => s.SnapshotId).ToList();
             if (!options.CleanExpiredFiles) return new ExpireResult(expired, []) { RemovedRefs = removedRefs };
-            // Reachability diff against the committed metadata, so snapshots another writer added meanwhile are retained.
-            var after = table.Metadata;
-            // The commit asserted refs and the UUID, not properties: if the committed state disables GC, delete nothing.
-            if (!TableLocations.IsGcEnabled(after)) return new ExpireResult(expired, []) { RemovedRefs = removedRefs };
-            var candidates = await TableFiles.ReachableAsync(m, table.IO, expire, ct);
-            candidates.ExceptWith(await TableFiles.ReachableAsync(after, table.IO, after.Snapshots, ct));
-            var (inside, outside) = TableLocations.Partition(after, candidates);
-            await TableFiles.DeleteAllAsync(table.IO, inside, ct);
-            return new ExpireResult(expired, inside.Order(StringComparer.Ordinal).ToList())
-            {
-                RemovedRefs = removedRefs,
-                SkippedFiles = outside.Order(StringComparer.Ordinal).ToList(),
-            };
+            // From here on the snapshots are expired: report, never throw (but for cancellation), so the caller learns it.
+            return await DeleteExpiredFilesAsync(table, m, expire, expired, removedRefs, ct);
         }
+    }
+
+    private static async Task<ExpireResult> DeleteExpiredFilesAsync(Table table, TableMetadata m, List<Snapshot> expire, List<long> expired, List<string> removedRefs, CancellationToken ct)
+    {
+        // Reachability diff against the committed metadata, so snapshots another writer added meanwhile are retained.
+        var after = table.Metadata;
+        // The commit asserted refs and the UUID, not properties: if the committed state disables GC, delete nothing.
+        if (!TableLocations.IsGcEnabled(after)) return new ExpireResult(expired, []) { RemovedRefs = removedRefs };
+        HashSet<string> candidates;
+        try
+        {
+            candidates = await TableFiles.ReachableAsync(m, table.IO, expire, ct);
+            // Both sets must be complete: a retained snapshot's file missing from the second would be deleted.
+            candidates.ExceptWith(await TableFiles.ReachableAsync(after, table.IO, after.Snapshots, ct));
+        }
+        catch (Exception e) when (e is not OperationCanceledException || !ct.IsCancellationRequested)
+        {
+            return new ExpireResult(expired, []) { RemovedRefs = removedRefs, CleanupError = e };
+        }
+        var (inside, outside) = TableLocations.Partition(after, candidates);
+        var failed = await TableFiles.TryDeleteAllAsync(table.IO, inside, ct);
+        var failedSet = failed.ToHashSet(StringComparer.Ordinal);
+        return new ExpireResult(expired, inside.Where(f => !failedSet.Contains(f)).Order(StringComparer.Ordinal).ToList())
+        {
+            RemovedRefs = removedRefs,
+            SkippedFiles = outside.Order(StringComparer.Ordinal).ToList(),
+            FailedDeletes = failed,
+        };
     }
 
     private static void RequireGc(TableMetadata m)
@@ -189,21 +221,37 @@ public static class Maintenance
         SnapshotProducer.RewriteManifests(table, targetSizeBytes).CommitAsync(ct);
 
     /// <summary>
-    /// Delete files under the table location that no snapshot or metadata file references (Java's
-    /// <c>DeleteOrphanFiles</c>): leftovers of failed or abandoned writes. Only files older than
-    /// <paramref name="olderThan"/> (default 3 days, as Java; at least <see cref="MinOrphanAge"/>, as Spark's procedure)
-    /// are candidates, so in-flight writes of other writers are safe; <paramref name="dryRun"/> only reports. The table is
-    /// refreshed first, so files committed since it was loaded are not taken for orphans. Refused when the location is
-    /// not safe to list under (<see cref="TableLocations.RequireSafeRoot"/>) or <c>gc.enabled</c> is false. Locations are
-    /// compared after normalising URI forms (<c>s3a://</c>/<c>s3n://</c> vs <c>s3://</c>, <c>file:/</c> vs
-    /// <c>file:///</c> vs bare paths).
+    /// Delete files under the table location that no snapshot or metadata file references; see
+    /// <see cref="RemoveOrphanFilesAsync"/>. Returns the orphans found. Every orphan is tried; if some could not be
+    /// deleted, the first error is thrown afterwards (nothing was committed, so nothing is lost by throwing).
+    /// <see cref="RemoveOrphanFilesAsync"/> reports them instead.
     /// </summary>
     public static async Task<IReadOnlyList<string>> DeleteOrphanFilesAsync(Table table, TimeSpan? olderThan = null, bool dryRun = false, CancellationToken ct = default)
     {
+        var result = await RemoveOrphanFilesAsync(table, new OrphanFilesOptions { OlderThan = olderThan, DryRun = dryRun }, ct);
+        if (result.FailedDeletes.Count > 0)
+            throw new IOException($"Could not delete {result.FailedDeletes.Count} of {result.Orphans.Count} orphan files of {table.Identifier}, e.g. {result.FailedDeletes[0]}");
+        return result.Orphans;
+    }
+
+    /// <summary>
+    /// Delete files under the table location that no snapshot or metadata file references (Java's
+    /// <c>DeleteOrphanFiles</c>): leftovers of failed or abandoned writes. Only files older than
+    /// <see cref="OrphanFilesOptions.OlderThan"/> (default 3 days, as Java; at least <see cref="MinOrphanAge"/>, as Spark's
+    /// procedure) are candidates, so in-flight writes of other writers are safe; <see cref="OrphanFilesOptions.DryRun"/>
+    /// only reports. The table is refreshed first, so files committed since it was loaded are not taken for orphans.
+    /// Refused when the location is not safe to list under (<see cref="TableLocations.RequireSafeRoot"/>) or
+    /// <c>gc.enabled</c> is false. Locations are compared after normalising URI forms (<c>s3a://</c>/<c>s3n://</c> vs
+    /// <c>s3://</c>, <c>file:/</c> vs <c>file:///</c> vs bare paths). Deletes are best effort: the ones that fail are
+    /// reported in <see cref="OrphanFilesResult.FailedDeletes"/>, not thrown.
+    /// </summary>
+    public static async Task<OrphanFilesResult> RemoveOrphanFilesAsync(Table table, OrphanFilesOptions? options = null, CancellationToken ct = default)
+    {
+        options ??= new OrphanFilesOptions();
         if (table.IO is not IO.ISupportsListing lister) throw new NotSupportedException($"{table.IO.GetType().Name} cannot list files");
-        var age = olderThan ?? TimeSpan.FromDays(3);
+        var age = options.OlderThan ?? TimeSpan.FromDays(3);
         if (age < MinOrphanAge)
-            throw new ArgumentOutOfRangeException(nameof(olderThan), age, $"Orphan cleanup needs files at least {MinOrphanAge.TotalHours:0} hours old: younger ones may belong to a writer still running");
+            throw new ArgumentOutOfRangeException(nameof(options), age, $"Orphan cleanup needs files at least {MinOrphanAge.TotalHours:0} hours old: younger ones may belong to a writer still running");
         await table.RefreshAsync(ct);
         var m = table.Metadata;
         if (!TableLocations.IsGcEnabled(m))
@@ -220,7 +268,23 @@ public static class Maintenance
         var orphans = new List<string>();
         await foreach (var f in lister.ListAsync(m.Location.TrimEnd('/') + "/", ct))
             if (f.LastModifiedUtc < cutoff && !keep.Contains(TableLocations.Normalise(f.Location))) orphans.Add(f.Location);
-        if (!dryRun) await TableFiles.DeleteAllAsync(table.IO, orphans, ct);
-        return orphans;
+        if (options.DryRun) return new OrphanFilesResult(orphans);
+        return new OrphanFilesResult(orphans) { FailedDeletes = await TableFiles.TryDeleteAllAsync(table.IO, orphans, ct) };
     }
+}
+
+/// <summary>What <see cref="Maintenance.RemoveOrphanFilesAsync"/> considers and does.</summary>
+public sealed record OrphanFilesOptions
+{
+    /// <summary>Only files older than this are candidates; default 3 days, at least <see cref="Maintenance.MinOrphanAge"/>.</summary>
+    public TimeSpan? OlderThan { get; init; }
+    /// <summary>Only report the orphans.</summary>
+    public bool DryRun { get; init; }
+}
+
+/// <param name="Orphans">Unreferenced files old enough to delete (deleted unless a dry run, or listed in <see cref="FailedDeletes"/>).</param>
+public sealed record OrphanFilesResult(IReadOnlyList<string> Orphans)
+{
+    /// <summary>Orphans whose delete failed; the next run finds them again.</summary>
+    public IReadOnlyList<string> FailedDeletes { get; init; } = [];
 }
