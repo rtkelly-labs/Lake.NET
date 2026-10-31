@@ -381,6 +381,24 @@ public sealed class LocationPolicyTests : IAsyncLifetime
         Assert.Equal(rows, plan.Tasks.Sum(t => t.DataFile.RecordCount));
     }
 
+    [Theory]
+    [InlineData("t*")]
+    [InlineData("t?")]
+    [InlineData("$t")]
+    public async Task A_staged_create_refuses_a_name_the_create_endpoint_refuses(string name)
+    {
+        var id = new TableIdentifier(Namespace.Of("sales"), name);
+        var updates = new List<MetadataUpdate>
+        {
+            new MetadataUpdate.AssignUuid(Guid.NewGuid()), new MetadataUpdate.AddSchema(ScanPlanningTests.Schema),
+            new MetadataUpdate.SetCurrentSchema(MetadataUpdate.LastAdded),
+        };
+        var e = await Assert.ThrowsAsync<HttpRequestException>(() =>
+            _catalog.CommitTableAsync(new TableCommit(id, [new UpdateRequirement.AssertCreate()], updates)));
+        Assert.Equal(HttpStatusCode.BadRequest, e.StatusCode);
+        Assert.Empty(await _catalog.ListTablesAsync(Namespace.Of("sales")));
+    }
+
     [Fact]
     public async Task A_staged_create_cannot_carry_a_snapshot_outside_its_table()
     {
