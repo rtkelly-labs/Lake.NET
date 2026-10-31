@@ -130,6 +130,8 @@ public sealed class OrphanLocationTests
     [InlineData("s3://bucket/data//main/t/f.parquet", "s3://bucket/data/main/t/f.parquet")]
     [InlineData("s3a://bucket/data///f.parquet", "s3a://bucket/data/f.parquet")]
     [InlineData("file:///tmp/lake//data/f.parquet", "file:///tmp/lake/data/f.parquet")]
+    [InlineData("file:/tmp/lake/data/f.parquet", "file:///tmp/lake/data/f.parquet")] // Hadoop's spelling: the same file
+    [InlineData("file:/C:/lake/data/f.parquet", "file:///C:/lake/data/f.parquet")]
     [InlineData("/tmp/lake//data\\main\\f.parquet", "/tmp/lake/data/main/f.parquet")]
     [InlineData("lake/data/f.parquet", "lake/data/f.parquet")]
     public void Normalising_keeps_the_scheme_and_collapses_the_path(string location, string expected) =>
