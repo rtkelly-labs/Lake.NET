@@ -1006,6 +1006,32 @@ public abstract class CrossEngineTests : IAsyncLifetime
         await Assert.ThrowsAsync<DuckLakeConflictException>(() => refused.CommitAsync());
         Assert.Equal(["[10]", "[20]", "[2]"], await Oracle.RowsAsync(_lake, "SELECT id FROM lake.t"));
     }
+
+    [SkippableFact]
+    [Spec("ducklake: Conflict Resolution")]
+    public async Task A_rename_staged_here_is_refused_over_a_DuckDB_alter_of_the_same_table()
+    {
+        // The rule fixed in ConflictRuleTests (ours renamed_table vs theirs altered_table), on DuckDB's own change record.
+        Oracle.Require();
+        var catalog = await _lake.CreateAsync();
+        await using (var tx = catalog.BeginTransaction())
+        {
+            await tx.CreateTableAsync("main", "t", [new("id", DuckLakeType.Int64)]);
+            await tx.InsertAsync("main", "t", [[1L]]);
+            await tx.CommitAsync();
+        }
+        var rename = catalog.BeginTransaction();
+        await rename.RenameTableAsync("main", "t", "renamed");
+        await Oracle.RunAsync(_lake, "ALTER TABLE lake.t ADD COLUMN extra INTEGER");
+        await Assert.ThrowsAsync<DuckLakeConflictException>(() => rename.CommitAsync());
+
+        // Nothing of the refused rename landed: both engines still see t, with DuckDB's new column.
+        Assert.Equal(["t"], await catalog.ListTablesAsync("main"));
+        Assert.Equal(["id", "extra"], (await catalog.LoadTableAsync("main", "t")).Columns.Select(c => c.Name));
+        var duckdbTables = await Oracle.RowsAsync(_lake, "SELECT table_name FROM duckdb_tables() WHERE database_name = 'lake'");
+        Assert.Contains("[\"t\"]", duckdbTables);
+        Assert.DoesNotContain("[\"renamed\"]", duckdbTables);
+    }
 }
 
 public sealed class SqliteCrossEngineTests10() : CrossEngineTests(CatalogBackend.Sqlite, DuckLakeCatalog.FormatVersion10);

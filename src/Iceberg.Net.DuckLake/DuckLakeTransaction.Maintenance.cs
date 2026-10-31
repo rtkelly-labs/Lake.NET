@@ -83,7 +83,7 @@ public sealed partial class DuckLakeTransaction
             foreach (var f in group)
                 await foreach (var (_, rowId, snapshot, values) in ReadFileAsync(loaded, f, deleted: null, ct))
                     rows.Add((values, rowId, snapshot));
-            var directory = group[0].Path is { } p && p.LastIndexOf('/') is var slash and >= 0 ? p[..(slash + 1)] : "";
+            var directory = CompactedDirectory(group[0]);
             var file = await WriteCompactedAsync(t, loaded.Columns, directory, rows, keepSnapshots: true, partitionValues.GetValueOrDefault(group[0].DataFileId, []), ct);
             _ops.Add(new MergeOp(t, group.Select(f => f.DataFileId).ToList(), file, group.Min(f => f.BeginSnapshot),
                 group.Max(f => f.PartialMax ?? f.BeginSnapshot), group.Any(f => f.RowIdStart is null) ? null : group.Min(f => f.RowIdStart), group[0].PartitionId));
@@ -153,7 +153,7 @@ public sealed partial class DuckLakeTransaction
                     rows.Add((values, rowId, snapshot));
             if (rows.Count == 0) continue; // every row was deleted: the inputs just end
             var first = fileRows[group.First().Task.DataFileId];
-            var directory = first.Path is { } p && p.LastIndexOf('/') is var slash and >= 0 ? p[..(slash + 1)] : "";
+            var directory = CompactedDirectory(first);
             outputs.Add((await WriteCompactedAsync(t, loaded.Columns, directory, rows, keepSnapshots: false, partitionValues.GetValueOrDefault(first.DataFileId, []), ct),
                 group.Key.PartitionId));
         }
@@ -161,6 +161,13 @@ public sealed partial class DuckLakeTransaction
         t.Compacted = true;
         return new DuckLakeCompaction(t.Schema.Name, t.Name, candidates.Count, outputs.Count);
     }
+
+    /// <summary>
+    /// The directory (relative to the table) a compacted file goes in: its first input's, as DuckDB does (a partition's
+    /// directory). An input registered in place (absolute path) has none under the table: the table's own then.
+    /// </summary>
+    private static string CompactedDirectory(DataFileEntity first) =>
+        first.PathIsRelative != false && first.Path is { } p && p.LastIndexOf('/') is var slash and >= 0 ? p[..(slash + 1)] : "";
 
     private static async Task<Dictionary<long, IReadOnlyList<string?>>> PartitionValuesAsync(DuckLakeDbContext db, long tableId, List<long> fileIds, CancellationToken ct) =>
         (await db.FilePartitionValues.Where(p => p.TableId == tableId && fileIds.Contains(p.DataFileId)).ToListAsync(ct))

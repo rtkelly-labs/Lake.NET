@@ -103,7 +103,8 @@ public static class DuckLakeDeleteFiles
     private static async Task<List<object?[]>> RowsAsync(IFileIO io, string location, byte[]? key, CancellationToken ct)
     {
         var rows = new List<object?[]>();
-        await foreach (var batch in ParquetFiles.ReadBatchesAsync(io, location, ReadSchema, null, new DataFileReadOptions { DecryptionKey = key }, ct)) rows.AddRange(batch.Rows);
+        await foreach (var batch in DuckLakeCatalog.Guard("Delete file", location, ParquetFiles.ReadBatchesAsync(io, location, ReadSchema, null, new DataFileReadOptions { DecryptionKey = key }, ct), ct))
+            rows.AddRange(batch.Rows);
         return rows;
     }
 
@@ -155,6 +156,20 @@ internal static class DuckLakeInlinedData
     /// <summary>The system columns of inlined data tables: renamed with a <c>_ducklake_</c> prefix in 1.1.</summary>
     internal static (string RowId, string Begin, string End) SystemColumns(bool v11) =>
         v11 ? ("_ducklake_row_id", "_ducklake_begin_snapshot", "_ducklake_end_snapshot") : ("row_id", "begin_snapshot", "end_snapshot");
+
+    /// <summary>The name of a table's inlined data table for one schema version (spec <c>ducklake_inlined_data_tables</c>).</summary>
+    internal static string TableName(long tableId, long schemaVersion) =>
+        string.Create(System.Globalization.CultureInfo.InvariantCulture, $"ducklake_inlined_data_{tableId}_{schemaVersion}");
+
+    /// <summary>
+    /// A name read from <c>ducklake_inlined_data_tables</c>, before it is selected from, deleted from or dropped: it must be
+    /// the name its own row's table and schema version give. The catalog is untrusted; a row naming another table (say
+    /// <c>ducklake_snapshot</c>) is a format error, never a statement against that table.
+    /// </summary>
+    internal static string Checked(InlinedDataTableEntity row) =>
+        row.TableName == TableName(row.TableId, row.SchemaVersion) ? row.TableName
+            : throw new InvalidDataException($"ducklake_inlined_data_tables: table {row.TableId}, schema version {row.SchemaVersion} names '{row.TableName}', " +
+                                             $"not {TableName(row.TableId, row.SchemaVersion)}");
 
     public static async Task<List<(long RowId, object?[] Values)>> ReadAsync(DuckLakeDbContext db, DuckLakeTable table, string inlinedTable, CancellationToken ct)
     {

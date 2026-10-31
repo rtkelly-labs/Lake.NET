@@ -68,7 +68,7 @@ public sealed partial class DuckLakeTransaction
             var tableId = loaded.TableId;
             foreach (var registered in await db.InlinedDataTables.Where(i => i.TableId == tableId).OrderBy(i => i.SchemaVersion).ToListAsync(ct))
             {
-                var (columns, rows) = await DuckLakeInlinedData.ReadAllAsync(db, tableId, registered.TableName, registered.SchemaVersion, ct);
+                var (columns, rows) = await DuckLakeInlinedData.ReadAllAsync(db, tableId, DuckLakeInlinedData.Checked(registered), registered.SchemaVersion, ct);
                 if (rows.Count > 0) inlined.Add((registered.TableName, columns, rows));
             }
             plan = await _catalog.PlanScanAsync(db, loaded, null, ct);

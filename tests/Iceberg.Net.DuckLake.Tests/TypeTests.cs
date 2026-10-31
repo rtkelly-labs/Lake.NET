@@ -136,7 +136,7 @@ public abstract class TypeTests : IAsyncLifetime
         await tx.CommitAsync();
     }
 
-    [Theory]
+    [SkippableTheory]
     [InlineData(0)]
     [InlineData(10)]
     [Spec("ducklake: Data Types")]
@@ -166,7 +166,7 @@ public abstract class TypeTests : IAsyncLifetime
         Assert.Equal(inlining == 0 ? new DuckLakeInterval(1, 2, 3_004_000) : new DuckLakeInterval(1, 2, 3_004_005), max[10]);
     }
 
-    [Fact]
+    [SkippableFact]
     [Spec("ducklake: Data Types")]
     public async Task Data_files_carry_the_Parquet_annotations_DuckDB_writes()
     {
@@ -207,7 +207,7 @@ public abstract class TypeTests : IAsyncLifetime
         Assert.Equal("Int64 INT(64,unsigned)", Annotation("pair.n"));
     }
 
-    [Fact]
+    [SkippableFact]
     [Spec("ducklake: Type Encoding for Statistics")]
     [Spec("ducklake: ducklake_file_column_stats")]
     public async Task Statistics_are_written_as_DuckDB_writes_them_and_none_for_timetz_and_interval()
@@ -233,7 +233,7 @@ public abstract class TypeTests : IAsyncLifetime
         Assert.Empty(plan.Files);
     }
 
-    [Fact]
+    [SkippableFact]
     public async Task Values_out_of_range_and_negative_intervals_in_files_are_rejected()
     {
         var catalog = await LakeAsync();
@@ -257,7 +257,7 @@ public abstract class TypeTests : IAsyncLifetime
         Assert.Throws<ArgumentOutOfRangeException>(() => new DuckLakeTimeTz(DuckLakeTimeTz.MicrosPerDay + 1, 0));
     }
 
-    [Fact]
+    [SkippableFact]
     public async Task Negative_intervals_are_kept_inlined()
     {
         var catalog = await LakeAsync(inlining: 10);
@@ -268,7 +268,7 @@ public abstract class TypeTests : IAsyncLifetime
         Assert.Equal(new DuckLakeInterval(-1, -2, -3_500_000), Assert.Single(read)[10]);
     }
 
-    [Fact]
+    [SkippableFact]
     public async Task A_flush_of_negative_intervals_is_refused_and_they_stay_inlined()
     {
         var catalog = await LakeAsync(inlining: 10);
@@ -287,7 +287,7 @@ public abstract class TypeTests : IAsyncLifetime
         Assert.Equal(new DuckLakeInterval(0, -1, 0), Assert.Single(await catalog.ReadAsync(before))[10]);
     }
 
-    [Fact]
+    [SkippableFact]
     public async Task Timetz_and_interval_columns_cannot_be_filtered_or_bucketed_and_unsigned_columns_cannot_be_bucketed()
     {
         var catalog = await LakeAsync();
@@ -301,7 +301,7 @@ public abstract class TypeTests : IAsyncLifetime
         DuckLakePartitioning.Validate(DuckLakeType.UInt64, "identity");
     }
 
-    [Fact]
+    [SkippableFact]
     public async Task Rows_partitioned_by_month_of_a_millisecond_timestamp_land_in_their_month()
     {
         var catalog = await LakeAsync();
@@ -315,7 +315,7 @@ public abstract class TypeTests : IAsyncLifetime
         Assert.Equal(["1", "12", null], values.Select(v => v[0] as string).OrderBy(v => v is null).ThenBy(v => v, StringComparer.Ordinal));
     }
 
-    [Fact]
+    [SkippableFact]
     public async Task Inlined_columns_have_the_types_DuckDB_creates()
     {
         var catalog = await LakeAsync(inlining: 10);
@@ -334,7 +334,7 @@ public abstract class TypeTests : IAsyncLifetime
         Assert.Equal(_lake.Backend == CatalogBackend.Sqlite ? "1 month 2 days 00:00:03.004005" : "1 mon 2 days 00:00:03.004005", text[2]);
     }
 
-    [Fact]
+    [SkippableFact]
     public async Task Flushing_inlined_rows_writes_what_a_file_holds()
     {
         var catalog = await LakeAsync(inlining: 10);
@@ -345,7 +345,7 @@ public abstract class TypeTests : IAsyncLifetime
         Assert.Equal(LakeJson.Rows(table.Columns, WideTypes.Rows().Select(r => WideTypes.Expected(r, fromFile: true))), LakeJson.Rows(table.Columns, read));
     }
 
-    [Theory]
+    [SkippableTheory]
     [InlineData("00:00:00")]
     [InlineData("25:00:00")]
     [InlineData("1 year 1 month")]
@@ -355,7 +355,7 @@ public abstract class TypeTests : IAsyncLifetime
     [InlineData("1 day 00:00:00.1")]
     public void Interval_text_round_trips_in_DuckDBs_spelling(string text) => Assert.Equal(text, DuckLakeInterval.Parse(text).ToString());
 
-    [Theory]
+    [SkippableTheory]
     [InlineData("1 mon 2 days 00:00:03.004005", 1, 2, 3_004_005)] // PostgreSQL
     [InlineData("1 year 2 mons -3 days +04:05:06", 14, -3, 14_706_000_000)]
     [InlineData("-1 days", 0, -1, 0)]
@@ -364,7 +364,7 @@ public abstract class TypeTests : IAsyncLifetime
     public void Interval_text_from_other_writers_parses(string text, int months, int days, long micros) =>
         Assert.Equal(new DuckLakeInterval(months, days, micros), DuckLakeInterval.Parse(text));
 
-    [Theory]
+    [SkippableTheory]
     [InlineData("01:02:03+05:30")]
     [InlineData("01:02:03.1-00:01")]
     [InlineData("12:00:00+15:59:59")]
@@ -372,7 +372,7 @@ public abstract class TypeTests : IAsyncLifetime
     [InlineData("00:00:00.000001+00")]
     public void Timetz_text_round_trips_in_DuckDBs_spelling(string text) => Assert.Equal(text, DuckLakeTimeTz.Parse(text).ToString());
 
-    [Theory]
+    [SkippableTheory]
     [InlineData("1 fortnight")]
     [InlineData("1.5 months")]
     [InlineData("0.0000001 seconds")]
