@@ -68,7 +68,8 @@ a namespace is created or its `location` changes, when a table or view is create
 commit that changes a table's `location`, `write.data.path`, `write.metadata.path` or `write.object-storage.path`:
 
 1. **Allowed storage.** Strictly below `Warehouse` or one of `Locations:Allowed`, with no `.` or `..` segments
-   and no empty ones (a local file system reads `a//b` as `a/b`). Another bucket, `s3://*`, a bucket root or a local path elsewhere is refused.
+   and no empty ones (a local file system reads `a//b` as `a/b`), and no `*`, `?` or `$` (IAM reads them as wildcards
+   and policy variables in a vended session policy). Another bucket, `s3://*`, a bucket root or a local path elsewhere is refused.
 2. **Its namespace.** A namespace's root is its `location` property, else `{Warehouse}/{levels}`. A table's or view's
    locations must be below its namespace's root, so each namespace has one storage root; put tables on other storage in
    a namespace rooted there. Namespace roots may nest only along the namespace hierarchy, and a namespace that holds
@@ -80,7 +81,14 @@ commit that changes a table's `location`, `write.data.path`, `write.metadata.pat
    the catalog grows.
 
 Register checks the metadata location against rules 1 and 2 before reading anything. Table, view and namespace names
-that would reshape a path (`..`, `/`, `\`, empty, control characters) are refused. Every refusal is a 400.
+that would reshape a path or a credential policy (`..`, `/`, `\`, `*`, `?`, `$`, empty, control characters) are refused,
+on create and on rename. The S3 vendor refuses to build a session policy for a bucket or key holding `*`, `?` or `$`.
+
+The server also reads the files a table's metadata names with its own access (scan planning reads manifest lists,
+manifests and statistics). So every manifest list (and v1 embedded manifest), statistics file and partition statistics
+file that a commit, staged create or register adds must lie strictly below one of the table's own directories, in the
+same single spelling as rule 1 (no `.`, `..` or percent-encoded dot segments); files the table already referenced are
+not re-checked. Every refusal is a 400.
 
 The S3 signer applies the same scoping to requests: a table's own objects only, with no sub-resource beyond what clients
 send (multipart, versions, the Java SDK's `x-id`) and no header that changes access or retention (`x-amz-acl`,

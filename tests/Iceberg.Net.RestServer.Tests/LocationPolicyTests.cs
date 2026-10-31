@@ -1,6 +1,7 @@
 using System.Net;
 using System.Text.Json.Nodes;
 using Iceberg.Net.Catalog;
+using Iceberg.Net.Data;
 using Iceberg.Net.Json;
 using Iceberg.Net.Metadata;
 using static Iceberg.Net.RestServer.Tests.ProtocolTests;
@@ -191,6 +192,219 @@ public sealed class LocationPolicyTests : IAsyncLifetime
     [InlineData("../escape")]
     [InlineData("a/b")]
     [InlineData("..")]
-    public async Task Names_that_would_reshape_a_path_are_refused(string name) =>
+    [InlineData("t*")]
+    [InlineData("t?")]
+    [InlineData("*")]
+    [InlineData("${aws:username}")]
+    public async Task Names_that_would_reshape_a_path_are_refused(string name)
+    {
         await AssertRefusedAsync("/v1/namespaces/sales/tables", CreateBody(name));
+        await AssertRefusedAsync("/v1/namespaces/sales/views", new JsonObject
+        {
+            ["name"] = name, ["schema"] = TypeJson.SchemaToJson(ScanPlanningTests.Schema),
+            ["view-version"] = new JsonObject
+            {
+                ["version-id"] = 1, ["timestamp-ms"] = 0, ["schema-id"] = 0, ["summary"] = new JsonObject(),
+                ["default-namespace"] = new JsonArray("sales"),
+                ["representations"] = new JsonArray(new JsonObject { ["type"] = "sql", ["sql"] = "SELECT 1", ["dialect"] = "spark" }),
+            },
+        });
+    }
+
+    // Credential vending scopes an IAM policy to a table's location: a '*', '?' or '${…}' anywhere in it (a namespace
+    // level, a table name, or a chosen location) would widen that policy to other tables' files.
+    [Theory]
+    [InlineData("*")]
+    [InlineData("s*")]
+    [InlineData("s?")]
+    [InlineData("$x")]
+    [InlineData("..")]
+    public async Task Namespace_levels_that_would_reshape_a_path_or_policy_are_refused(string level)
+    {
+        await AssertRefusedAsync("/v1/namespaces", new JsonObject { ["namespace"] = new JsonArray(level) });
+        await AssertRefusedAsync("/v1/namespaces", new JsonObject { ["namespace"] = new JsonArray("sales", level) });
+        Assert.False(await _catalog.NamespaceExistsAsync(Namespace.Of(level)));
+    }
+
+    [Fact]
+    public async Task Locations_with_policy_wildcards_are_refused()
+    {
+        await AssertRefusedAsync("/v1/namespaces", new JsonObject
+            { ["namespace"] = new JsonArray("ops"), ["properties"] = new JsonObject { ["location"] = Wh("*") } });
+        await AssertRefusedAsync("/v1/namespaces", new JsonObject
+            { ["namespace"] = new JsonArray("ops"), ["properties"] = new JsonObject { ["location"] = Wh("ops*") } });
+        await AssertRefusedAsync("/v1/namespaces", new JsonObject
+            { ["namespace"] = new JsonArray("ops"), ["properties"] = new JsonObject { ["location"] = Wh("ops", "${aws:username}") } });
+        Assert.False(await _catalog.NamespaceExistsAsync(Namespace.Of("ops")));
+        await _catalog.CreateNamespaceAsync(Namespace.Of("ops"));
+        await AssertRefusedAsync("/v1/namespaces/ops/properties", new JsonObject { ["updates"] = new JsonObject { ["location"] = Wh("ops", "*") } });
+        Assert.Null((await SendAsync(_http, HttpMethod.Get, "/v1/namespaces/ops")).Body!["properties"]?["location"]);
+
+        await AssertRefusedAsync("/v1/namespaces/sales/tables", CreateBody("t", Wh("sales", "t*")));
+        await AssertRefusedAsync("/v1/namespaces/sales/tables", CreateBody("t", Wh("sales", "t?")));
+        await AssertRefusedAsync("/v1/namespaces/sales/tables",
+            CreateBody("t", properties: new() { ["write.data.path"] = Wh("sales", "t", "*") }));
+        Assert.False(await _catalog.TableExistsAsync(TableIdentifier.Of("sales", "t")));
+
+        var t = await _catalog.CreateTableAsync(new CreateTableRequest(TableIdentifier.Of("sales", "t"), ScanPlanningTests.Schema));
+        var e = await Assert.ThrowsAsync<HttpRequestException>(() => _catalog.CommitTableAsync(new TableCommit(t.Identifier,
+            [new UpdateRequirement.AssertTableUuid(t.Metadata.TableUuid)], [new MetadataUpdate.SetLocation(Wh("sales", "t*"))])));
+        Assert.Equal(HttpStatusCode.BadRequest, e.StatusCode);
+        Assert.Equal(t.Location, (await _catalog.LoadTableAsync(t.Identifier)).Location);
+    }
+
+    [Fact]
+    public async Task A_table_cannot_be_renamed_to_a_name_that_would_reshape_a_path_or_policy()
+    {
+        await _catalog.CreateTableAsync(new CreateTableRequest(TableIdentifier.Of("sales", "orders"), ScanPlanningTests.Schema));
+        foreach (var name in new[] { "o*", "o?", "$o", "../o" })
+            await AssertRefusedAsync("/v1/tables/rename", new JsonObject
+            {
+                ["source"] = new JsonObject { ["namespace"] = new JsonArray("sales"), ["name"] = "orders" },
+                ["destination"] = new JsonObject { ["namespace"] = new JsonArray("sales"), ["name"] = name },
+            });
+        Assert.True(await _catalog.TableExistsAsync(TableIdentifier.Of("sales", "orders")));
+    }
+
+    // ---------- files a table's metadata points at ----------
+
+    private static MetadataUpdate[] AddSnapshot(Table t, string manifestList)
+    {
+        var id = (t.Metadata.CurrentSnapshotId ?? 0) + 1000;
+        return
+        [
+            new MetadataUpdate.AddSnapshot(new Snapshot
+            {
+                SnapshotId = id, ParentSnapshotId = t.Metadata.CurrentSnapshotId, SequenceNumber = t.Metadata.NextSequenceNumber,
+                TimestampMs = DateTimeOffset.UtcNow.ToUnixTimeMilliseconds(), ManifestList = manifestList, SchemaId = t.Metadata.CurrentSchemaId,
+                Summary = new Dictionary<string, string> { ["operation"] = Operations.Append },
+            }),
+            new MetadataUpdate.SetSnapshotRef(SnapshotRef.Main, SnapshotRef.Branch(id)),
+        ];
+    }
+
+    private static StatisticsFile Statistics(long snapshotId, string path) => new(snapshotId, path, 100, 10, []);
+
+    /// <summary>Paths outside table <c>sales.mine</c>: another table's directory, another bucket, system files, escapes.</summary>
+    private string[] Outside(Table mine, Table victim) =>
+    [
+        $"{victim.Location}/metadata/snap-1-1-victim.avro",
+        "s3://another-bucket/wh/sales/mine/metadata/snap.avro",
+        "file:///etc/passwd",
+        "/etc/passwd",
+        $"{mine.Location}/../orders/metadata/snap.avro",
+        $"file://{mine.Location}/../orders/metadata/snap.avro",
+        $"{mine.Location}/metadata/%2e%2e/%2e%2e/orders/metadata/snap.avro",
+        $"{mine.Location}",
+        $"{mine.Location}-other/snap.avro",
+    ];
+
+    private async Task<(Table Mine, Table Victim)> TwoTablesWithDataAsync()
+    {
+        var victim = await _catalog.CreateTableAsync(new CreateTableRequest(TableIdentifier.Of("sales", "orders"), ScanPlanningTests.Schema));
+        await SnapshotProducer.Append(victim).AddFiles(await TableWriter.WriteAsync(victim, ScanPlanningTests.Rows(0, 4))).CommitAsync();
+        var mine = await _catalog.CreateTableAsync(new CreateTableRequest(TableIdentifier.Of("sales", "mine"), ScanPlanningTests.Schema));
+        await SnapshotProducer.Append(mine).AddFiles(await TableWriter.WriteAsync(mine, ScanPlanningTests.Rows(0, 2))).CommitAsync();
+        return (await _catalog.LoadTableAsync(mine.Identifier), await _catalog.LoadTableAsync(victim.Identifier));
+    }
+
+    private async Task AssertCommitRefusedAsync(Table t, MetadataUpdate[] updates)
+    {
+        var e = await Assert.ThrowsAsync<HttpRequestException>(() =>
+            _catalog.CommitTableAsync(new TableCommit(t.Identifier, [new UpdateRequirement.AssertTableUuid(t.Metadata.TableUuid)], updates)));
+        Assert.Equal(HttpStatusCode.BadRequest, e.StatusCode);
+        Assert.Equal(t.MetadataLocation, (await _catalog.LoadTableAsync(t.Identifier)).MetadataLocation);
+    }
+
+    [Fact]
+    public async Task A_snapshot_cannot_point_at_a_manifest_list_outside_its_table()
+    {
+        var (mine, victim) = await TwoTablesWithDataAsync();
+        foreach (var path in Outside(mine, victim)) await AssertCommitRefusedAsync(mine, AddSnapshot(mine, path));
+        // The victim's own manifest list, the most direct way to read its files through server-side planning.
+        await AssertCommitRefusedAsync(mine, AddSnapshot(mine, victim.Metadata.CurrentSnapshot!.ManifestList!));
+        // In the same transaction as a legitimate change to another table, nothing moves.
+        var e = await Assert.ThrowsAsync<HttpRequestException>(() => _catalog.CommitTransactionAsync(
+        [
+            new TableCommit(victim.Identifier, [new UpdateRequirement.AssertTableUuid(victim.Metadata.TableUuid)],
+                [new MetadataUpdate.SetProperties(new Dictionary<string, string> { ["k"] = "v" })]),
+            new TableCommit(mine.Identifier, [new UpdateRequirement.AssertTableUuid(mine.Metadata.TableUuid)],
+                AddSnapshot(mine, victim.Metadata.CurrentSnapshot!.ManifestList!)),
+        ]));
+        Assert.Equal(HttpStatusCode.BadRequest, e.StatusCode);
+        Assert.Equal(victim.MetadataLocation, (await _catalog.LoadTableAsync(victim.Identifier)).MetadataLocation);
+
+        // Inside its own directories (its location or a write.*.path), a snapshot commits as before.
+        await _catalog.CommitTableAsync(new TableCommit(mine.Identifier, [new UpdateRequirement.AssertTableUuid(mine.Metadata.TableUuid)],
+            AddSnapshot(mine, $"{mine.Location}/metadata/snap-own.avro")));
+        mine = await _catalog.LoadTableAsync(mine.Identifier);
+        Assert.Equal($"{mine.Location}/metadata/snap-own.avro", mine.Metadata.CurrentSnapshot!.ManifestList);
+        await SnapshotProducer.Append(victim).AddFiles(await TableWriter.WriteAsync(victim, ScanPlanningTests.Rows(4, 4))).CommitAsync();
+        Assert.Equal(8, (await TableScan.ReadAllAsync(await _catalog.LoadTableAsync(victim.Identifier))).Count);
+    }
+
+    [Fact]
+    public async Task A_staged_create_cannot_carry_a_snapshot_outside_its_table()
+    {
+        var (mine, victim) = await TwoTablesWithDataAsync();
+        var id = TableIdentifier.Of("sales", "staged");
+        var updates = new List<MetadataUpdate>
+        {
+            new MetadataUpdate.AssignUuid(Guid.NewGuid()), new MetadataUpdate.AddSchema(ScanPlanningTests.Schema),
+            new MetadataUpdate.SetCurrentSchema(MetadataUpdate.LastAdded),
+        };
+        var snapshot = AddSnapshot(mine, victim.Metadata.CurrentSnapshot!.ManifestList!);
+        var e = await Assert.ThrowsAsync<HttpRequestException>(() =>
+            _catalog.CommitTableAsync(new TableCommit(id, [new UpdateRequirement.AssertCreate()], [.. updates, .. snapshot])));
+        Assert.Equal(HttpStatusCode.BadRequest, e.StatusCode);
+        Assert.False(await _catalog.TableExistsAsync(id));
+    }
+
+    [Fact]
+    public async Task Statistics_cannot_point_outside_their_table()
+    {
+        var (mine, victim) = await TwoTablesWithDataAsync();
+        var snapshot = mine.Metadata.CurrentSnapshotId!.Value;
+        foreach (var path in Outside(mine, victim))
+            await AssertCommitRefusedAsync(mine, [new MetadataUpdate.SetStatistics(Statistics(snapshot, path))]);
+        // set-partition-statistics is not an update this server applies at all.
+        var r = await SendAsync(_http, HttpMethod.Post, "/v1/namespaces/sales/tables/mine", new JsonObject
+        {
+            ["requirements"] = new JsonArray(),
+            ["updates"] = new JsonArray(new JsonObject
+            {
+                ["action"] = "set-partition-statistics",
+                ["partition-statistics"] = new JsonObject { ["snapshot-id"] = snapshot, ["statistics-path"] = "/etc/passwd", ["file-size-in-bytes"] = 1 },
+            }),
+        });
+        Assert.Equal(HttpStatusCode.BadRequest, r.Status);
+        Assert.Empty((await _catalog.LoadTableAsync(mine.Identifier)).Metadata.PartitionStatistics);
+
+        var own = $"{mine.Location}/metadata/stats-own.puffin";
+        await _catalog.CommitTableAsync(new TableCommit(mine.Identifier, [], [new MetadataUpdate.SetStatistics(Statistics(snapshot, own))]));
+        Assert.Equal(own, (await _catalog.LoadTableAsync(mine.Identifier)).Metadata.Statistics.Single().StatisticsPath);
+    }
+
+    [Fact]
+    public async Task Register_refuses_metadata_that_points_outside_the_table()
+    {
+        var (mine, _) = await TwoTablesWithDataAsync();
+        var location = Wh("sales", "registered");
+        async Task<(HttpStatusCode Status, JsonNode? Body)> RegisterAsync(string file, TableMetadata m)
+        {
+            var path = $"{location}/metadata/{file}";
+            Directory.CreateDirectory(Path.GetDirectoryName(path)!);
+            await File.WriteAllTextAsync(path, MetadataJson.Write(m with { Location = location, Properties = new Dictionary<string, string>() }));
+            return await SendAsync(_http, HttpMethod.Post, "/v1/namespaces/sales/register", new JsonObject { ["name"] = "registered", ["metadata-location"] = path });
+        }
+        var bare = mine.Metadata with { Snapshots = [], Refs = new Dictionary<string, SnapshotRef>(), CurrentSnapshotId = null, SnapshotLog = [], MetadataLog = [] };
+        // Another table's snapshots (manifest lists in its directory), or statistics anywhere else.
+        AssertError(HttpStatusCode.BadRequest, "BadRequestException", await RegisterAsync("00001-a.metadata.json", mine.Metadata));
+        AssertError(HttpStatusCode.BadRequest, "BadRequestException", await RegisterAsync("00001-b.metadata.json",
+            bare with { PartitionStatistics = [new PartitionStatisticsFile(1, "/etc/passwd", 1)] }));
+        AssertError(HttpStatusCode.BadRequest, "BadRequestException", await RegisterAsync("00001-c.metadata.json",
+            bare with { Statistics = [Statistics(1, $"{mine.Location}/metadata/stats.puffin")] }));
+        Assert.False(await _catalog.TableExistsAsync(TableIdentifier.Of("sales", "registered")));
+        Assert.Equal(HttpStatusCode.OK, (await RegisterAsync("00001-d.metadata.json", bare)).Status);
+    }
 }
