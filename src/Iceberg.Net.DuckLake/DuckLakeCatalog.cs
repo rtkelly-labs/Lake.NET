@@ -49,6 +49,14 @@ public sealed record DuckLakeOptions
     /// </summary>
     public bool Encrypted { get; init; }
 
+    /// <summary>
+    /// Let <see cref="DuckLakeCatalog.CleanupOldFilesAsync"/> delete scheduled files that lie outside <c>data_path</c> under an
+    /// absolute path: files registered in place by <see cref="DuckLakeTransaction.AddDataFilesAsync"/>, which the lake
+    /// owns once registered (DuckDB deletes them). Off by default: catalog rows are not trusted to name arbitrary files,
+    /// so such rows are left scheduled. A relative path that climbs out of <c>data_path</c> is never followed.
+    /// </summary>
+    public bool CleanupOutsideDataPath { get; init; }
+
     public const int DefaultRowGroupRows = 122_880;
 }
 
@@ -406,12 +414,13 @@ public sealed partial class DuckLakeCatalog
 
     /// <summary>
     /// A path under its parent (spec "Note on Paths": <c>path_is_relative</c>). A null path means the parent itself, as in
-    /// catalogs written before schemas and tables had paths.
+    /// catalogs written before schemas and tables had paths. A relative path from a row must stay under its parent
+    /// (<see cref="DuckLakePaths"/>): <c>../x</c>, <c>%2e%2e/x</c> or <c>/etc/x</c> flagged relative is a format error.
     /// </summary>
     internal static string Resolve(string parent, string? path, bool relative)
     {
         if (string.IsNullOrEmpty(path)) return parent;
-        return relative ? parent + path : path;
+        return relative ? parent + DuckLakePaths.CheckRelative(path, "Catalog path") : path;
     }
 
     // ---- scans -----------------------------------------------------------------------------------------------------

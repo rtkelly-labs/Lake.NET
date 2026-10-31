@@ -97,6 +97,7 @@ public sealed partial class DuckLakeTransaction
     /// <summary>Rename a table: a new version of its <c>ducklake_table</c> row (same ID and files; DuckDB records <c>created_table</c> with the new name).</summary>
     public async Task RenameTableAsync(string schema, string table, string newName, CancellationToken ct = default)
     {
+        DuckLakePaths.CheckName(newName, "table");
         await using var db = await BeginAsync(ct);
         var t = await AlterableAsync(db, schema, table, ct, allowCreated: true);
         await RequireFreeNameAsync(db, t.Schema, newName, ct);

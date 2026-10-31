@@ -199,6 +199,7 @@ public sealed partial class DuckLakeTransaction : IAsyncDisposable
         await using var db = await BeginAsync(ct);
         var parts = name.Split('.');
         if (parts.Any(string.IsNullOrEmpty)) throw new ArgumentException($"'{name}' is not a schema name or path", nameof(name));
+        foreach (var part in parts) DuckLakePaths.CheckName(part, "schema");
         var live = await _catalog.SchemasAsync(db, _base!.Value, ct);
         if (live.Any(s => s.Name == name && !(_schemas.TryGetValue(s.Name, out var d) && d.Dropped)) || _schemas.TryGetValue(name, out var p) && !p.Dropped)
             throw new InvalidOperationException($"Schema {name} already exists");
@@ -250,6 +251,7 @@ public sealed partial class DuckLakeTransaction : IAsyncDisposable
 
     public async Task CreateTableAsync(string schema, string name, IReadOnlyList<DuckLakeColumnDefinition> columns, CancellationToken ct = default)
     {
+        DuckLakePaths.CheckName(name, "table");
         if (columns.Count == 0) throw new ArgumentException("A table needs at least one column", nameof(columns));
         if (columns.Select(x => x.Name).Distinct(StringComparer.OrdinalIgnoreCase).Count() != columns.Count)
             throw new ArgumentException("Column names must be unique", nameof(columns));
