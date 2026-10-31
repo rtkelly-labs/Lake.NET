@@ -39,7 +39,7 @@ Lake.NET 1.0 ships when every row is ✅ for every format. Status columns are up
 | G4 | Validator after every scenario, model step, fault and soak run | ✅ | ✅ | ⏳ | — |
 | G5 | Deterministic faults on every commit **and maintenance** path | 🟡 writes only, in-memory catalog | ⏳ | ⏳ | 🟡 `FaultInjectingFileIO` writes only |
 | G6 | Concurrency: soak and two-writer races against the reference engine | 🟡 15 s soak | ⏳ | ⏳ | — |
-| G7 | Every decoder of untrusted bytes fuzzed and corruption-tested | 🟡 no Parquet, Avro data or REST JSON | 🟡 two targets | ⏳ | ⏳ Parquet (both backends) |
+| G7 | Every decoder of untrusted bytes fuzzed and corruption-tested | 🟡 Avro data and REST request JSON covered; Parquet in the fork's malformed-file suite; REST response JSON open | 🟡 two targets | ⏳ | ⏳ Parquet (both backends) |
 | G8 | Security: threat model, authorization matrix, credential scoping, storage confinement | 🟡 see gap review §2 | 🟡 path and SQL confinement open | ⏳ | 🟡 scheme routing ✅ |
 | G9 | Storage conformance suite on every FileIO; object stores beyond S3 or explicit refusal | 🟡 local + S3; others refused ✅ | ⏳ local only | ⏳ | ⏳ |
 | G10 | CI fails closed; scheduled heavy suites; code and pathway coverage with ratchets | 🟡 schedules ✅, unit-suite coverage ratchet ✅; fail-closed engines in #26, pathway coverage ⏳ | ⏳ | ⏳ | 🟡 |
