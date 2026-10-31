@@ -88,6 +88,15 @@ public sealed class DependencyDirectionTests
     }
 
     [Fact]
+    public void The_format_neutral_test_harness_references_no_format()
+    {
+        // Lake.TestSupport holds IFormatDriver and the common scenarios; a driver lives with its format's tests.
+        var csproj = Path.Combine(RepositoryRoot(), "tests", "Lake.TestSupport", "Lake.TestSupport.csproj");
+        Assert.True(File.Exists(csproj), csproj);
+        Assert.Empty(XDocument.Load(csproj).Descendants("ProjectReference"));
+    }
+
+    [Fact]
     public void The_rules_catch_what_they_are_meant_to()
     {
         // Negative controls, so the test above cannot pass by checking nothing.
