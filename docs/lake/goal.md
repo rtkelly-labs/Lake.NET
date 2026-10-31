@@ -35,7 +35,7 @@ Lake.NET 1.0 ships when every row is ✅ for every format. Status columns are up
 |---|---|---|---|---|---|
 | G1 | Read, write, maintain: every spec section `supported`, `refused` or `planned`, CI-checked | 🟡 73/88 linked, no support file | 🟡 65/66 linked, branch only | ⏳ | — |
 | G2 | Reference-engine interop in both directions, every write mode | ✅ Spark, PyIceberg, Trino, DuckDB (read) | 🟡 DuckDB, serial only | ⏳ | — |
-| G3 | Committed fixtures from every reference writer **and from our own released versions** | 🟡 third-party only | ⏳ live-only | ⏳ DAT | — |
+| G3 | Committed fixtures from every reference writer **and from our own released versions** | 🟡 third-party + our own (`OwnGoldenFixtureTests`; release-gated) | ⏳ live-only | ⏳ DAT | — |
 | G4 | Validator after every scenario, model step, fault and soak run | ✅ | ✅ | ⏳ | — |
 | G5 | Deterministic faults on every commit **and maintenance** path | 🟡 writes only, in-memory catalog | ⏳ | ⏳ | 🟡 `FaultInjectingFileIO` writes only |
 | G6 | Concurrency: soak and two-writer races against the reference engine | 🟡 15 s soak | ⏳ | ⏳ | — |
@@ -46,7 +46,7 @@ Lake.NET 1.0 ships when every row is ✅ for every format. Status columns are up
 | G11 | Resource envelope: memory, request counts and time budgets at scale | ⏳ | 🟡 bench tool | ⏳ | ⏳ |
 | G12 | Platforms: Linux, Windows, macOS; net10 + netstandard2.0 consumers executed; both Parquet backends | 🟡 Linux only | 🟡 both backends on branch | ⏳ | ⏳ |
 | G13 | Dependency direction enforced; one format never pulls in another | ✅ `DependencyDirectionTests` | ⏳ needs phase 3 | ⏳ | ✅ |
-| G14 | Per-package versions, API files, package validation against the last release | ⏳ | ⏳ | ⏳ | ⏳ |
+| G14 | Per-package versions, API files, package validation against the last release | 🟡 package validation on every pack | ⏳ | ⏳ | 🟡 |
 
 ## Workstreams
 

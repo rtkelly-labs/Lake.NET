@@ -36,6 +36,9 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
   don't all accept the AWS SDK's default checksum trailers.
 - `Iceberg.Net.DuckDbNet.Tests`: DuckDB's Parquet reader, in-process through DuckDB.NET, checks the values, field IDs
   and statistics of every file type we write, in the unit suite.
+- Golden tables written by this library (`tests/Iceberg.Net.Spec.Tests/fixtures/lake-net/`), read, validated and
+  written on top by every later version (`OwnGoldenFixtureTests`); a release requires its own set.
+- Package validation: every pack compares each published package's API with `0.0.1-alpha.1`.
 - `FileIOConformanceTests`: one contract for every FileIO (local and S3), covering concurrent create-if-absent,
   overwrite, missing objects, exact ranged reads, empty objects, idempotent deletes, listings that page, stay inside
   their prefix and spell keys exactly as written, and cancellation.

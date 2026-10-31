@@ -64,6 +64,21 @@ jobs:
             exit 1
           fi
 
+      # Every release commits golden tables written by itself, so later versions are tested reading them
+      # (OwnGoldenFixtureTests; docs/lake/goal.md G3). Write them before cutting the changelog section:
+      # LAKE_WRITE_GOLDEN=<version> dotnet test tests/Iceberg.Net.Spec.Tests --filter OwnGoldenFixtureTests.Write
+      - name: Require golden tables written by this version
+        env:
+          VERSION: ${{ steps.changelog.outputs.version }}
+          DRY_RUN: ${{ inputs.dry_run }}
+        run: |
+          set -euo pipefail
+          if [ ! -f "tests/Iceberg.Net.Spec.Tests/fixtures/lake-net/$VERSION/expected.json" ]; then
+            msg="No golden tables for $VERSION in tests/Iceberg.Net.Spec.Tests/fixtures/lake-net/$VERSION"
+            if [ "$DRY_RUN" = "false" ]; then echo "::error::$msg"; exit 1; fi
+            echo "::warning::$msg (dry run: a real release would stop here)"
+          fi
+
       - uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
         with:
           name: release-notes
