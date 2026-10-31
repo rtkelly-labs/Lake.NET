@@ -183,7 +183,9 @@ internal sealed class ChangeSet
                     => $"concurrent {c}",
                 DuckLakeChange.DroppedScalarMacro or DuckLakeChange.DroppedTableMacro when id is { } m && DroppedMacros.Any(d => d.Id == m) => $"both dropped macro {m}",
                 DuckLakeChange.DroppedTable when id is { } t && Touched.Contains(t) => $"table {t} was dropped",
-                DuckLakeChange.AlteredTable when id is { } t && (AlteredTables.Contains(t) || Inserted.Contains(t) || Deleted.Contains(t)) => $"table {t} was altered",
+                // Spec: altering or renaming a table another snapshot altered; inserting into or deleting from it.
+                DuckLakeChange.AlteredTable when id is { } t && (AlteredTables.Contains(t) || RenamedTables.Any(r => r.Id == t) || Inserted.Contains(t) || Deleted.Contains(t))
+                    => $"table {t} was altered",
                 DuckLakeChange.InsertedIntoTable or DuckLakeChange.InlinedInsert when id is { } t && Deleted.Contains(t) => $"table {t} was inserted into while deleting from it",
                 DuckLakeChange.DeletedFromTable or DuckLakeChange.InlinedDelete when id is { } t && Inserted.Contains(t) => $"table {t} was deleted from while inserting into it",
                 // Flushing conflicts with another flush of the table and with concurrent inlined deletions (spec, Data).

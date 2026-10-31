@@ -73,9 +73,9 @@ public sealed class CatalogFaults : IDbCommandInterceptor, IDbTransactionInterce
         Exception? fault = null;
         lock (_lock)
         {
-            if (_point is not { } point || _remaining == 0) return;
+            if (_point is not { } point) return;
             if (before) Commands++;
-            var hit = point == (before ? FaultPoint.BeforeCommand : FaultPoint.AfterCommand) && Commands >= _n;
+            var hit = _remaining > 0 && point == (before ? FaultPoint.BeforeCommand : FaultPoint.AfterCommand) && Commands >= _n;
             if (hit)
             {
                 _remaining--;
@@ -91,9 +91,9 @@ public sealed class CatalogFaults : IDbCommandInterceptor, IDbTransactionInterce
         Exception? fault = null;
         lock (_lock)
         {
-            if (_point is not { } point || _remaining == 0) return;
+            if (_point is not { } point) return;
             if (before) Commits++;
-            if (point == (before ? FaultPoint.BeforeCommit : FaultPoint.AfterCommit))
+            if (_remaining > 0 && point == (before ? FaultPoint.BeforeCommit : FaultPoint.AfterCommit))
             {
                 _remaining--;
                 Fired++;
