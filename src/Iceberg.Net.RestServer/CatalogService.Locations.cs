@@ -208,7 +208,7 @@ public sealed partial class CatalogService
     /// Strictly below one of <paramref name="prefixes"/> in the one spelling <see cref="TableLocations"/> accepts, and
     /// without dot segments even once percent-decoded (a store or proxy that decodes <c>%2e%2e</c> would climb out).
     /// </summary>
-    private static bool IsOwnFile(string path, IReadOnlyList<string> prefixes) =>
+    internal static bool IsOwnFile(string path, IReadOnlyList<string> prefixes) =>
         TableLocations.IsUnder(path, prefixes)
         && !PathPart(Uri.UnescapeDataString(TableLocations.Normalise(path))).Split('/', '\\').Any(s => s is "." or "..");
 

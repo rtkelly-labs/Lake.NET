@@ -15,7 +15,8 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
   refuse `*`, `?` and `$`, and the S3 vendor refuses to build a session policy containing them, so no name or location
   can widen vended STS credentials to other tables. Commits, staged creates and registers refuse manifest lists,
   statistics and partition statistics outside the table's own directories, which server-side scan planning would
-  otherwise read with the server's access.
+  otherwise read with the server's access. Server-side scan planning reads only files inside the planned table's
+  directories, so a manifest list inside a table cannot name another table's manifests.
 - `ResolvingFileIO` and `LocalFileIO` refuse storage schemes they have no FileIO for (`gs`, `abfss`, `hdfs`, …)
   instead of reading and writing them as local paths; a relative path starting with `s3` stays local.
 
