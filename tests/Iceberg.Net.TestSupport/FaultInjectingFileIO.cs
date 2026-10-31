@@ -59,6 +59,11 @@ public sealed class FaultInjectingFileIO(IFileIO inner) : IFileIO, ISupportsList
     public List<string> Faulted { get; } = [];
     /// <summary>A point fault has fired (seeded mode: at least one has).</summary>
     public bool Fired { get; private set; }
+    /// <summary>
+    /// Slow reads that fired on a call whose token cannot be cancelled (the caller dropped its token on the way down), with
+    /// the call stack: a cancelled operation would wait out the whole stall there.
+    /// </summary>
+    public List<string> UncancellableReads { get; } = [];
     /// <summary>How long a <see cref="FaultKind.SlowRead"/> stalls.</summary>
     public TimeSpan SlowReadDelay { get; set; } = TimeSpan.FromSeconds(30);
     /// <summary>Runs when a fault fires, before it takes effect (e.g. cancel the operation at a slow read).</summary>
@@ -82,6 +87,7 @@ public sealed class FaultInjectingFileIO(IFileIO inner) : IFileIO, ISupportsList
             Written.Clear();
             Deleted.Clear();
             Faulted.Clear();
+            UncancellableReads.Clear();
         }
     }
 
@@ -177,6 +183,7 @@ public sealed class FaultInjectingFileIO(IFileIO inner) : IFileIO, ISupportsList
         if (Decide(Op.Read, location) is not { } kind) return;
         Fire(kind, location);
         if (kind == FaultKind.FailRead) throw Injected(kind, location);
+        if (!ct.CanBeCanceled) lock (_gate) UncancellableReads.Add($"{location}\n{Environment.StackTrace}");
         await Task.Delay(SlowReadDelay, ct);
     }
 
