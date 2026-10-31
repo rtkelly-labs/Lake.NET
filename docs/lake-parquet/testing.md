@@ -153,8 +153,9 @@ CI's `aot` job (required by `lake-ci`) runs every mode, 3,000 fixed and 2,000 fr
 x64; macOS arm64 runners cost ten times as much, so that leg runs on a pull request labelled `macos` or a run
 dispatched with `macos: true` (before a release, at least).
 
-**Coverage.** The modes together cover 56% of the package's lines, and 83% of the code the library can call (the
-generated big-endian bit-packing kernels, a third of all lines, have no caller but upstream's own test). Measure it on
+**Coverage.** The modes together cover 83% of the package's lines (11,450 of 13,746). Code nothing in the package
+calls is left out of it (decision 6; `lake(0050)` removed the 6,632 lines of uncalled big-endian bit-packing kernels),
+so the figure is of what ships. Measure it on
 the JIT build of the suite, which runs the same code: `dotnet-coverage instrument` the copied `Lake.Parquet.dll`,
 then `dotnet-coverage collect --output-format cobertura` around the modes. A change that adds a code path adds the
 `api` check that reaches it.
