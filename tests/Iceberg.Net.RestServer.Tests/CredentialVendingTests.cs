@@ -128,6 +128,61 @@ public sealed class CredentialVendingTests
         }
     }
 
+    /// <summary>
+    /// A table stored before locations were checked for IAM wildcards can still hold one. Loading it works; vending for
+    /// it is refused with an explicit 422 that says why, before any vendor is asked, rather than failing inside one.
+    /// </summary>
+    [Fact]
+    public async Task A_stored_location_with_an_iam_wildcard_gets_a_clean_refusal_instead_of_credentials()
+    {
+        var sts = new FakeSts();
+        using var vendor = new StsCredentialVendor(
+            new CredentialVendingOptions { RoleArn = "arn:aws:iam::123456789012:role/lake", Region = "eu-west-1", StsEndpoint = "https://sts.example/" },
+            new Dictionary<string, string> { ["s3.access-key-id"] = "server", ["s3.secret-access-key"] = "server-secret" }, sts);
+        await using var host = ServerHost.Start(settings: Secured, services: s => s.AddSingleton<IStorageCredentialVendor>(vendor));
+        using (var writer = await host.ConnectAsync(credential: "writer:writer-secret"))
+        {
+            await writer.CreateNamespaceAsync(Namespace.Of("db"));
+            await writer.CreateTableAsync(new CreateTableRequest(TableIdentifier.Of("db", "t"), ScanPlanningTests.Schema));
+        }
+        // What an older server let through: the table's location now reads s3://bucket/wh/db/t*.
+        var id = TableIdentifier.Of("db", "t");
+        var store = host.Service<ICatalogStore>();
+        var current = (await store.GetAsync(id, CatalogEntryKind.Table))!;
+        var metadata = JsonNode.Parse(await File.ReadAllTextAsync(current))!;
+        metadata["location"] = "s3://bucket/wh/db/t*";
+        var tampered = Path.Combine(Path.GetDirectoryName(current)!, "00009-tampered.metadata.json");
+        await File.WriteAllTextAsync(tampered, metadata.ToJsonString());
+        await store.SwapAsync([new PointerSwap(id, current, tampered)], CatalogEntryKind.Table);
+
+        using var http = host.Http();
+        var token = await TokenAsync(http, "reader", "reader-secret");
+        Assert.Equal(HttpStatusCode.OK, (await SendAsync(http, HttpMethod.Get, "/v1/namespaces/db/tables/t", token)).Status);
+        foreach (var (path, delegation) in new[] { ("/v1/namespaces/db/tables/t", "vended-credentials"), ("/v1/namespaces/db/tables/t/credentials", (string?)null) })
+        {
+            var (status, body) = await SendAsync(http, HttpMethod.Get, path, token, delegation);
+            Assert.True(status == HttpStatusCode.UnprocessableEntity, $"{path}: {(int)status} {body}");
+            Assert.Equal("UnprocessableEntityException", body!["error"]!["type"]!.GetValue<string>());
+            Assert.Contains("wildcard", body["error"]!["message"]!.GetValue<string>(), StringComparison.Ordinal);
+        }
+        Assert.Empty(sts.Requests);
+
+        // A namespace stored with such a location: a table created in it gets a 400 that says why, not a 500.
+        await store.CreateNamespaceAsync(Namespace.Of("wild"), new Dictionary<string, string> { ["location"] = $"{host.Warehouse}/wild*" });
+        using var writerHttp = host.Http();
+        var writerToken = await TokenAsync(writerHttp, "writer", "writer-secret");
+        using var create = new HttpRequestMessage(HttpMethod.Post, "/v1/namespaces/wild/tables")
+        {
+            Content = new StringContent(new JsonObject { ["name"] = "t", ["schema"] = Json.TypeJson.SchemaToJson(ScanPlanningTests.Schema) }.ToJsonString(), Encoding.UTF8, "application/json"),
+        };
+        create.Headers.Authorization = new System.Net.Http.Headers.AuthenticationHeaderValue("Bearer", writerToken);
+        create.Headers.Add("X-Iceberg-Access-Delegation", "vended-credentials");
+        using var created = await writerHttp.SendAsync(create);
+        var createdBody = await created.Content.ReadAsStringAsync();
+        Assert.True(created.StatusCode == HttpStatusCode.BadRequest, createdBody);
+        Assert.Contains("wildcard", createdBody, StringComparison.Ordinal);
+    }
+
     [Fact]
     public async Task The_sts_vendor_assumes_the_role_with_a_policy_narrowed_to_the_table()
     {

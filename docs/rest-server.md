@@ -246,7 +246,10 @@ location, and the same keys in `config` for clients that predate `storage-creden
 (loadCredentials) returns them on their own and is advertised only when vending is on. Commit responses carry no
 `config`, so no credentials. Clients must refresh before the credentials expire
 (`s3.session-token-expires-at-ms`, `adls.sas-token-expires-at-ms.*`, `gcs.oauth2.token-expires-at`). This library's client does not refresh yet
-([catalogs.md](catalogs.md)), so long writers should reload the table.
+([catalogs.md](catalogs.md)), so long writers should reload the table. A table whose stored location contains `*`, `?`
+or `$` (accepted before locations were checked for them) still loads, but asking for its credentials is a
+`422 UnprocessableEntityException` that says why, for every vendor; register its metadata at a literal location to
+vend again. A namespace stored with such a location refuses new tables with a 400.
 
 The S3 vendor (`StsCredentialVendor`) calls STS `AssumeRole` (the Query API over HTTP, signed with the library's
 `SigV4Handler`):
