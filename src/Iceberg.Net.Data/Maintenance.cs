@@ -52,8 +52,13 @@ public sealed record ExpireOptions
     public IReadOnlyList<long> SnapshotIds { get; init; } = [];
     /// <summary>Delete the files only expired snapshots referenced, after the commit (Java's default).</summary>
     public bool CleanExpiredFiles { get; init; } = true;
-    /// <summary>The instant ages are measured from (epoch ms); default now.</summary>
+    /// <summary>The instant ages are measured from (epoch ms); default <see cref="TimeProvider"/>'s now.</summary>
     public long? NowMs { get; init; }
+    /// <summary>
+    /// The clock "now" is read from when <see cref="NowMs"/> is unset (default <see cref="System.TimeProvider.System"/>).
+    /// Snapshots stamped after it (a writer whose clock runs ahead) are younger than every cut-off, so they are kept.
+    /// </summary>
+    public TimeProvider? TimeProvider { get; init; }
 }
 
 public static class Maintenance
@@ -163,7 +168,7 @@ public static class Maintenance
         static long Long(TableMetadata m, string key, long fallback) =>
             long.TryParse(m.Property(key, ""), NumberStyles.Integer, CultureInfo.InvariantCulture, out var v) ? v : fallback;
 
-        var now = options.NowMs ?? DateTimeOffset.UtcNow.ToUnixTimeMilliseconds();
+        var now = options.NowMs ?? (options.TimeProvider ?? TimeProvider.System).GetUtcNow().ToUnixTimeMilliseconds();
         var defaultMaxRefAge = Long(m, MaxRefAgeMs, long.MaxValue);
         var defaultMinSnapshots = options.RetainLast ?? (int)Long(m, MinSnapshotsToKeep, 1);
         if (defaultMinSnapshots < 1) throw new ArgumentOutOfRangeException(nameof(options), "Number of snapshots to retain must be at least 1");
@@ -264,7 +269,9 @@ public static class Maintenance
         referenced.UnionWith(m.PartitionStatistics.Select(s => s.StatisticsPath));
         var keep = referenced.Select(TableLocations.Normalise).ToHashSet(StringComparer.Ordinal);
 
-        var cutoff = DateTime.UtcNow - age;
+        // The store stamps LastModified with its clock and we compare it with ours: a file written "in the future" by a
+        // skewed writer is younger than the cut-off, so skew up to the minimum age only delays deletes, never hastens them.
+        var cutoff = (options.TimeProvider ?? TimeProvider.System).GetUtcNow().UtcDateTime - age;
         var orphans = new List<string>();
         await foreach (var f in lister.ListAsync(m.Location.TrimEnd('/') + "/", ct))
             if (f.LastModifiedUtc < cutoff && !keep.Contains(TableLocations.Normalise(f.Location))) orphans.Add(f.Location);
@@ -280,6 +287,8 @@ public sealed record OrphanFilesOptions
     public TimeSpan? OlderThan { get; init; }
     /// <summary>Only report the orphans.</summary>
     public bool DryRun { get; init; }
+    /// <summary>The clock file ages are measured with (default <see cref="System.TimeProvider.System"/>).</summary>
+    public TimeProvider? TimeProvider { get; init; }
 }
 
 /// <param name="Orphans">Unreferenced files old enough to delete (deleted unless a dry run, or listed in <see cref="FailedDeletes"/>).</param>
