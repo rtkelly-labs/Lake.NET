@@ -7,6 +7,9 @@ name: upkeep
 #                so emulator behaviour changes (good or bad) surface before anyone bumps a pin.
 # Neither touches the repository or opens issues: a red run is the signal.
 on:
+  # Weekly: spec drift and the emulators at :latest (docs/lake/goal.md, G10).
+  schedule:
+    - cron: "37 3 * * 1"
   workflow_dispatch:
 
 permissions:
