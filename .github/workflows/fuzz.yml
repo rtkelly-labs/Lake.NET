@@ -3,6 +3,9 @@ name: fuzz
 # Weekly coverage-guided fuzzing (SharpFuzz + libFuzzer) of the decoders for untrusted bytes
 # (see docs/regression-suite.md, "Fuzzing"). A finding fails its job and uploads the input.
 on:
+  # Weekly (docs/lake/goal.md, G7 and G10); 900 s per target when scheduled.
+  schedule:
+    - cron: "23 2 * * 0"
   workflow_dispatch:
     inputs:
       seconds:
@@ -19,7 +22,7 @@ jobs:
     strategy:
       fail-fast: false
       matrix:
-        target: [metadata, view-metadata, manifest-list, manifest, puffin, deletion-vector, roaring, theta]
+        target: [metadata, view-metadata, manifest-list, manifest, puffin, deletion-vector, roaring, theta, mumbling]
     steps:
       - uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0 # v7.0.0
       - uses: actions/setup-dotnet@a98b56852c35b8e3190ac28c8c2271da59106c68 # v6
