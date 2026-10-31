@@ -37,7 +37,10 @@ public sealed class LimitsTests : IAsyncLifetime
         });
         await _app.StartAsync();
         var address = _app.Services.GetRequiredService<IServer>().Features.Get<IServerAddressesFeature>()!.Addresses.First();
-        _http = new HttpClient { BaseAddress = new Uri(address) };
+        // The client waits for the server's answer to Expect: 100-continue before sending a body. Its default wait is one
+        // second, after which it sends anyway; on a loaded machine the 413 then races the upload and the client can see a
+        // reset connection instead of the answer.
+        _http = new HttpClient(new SocketsHttpHandler { Expect100ContinueTimeout = TimeSpan.FromSeconds(30) }) { BaseAddress = new Uri(address) };
     }
 
     public async Task DisposeAsync()
