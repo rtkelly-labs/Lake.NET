@@ -52,11 +52,14 @@ internal static partial class DuckLakePaths
 
     /// <summary>
     /// A schema or table name that becomes a directory under <c>data_path</c>: <c>.</c>, <c>..</c>, and names with
-    /// <c>/</c>, <c>\</c> or NUL are refused (the directory would not be the object's own).
+    /// <c>/</c>, <c>\</c> or NUL are refused (the directory would not be the object's own). So is a name whose stored
+    /// segment (<c>Uri.EscapeDataString(name)</c>) the path check would later refuse, such as <c>%2e%2e</c>, which decodes
+    /// to <c>..</c>: it would commit and then fail every load of the object.
     /// </summary>
     public static void CheckName(string name, string what)
     {
-        if (string.IsNullOrEmpty(name) || name is "." or ".." || name.Contains('/') || name.Contains('\\') || name.Contains('\0'))
-            throw new ArgumentException($"'{name}' is not a valid {what} name: names may not be empty, '.' or '..', or contain '/', '\\' or NUL", nameof(name));
+        if (string.IsNullOrEmpty(name) || name is "." or ".." || name.Contains('/') || name.Contains('\\') || name.Contains('\0')
+            || !IsConfined(Uri.EscapeDataString(name) + "/"))
+            throw new ArgumentException($"'{name}' is not a valid {what} name: names may not be empty, '.' or '..' (also percent-encoded), or contain '/', '\\' or NUL", nameof(name));
     }
 }
