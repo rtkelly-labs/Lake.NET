@@ -73,23 +73,25 @@ public sealed class ScanPlanner(CatalogService catalog, ScanPlanningOptions opti
     /// <c>planTableScan</c>: a completed plan with its plan ID, or (with <see cref="ScanPlanningOptions.Async"/>) a
     /// submitted one. Either is recorded in the <see cref="IServerStateStore"/>, so any instance answers its plan ID.
     /// </summary>
-    public async Task<JsonObject> PlanAsync(TableIdentifier id, PlanRequest request, CancellationToken ct)
+    /// <param name="principal">Who plans (<see cref="Principals.Name"/>): only they can fetch or cancel the plan by its ID.</param>
+    public async Task<JsonObject> PlanAsync(TableIdentifier id, PlanRequest request, string principal, CancellationToken ct)
     {
         await ExpireAsync();
         var loaded = await catalog.LoadTableAsync(id, ct);
         Interlocked.Increment(ref _plansStarted);
         var planId = Guid.NewGuid().ToString();
+        var key = StateKey(principal, planId);
         if (options.Async)
         {
             var cancel = new CancellationTokenSource();
-            _running[planId] = cancel;
-            await state.AddPlanAsync(new PlanRecord(planId, id, "submitted", null, null, Now(), null), ct);
+            _running[key] = cancel;
+            await state.AddPlanAsync(new PlanRecord(key, id, "submitted", null, null, Now(), null), ct);
             _ = Task.Run(async () =>
             {
                 try
                 {
                     var result = await PlanCoreAsync(loaded, request, cancel.Token);
-                    await state.FinishPlanAsync(planId, "completed", result.ToJsonString(), null, Now());
+                    await state.FinishPlanAsync(key, "completed", result.ToJsonString(), null, Now());
                 }
                 catch (OperationCanceledException) when (cancel.IsCancellationRequested)
                 {
@@ -98,11 +100,11 @@ public sealed class ScanPlanner(CatalogService catalog, ScanPlanningOptions opti
                 catch (Exception e)
                 {
                     logger?.LogWarning(e, "Scan planning {PlanId} for {Table} failed", planId, id);
-                    await state.FinishPlanAsync(planId, "failed", null, e.Message, Now());
+                    await state.FinishPlanAsync(key, "failed", null, e.Message, Now());
                 }
                 finally
                 {
-                    _running.TryRemove(planId, out _);
+                    _running.TryRemove(key, out _);
                     cancel.Dispose();
                 }
             }, CancellationToken.None);
@@ -111,17 +113,17 @@ public sealed class ScanPlanner(CatalogService catalog, ScanPlanningOptions opti
 
         var completed = await PlanCoreAsync(loaded, request, ct);
         var now = Now();
-        await state.AddPlanAsync(new PlanRecord(planId, id, "completed", completed.ToJsonString(), null, now, now), ct);
+        await state.AddPlanAsync(new PlanRecord(key, id, "completed", completed.ToJsonString(), null, now, now), ct);
         var response = new JsonObject { ["status"] = "completed", ["plan-id"] = planId };
         foreach (var (k, v) in completed) response[k] = v?.DeepClone();
         return response;
     }
 
     /// <summary><c>fetchPlanningResult</c>.</summary>
-    public async Task<JsonObject> FetchAsync(TableIdentifier id, string planId, CancellationToken ct = default)
+    public async Task<JsonObject> FetchAsync(TableIdentifier id, string planId, string principal, CancellationToken ct = default)
     {
         await ExpireAsync();
-        var plan = await FindAsync(id, planId, ct);
+        var plan = await FindAsync(id, planId, principal, ct);
         switch (plan.Status)
         {
             case "completed":
@@ -145,19 +147,26 @@ public sealed class ScanPlanner(CatalogService catalog, ScanPlanningOptions opti
     }
 
     /// <summary><c>cancelPlanning</c>: stops a plan running here and forgets the plan either way.</summary>
-    public async Task CancelAsync(TableIdentifier id, string planId, CancellationToken ct = default)
+    public async Task CancelAsync(TableIdentifier id, string planId, string principal, CancellationToken ct = default)
     {
-        await FindAsync(id, planId, ct);
-        await state.DeletePlanAsync(planId, ct);
-        if (_running.TryGetValue(planId, out var cancel))
+        var key = (await FindAsync(id, planId, principal, ct)).PlanId;
+        await state.DeletePlanAsync(key, ct);
+        if (_running.TryGetValue(key, out var cancel))
         {
             try { cancel.Cancel(); }
             catch (ObjectDisposedException) { /* it just finished */ }
         }
     }
 
-    private async Task<PlanRecord> FindAsync(TableIdentifier id, string planId, CancellationToken ct) =>
-        await state.LoadPlanAsync(planId, ct) is { } plan && plan.Table.Equals(id)
+    /// <summary>
+    /// Where a plan is kept: its ID hashed with the principal that made it, so another principal's fetch or cancel of
+    /// the same ID finds nothing (404), on every instance, without a column for the owner.
+    /// </summary>
+    private static string StateKey(string principal, string planId) =>
+        Convert.ToHexString(System.Security.Cryptography.SHA256.HashData(Encoding.UTF8.GetBytes($"{principal}\n{planId}"))).ToLowerInvariant();
+
+    private async Task<PlanRecord> FindAsync(TableIdentifier id, string planId, string principal, CancellationToken ct) =>
+        await state.LoadPlanAsync(StateKey(principal, planId), ct) is { } plan && plan.Table.Equals(id)
         && (plan.Finished is not { } done || Now() - done <= options.PlanLifetime)
             ? plan
             : throw new NoSuchPlanIdException($"No plan {planId} for {id}");
