@@ -425,7 +425,15 @@ after `Idempotency:PendingTimeout` (5 minutes): the next request with the key ru
 
 ## Limits and errors
 
-- Request bodies are capped at 16 MiB (`Endpoints.MaxRequestBodyBytes`).
+- Request bodies are capped at 16 MiB (`Endpoints.MaxRequestBodyBytes`) before any middleware reads them, so a larger
+  body is a `413` whether or not it carries an `Idempotency-Key` (the idempotency check hashes the body). Kestrel
+  enforces the cap; a host without that feature (TestServer, some proxies' own servers) does not, so limit the body in
+  front of it too. `LimitsTests` check it on real Kestrel.
+- JSON bodies nest at most 64 levels deep (`Endpoints.MaxJsonDepth`); deeper is a `400`.
+- `POST /v1/oauth/tokens` takes `Auth:TokenRequestsPerMinute` (default 60) requests per client address per minute and
+  answers more with `429` and `Retry-After`, which bounds how fast client secrets can be guessed. Behind a proxy every
+  client shares its address: raise the limit, forward the client address (`UseForwardedHeaders`), or set it to `0` and
+  limit at the proxy.
 - A list returns at most 1,000 entries per page (`Endpoints.MaxPageSize`), also when no `pageSize` is asked for, with a
   `next-page-token` for the rest.
 - A 500 answers `Internal server error (trace …)`; the cause is logged with that trace ID, never sent to the client.

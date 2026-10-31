@@ -90,6 +90,23 @@ public static class Endpoints
         // Create the store's tables before the first request.
         app.Services.GetRequiredService<ICatalogStore>().InitializeAsync().GetAwaiter().GetResult();
 
+        // Requests are JSON documents of kilobytes; nothing a client sends needs more than this. First of all, so no
+        // middleware (idempotency hashes the body) reads more than the limit; a body over it is a 413.
+        app.Use(async (ctx, next) =>
+        {
+            if (ctx.Features.Get<Microsoft.AspNetCore.Http.Features.IHttpMaxRequestBodySizeFeature>() is { IsReadOnly: false } limit)
+                limit.MaxRequestBodySize = MaxRequestBodyBytes;
+            try
+            {
+                await next(ctx);
+            }
+            catch (Microsoft.AspNetCore.Http.BadHttpRequestException e) when (!ctx.Response.HasStarted)
+            {
+                var (status, type) = ErrorModel.Classify(e);
+                await ErrorModel.WriteAsync(ctx, status, type, e.Message);
+            }
+        });
+
         // Outside the error handler, so the response it keeps is the final one (errors included).
         if (options.Idempotency.Enabled)
         {
@@ -116,14 +133,6 @@ public static class Endpoints
                 }
                 else await ErrorModel.WriteAsync(ctx, status, type, e.Message);
             }
-        });
-
-        // Requests are JSON documents of kilobytes; nothing a client sends needs more than this.
-        app.Use((ctx, next) =>
-        {
-            if (ctx.Features.Get<Microsoft.AspNetCore.Http.Features.IHttpMaxRequestBodySizeFeature>() is { IsReadOnly: false } limit)
-                limit.MaxRequestBodySize = MaxRequestBodyBytes;
-            return next(ctx);
         });
 
         app.MapPost("/v1/oauth/tokens", AuthSetup.TokenAsync).AllowAnonymous();
@@ -494,11 +503,16 @@ public static class Endpoints
     private static JsonArray Levels(Namespace ns) => new(ns.Levels.Select(l => (JsonNode)l).ToArray());
     private static JsonArray Strings(IEnumerable<string> items) => new(items.Select(i => (JsonNode)i).ToArray());
 
+    /// <summary>The deepest nesting a request body may have: the deepest the spec's documents need is far less.</summary>
+    public const int MaxJsonDepth = 64;
+
+    private static readonly System.Text.Json.JsonDocumentOptions JsonLimits = new() { MaxDepth = MaxJsonDepth };
+
     private static async Task<JsonNode> BodyAsync(HttpRequest req, CancellationToken ct)
     {
         try
         {
-            return await JsonNode.ParseAsync(req.Body, cancellationToken: ct) ?? throw new BadRequestException("Request body must be a JSON object");
+            return await JsonNode.ParseAsync(req.Body, documentOptions: JsonLimits, cancellationToken: ct) ?? throw new BadRequestException("Request body must be a JSON object");
         }
         catch (System.Text.Json.JsonException e)
         {
