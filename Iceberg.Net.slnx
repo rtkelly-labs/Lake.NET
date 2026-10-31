@@ -24,6 +24,7 @@
     <Project Path="tests/Iceberg.Net.EntityFrameworkCore.Tests/Iceberg.Net.EntityFrameworkCore.Tests.csproj" />
     <Project Path="tests/Iceberg.Net.Fuzz/Iceberg.Net.Fuzz.csproj" />
     <Project Path="tests/Iceberg.Net.Linq.Tests/Iceberg.Net.Linq.Tests.csproj" />
+    <Project Path="tests/Iceberg.Net.DuckDbNet.Tests/Iceberg.Net.DuckDbNet.Tests.csproj" />
     <Project Path="tests/Iceberg.Net.NetStandard.Tests/Iceberg.Net.NetStandard.Tests.csproj" />
     <Project Path="tests/Iceberg.Net.Regression.Tests/Iceberg.Net.Regression.Tests.csproj" />
     <Project Path="tests/Iceberg.Net.RestCatalogBehaviour.Tests/Iceberg.Net.RestCatalogBehaviour.Tests.csproj" />
