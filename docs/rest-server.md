@@ -124,8 +124,9 @@ PyIceberg ignore; `InMemoryCatalogStore` keeps them in memory. So every server i
 others' idempotency keys and answers their plan IDs (`SharedStateTests`, over one SQLite file and over one shared
 in-memory store). A store of your own that does not implement `IServerStateStore` gets process-local state.
 
-Metadata and data files go through `IFileIO`. The default is `ResolvingFileIO`, which sends `s3://` locations to
-`S3FileIO` and everything else to the local file system.
+Metadata and data files go through `IFileIO`. The default is `ResolvingFileIO`, which sends `s3://`, `s3a://` and
+`s3n://` locations to `S3FileIO`, plain paths and `file:` URIs to the local file system, and refuses every other scheme
+(`gs`, `abfss`, `hdfs`, …).
 
 ## Authentication
 

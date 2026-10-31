@@ -249,6 +249,8 @@ public sealed partial class CatalogService(ICatalogStore store, IFileIO io, Rest
                 bool changed;
                 if (current is null)
                 {
+                    // A staged create through the commit endpoint names the table as the create endpoint does.
+                    RequireEntryName(id.Name, "Table");
                     await LoadNamespaceAsync(id.Namespace, ct);
                     if (await Store.KindAsync(id, ct) is not null) throw new CommitFailedException($"Requirement failed: {id} already exists");
                     updated = await BuildCreatedAsync(id, commit.Updates, ct);
