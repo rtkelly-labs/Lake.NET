@@ -38,6 +38,7 @@
     <Project Path="tests/Iceberg.Net.RestServer.Tests/Iceberg.Net.RestServer.Tests.csproj" />
     <Project Path="tests/Iceberg.Net.Spec.Tests/Iceberg.Net.Spec.Tests.csproj" />
     <Project Path="tests/Iceberg.Net.TestSupport/Iceberg.Net.TestSupport.csproj" />
+    <Project Path="tests/Lake.Delta.Tests/Lake.Delta.Tests.csproj" />
   </Folder>
   <Folder Name="/tools/">
     <Project Path="tools/ShadowCompare/ShadowCompare.csproj" />
