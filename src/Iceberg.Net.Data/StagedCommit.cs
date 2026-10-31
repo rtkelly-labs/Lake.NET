@@ -27,7 +27,7 @@ public class StagedCommit
         _plan = plan;
     }
 
-    /// <summary>The table, refreshed by every re-plan and after the commit.</summary>
+    /// <summary>The table, refreshed by every re-plan and after the commit (unless that read fails: the commit stands).</summary>
     public Table Table { get; }
 
     /// <summary>What committing the current plan sends to the catalog; null when the plan changes nothing.</summary>
@@ -169,9 +169,14 @@ public class StagedCommit
                     continue;
                 }
                 foreach (var s in staged) s.IsCommitted = true;
-                // A transaction returns no metadata: load what was committed (a single commit already did).
+                // A transaction returns no metadata: load what was committed (a single commit already did). Best effort:
+                // the transaction has committed, and throwing now would tell the caller it had not.
                 if (pending.Count > 1)
-                    foreach (var s in pending) await s.Table.RefreshAsync(ct);
+                    foreach (var s in pending)
+                    {
+                        try { await s.Table.RefreshAsync(ct); }
+                        catch (Exception e) when (e is not OperationCanceledException) { /* Table stays at its pre-commit metadata until refreshed */ }
+                    }
                 telemetry.Committed(pending[0].Snapshot!.SnapshotId, "transaction");
                 return;
             }

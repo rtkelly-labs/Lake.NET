@@ -877,15 +877,27 @@ public sealed class SnapshotProducer
     private static long PositionRecords(IEnumerable<DataFile> files) => files.Where(f => f.Content == FileContent.PositionDeletes).Sum(f => f.RecordCount);
     private static long EqualityRecords(IEnumerable<DataFile> files) => files.Where(f => f.Content == FileContent.EqualityDeletes).Sum(f => f.RecordCount);
 
-    /// <summary>After a successful commit, delete manifests/lists from failed attempts that the winning snapshot does not reference.</summary>
+    /// <summary>
+    /// After a successful commit, delete manifests/lists from failed attempts that the winning snapshot does not reference.
+    /// Best effort, and never throws but for cancellation: the commit has happened, and an error here would tell the
+    /// caller it had not (a retried append would then add its rows twice).
+    /// </summary>
     private async Task CleanupAsync(CancellationToken ct)
     {
-        var current = _table.Metadata.SnapshotById(Head(_table.Metadata)!.Value)!;
-        var live = (await TableScan.ManifestsAsync(_table, current, ct)).Select(mf => mf.ManifestPath).Append(current.ManifestList!).ToHashSet();
-        foreach (var path in _staleArtifacts.Where(p => !live.Contains(p)))
+        if (_staleArtifacts.Count == 0) return;
+        try
         {
-            try { await _table.IO.DeleteAsync(path, ct); }
-            catch (Exception e) when (e is not OperationCanceledException) { /* orphan-file cleanup will catch it */ }
+            var current = _table.Metadata.SnapshotById(Head(_table.Metadata)!.Value)!;
+            var live = (await TableScan.ManifestsAsync(_table, current, ct)).Select(mf => mf.ManifestPath).Append(current.ManifestList!).ToHashSet();
+            foreach (var path in _staleArtifacts.Where(p => !live.Contains(p)))
+            {
+                try { await _table.IO.DeleteAsync(path, ct); }
+                catch (Exception e) when (e is not OperationCanceledException) { /* orphan-file cleanup will catch it */ }
+            }
+        }
+        catch (Exception e) when (e is not OperationCanceledException)
+        {
+            // The winning snapshot's manifests could not be read, so which stale files are unreferenced is unknown: keep them all.
         }
         _staleArtifacts.Clear();
     }
