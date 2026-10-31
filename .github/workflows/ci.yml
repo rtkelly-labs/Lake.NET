@@ -160,10 +160,42 @@ jobs:
 
   # The one required check. Branch protection matches on this name, so it stays `ci` whatever
   # the jobs above are called or however they are split.
+  # The local-filesystem paths that differ by OS: path separators, drive letters, case-insensitive file systems and
+  # line endings. Orphan cleanup deletes what a listing returns and the metadata doesn't name, so a path compared in
+  # the wrong form deletes live files (docs/lake/verification/gap-review-2026-10.md §7). No Docker or Python here.
+  platform:
+    name: platform (${{ matrix.os }})
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [windows-latest, macos-latest]
+    runs-on: ${{ matrix.os }}
+    timeout-minutes: 30
+    permissions:
+      contents: read
+    steps:
+      - uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0 # v7.0.0
+      - uses: actions/setup-dotnet@a98b56852c35b8e3190ac28c8c2271da59106c68 # v6
+        with:
+          global-json-file: global.json
+      - name: Local tables, FileIO, maintenance and golden tables
+        shell: bash
+        run: >-
+          dotnet test tests/Iceberg.Net.Spec.Tests --nologo
+          --filter "FullyQualifiedName~LocalTableTests|FullyQualifiedName~FileIORoutingTests|FullyQualifiedName~MaintenanceTests|FullyQualifiedName~TableLocationsTests|FullyQualifiedName~ExpiryRetentionTests|FullyQualifiedName~CompactionTests|FullyQualifiedName~OwnGoldenFixtureTests|FullyQualifiedName~SparkFixtureTests|FullyQualifiedName~DependencyDirectionTests"
+      - name: FileIO conformance on the local filesystem
+        shell: bash
+        run: dotnet test tests/Iceberg.Net.Regression.Tests --nologo --filter "FullyQualifiedName~LocalFileIOConformanceTests"
+      - name: DuckDB in-process reader and the netstandard2.0 builds
+        shell: bash
+        run: |
+          dotnet test tests/Iceberg.Net.DuckDbNet.Tests --nologo
+          dotnet test tests/Iceberg.Net.NetStandard.Tests --nologo
+
   ci:
     name: ci
     runs-on: ubuntu-latest
-    needs: [unit, cross-engine, regression]
+    needs: [unit, cross-engine, regression, platform]
     # `always()`, so this reports a verdict when a job fails rather than being skipped: a skipped
     # required check is indistinguishable from one still running, and blocks the PR either way.
     if: always()
