@@ -91,8 +91,9 @@ same single spelling as rule 1 (no `.`, `..` or percent-encoded dot segments); f
 not re-checked. Every refusal is a 400. A clash names only the caller's own location: the other table, view or namespace may be one the caller cannot read, so its name and location go to the server log (Information), not the response.
 
 The S3 signer applies the same scoping to requests: a table's own objects only, with no sub-resource beyond what clients
-send (multipart, versions, the Java SDK's `x-id`) and no header that changes access or retention (`x-amz-acl`,
-`x-amz-grant-*`, `x-amz-object-lock-*`); bucket requests only for the table's buckets, with each operation's own
+send (multipart, versions, the Java SDK's `x-id`) and only the headers on its allow-list, so none that changes access,
+retention, tags or the KMS key (`x-amz-acl`, `x-amz-grant-*`, `x-amz-object-lock-*`, `x-amz-tagging`,
+`x-amz-server-side-encryption-aws-kms-key-id`); bucket requests only for the table's buckets, with each operation's own
 parameters.
 
 ## Storage
@@ -385,7 +386,11 @@ reads and `no-cache` for writes.
   AWS S3 over HTTPS when none is set. Object requests must name a key under the table's location, `write.data.path` or
   `write.metadata.path` (no `.` or `..` segments), and so must a copy's `x-amz-copy-source`. Bucket requests are limited
   to listing with such a `prefix`, `DeleteObjects` whose body names only such keys, `GetBucketLocation` and
-  `HeadBucket`. Anything else is a 403, as is a write from a principal without `write` on the table.
+  `HeadBucket`. Only `GET`, `HEAD`, `PUT`, `POST` and `DELETE` are signed. Headers are an allow-list
+  (`S3RequestSigner.AllowedHeaders`): transport, SDK and tracing headers, content and conditional headers, checksums,
+  `x-amz-meta-*`, storage class, copy sources, SSE-S3 (`x-amz-server-side-encryption` of `AES256`, `aws:kms` or
+  `aws:kms:dsse`, never with a key ID or context) and SSE-C; a header S3 adds later is refused until it is listed.
+  Anything else is a 403, as is a write from a principal without `write` on the table.
 - **How it is checked:** the S3 signer matches AWS's documented "GET Object" SigV4 example, and the authorization rules
   have their own tests (`RemoteSigningTests`). End to end, against a moto that checks signatures (a one-off
   `motoserver/moto` container with authentication on, bootstrapped with an IAM user: `AuthenticatingMoto`; the shared
