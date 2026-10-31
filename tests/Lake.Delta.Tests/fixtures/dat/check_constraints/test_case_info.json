@@ -1,0 +1,4 @@
+{
+  "name": "check_constraints",
+  "description": "Table with a check constraint"
+}
