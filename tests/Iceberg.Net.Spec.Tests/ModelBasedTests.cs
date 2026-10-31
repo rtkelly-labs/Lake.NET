@@ -5,6 +5,7 @@ using Iceberg.Net.Catalog;
 using Iceberg.Net.Data;
 using Iceberg.Net.Metadata;
 using Iceberg.Net.Partitioning;
+using Iceberg.Net.Transforms;
 using Iceberg.Net.Types;
 
 namespace Iceberg.Net.Spec.Tests;
@@ -48,6 +49,15 @@ public sealed class ModelBasedTests
     public sealed record Expire(int RetainLast) : Op;
     public sealed record ComputeStats : Op;
     public sealed record UpgradeAndConvert : Op;
+    /// <summary>Compaction (bin-pack; <c>All</c>: rewrite every file): the rows must not change.</summary>
+    public sealed record Compact(bool All) : Op;
+    public sealed record RewriteManifests : Op;
+    /// <summary>Partition evolution: add a bucket on id, drop the day field, or bring it back (a no-op when not applicable).</summary>
+    public sealed record EvolveSpec(SpecChange Change) : Op;
+    /// <summary>Add an optional column; existing rows read it as null, and later writes leave it null.</summary>
+    public sealed record AddColumn : Op;
+
+    public enum SpecChange { AddIdBucket, DropDay, RestoreDay }
 
     public sealed record Case(int FormatVersion, Op[] Ops)
     {
@@ -77,7 +87,11 @@ public sealed class ModelBasedTests
         (1, Gen.Choose(0, 2).Select(d => (Op)new DropDay(d))),
         (1, Gen.Choose(1, 3).Select(n => (Op)new Expire(n))),
         (1, Gen.Constant((Op)new ComputeStats())),
-        (1, Gen.Constant((Op)new UpgradeAndConvert())));
+        (1, Gen.Constant((Op)new UpgradeAndConvert())),
+        (1, Gen.Elements(false, true).Select(all => (Op)new Compact(all))),
+        (1, Gen.Constant((Op)new RewriteManifests())),
+        (1, Gen.Elements(SpecChange.AddIdBucket, SpecChange.DropDay, SpecChange.RestoreDay).Select(c => (Op)new EvolveSpec(c))),
+        (1, Gen.Constant((Op)new AddColumn())));
 
     private static readonly Gen<Case> CaseGen =
         from v in Gen.Elements(2, 3)
@@ -140,6 +154,8 @@ public sealed class ModelBasedTests
                 var actual = (await TableScan.ReadAllAsync(table)).Select(Row.From);
                 if (Canon(actual) != Canon(model))
                     throw new InvalidOperationException($"step {step} ({op}): table [{Canon(actual)}] != model [{Canon(model)}]");
+                var report = await TableValidator.ValidateAsync(table, new ValidationOptions { Deep = true });
+                if (!report.IsValid) throw new InvalidOperationException($"step {step} ({op}): fsck failed: {report}");
                 if (table.Metadata.CurrentSnapshotId is { } sid) history[sid] = Canon(model);
                 if (table.Metadata.FormatVersion >= 3) await CheckLineage(table, createdV3: c.FormatVersion >= 3, step, op);
             }
@@ -173,26 +189,59 @@ public sealed class ModelBasedTests
             throw new InvalidOperationException($"step {step} ({op}): _last_updated_sequence_number outside committed range");
     }
 
+    /// <summary>A model row as a table row: columns added since (AddColumn) are null.</summary>
+    private static object?[] Full(Table t, Row r)
+    {
+        var row = r.ToArray();
+        return row.Length == t.Schema.Columns.Count ? row : [.. row, .. new object?[t.Schema.Columns.Count - row.Length]];
+    }
+
+    /// <summary>
+    /// Runs a keyed mutation. Equality deletes are refused when a partition source column is outside the key (after
+    /// EvolveSpec adds bucket(id), a key on event_date alone no longer decides a row's partition). A refusal is
+    /// accepted only when some spec makes it possible, and must leave the table unchanged; the model then stays as it is.
+    /// </summary>
+    private static async Task<bool> AppliedAsync(Table t, DeleteStrategy strategy, IEnumerable<string> key, Func<Task> mutate)
+    {
+        var keyNames = key.ToHashSet(StringComparer.Ordinal);
+        var mayRefuse = strategy == DeleteStrategy.EqualityDeletes && t.Metadata.PartitionSpecs.Any(sp => sp.Fields.Any(f =>
+            f.Transform is not VoidTransform && !keyNames.Contains(t.Schema.FindField(f.SourceId)?.Name ?? "")));
+        var before = t.Metadata.CurrentSnapshotId;
+        try
+        {
+            await mutate();
+            return true;
+        }
+        catch (ValidationException e) when (mayRefuse && e.Message.StartsWith("Equality deletes require every partition source", StringComparison.Ordinal))
+        {
+            if (t.Metadata.CurrentSnapshotId != before) throw new InvalidOperationException("a refused equality delete changed the table");
+            return false;
+        }
+    }
+
     private static async Task Apply(Table t, Op op, List<Row> model)
     {
         switch (op)
         {
             case Insert x:
-                await TableMutations.InsertAsync(t, x.Rows.Select(r => r.ToArray()).ToList());
+                await TableMutations.InsertAsync(t, x.Rows.Select(r => Full(t, r)).ToList());
                 model.AddRange(x.Rows);
                 break;
             case Upsert x:
-                await TableMutations.UpsertAsync(t, x.Rows.Select(r => r.ToArray()).ToList(), strategy: x.S);
+                if (!await AppliedAsync(t, x.S, t.Schema.IdentifierFieldIds.Select(id => t.Schema.FindField(id)!.Name),
+                    () => TableMutations.UpsertAsync(t, x.Rows.Select(r => Full(t, r)).ToList(), strategy: x.S))) break;
                 model.RemoveAll(m => x.Rows.Any(r => (r.Id, r.Day) == (m.Id, m.Day)));
                 model.AddRange(x.Rows);
                 break;
             case ReplaceDays x:
-                await TableMutations.ReplaceGroupsAsync(t, x.Rows.Select(r => r.ToArray()).ToList(), ["event_date"], x.S);
+                if (!await AppliedAsync(t, x.S, ["event_date"],
+                    () => TableMutations.ReplaceGroupsAsync(t, x.Rows.Select(r => Full(t, r)).ToList(), ["event_date"], x.S))) break;
                 model.RemoveAll(m => x.Rows.Any(r => r.Day == m.Day));
                 model.AddRange(x.Rows);
                 break;
             case DeleteKeys x:
-                await TableMutations.DeleteByKeysAsync(t, ["id", "event_date"], x.Keys.Select(k => new object?[] { k.Id, 19_700 + k.Day }), x.S);
+                if (!await AppliedAsync(t, x.S, ["id", "event_date"],
+                    () => TableMutations.DeleteByKeysAsync(t, ["id", "event_date"], x.Keys.Select(k => new object?[] { k.Id, 19_700 + k.Day }), x.S))) break;
                 model.RemoveAll(m => x.Keys.Contains((m.Id, m.Day)));
                 break;
             case DeleteWhereIdMod x:
@@ -201,7 +250,10 @@ public sealed class ModelBasedTests
                 break;
             case DropDay x:
                 if (t.Metadata.CurrentSnapshot is null) break;
-                await SnapshotProducer.DeleteFiles(t, f => (int?)f.Partition[0] == 19_700 + x.Day).CommitAsync();
+                if (t.Metadata.PartitionSpecs.Count == 1)
+                    await SnapshotProducer.DeleteFiles(t, f => (int?)f.Partition[0] == 19_700 + x.Day).CommitAsync();
+                else // after partition evolution a file may hold several days: delete the rows instead
+                    await TableMutations.DeleteWhereAsync(t, r => (int)r[2]! == 19_700 + x.Day, DeleteStrategy.CopyOnWrite);
                 model.RemoveAll(m => m.Day == x.Day);
                 break;
             case Expire x:
@@ -214,6 +266,32 @@ public sealed class ModelBasedTests
                 if (t.Metadata.FormatVersion == 3) break;
                 await t.CommitAsync([], [new MetadataUpdate.UpgradeFormatVersion(3)]);
                 if (t.Metadata.CurrentSnapshot is not null) await SnapshotProducer.ConvertPositionDeletesToDeletionVectors(t).CommitAsync();
+                break;
+            case Compact x:
+                await Compaction.RewriteDataFilesAsync(t, new RewriteOptions(MinInputFiles: 2, RewriteAll: x.All));
+                break;
+            case RewriteManifests:
+                if (t.Metadata.CurrentSnapshot is not null) await Maintenance.RewriteManifestsAsync(t);
+                break;
+            case EvolveSpec x:
+            {
+                var fields = t.Metadata.DefaultSpec.Fields.Select(f => f.Name).ToHashSet();
+                switch (x.Change)
+                {
+                    case SpecChange.AddIdBucket when !fields.Contains("id_bucket"):
+                        await t.UpdateSpecAsync(p => p.AddField("id", Transform.Bucket(2), "id_bucket"));
+                        break;
+                    case SpecChange.DropDay when fields.Contains("event_date"):
+                        await t.UpdateSpecAsync(p => p.RemoveField("event_date"));
+                        break;
+                    case SpecChange.RestoreDay when !fields.Contains("event_date"):
+                        await t.UpdateSpecAsync(p => p.AddField("event_date"));
+                        break;
+                }
+                break;
+            }
+            case AddColumn:
+                if (t.Schema.Columns.Count < 7) await t.UpdateSchemaAsync(s => s.AddColumn($"extra{t.Schema.Columns.Count}", PrimitiveType.Int));
                 break;
         }
     }

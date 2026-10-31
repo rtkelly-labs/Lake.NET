@@ -35,3 +35,4 @@ dist/
 *.feature.cs
 # python3 tools/spec_trace.py matrix (CI uploads it as the spec-traceability artifact)
 docs/spec-traceability.md
+BenchmarkDotNet.Artifacts/

@@ -1,0 +1,4 @@
+{
+  "name": "timestamp_ntz",
+  "description": "Table with not timezone timestamps in it"
+}

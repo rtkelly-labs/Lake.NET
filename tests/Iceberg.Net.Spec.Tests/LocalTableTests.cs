@@ -205,6 +205,50 @@ public sealed class LocalTableTests : IDisposable
     }
 
     [Spec("File System Operations")]
+    [Theory]
+    [InlineData("00007-{0}.gz.metadata.json")] // Java's name for write.metadata.compression-codec=gzip
+    [InlineData("00007-{0}.metadata.json.gz")] // older Java releases
+    public async Task Gzipped_metadata_is_read_whatever_it_is_called_and_numbering_continues(string nameFormat)
+    {
+        var table = await Create();
+        await SnapshotProducer.Append(table).AddFiles(await TableWriter.WriteAsync(table, Rows(0, 10))).CommitAsync();
+        var gzipped = Path.Combine(_warehouse, "gz", string.Format(System.Globalization.CultureInfo.InvariantCulture, nameFormat, Guid.NewGuid()));
+        Directory.CreateDirectory(Path.GetDirectoryName(gzipped)!);
+        await using (var file = File.Create(gzipped))
+        await using (var gz = new System.IO.Compression.GZipStream(file, System.IO.Compression.CompressionLevel.Optimal))
+            gz.Write(await table.IO.ReadAllAsync(table.MetadataLocation!));
+
+        var registered = await _catalog.RegisterTableAsync(TableIdentifier.Of("db", "gz"), gzipped);
+        Assert.Equal(table.Metadata.TableUuid, registered.Metadata.TableUuid);
+        Assert.Equal(10, (await TableScan.ReadAllAsync(registered)).Count);
+
+        await SnapshotProducer.Append(registered).AddFiles(await TableWriter.WriteAsync(registered, Rows(10, 5))).CommitAsync();
+        Assert.Matches(@"/00008-[0-9a-f-]+\.metadata\.json$", registered.MetadataLocation!.Replace('\\', '/'));
+        Assert.Equal(15, (await TableScan.ReadAllAsync(await _catalog.LoadTableAsync(TableIdentifier.Of("db", "gz")))).Count);
+    }
+
+    [Fact]
+    public void Gzipped_metadata_that_inflates_past_the_limit_is_refused()
+    {
+        using var ms = new MemoryStream();
+        using (var gz = new System.IO.Compression.GZipStream(ms, System.IO.Compression.CompressionLevel.SmallestSize, leaveOpen: true))
+            gz.Write(new byte[1 << 20]); // 1 MiB of zeros: a few KiB compressed
+        Assert.True(ms.Length < 16 * 1024);
+        Assert.Throws<InvalidDataException>(() => MetastoreCatalog.DecodeMetadata(ms.ToArray(), "bomb.gz.metadata.json", maxDecompressedBytes: 64 * 1024));
+        Assert.True(MetastoreCatalog.MaxDecompressedMetadataBytes >= 64 * 1024 * 1024);
+    }
+
+    [Theory]
+    [InlineData("/wh/db/t/metadata/00007-1b4e28ba-2fa1-11d2-883f-0016d3cca427.metadata.json")]
+    [InlineData(@"C:\wh\db\t\metadata\00007-1b4e28ba-2fa1-11d2-883f-0016d3cca427.metadata.json")]
+    [InlineData("s3://b/wh/t/metadata/00007-1b4e28ba-2fa1-11d2-883f-0016d3cca427.gz.metadata.json")]
+    public async Task The_next_metadata_version_follows_the_previous_on_any_path_style(string previous)
+    {
+        var table = await Create();
+        Assert.Matches(@"/00008-[0-9a-f-]+\.metadata\.json$", MetastoreCatalog.NewMetadataLocation(table.Metadata, previous));
+    }
+
+    [Spec("File System Operations")]
     [Fact]
     public async Task Metadata_files_are_never_overwritten()
     {

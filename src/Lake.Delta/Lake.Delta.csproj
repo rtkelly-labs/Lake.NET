@@ -1,0 +1,17 @@
+<Project Sdk="Microsoft.NET.Sdk">
+  <PropertyGroup>
+    <!-- Not published yet: the first increment is a reader (docs/lake/reference/specs/delta.md §11). -->
+    <IsPackable>false</IsPackable>
+    <RootNamespace>Lake.Delta</RootNamespace>
+    <Description>Delta Lake tables: transaction log replay, checkpoints, protocol gate, column mapping, deletion vectors and Parquet reads. Built on the shared layers only (Iceberg.Net.IO, Iceberg.Net.Puffin); never on an Iceberg-role project.</Description>
+  </PropertyGroup>
+  <ItemGroup>
+    <!-- ParquetSharp's Arrow reader (Apache.Arrow comes with it) reassembles nested columns for data files and checkpoints. -->
+    <PackageReference Include="ParquetSharp" />
+    <ProjectReference Include="../Iceberg.Net.IO/Iceberg.Net.IO.csproj" />
+    <ProjectReference Include="../Iceberg.Net.Puffin/Iceberg.Net.Puffin.csproj" />
+  </ItemGroup>
+  <ItemGroup>
+    <InternalsVisibleTo Include="Lake.Delta.Tests" />
+  </ItemGroup>
+</Project>

@@ -40,12 +40,17 @@ public sealed class LocalFileIO : IFileIO, ISupportsListing
     {
         var root = PathOf(prefix);
         if (!Directory.Exists(root)) yield break;
-        var scheme = prefix.StartsWith("file:", StringComparison.Ordinal) ? "file://" : "";
+        // Each location is the prefix as the caller spelled it plus the relative path, so a listing names a file exactly
+        // as it was written (orphan cleanup compares the two) on every OS: Windows enumerates with backslash separators.
+        var separator = prefix.Contains('/', StringComparison.Ordinal) ? '/' : Path.DirectorySeparatorChar;
+        var head = prefix.TrimEnd('/', '\\') + separator;
         foreach (var path in Directory.EnumerateFiles(root, "*", SearchOption.AllDirectories))
         {
             ct.ThrowIfCancellationRequested();
             var info = new FileInfo(path);
-            yield return new StoredFile(scheme + path, info.Length, info.LastWriteTimeUtc);
+            var relative = Path.GetRelativePath(root, path);
+            if (separator == '/') relative = relative.Replace(Path.DirectorySeparatorChar, '/');
+            yield return new StoredFile(head + relative, info.Length, info.LastWriteTimeUtc);
         }
         await Task.CompletedTask;
     }
@@ -55,24 +60,50 @@ public sealed class LocalFileIO : IFileIO, ISupportsListing
     /// (<see cref="Uri"/> rejects it: the empty authority is missing).
     /// </summary>
     private static string PathOf(string location) =>
-        !location.StartsWith("file:", StringComparison.Ordinal) ? location
-        : location.StartsWith("file://", StringComparison.Ordinal) ? new Uri(location).LocalPath
-        : Uri.UnescapeDataString(location["file:".Length..]);
+        StorageScheme.Of(location) switch
+        {
+            null => location,
+            "file" when location.StartsWith("file://", StringComparison.Ordinal) => new Uri(location).LocalPath,
+            "file" => Uri.UnescapeDataString(location["file:".Length..]),
+            var scheme => throw StorageScheme.Unsupported(scheme, location),
+        };
 
-    public Task<byte[]> ReadAllAsync(string location, CancellationToken ct = default) => File.ReadAllBytesAsync(PathOf(location), ct);
+    // A missing parent directory is a missing file: callers handle FileNotFoundException alone, as they do for S3. So
+    // is a name this filesystem cannot spell (Windows refuses `*`, `?`, `<` and others with ERROR_INVALID_NAME, where
+    // Linux and S3 answer "not found"): no file by that name can exist here.
+    private static FileStream OpenExisting(string location)
+    {
+        try { return File.OpenRead(PathOf(location)); }
+        catch (DirectoryNotFoundException e) { throw new FileNotFoundException($"No such file: {location}", location, e); }
+        catch (IOException e) when (e.HResult == ErrorInvalidName) { throw new FileNotFoundException($"No such file: {location}", location, e); }
+    }
 
-    public Task<Stream> OpenReadAsync(string location, CancellationToken ct = default) => Task.FromResult<Stream>(File.OpenRead(PathOf(location)));
+    private const int ErrorInvalidName = unchecked((int)0x8007007B);
+
+    public async Task<byte[]> ReadAllAsync(string location, CancellationToken ct = default)
+    {
+        await using var fs = OpenExisting(location);
+        var buf = new byte[fs.Length];
+        await fs.ReadExactlyAsync(buf, ct);
+        return buf;
+    }
+
+    public Task<Stream> OpenReadAsync(string location, CancellationToken ct = default) => Task.FromResult<Stream>(OpenExisting(location));
 
     public async Task<byte[]> ReadRangeAsync(string location, long offset, int length, CancellationToken ct = default)
     {
-        await using var fs = File.OpenRead(PathOf(location));
+        await using var fs = OpenExisting(location);
         fs.Seek(offset, SeekOrigin.Begin);
         var buf = new byte[length];
         await fs.ReadExactlyAsync(buf, ct);
         return buf;
     }
 
-    public Task<long> LengthAsync(string location, CancellationToken ct = default) => Task.FromResult(new FileInfo(PathOf(location)).Length);
+    public Task<long> LengthAsync(string location, CancellationToken ct = default)
+    {
+        var info = new FileInfo(PathOf(location));
+        return info.Exists ? Task.FromResult(info.Length) : throw new FileNotFoundException($"No such file: {location}", location);
+    }
 
     public Task<bool> ExistsAsync(string location, CancellationToken ct = default) => Task.FromResult(File.Exists(PathOf(location)));
 
@@ -93,7 +124,8 @@ public sealed class LocalFileIO : IFileIO, ISupportsListing
 
     public Task DeleteAsync(string location, CancellationToken ct = default)
     {
-        File.Delete(PathOf(location));
+        try { File.Delete(PathOf(location)); }
+        catch (DirectoryNotFoundException) { /* already gone, as with a missing file */ }
         return Task.CompletedTask;
     }
 
@@ -131,6 +163,47 @@ public sealed record S3FileIOOptions
     /// URI if need be) before it is sent. <c>RestCatalog</c> supplies one that calls the catalog's signer endpoint.
     /// </summary>
     public Func<HttpRequestMessage, CancellationToken, Task>? RequestSigner { get; init; }
+
+    /// <summary>
+    /// Send request checksums only where an operation requires them, instead of the AWS SDK's default (a CRC32 trailer on
+    /// every upload, which needs <c>aws-chunked</c> encoding). Null (the default) decides by endpoint: AWS keeps the SDK's
+    /// checksums; any other endpoint (Cloudflare R2, MinIO, Ceph, emulators) gets them only when required, since
+    /// S3-compatible stores implement the trailing-checksum protocol partly or not at all. R2, for one, documents CRC32
+    /// only as a multipart (composite) checksum (docs/lake/reference/cloudflare.md).
+    /// </summary>
+    public bool? ChecksumsOnlyWhenRequired { get; init; }
+
+    /// <summary>Whether <see cref="ChecksumsOnlyWhenRequired"/>, resolved for this endpoint, turns the SDK's checksums off.</summary>
+    public bool SendsChecksumsOnlyWhenRequired => ChecksumsOnlyWhenRequired ?? RequestSigner is not null || IsThirdPartyEndpoint(Endpoint);
+
+    private static bool IsThirdPartyEndpoint(string? endpoint) =>
+        endpoint is not null && Uri.TryCreate(endpoint, UriKind.Absolute, out var u)
+        && !u.Host.EndsWith(".amazonaws.com", StringComparison.OrdinalIgnoreCase)
+        && !u.Host.EndsWith(".amazonaws.com.cn", StringComparison.OrdinalIgnoreCase);
+
+    /// <summary>
+    /// Cloudflare R2 through its S3 API: <c>https://{account}.r2.cloudflarestorage.com</c> (or the jurisdiction's endpoint,
+    /// e.g. <c>eu</c>), region <c>auto</c>, checksums only when required. R2 evaluates <c>If-None-Match: *</c> on
+    /// <c>PutObject</c> atomically, which is what metadata commits (and Delta's log) rely on. Use an R2 API token's
+    /// S3 access key pair, or temporary credentials with <paramref name="sessionToken"/>.
+    /// </summary>
+    public static S3FileIOOptions ForR2(string accountId, string accessKeyId, string secretAccessKey, string? jurisdiction = null, string? sessionToken = null)
+    {
+        if (string.IsNullOrEmpty(accountId) || !accountId.All(char.IsAsciiLetterOrDigit))
+            throw new ArgumentException("An R2 account ID is letters and digits only", nameof(accountId));
+        if (jurisdiction is not null && (jurisdiction.Length == 0 || !jurisdiction.All(char.IsAsciiLetterLower)))
+            throw new ArgumentException("An R2 jurisdiction is a lower-case name such as 'eu' or 'fedramp'", nameof(jurisdiction));
+        return new S3FileIOOptions
+        {
+            Endpoint = jurisdiction is null ? $"https://{accountId}.r2.cloudflarestorage.com" : $"https://{accountId}.{jurisdiction}.r2.cloudflarestorage.com",
+            Region = "auto",
+            PathStyleAccess = true,
+            AccessKeyId = accessKeyId,
+            SecretAccessKey = secretAccessKey,
+            SessionToken = sessionToken,
+            ChecksumsOnlyWhenRequired = true,
+        };
+    }
 
     private bool PrintMembers(System.Text.StringBuilder builder)
     {
@@ -195,12 +268,16 @@ public sealed class S3FileIO : IFileIO, ISupportsListing
         };
         if (options.RequestSigner is { } signer)
         {
+            // Checksum trailers would need aws-chunked uploads, which a remote signer cannot sign for an unknown body
+            // (SendsChecksumsOnlyWhenRequired is always true with a signer).
             config.HttpClientFactory = new HandlerClientFactory(new RemoteSigningHandler(signer, options.HttpHandler ?? new HttpClientHandler()));
-            // Checksum trailers would need aws-chunked uploads, which a remote signer cannot sign for an unknown body.
+        }
+        else if (options.HttpHandler is { } handler) config.HttpClientFactory = new HandlerClientFactory(handler);
+        if (options.SendsChecksumsOnlyWhenRequired)
+        {
             config.RequestChecksumCalculation = Amazon.Runtime.RequestChecksumCalculation.WHEN_REQUIRED;
             config.ResponseChecksumValidation = Amazon.Runtime.ResponseChecksumValidation.WHEN_REQUIRED;
         }
-        else if (options.HttpHandler is { } handler) config.HttpClientFactory = new HandlerClientFactory(handler);
         if (options.Endpoint is not null)
         {
             config.ServiceURL = options.Endpoint;
@@ -283,6 +360,9 @@ public sealed class S3FileIO : IFileIO, ISupportsListing
         using var resp = await _s3.GetObjectAsync(new GetObjectRequest { BucketName = b, Key = k, ByteRange = new ByteRange(offset, offset + length - 1) }, ct);
         using var ms = new MemoryStream(length);
         await resp.ResponseStream.CopyToAsync(ms, ct);
+        // S3 answers a range that runs past the end with the bytes that exist; a short buffer must not pass for the range.
+        if (ms.Length != length)
+            throw new EndOfStreamException($"Read {ms.Length} of {length} bytes at {offset} from {location}: the object is shorter");
         return ms.ToArray();
     }
 
@@ -319,7 +399,9 @@ public sealed class S3FileIO : IFileIO, ISupportsListing
         catch (AmazonS3Exception e) when (!overwrite && (int)e.StatusCode is 412 or 409)
         {
             // A retried PUT whose first attempt landed (response lost, e.g. 503 after apply) fails its own
-            // If-None-Match. Locations are unique per write, so identical bytes mean the object is ours.
+            // If-None-Match. Identical bytes mean the object is ours, provided no two writers ever write the same bytes
+            // to one location: Iceberg's names are unique per write, and Delta commit files carry a per-attempt
+            // commitInfo.txnId (docs/lake/reference/specs/delta.md, writer invariant 11).
             if (await ReadAllAsync(location, ct) is var existing && existing.AsSpan().SequenceEqual(content.Span)) return;
             throw new FileAlreadyExistsException(location);
         }
@@ -346,7 +428,17 @@ public sealed class ResolvingFileIO(Func<IFileIO> s3Factory) : IFileIO, ISupport
     private readonly LocalFileIO _local = new();
     private readonly Lazy<IFileIO> _s3 = new(s3Factory);
 
-    private IFileIO For(string location) => location.StartsWith("s3", StringComparison.Ordinal) ? _s3.Value : _local;
+    /// <summary>
+    /// <c>s3</c>, <c>s3a</c> and <c>s3n</c> go to S3; <c>file:</c> and bare paths to the local filesystem. Any other
+    /// scheme (<c>gs</c>, <c>abfss</c>, <c>hdfs</c>, …) is refused: writing such a location to local disk would put a
+    /// table's files somewhere no other engine looks, and reading it would read the local filesystem.
+    /// </summary>
+    private IFileIO For(string location) => StorageScheme.Of(location) switch
+    {
+        null or "file" => _local,
+        "s3" or "s3a" or "s3n" => _s3.Value,
+        var scheme => throw StorageScheme.Unsupported(scheme, location),
+    };
 
     public Task<byte[]> ReadAllAsync(string l, CancellationToken ct = default) => For(l).ReadAllAsync(l, ct);
     public Task<Stream> OpenReadAsync(string l, CancellationToken ct = default) => For(l).OpenReadAsync(l, ct);
@@ -360,4 +452,25 @@ public sealed class ResolvingFileIO(Func<IFileIO> s3Factory) : IFileIO, ISupport
     {
         if (_s3.IsValueCreated) _s3.Value.Dispose();
     }
+}
+
+/// <summary>The URI scheme of a storage location, as the FileIOs route on it.</summary>
+public static class StorageScheme
+{
+    /// <summary>
+    /// The scheme in lower case (<c>s3</c>, <c>file</c>, <c>gs</c>, …), or null for a bare path. A single letter before
+    /// the colon is a Windows drive (<c>C:\x</c>, <c>C:/x</c>), not a scheme.
+    /// </summary>
+    public static string? Of(string location)
+    {
+        var colon = location.IndexOf(':');
+        if (colon < 2) return null;
+        if (!char.IsAsciiLetter(location[0])) return null;
+        for (var i = 1; i < colon; i++)
+            if (!(char.IsAsciiLetterOrDigit(location[i]) || location[i] is '+' or '-' or '.')) return null;
+        return location[..colon].ToLowerInvariant();
+    }
+
+    internal static NotSupportedException Unsupported(string scheme, string location) =>
+        new($"No FileIO for the '{scheme}' scheme ({location}); supported: s3, s3a, s3n, file and local paths");
 }

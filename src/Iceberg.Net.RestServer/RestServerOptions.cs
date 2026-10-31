@@ -292,6 +292,12 @@ public sealed class RestServerAuthOptions
     /// </summary>
     public TimeSpan MaxSessionLifetime { get; set; } = TimeSpan.FromHours(12);
 
+    /// <summary>
+    /// Requests to <c>POST /v1/oauth/tokens</c> accepted per client address per minute (fixed window); more get a 429.
+    /// It bounds how fast client secrets can be guessed. 0 turns the limit off (a proxy in front limits instead).
+    /// </summary>
+    public int TokenRequestsPerMinute { get; set; } = 60;
+
     /// <summary>Allow an <c>http://</c> <see cref="Authority"/> (tests, local IdPs).</summary>
     public bool RequireHttpsMetadata { get; set; } = true;
 

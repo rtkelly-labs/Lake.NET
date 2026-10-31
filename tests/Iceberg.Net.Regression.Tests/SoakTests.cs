@@ -14,6 +14,9 @@ namespace Iceberg.Net.Regression.Tests;
 /// A writer that exhausts its retry budget (starvation: a slow copy-on-write planner losing to fast appenders)
 /// gets a <see cref="Iceberg.Net.Metadata.CommitFailedException"/>; that is allowed, but the failed operation
 /// must leave no trace, which the per-writer model checks because it only records acknowledged operations.
+/// A maintenance worker runs alongside the writers: compaction, then expiry keeping the last 2 snapshots, in a loop.
+/// Neither may change any row, and expiry deleting the files of snapshots a writer planned against must read as a lost
+/// race to that writer, never as an error or a lost update.
 /// </summary>
 [Spec("Optimistic Concurrency")]
 [Spec("Commit Conflict Resolution and Retry")]
@@ -117,6 +120,45 @@ public sealed class SoakTests
                     }
                 }
             })).ToList();
+            var maintenance = new ConcurrentBag<string>();
+            var gcEnabled = TableLocations.IsGcEnabled((await catalog.LoadTableAsync(id)).Metadata);
+            tasks.Add(Task.Run(async () =>
+            {
+                var table = await catalog.LoadTableAsync(id);
+                while (DateTime.UtcNow < deadline)
+                {
+                    try
+                    {
+                        await table.RefreshAsync();
+                        var compacted = await Compaction.RewriteDataFilesAsync(table, new RewriteOptions(MinInputFiles: 2));
+                        if (compacted.Snapshot is not null) maintenance.Add("compact");
+                    }
+                    catch (Iceberg.Net.Metadata.CommitFailedException)
+                    {
+                        maintenance.Add("compact-gave-up"); // lost every race to the writers: allowed, and it left no trace
+                    }
+                    if (!gcEnabled)
+                    {
+                        // Nessie creates tables with gc.enabled=false (its branches share files); expiry must refuse
+                        // (ExpireAsync checks before planning anything), and compaction alone runs against the writers.
+                        await Assert.ThrowsAsync<ValidationException>(() => Maintenance.ExpireAsync(table, new ExpireOptions { OlderThanMs = long.MaxValue, RetainLast = 2 }));
+                        maintenance.Add("expire-refused");
+                        await Task.Delay(20);
+                        continue;
+                    }
+                    try
+                    {
+                        var expired = await Maintenance.ExpireAsync(table, new ExpireOptions { OlderThanMs = long.MaxValue, RetainLast = 2 });
+                        Assert.True(expired.CleanupComplete, $"expiry left files: {expired.CleanupError?.Message} {string.Join(", ", expired.FailedDeletes)}");
+                        if (expired.Expired.Count > 0) maintenance.Add("expire");
+                    }
+                    catch (Iceberg.Net.Metadata.CommitFailedException)
+                    {
+                        maintenance.Add("expire-gave-up");
+                    }
+                    await Task.Delay(20);
+                }
+            }));
             await Task.WhenAll(tasks);
 
             var final = await catalog.LoadTableAsync(id);
@@ -135,6 +177,7 @@ public sealed class SoakTests
             var report = await TableValidator.ValidateAsync(final, new ValidationOptions { Deep = true });
             Assert.True(report.IsValid, report.ToString());
             Assert.True(operations.Count >= Writers, $"only {operations.Count} operations ran");
+            Assert.Contains(gcEnabled ? "expire" : "expire-refused", maintenance);
             // Liveness, loosely: starvation must stay the exception, not the rule.
             Assert.True(gaveUp.Count * 4 <= operations.Count, $"{gaveUp.Count} operations gave up vs {operations.Count} committed");
         }

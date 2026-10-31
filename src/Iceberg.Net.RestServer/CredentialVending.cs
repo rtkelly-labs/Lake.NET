@@ -75,8 +75,12 @@ public sealed class StsCredentialVendor : IStorageCredentialVendor, IDisposable
     }
 
     /// <summary>The session policy: the role's permissions, narrowed to <paramref name="key"/> in <paramref name="bucket"/>.</summary>
+    /// <exception cref="ArgumentException"><paramref name="bucket"/> or <paramref name="key"/> contains <c>*</c>, <c>?</c> or
+    /// <c>$</c>: IAM would read them as wildcards or policy variables, and the policy would reach beyond the table.</exception>
     public static string SessionPolicy(string bucket, string key, bool write)
     {
+        RequireLiteral(bucket, nameof(bucket));
+        RequireLiteral(key, nameof(key));
         var objects = new JsonArray("s3:GetObject", "s3:GetObjectVersion");
         if (write) { objects.Add("s3:PutObject"); objects.Add("s3:DeleteObject"); objects.Add("s3:AbortMultipartUpload"); }
         var keyPrefix = key.Length == 0 ? "" : key + "/";
@@ -92,6 +96,12 @@ public sealed class StsCredentialVendor : IStorageCredentialVendor, IDisposable
                 },
                 new JsonObject { ["Effect"] = "Allow", ["Action"] = "s3:GetBucketLocation", ["Resource"] = $"arn:aws:s3:::{bucket}" }),
         }.ToJsonString();
+    }
+
+    private static void RequireLiteral(string value, string name)
+    {
+        if (value.AsSpan().IndexOfAny(CatalogService.PolicyMetacharacters) >= 0)
+            throw new ArgumentException($"S3 {name} '{value}' contains '*', '?' or '$', which IAM reads as a wildcard or policy variable", name);
     }
 
     private async Task<VendedCredential> AssumeRoleAsync(TableIdentifier table, string bucket, string key, string prefix, bool write, CancellationToken ct)

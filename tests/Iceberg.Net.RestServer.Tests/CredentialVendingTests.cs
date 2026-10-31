@@ -128,6 +128,61 @@ public sealed class CredentialVendingTests
         }
     }
 
+    /// <summary>
+    /// A table stored before locations were checked for IAM wildcards can still hold one. Loading it works; vending for
+    /// it is refused with an explicit 422 that says why, before any vendor is asked, rather than failing inside one.
+    /// </summary>
+    [Fact]
+    public async Task A_stored_location_with_an_iam_wildcard_gets_a_clean_refusal_instead_of_credentials()
+    {
+        var sts = new FakeSts();
+        using var vendor = new StsCredentialVendor(
+            new CredentialVendingOptions { RoleArn = "arn:aws:iam::123456789012:role/lake", Region = "eu-west-1", StsEndpoint = "https://sts.example/" },
+            new Dictionary<string, string> { ["s3.access-key-id"] = "server", ["s3.secret-access-key"] = "server-secret" }, sts);
+        await using var host = ServerHost.Start(settings: Secured, services: s => s.AddSingleton<IStorageCredentialVendor>(vendor));
+        using (var writer = await host.ConnectAsync(credential: "writer:writer-secret"))
+        {
+            await writer.CreateNamespaceAsync(Namespace.Of("db"));
+            await writer.CreateTableAsync(new CreateTableRequest(TableIdentifier.Of("db", "t"), ScanPlanningTests.Schema));
+        }
+        // What an older server let through: the table's location now reads s3://bucket/wh/db/t*.
+        var id = TableIdentifier.Of("db", "t");
+        var store = host.Service<ICatalogStore>();
+        var current = (await store.GetAsync(id, CatalogEntryKind.Table))!;
+        var metadata = JsonNode.Parse(await File.ReadAllTextAsync(current))!;
+        metadata["location"] = "s3://bucket/wh/db/t*";
+        var tampered = Path.Combine(Path.GetDirectoryName(current)!, "00009-tampered.metadata.json");
+        await File.WriteAllTextAsync(tampered, metadata.ToJsonString());
+        await store.SwapAsync([new PointerSwap(id, current, tampered)], CatalogEntryKind.Table);
+
+        using var http = host.Http();
+        var token = await TokenAsync(http, "reader", "reader-secret");
+        Assert.Equal(HttpStatusCode.OK, (await SendAsync(http, HttpMethod.Get, "/v1/namespaces/db/tables/t", token)).Status);
+        foreach (var (path, delegation) in new[] { ("/v1/namespaces/db/tables/t", "vended-credentials"), ("/v1/namespaces/db/tables/t/credentials", (string?)null) })
+        {
+            var (status, body) = await SendAsync(http, HttpMethod.Get, path, token, delegation);
+            Assert.True(status == HttpStatusCode.UnprocessableEntity, $"{path}: {(int)status} {body}");
+            Assert.Equal("UnprocessableEntityException", body!["error"]!["type"]!.GetValue<string>());
+            Assert.Contains("wildcard", body["error"]!["message"]!.GetValue<string>(), StringComparison.Ordinal);
+        }
+        Assert.Empty(sts.Requests);
+
+        // A namespace stored with such a location: a table created in it gets a 400 that says why, not a 500.
+        await store.CreateNamespaceAsync(Namespace.Of("wild"), new Dictionary<string, string> { ["location"] = $"{host.Warehouse}/wild*" });
+        using var writerHttp = host.Http();
+        var writerToken = await TokenAsync(writerHttp, "writer", "writer-secret");
+        using var create = new HttpRequestMessage(HttpMethod.Post, "/v1/namespaces/wild/tables")
+        {
+            Content = new StringContent(new JsonObject { ["name"] = "t", ["schema"] = Json.TypeJson.SchemaToJson(ScanPlanningTests.Schema) }.ToJsonString(), Encoding.UTF8, "application/json"),
+        };
+        create.Headers.Authorization = new System.Net.Http.Headers.AuthenticationHeaderValue("Bearer", writerToken);
+        create.Headers.Add("X-Iceberg-Access-Delegation", "vended-credentials");
+        using var created = await writerHttp.SendAsync(create);
+        var createdBody = await created.Content.ReadAsStringAsync();
+        Assert.True(created.StatusCode == HttpStatusCode.BadRequest, createdBody);
+        Assert.Contains("wildcard", createdBody, StringComparison.Ordinal);
+    }
+
     [Fact]
     public async Task The_sts_vendor_assumes_the_role_with_a_policy_narrowed_to_the_table()
     {
@@ -164,6 +219,62 @@ public sealed class CredentialVendingTests
         // Only S3 locations get credentials.
         Assert.Empty(await vendor.VendAsync(id, "/local/warehouse/db/t", write: true));
         Assert.Equal(2, sts.Requests.Count);
+    }
+
+    [Theory]
+    [InlineData("bucket", "wh/db/t*")]
+    [InlineData("bucket", "wh/*/t")]
+    [InlineData("bucket", "wh/db/t?")]
+    [InlineData("bucket", "wh/${aws:username}/t")]
+    [InlineData("bucket*", "wh/db/t")]
+    [InlineData("b?cket", "wh/db/t")]
+    public void The_session_policy_refuses_iam_wildcards_and_variables(string bucket, string key)
+    {
+        Assert.Throws<ArgumentException>(() => StsCredentialVendor.SessionPolicy(bucket, key, write: false));
+        Assert.Throws<ArgumentException>(() => StsCredentialVendor.SessionPolicy(bucket, key, write: true));
+    }
+
+    /// <summary>
+    /// Whatever namespace and table names a client tries, a table the server accepts gets a vended policy whose only
+    /// wildcard is the trailing <c>/*</c> on its own prefix: no name can reach another table through IAM pattern matching.
+    /// </summary>
+    [Fact]
+    public async Task Every_accepted_name_vends_a_policy_with_only_the_trailing_wildcard()
+    {
+        var vendor = new RecordingVendor();
+        await using var host = ServerHost.Start(services: s => s.AddSingleton<IStorageCredentialVendor>(vendor));
+        using var catalog = await host.ConnectAsync(accessDelegation: "vended-credentials");
+        const string alphabet = "ab9_-.*?$[]{}%~=+@ é\u00e9";
+        var random = new Random(20261031);
+        string Name() => new(Enumerable.Range(0, random.Next(1, 7)).Select(_ => alphabet[random.Next(alphabet.Length)]).ToArray());
+        int accepted = 0, refused = 0;
+        for (var i = 0; i < 120; i++)
+        {
+            var ns = Namespace.Of($"n{i}", Name());
+            var id = new TableIdentifier(ns, Name());
+            try
+            {
+                await catalog.CreateNamespaceAsync(ns);
+                await catalog.CreateTableAsync(new CreateTableRequest(id, ScanPlanningTests.Schema));
+            }
+            catch (HttpRequestException e) when (e.StatusCode == HttpStatusCode.BadRequest)
+            {
+                refused++;
+                continue;
+            }
+            accepted++;
+            var (_, location, _) = vendor.Calls[^1];
+            var key = "wh/" + Path.GetRelativePath(host.Warehouse, location).Replace('\\', '/');
+            var statements = JsonNode.Parse(StsCredentialVendor.SessionPolicy("bucket", key, write: true))!["Statement"]!.AsArray();
+            foreach (var pattern in new[] { statements[0]!["Resource"]!.GetValue<string>(), statements[1]!["Condition"]!["StringLike"]!["s3:prefix"]!.GetValue<string>() })
+            {
+                Assert.EndsWith("/*", pattern);
+                Assert.Equal(-1, pattern[..^2].IndexOfAny(['*', '?', '$']));
+            }
+        }
+        // Both sides of the property were exercised.
+        Assert.True(accepted > 10, $"{accepted} accepted");
+        Assert.True(refused > 10, $"{refused} refused");
     }
 
     /// <summary>

@@ -1,0 +1,30 @@
+<Project Sdk="Microsoft.NET.Sdk">
+  <!--
+    DuckDB in-process, through DuckDB.NET, as a second reader of what this library writes: its own Parquet reader (not
+    Arrow C++, which writes our files) checks values, field IDs and footer statistics on every PR, with no Python,
+    Docker or network. The Python DuckDB oracle (interop/duckdb_oracle.py) still covers DuckDB's iceberg extension.
+  -->
+  <PropertyGroup>
+    <IsPackable>false</IsPackable>
+    <IsTestProject>true</IsTestProject>
+    <!-- The CI job that runs this project (tools/test-projects.sh; registry: Iceberg.Net.slnx) -->
+    <CiSuite>unit</CiSuite>
+    <RootNamespace>Iceberg.Net.DuckDbNet.Tests</RootNamespace>
+  </PropertyGroup>
+  <ItemGroup>
+    <PackageReference Include="Microsoft.NET.Test.Sdk" />
+    <PackageReference Include="xunit" />
+    <PackageReference Include="xunit.runner.visualstudio" PrivateAssets="all" />
+    <PackageReference Include="DuckDB.NET.Data.Full" />
+  </ItemGroup>
+  <ItemGroup>
+    <ProjectReference Include="../../src/Iceberg.Net.Core/Iceberg.Net.Core.csproj" />
+    <ProjectReference Include="../../src/Iceberg.Net.IO/Iceberg.Net.IO.csproj" />
+    <ProjectReference Include="../../src/Iceberg.Net.Catalog/Iceberg.Net.Catalog.csproj" />
+    <ProjectReference Include="../../src/Iceberg.Net.Data/Iceberg.Net.Data.csproj" />
+    <ProjectReference Include="../Iceberg.Net.TestSupport/Iceberg.Net.TestSupport.csproj" />
+  </ItemGroup>
+  <ItemGroup>
+    <Using Include="Xunit" />
+  </ItemGroup>
+</Project>

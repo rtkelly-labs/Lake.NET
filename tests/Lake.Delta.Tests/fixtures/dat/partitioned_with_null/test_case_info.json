@@ -1,0 +1,4 @@
+{
+  "name": "partitioned_with_null",
+  "description": "A partitioned table with a null partition"
+}

@@ -259,20 +259,34 @@ public abstract partial class MetastoreCatalog(string name, IFileIO io) : ICatal
 
     public async Task DropTableAsync(TableIdentifier id, bool purge = false, CancellationToken ct = default)
     {
+        if (purge) await PurgeTableAsync(id, ct);
+        else await DropAsync(id, purge: false, ct);
+    }
+
+    /// <summary>
+    /// Drop the table and delete its files (<c>DropTableAsync(id, purge: true)</c>), reporting what could not be deleted.
+    /// The drop is done once this returns; deleting files is best effort (<see cref="TableFiles.PurgeAsync"/>), so a failed
+    /// delete is reported in the result, never thrown after the entry is gone.
+    /// </summary>
+    public async Task<PurgeResult> PurgeTableAsync(TableIdentifier id, CancellationToken ct = default) =>
+        (await DropAsync(id, purge: true, ct))!;
+
+    private async Task<PurgeResult?> DropAsync(TableIdentifier id, bool purge, CancellationToken ct)
+    {
         using var telemetry = IcebergTelemetry.StartCatalogCall(Name, GetType().Name, "drop_table", id.ToString());
         var location = await CurrentMetadataLocationAsync(id, ct) ?? throw new NoSuchTableException($"Table {id} does not exist");
         var metadata = purge ? await ReadMetadataAsync(location, ct) : null;
         await RemoveTableEntryAsync(id, ct);
+        PurgeResult? result = null;
         if (metadata is not null)
         {
             // Entry first, files second: a crash in between leaves orphans, never a table pointing at missing files.
             // As Java's dropTableData, a table without gc.enabled keeps its data files; only metadata goes. Paths outside
             // the table's own directories are never deleted, whatever the metadata names.
-            var files = await TableFiles.ReachableAsync(metadata, FileIO, metadata.Snapshots, ct, dataFiles: TableLocations.IsGcEnabled(metadata));
-            files.UnionWith(metadata.MetadataLog.Select(l => l.MetadataFile).Append(location));
-            await TableFiles.DeleteAllAsync(FileIO, TableLocations.Partition(metadata, files).Inside, ct);
+            result = await TableFiles.PurgeAsync(metadata, location, FileIO, ct);
         }
         telemetry.Succeeded();
+        return result;
     }
 
     public async Task<TableMetadata> CommitTableAsync(TableCommit commit, CancellationToken ct = default)
@@ -366,20 +380,42 @@ public abstract partial class MetastoreCatalog(string name, IFileIO io) : ICatal
         return updated;
     }
 
-    protected async Task<TableMetadata> ReadMetadataAsync(string location, CancellationToken ct)
+    protected async Task<TableMetadata> ReadMetadataAsync(string location, CancellationToken ct) =>
+        DecodeMetadata(await FileIO.ReadAllAsync(location, ct), location);
+
+    /// <summary>
+    /// A metadata file's bytes, plain or gzipped. Java names gzipped metadata <c>NNNNN-uuid.gz.metadata.json</c> (older
+    /// releases <c>.metadata.json.gz</c>); neither name is needed: JSON never starts with the gzip magic bytes, so the
+    /// content decides.
+    /// </summary>
+    public static TableMetadata DecodeMetadata(byte[] bytes, string location) => DecodeMetadata(bytes, location, MaxDecompressedMetadataBytes);
+
+    /// <summary>
+    /// The largest metadata file a gzipped one may inflate to (256 MiB): far above real tables, small enough that a
+    /// compression bomb registered as a table's metadata can't exhaust a catalog's or the REST server's memory.
+    /// </summary>
+    public const int MaxDecompressedMetadataBytes = 256 * 1024 * 1024;
+
+    public static TableMetadata DecodeMetadata(byte[] bytes, string location, int maxDecompressedBytes)
     {
-        var bytes = await FileIO.ReadAllAsync(location, ct);
-        if (location.EndsWith(".gz", StringComparison.Ordinal))
+        if (bytes is [0x1f, 0x8b, ..])
         {
             using var gz = new System.IO.Compression.GZipStream(new MemoryStream(bytes), System.IO.Compression.CompressionMode.Decompress);
             using var ms = new MemoryStream();
-            await gz.CopyToAsync(ms, ct);
+            var buffer = new byte[81920];
+            int n;
+            while ((n = gz.Read(buffer, 0, buffer.Length)) > 0)
+            {
+                if (ms.Length + n > maxDecompressedBytes)
+                    throw new InvalidDataException($"Metadata {location} inflates past {maxDecompressedBytes:N0} bytes; refusing it");
+                ms.Write(buffer, 0, n);
+            }
             bytes = ms.ToArray();
         }
         return MetadataJson.Read(Encoding.UTF8.GetString(bytes), location);
     }
 
-    [GeneratedRegex(@"/(\d+)-[0-9a-fA-F-]+\.metadata\.json(\.gz)?$")]
+    [GeneratedRegex(@"[/\\](\d+)-[0-9a-fA-F-]+(\.gz)?\.metadata\.json(\.gz)?$")]
     private static partial Regex VersionRe();
 
     /// <summary><c>{location}/metadata/{version:00000}-{uuid}.metadata.json</c>, the Java/PyIceberg naming.</summary>

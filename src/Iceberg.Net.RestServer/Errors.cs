@@ -28,6 +28,8 @@ public static class ErrorModel
         NoSuchPlanIdException => (404, "NoSuchPlanIdException"),
         NoSuchPlanTaskException => (404, "NoSuchPlanTaskException"),
         ForbiddenException => (403, "ForbiddenException"),
+        // Kestrel's own refusals while the body is read: 413 for a body over the limit, 400 for a malformed one.
+        BadHttpRequestException b => (b.StatusCode, b.StatusCode == 413 ? "RequestTooLargeException" : "BadRequestException"),
         AlreadyExistsException => (409, "AlreadyExistsException"),
         NamespaceNotEmptyException => (409, "NamespaceNotEmptyException"),
         CommitFailedException => (409, "CommitFailedException"),
