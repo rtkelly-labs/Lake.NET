@@ -344,6 +344,30 @@ public sealed class LocationPolicyTests : IAsyncLifetime
     }
 
     [Fact]
+    public async Task Planning_refuses_manifests_outside_the_table_named_by_a_manifest_list_inside_it()
+    {
+        // The commit check sees only the manifest list's path. A copy of the victim's manifest list, written inside
+        // mine, still names the victim's manifests; the planner reads those with the server's access and would hand back
+        // the victim's data files and column bounds.
+        var (mine, victim) = await TwoTablesWithDataAsync();
+        var smuggled = $"{mine.Location}/metadata/snap-smuggled.avro";
+        await mine.IO.WriteAsync(smuggled, await victim.IO.ReadAllAsync(victim.Metadata.CurrentSnapshot!.ManifestList!));
+        await _catalog.CommitTableAsync(new TableCommit(mine.Identifier, [new UpdateRequirement.AssertTableUuid(mine.Metadata.TableUuid)],
+            AddSnapshot(mine, smuggled)));
+        mine = await _catalog.LoadTableAsync(mine.Identifier);
+
+        var e = await Assert.ThrowsAsync<HttpRequestException>(() => _catalog.PlanTableScanAsync(mine, new ScanPlanRequest()));
+        Assert.Equal(HttpStatusCode.BadRequest, e.StatusCode);
+        Assert.DoesNotContain(victim.Location, e.Message, StringComparison.Ordinal);
+
+        // The victim plans as before, and so does mine at its own earlier snapshot.
+        var plan = await _catalog.PlanTableScanAsync(victim, new ScanPlanRequest());
+        Assert.NotEmpty(plan.Tasks);
+        var own = await _catalog.PlanTableScanAsync(mine, new ScanPlanRequest(SnapshotId: mine.Metadata.CurrentSnapshot!.ParentSnapshotId));
+        Assert.All(own.Tasks, t => Assert.StartsWith(mine.Location, t.DataFile.FilePath, StringComparison.Ordinal));
+    }
+
+    [Fact]
     public async Task A_staged_create_cannot_carry_a_snapshot_outside_its_table()
     {
         var (mine, victim) = await TwoTablesWithDataAsync();

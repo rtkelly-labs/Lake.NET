@@ -5,6 +5,7 @@ using Microsoft.Extensions.Logging;
 using Iceberg.Net.Catalog;
 using Iceberg.Net.Data;
 using Iceberg.Net.Expressions;
+using Iceberg.Net.IO;
 using Iceberg.Net.Json;
 using Iceberg.Net.Manifests;
 using Iceberg.Net.Metadata;
@@ -344,8 +345,14 @@ public sealed class ScanPlanner(CatalogService catalog, ScanPlanningOptions opti
     }
 
     // Planning only reads: the table never commits, so it needs no catalog.
+    /// <summary>
+    /// The table as the planner sees it: its FileIO reads only files inside the table's own directories and writes
+    /// nothing. Commits already refuse manifest lists outside the table, but a manifest list inside it can still name
+    /// another table's manifests; the planner reads those with the server's access, so it must refuse them itself.
+    /// </summary>
     private Table TableOf(LoadedTable loaded) =>
-        new(null!, loaded.Id, loaded.Metadata with { MetadataFileLocation = loaded.MetadataLocation }, catalog.FileIO);
+        new(null!, loaded.Id, loaded.Metadata with { MetadataFileLocation = loaded.MetadataLocation },
+            new TableConfinedFileIO(catalog.FileIO, loaded.Id, TableLocations.Prefixes(loaded.Metadata)));
 
     /// <summary>Field names of a request, resolved exactly or (with <c>case-sensitive: false</c>) ignoring case.</summary>
     private sealed class NameResolver(Schema schema, bool caseSensitive)
@@ -431,4 +438,24 @@ internal sealed record PlanTaskToken(Guid TableUuid, long SnapshotId, IReadOnlyL
             throw new NoSuchPlanTaskException("Unknown or malformed plan task");
         }
     }
+}
+
+/// <summary>A read-only view of a FileIO that refuses any location outside one table's directories.</summary>
+internal sealed class TableConfinedFileIO(IFileIO inner, TableIdentifier table, IReadOnlyList<string> prefixes) : IFileIO
+{
+    private string Check(string location) => CatalogService.IsOwnFile(location, prefixes)
+        ? location
+        // The location is not echoed: it names another table's file.
+        : throw new BadRequestException($"Table {table} references a file outside the table's directories");
+
+    public Task<byte[]> ReadAllAsync(string location, CancellationToken ct = default) => inner.ReadAllAsync(Check(location), ct);
+    public Task<Stream> OpenReadAsync(string location, CancellationToken ct = default) => inner.OpenReadAsync(Check(location), ct);
+    public Task<byte[]> ReadRangeAsync(string location, long offset, int length, CancellationToken ct = default) => inner.ReadRangeAsync(Check(location), offset, length, ct);
+    public Task<long> LengthAsync(string location, CancellationToken ct = default) => inner.LengthAsync(Check(location), ct);
+    public Task<bool> ExistsAsync(string location, CancellationToken ct = default) => inner.ExistsAsync(Check(location), ct);
+    public Task WriteAsync(string location, ReadOnlyMemory<byte> content, bool overwrite = false, CancellationToken ct = default) =>
+        throw new InvalidOperationException("Scan planning never writes");
+    public Task DeleteAsync(string location, CancellationToken ct = default) =>
+        throw new InvalidOperationException("Scan planning never deletes");
+    public void Dispose() { } // the catalog owns the inner FileIO
 }

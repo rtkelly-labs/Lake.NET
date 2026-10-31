@@ -12,12 +12,11 @@ items it found that have since been fixed are listed first, so this page stays t
 | S3 Unsupported schemes written to local disk | `fix(io): refuse storage schemes with no FileIO; …` | `FileIORoutingTests` |
 | §5 Gzip metadata named the Java way | same commit, plus the REST server's reader | `LocalTableTests.Gzipped_metadata_is_read_whatever_it_is_called_and_numbering_continues` |
 | §9 No dependency-direction test | `test: DuckDB in-process as a second Parquet reader; …` | `DependencyDirectionTests` |
+| Manifests named by an in-table manifest list (found while fixing S2) | `fix(rest-server): scan planning reads only the planned table's files` | `LocationPolicyTests.Planning_refuses_manifests_outside_the_table_named_by_a_manifest_list_inside_it` (fails on the old code) |
+| E4 Fuzz, mutation and upkeep never scheduled; `mumbling` missing from the fuzz matrix | `ci: run fuzzing, mutation testing and upkeep weekly; …` | — |
 | PQ2 (part) No independent Parquet reader in the unit suite | same commit | `Iceberg.Net.DuckDbNet.Tests` (DuckDB's reader: values, field IDs, statistics, both directions) |
 
-**New, found while fixing S2:** manifests *inside* a manifest list are not confined. A writer can commit a manifest
-list in its own directory that lists another table's manifests, and server-side planning would read them with the
-server's credentials. Fix in the planner (refuse out-of-table manifests) rather than by reading every manifest list
-at commit. Existing tables or namespaces whose location already contains a wildcard now fail to vend (a 500, not a
+**Still open from that work:** existing tables or namespaces whose location already contains a wildcard now fail to vend (a 500, not a
 clean error); re-validate them at load.
 
 ## What was reviewed
