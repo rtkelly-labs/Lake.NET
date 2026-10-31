@@ -48,6 +48,9 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 - `FileIOConformanceTests`: one contract for every FileIO (local and S3), covering concurrent create-if-absent,
   overwrite, missing objects, exact ranged reads, empty objects, idempotent deletes, listings that page, stay inside
   their prefix and spell keys exactly as written, and cancellation.
+- `tests/Lake.TestSupport` (`IFormatDriver` and the common scenarios every format must pass) and
+  `tests/Lake.Common.Tests`, running them for Iceberg v2 and v3 under copy-on-write, position deletes, equality deletes
+  and deletion vectors.
 - `DependencyDirectionTests`: every `src` project has a layer and a role, and references may only point down, stay in
   the shared layers, and never cross formats.
 
