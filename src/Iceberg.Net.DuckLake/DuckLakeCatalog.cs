@@ -518,7 +518,8 @@ public sealed partial class DuckLakeCatalog
             var maps = await DuckLakeNameMap.LoadAsync(db, mapped.Select(x => x.MappingId).Distinct().ToList(), ct);
             foreach (var (index, id) in mapped) tasks[index] = tasks[index] with { Mapping = maps[id] };
         }
-        var inlined = await db.InlinedDataTables.Where(i => i.TableId == table.TableId).OrderBy(i => i.SchemaVersion).Select(i => i.TableName).ToListAsync(ct);
+        var inlined = (await db.InlinedDataTables.Where(i => i.TableId == table.TableId).OrderBy(i => i.SchemaVersion).ToListAsync(ct))
+            .Select(DuckLakeInlinedData.Checked).ToList();
         db.Scope?.Planned(tasks.Count, pruned);
         return new DuckLakeScanPlan(tasks, pruned, inlined) { InlinedDeletions = await InlinedDeletionsAsync(db, table.TableId, table.SnapshotId, ct) };
     }

@@ -1141,10 +1141,11 @@ public sealed partial class DuckLakeTransaction : IAsyncDisposable
                 var tableId = t.TableId!.Value;
                 var version = versionedTables.Contains(t) ? schemaVersion
                     : await db.SchemaVersions.Where(v => v.TableId == tableId).MaxAsync(v => (long?)v.SchemaVersion, ct) ?? latest.SchemaVersion;
-                var name = await db.InlinedDataTables.Where(x => x.TableId == tableId && x.SchemaVersion == version).Select(x => x.TableName).FirstOrDefaultAsync(ct);
+                var registered = await db.InlinedDataTables.Where(x => x.TableId == tableId && x.SchemaVersion == version).FirstOrDefaultAsync(ct);
+                var name = registered is null ? null : DuckLakeInlinedData.Checked(registered);
                 if (name is null)
                 {
-                    name = $"ducklake_inlined_data_{tableId}_{version}";
+                    name = DuckLakeInlinedData.TableName(tableId, version);
                     await Raw(DuckLakeInlinedData.CreateTableSql(db.Dialect, v11, name, t.Columns));
                     rows.InlinedDataTables.Add(new InlinedDataTableEntity { TableId = tableId, TableName = name, SchemaVersion = version });
                 }
