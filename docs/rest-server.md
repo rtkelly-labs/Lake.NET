@@ -135,11 +135,11 @@ endpoint except the token endpoint:
 
 | Key | Meaning |
 |---|---|
-| `Auth:Tokens:0`, `:1`, … | Static bearer tokens (the client's `token` property) |
+| `Auth:Tokens:0`, `:1`, … | Static bearer tokens (the client's `token` property), compared in constant time |
 | `Auth:Clients:{id}` = secret | OAuth2 clients for `POST /v1/oauth/tokens` (`credential = id:secret`) |
 | `Auth:SigningKey` | HMAC-SHA256 key, at least 32 bytes, for the tokens the server issues. If unset, the key is random per process, so tokens do not survive a restart and are not shared between instances |
 | `Auth:TokenLifetime` | Default `01:00:00` |
-| `Auth:Authority`, `Auth:Audience` | Also accept JWTs from an external OpenID Connect issuer (its keys come from discovery). An authority needs an audience, or the server refuses to start (`Auth:AllowAnyAudience=true` accepts tokens for any audience knowingly). `Auth:RequireHttpsMetadata=false` allows an `http://` authority |
+| `Auth:Authority`, `Auth:Audience` | Also accept JWTs from an external OpenID Connect issuer (its keys come from discovery). An authority needs an audience, or the server refuses to start (`Auth:AllowAnyAudience=true` accepts tokens for any audience knowingly); the server's own tokens carry none and are not asked for it. External tokens need a signature from a published key, an unexpired `exp`, the authority's issuer and the audience, or they get a 401. `Auth:RequireHttpsMetadata=false` allows an `http://` authority |
 | `Auth:MaxSessionLifetime` | Default `12:00:00`. Token exchange refreshes a session up to this long after its client-credentials grant, and never for a client that has since been removed |
 
 `/v1/oauth/tokens` is deprecated in the spec, but Spark, PyIceberg and this library still use it by default:
@@ -167,8 +167,11 @@ Iceberg__Authorization__Grants__root__0=admin:*
 Iceberg__Authorization__Grants__*__0=read:public        # every principal
 ```
 
-- A **principal** is the token's `sub`: the OAuth2 client ID for tokens from `/v1/oauth/tokens`, the external IdP's
-  subject, `static-token` for a static token, and `anonymous` when authentication is off.
+- A **principal** is keyed by the token's issuer and `sub`: the OAuth2 client ID for tokens from `/v1/oauth/tokens`,
+  `external/{sub}` for the external IdP's tokens (so the IdP's user `root` is never the server's client `root`),
+  `static-token` for a static token, and `anonymous` when authentication is off. A token signed by the IdP may not
+  carry the server's own issuer, nor one signed with the server's key the IdP's, and a principal claim inside a token
+  is ignored.
 - A **grant** is `{level}:{scope}`. The scope is `*` or a dotted namespace or table path, and covers everything beneath
   it (`sales` covers `sales.orders` and `sales.staging.events`).
 - The **levels** nest, `read` < `write` < `admin`:
