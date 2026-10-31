@@ -1,0 +1,6 @@
+<Project>
+  <!-- Code coverage for every test project (docs/lake/goal.md G10): run tests with the XPlat Code Coverage collector. -->
+  <ItemGroup Condition="'$(IsTestProject)' == 'true'">
+    <PackageReference Include="coverlet.collector" PrivateAssets="all" />
+  </ItemGroup>
+</Project>
