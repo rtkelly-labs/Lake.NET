@@ -88,7 +88,7 @@ The server also reads the files a table's metadata names with its own access (sc
 manifests and statistics). So every manifest list (and v1 embedded manifest), statistics file and partition statistics
 file that a commit, staged create or register adds must lie strictly below one of the table's own directories, in the
 same single spelling as rule 1 (no `.`, `..` or percent-encoded dot segments); files the table already referenced are
-not re-checked. Every refusal is a 400.
+not re-checked. Every refusal is a 400. A clash names only the caller's own location: the other table, view or namespace may be one the caller cannot read, so its name and location go to the server log (Information), not the response.
 
 The S3 signer applies the same scoping to requests: a table's own objects only, with no sub-resource beyond what clients
 send (multipart, versions, the Java SDK's `x-id`) and no header that changes access or retention (`x-amz-acl`,
