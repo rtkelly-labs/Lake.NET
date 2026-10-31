@@ -147,8 +147,8 @@ tables". Converting between them needs only metadata arithmetic: Iceberg `conten
 | Claim | Status | How |
 |---|---|---|
 | Iceberg magic bytes = Delta's magic number little-endian | ✅ verified | 1681511377 = `0x6439D3D1` → LE `D1 D3 39 64` |
-| Iceberg blob = Delta record layout | 🟡 by spec text only | both specs read; no Delta-written DV fixture in our tests |
-| Delta `offset` points at `dataSize`, not at the magic | ⏳ assumed | the protocol says "start of the data for this DV"; its examples use `offset: 4` with a version byte at 0 (unverified against delta-spark or delta-kernel) |
+| Iceberg blob = Delta record layout | ✅ verified | `DeltaDeletionVectorBytesTests`: the Spark/Delta-written DV in delta-rs's `table-with-dv-small` decodes with `DeletionVector.Decode` to {0, 9}, and `DeletionVector.Encode` of {0, 9} reproduces Delta's record byte for byte, CRC included |
+| Delta `offset` points at `dataSize`, not at the magic | ✅ verified | in the same fixture `offset` is 1 (after the version byte `01`) and the 4 bytes there are `00 00 00 24` = `sizeInBytes` 36, big-endian |
 | Delta `u` example decodes | ✅ verified | `ab^-aqEH.-t@S}K{vb[*k^` → prefix `ab` + UUID `d2c639aa-8816-431a-aaf6-d3fe2512ff61`, as the protocol states |
 | Delta inline example is the portable format | **contradicted** | Example 3 (`wi5b=000010000siXQKl0rr91000f55c8Xg0@@D72lkbi5=-{L`, 40 bytes) decodes to `64 39 D3 D0 00000001 0000001C` + a 28-byte 32-bit Roaring bitmap {3, 4, 7, 11, 18, 29}: magic **1681511376 big-endian**, a big-endian int32 bitmap count and a big-endian per-bitmap length, i.e. a different ("native") RoaringBitmapArray layout, not the little-endian portable layout with magic 1681511377 that the format section specifies. A Delta reader must therefore expect both magics (unverified which one delta-spark writes today) |
 | Inline bytes not a multiple of 4 | ⏳ unknown | Z85 needs 4-byte groups; padding rule not in the protocol |
