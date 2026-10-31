@@ -351,18 +351,8 @@ public sealed partial class CatalogService(ICatalogStore store, IFileIO io, Rest
     private Task WriteMetadataAsync(string location, TableMetadata m, CancellationToken ct) =>
         FileIO.WriteAsync(location, Encoding.UTF8.GetBytes(MetadataJson.Write(m)), overwrite: false, ct);
 
-    public async Task<TableMetadata> ReadMetadataAsync(string location, CancellationToken ct)
-    {
-        var bytes = await FileIO.ReadAllAsync(location, ct);
-        if (location.EndsWith(".gz", StringComparison.Ordinal))
-        {
-            using var gz = new System.IO.Compression.GZipStream(new MemoryStream(bytes), System.IO.Compression.CompressionMode.Decompress);
-            using var ms = new MemoryStream();
-            await gz.CopyToAsync(ms, ct);
-            bytes = ms.ToArray();
-        }
-        return MetadataJson.Read(Encoding.UTF8.GetString(bytes), location);
-    }
+    public async Task<TableMetadata> ReadMetadataAsync(string location, CancellationToken ct) =>
+        MetastoreCatalog.DecodeMetadata(await FileIO.ReadAllAsync(location, ct), location);
 
     // ---------- views ----------
 

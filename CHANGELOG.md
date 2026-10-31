@@ -16,6 +16,18 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
   can widen vended STS credentials to other tables. Commits, staged creates and registers refuse manifest lists,
   statistics and partition statistics outside the table's own directories, which server-side scan planning would
   otherwise read with the server's access.
+- `ResolvingFileIO` and `LocalFileIO` refuse storage schemes they have no FileIO for (`gs`, `abfss`, `hdfs`, …)
+  instead of reading and writing them as local paths; a relative path starting with `s3` stays local.
+
+### Fixed
+- Gzipped metadata is recognised by its content, so Java's `NNNNN-uuid.gz.metadata.json` is read (by catalogs and the
+  REST server) and the next version number continues from it.
+
+### Added
+- `Iceberg.Net.DuckDbNet.Tests`: DuckDB's Parquet reader, in-process through DuckDB.NET, checks the values, field IDs
+  and statistics of every file type we write, in the unit suite.
+- `DependencyDirectionTests`: every `src` project has a layer and a role, and references may only point down, stay in
+  the shared layers, and never cross formats.
 
 ## [0.0.1-alpha.1] - 2026-10-25
 
