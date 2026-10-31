@@ -30,6 +30,8 @@ public sealed class DependencyDirectionTests
         ["Iceberg.Net.Linq"] = (5, "iceberg"),
         ["Iceberg.Net.RestServer"] = (5, "iceberg"),
         ["Iceberg.Net.EntityFrameworkCore"] = (6, "iceberg"),
+        // Delta builds on the shared layers only (IO, Puffin); its role keeps it from ever referencing an Iceberg project.
+        ["Lake.Delta"] = (1, "delta"),
     };
 
     /// <summary>
@@ -105,5 +107,7 @@ public sealed class DependencyDirectionTests
         Assert.True(Projects["Iceberg.Net.Catalog"].Layer > Projects["Iceberg.Net.IO"].Layer);
         Assert.Equal(Shared, Projects["Iceberg.Net.IO"].Role);
         Assert.NotEqual(Shared, Projects["Iceberg.Net.Core"].Role);
+        Assert.Contains("Iceberg.Net.Puffin", graph["Lake.Delta"]); // Delta reaches Roaring64 through the shared layer
+        Assert.NotEqual(Projects["Lake.Delta"].Role, Projects["Iceberg.Net.Core"].Role);
     }
 }
