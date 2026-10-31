@@ -172,7 +172,7 @@ public static class Compaction
         }
         catch (CommitFailedException)
         {
-            await TableFiles.DeleteAllAsync(table.IO, added.Select(f => f.FilePath), ct); // never committed: ours to remove
+            await TableFiles.TryDeleteAllAsync(table.IO, added.Select(f => f.FilePath), ct); // never committed: ours to remove (best effort)
             return (null, default);
         }
     }
@@ -253,7 +253,7 @@ public static class Compaction
         }
         catch (Exception e) when (e is ValidationException or CommitFailedException)
         {
-            await TableFiles.DeleteAllAsync(table.IO, written.Select(f => f.FilePath), ct); // never committed: ours to remove
+            await TableFiles.TryDeleteAllAsync(table.IO, written.Select(f => f.FilePath), ct); // never committed: ours to remove (best effort)
             throw;
         }
     }

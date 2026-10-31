@@ -193,21 +193,11 @@ public sealed partial class CatalogService(ICatalogStore store, IFileIO io, Rest
         if (!await Store.DeleteAsync(id, CatalogEntryKind.Table, ct)) throw new NoSuchTableException($"Table does not exist: {id}");
         if (!purge) return;
         // Entry first, files second: a crash in between leaves orphans, never a table pointing at missing files.
-        var m = table.Metadata;
-        try
-        {
-            // Only the table's own directories, and data files only when the table owns them (gc.enabled), as the catalogs do.
-            var files = await TableFiles.ReachableAsync(m, FileIO, m.Snapshots, ct, dataFiles: TableLocations.IsGcEnabled(m));
-            files.UnionWith(m.MetadataLog.Select(l => l.MetadataFile).Append(table.MetadataLocation!));
-            var (inside, outside) = TableLocations.Partition(m, files);
-            if (outside.Count > 0) Logger?.LogWarning("Purging {Table}: skipped {Count} files outside its location", id, outside.Count);
-            await TableFiles.DeleteAllAsync(FileIO, inside, ct);
-        }
-        catch (Exception e) when (e is not OperationCanceledException)
-        {
-            // The table is dropped; what could not be found or deleted is left to orphan-file cleanup (as Java does).
-            Logger?.LogWarning(e, "Dropped {Table}, but purging its files failed", id);
-        }
+        // Best effort (TableFiles.PurgeAsync never throws but for cancellation): what is left goes to orphan-file cleanup, as in Java.
+        var result = await TableFiles.PurgeAsync(table.Metadata, table.MetadataLocation!, FileIO, ct);
+        if (result.SkippedFiles.Count > 0) Logger?.LogWarning("Purging {Table}: skipped {Count} files outside its location", id, result.SkippedFiles.Count);
+        if (result.Error is not null) Logger?.LogWarning(result.Error, "Dropped {Table}, but listing its files to purge failed", id);
+        if (result.FailedDeletes.Count > 0) Logger?.LogWarning("Dropped {Table}, but {Count} of its files could not be deleted", id, result.FailedDeletes.Count);
     }
 
     public async Task RenameAsync(TableIdentifier from, TableIdentifier to, CatalogEntryKind kind, CancellationToken ct)
