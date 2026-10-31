@@ -1,3 +1,4 @@
+using Microsoft.Extensions.Logging;
 using Iceberg.Net.Catalog;
 using Iceberg.Net.Metadata;
 
@@ -157,11 +158,21 @@ public sealed partial class CatalogService
         }
         foreach (var (other, location) in await OccupiedAnywhereAsync((id, kind), _ => false, ct))
             if (directories.FirstOrDefault(d => Overlaps(d, location)) is { } clash)
-                throw new BadRequestException($"{what} location {clash} overlaps {other} at {location}");
+                throw Overlap(what, clash, other, location);
         foreach (var child in await Store.ListNamespacesAsync(id.Namespace, ct))
             // An implied namespace (a.b when only a and a.b.c were created) has no properties, so its root is the default.
             if (NamespaceRoot(child, await Store.LoadNamespaceAsync(child, ct) ?? new Dictionary<string, string>()) is { } childRoot && directories.FirstOrDefault(d => Overlaps(d, childRoot)) is { } clash)
-                throw new BadRequestException($"{what} location {clash} overlaps namespace {child} at {childRoot}");
+                throw Overlap(what, clash, $"namespace {child}", childRoot);
+    }
+
+    /// <summary>
+    /// A location clashes with another entry's. The client hears only that it does: the other entry may be in a
+    /// namespace it cannot read, so its name and location go to the server log, not the response.
+    /// </summary>
+    private BadRequestException Overlap(string what, string location, string other, string otherLocation)
+    {
+        Logger?.LogInformation("Refused {What} location {Location}: it overlaps {Other} at {OtherLocation}", what, location, other, otherLocation);
+        return new BadRequestException($"{what} location {location} overlaps the location of another table, view or namespace");
     }
 
     /// <summary>
@@ -224,10 +235,10 @@ public sealed partial class CatalogService
         {
             if (other == ns || IsAncestor(other, ns) || IsAncestor(ns, other)) continue;
             if (NamespaceRoot(other, await Store.LoadNamespaceAsync(other, ct) ?? new Dictionary<string, string>()) is { } otherRoot && Overlaps(root, otherRoot))
-                throw new BadRequestException($"Namespace {ns} location {root} overlaps namespace {other} at {otherRoot}");
+                throw Overlap($"Namespace {ns}", root, $"namespace {other}", otherRoot);
         }
         // Its own and its descendants' entries belong under it; anyone else's, a renamed table's included, must not.
         foreach (var (what, location) in await OccupiedAnywhereAsync(null, other => other == ns || IsAncestor(ns, other), ct))
-            if (Overlaps(root, location)) throw new BadRequestException($"Namespace {ns} location {root} overlaps {what} at {location}");
+            if (Overlaps(root, location)) throw Overlap($"Namespace {ns}", root, what, location);
     }
 }
