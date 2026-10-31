@@ -262,7 +262,7 @@ public sealed partial class DuckLakeCatalog
         var due = (await Guarded("ducklake_files_scheduled_for_deletion", () => db.FilesScheduledForDeletion.ToListAsync(ct)))
             .Where(f => olderThan is null || f.ScheduleStart < olderThan)
             .Where(f => f.PathIsRelative == true ? f.Path.Length > 0 && DuckLakePaths.IsConfined(f.Path)
-                : DuckLakePaths.IsUnder(DataPath, f.Path) || (Options.CleanupOutsideDataPath && DuckLakePaths.IsCleanAbsolute(f.Path))).ToList();
+                : DuckLakePaths.IsUnder(NormaliseLocation(DataPath), NormaliseLocation(f.Path)) || (Options.CleanupOutsideDataPath && DuckLakePaths.IsCleanAbsolute(f.Path))).ToList();
         var locations = due.Select(f => f.PathIsRelative == true ? DataPath + f.Path : f.Path).ToList();
         if (dryRun || due.Count == 0)
         {
@@ -311,7 +311,7 @@ public sealed partial class DuckLakeCatalog
         await foreach (var f in lister.ListAsync(DataPath, ct))
         {
             if (!f.Location.EndsWith(".parquet", StringComparison.OrdinalIgnoreCase) && !f.Location.EndsWith(".puffin", StringComparison.OrdinalIgnoreCase)) continue;
-            if (f.LastModifiedUtc < cutoff && !referenced.Contains(NormaliseLocation(f.Location)) && DuckLakePaths.IsUnder(DataPath, f.Location)) orphans.Add(f.Location);
+            if (f.LastModifiedUtc < cutoff && !referenced.Contains(NormaliseLocation(f.Location)) && DuckLakePaths.IsUnder(NormaliseLocation(DataPath), NormaliseLocation(f.Location))) orphans.Add(f.Location);
         }
         if (!dryRun)
             foreach (var o in orphans)
@@ -325,11 +325,15 @@ public sealed partial class DuckLakeCatalog
 
     /// <summary>
     /// A location in the one form the orphan scan compares catalog paths and listed objects in: forward slashes, doubled
-    /// slashes in the path collapsed, and a scheme's <c>://</c> (<c>s3://bucket/…</c>) left as it is.
+    /// slashes in the path collapsed, and a scheme's <c>://</c> (<c>s3://bucket/…</c>) left as it is. A <c>file:</c>
+    /// location is always spelled <c>file:///path</c>: Hadoop's <c>file:/path</c> (a supported data path) and the
+    /// <c>file:///path</c> a local listing returns are one file.
     /// </summary>
     internal static string NormaliseLocation(string location)
     {
         var l = location.Replace('\\', '/');
+        if (l.StartsWith("file:", StringComparison.OrdinalIgnoreCase))
+            l = "file:///" + l["file:".Length..].TrimStart('/');
         var scheme = l.IndexOf("://", StringComparison.Ordinal);
         var start = scheme > 0 && !l[..scheme].Contains('/') ? scheme + 3 : 0;
         var path = l[start..];

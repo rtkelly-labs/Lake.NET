@@ -188,6 +188,36 @@ public abstract class MaintenanceTests : IAsyncLifetime
 
     [SkippableFact]
     [Spec("ducklake: ducklake_files_scheduled_for_deletion")]
+    public async Task Orphan_cleanup_on_a_Hadoop_style_file_data_path_deletes_only_the_orphan()
+    {
+        // data_path file:/… (Hadoop's form) while the local listing returns file:///…: the two spellings of one file must
+        // match, or every live file looks orphaned (and every listed file looks outside data_path).
+        if (_lake.Storage != StorageBackend.Local) throw new Xunit.SkipException("a local data path");
+        var catalog = await DuckLakeCatalog.CreateAsync(_lake.Store, _lake.IO, "file:" + _lake.DataPath.Replace('\\', '/'), version: _lake.Version);
+        await using (var tx = catalog.BeginTransaction())
+        {
+            await tx.CreateTableAsync("main", "t", [new("id", DuckLakeType.Int64)]);
+            await tx.CommitAsync();
+        }
+        await using (var tx = catalog.BeginTransaction())
+        {
+            await tx.InsertAsync("main", "t", [[1L], [2L]]);
+            await tx.CommitAsync();
+        }
+        var live = Assert.Single(_lake.Files());
+        var orphan = Path.Combine(_lake.DataPath, "main", "t", "ducklake-crashed-writer.parquet");
+        await File.WriteAllBytesAsync(orphan, [1, 2, 3]);
+        foreach (var f in _lake.Files()) File.SetLastWriteTimeUtc(f, DateTime.UtcNow.AddDays(-4));
+
+        var deleted = await catalog.DeleteOrphanedFilesAsync();
+        Assert.Equal([Path.GetFullPath(orphan)], deleted.Select(l => Path.GetFullPath(new Uri(l).LocalPath)));
+        Assert.False(File.Exists(orphan));
+        Assert.True(File.Exists(live));
+        Assert.Equal(2, (await catalog.ReadAsync(await catalog.LoadTableAsync("main", "t"))).Count);
+    }
+
+    [SkippableFact]
+    [Spec("ducklake: ducklake_files_scheduled_for_deletion")]
     public async Task Orphaned_files_are_deleted_only_when_old_enough()
     {
         var catalog = await SmallFilesAsync(commits: 1);
