@@ -55,9 +55,13 @@ public sealed class LocalFileIO : IFileIO, ISupportsListing
     /// (<see cref="Uri"/> rejects it: the empty authority is missing).
     /// </summary>
     private static string PathOf(string location) =>
-        !location.StartsWith("file:", StringComparison.Ordinal) ? location
-        : location.StartsWith("file://", StringComparison.Ordinal) ? new Uri(location).LocalPath
-        : Uri.UnescapeDataString(location["file:".Length..]);
+        StorageScheme.Of(location) switch
+        {
+            null => location,
+            "file" when location.StartsWith("file://", StringComparison.Ordinal) => new Uri(location).LocalPath,
+            "file" => Uri.UnescapeDataString(location["file:".Length..]),
+            var scheme => throw StorageScheme.Unsupported(scheme, location),
+        };
 
     public Task<byte[]> ReadAllAsync(string location, CancellationToken ct = default) => File.ReadAllBytesAsync(PathOf(location), ct);
 
@@ -346,7 +350,17 @@ public sealed class ResolvingFileIO(Func<IFileIO> s3Factory) : IFileIO, ISupport
     private readonly LocalFileIO _local = new();
     private readonly Lazy<IFileIO> _s3 = new(s3Factory);
 
-    private IFileIO For(string location) => location.StartsWith("s3", StringComparison.Ordinal) ? _s3.Value : _local;
+    /// <summary>
+    /// <c>s3</c>, <c>s3a</c> and <c>s3n</c> go to S3; <c>file:</c> and bare paths to the local filesystem. Any other
+    /// scheme (<c>gs</c>, <c>abfss</c>, <c>hdfs</c>, …) is refused: writing such a location to local disk would put a
+    /// table's files somewhere no other engine looks, and reading it would read the local filesystem.
+    /// </summary>
+    private IFileIO For(string location) => StorageScheme.Of(location) switch
+    {
+        null or "file" => _local,
+        "s3" or "s3a" or "s3n" => _s3.Value,
+        var scheme => throw StorageScheme.Unsupported(scheme, location),
+    };
 
     public Task<byte[]> ReadAllAsync(string l, CancellationToken ct = default) => For(l).ReadAllAsync(l, ct);
     public Task<Stream> OpenReadAsync(string l, CancellationToken ct = default) => For(l).OpenReadAsync(l, ct);
@@ -360,4 +374,25 @@ public sealed class ResolvingFileIO(Func<IFileIO> s3Factory) : IFileIO, ISupport
     {
         if (_s3.IsValueCreated) _s3.Value.Dispose();
     }
+}
+
+/// <summary>The URI scheme of a storage location, as the FileIOs route on it.</summary>
+public static class StorageScheme
+{
+    /// <summary>
+    /// The scheme in lower case (<c>s3</c>, <c>file</c>, <c>gs</c>, …), or null for a bare path. A single letter before
+    /// the colon is a Windows drive (<c>C:\x</c>, <c>C:/x</c>), not a scheme.
+    /// </summary>
+    public static string? Of(string location)
+    {
+        var colon = location.IndexOf(':');
+        if (colon < 2) return null;
+        if (!char.IsAsciiLetter(location[0])) return null;
+        for (var i = 1; i < colon; i++)
+            if (!(char.IsAsciiLetterOrDigit(location[i]) || location[i] is '+' or '-' or '.')) return null;
+        return location[..colon].ToLowerInvariant();
+    }
+
+    internal static NotSupportedException Unsupported(string scheme, string location) =>
+        new($"No FileIO for the '{scheme}' scheme ({location}); supported: s3, s3a, s3n, file and local paths");
 }
