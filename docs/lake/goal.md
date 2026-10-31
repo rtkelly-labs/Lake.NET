@@ -59,7 +59,7 @@ Each workstream owns criteria above, and maps to issues labelled `lake-plan`.
 | **W3 Durability** | G5, G6 | Maintenance in `FaultInjectionTests`; read/delete/torn-write faults; DuckLake `DbCommandInterceptor` faults + idempotency token; DuckDB concurrent-writer oracle |
 | **W4 Storage** | G9 | `FileIOConformanceTests<T>` (local, moto, MinIO, remote-signed); DuckLake on S3; Azure/GCS FileIO or permanent refusal |
 | **W5 Interop and fixtures** | G2, G3 | Golden fixtures of our own releases; DuckDB-written DuckLake fixtures; one engine-version manifest (`interop/engines.json`); ✅ DuckDB in-process Parquet reader in the unit suite |
-| **W6 Data plane** | G7, G12 (backends) | Parquet.Net fork: hostile-input suite, external readers, contract suite gating the daily rebase ([reference/forks.md](reference/forks.md)) |
+| **W6 Data plane** | G7, G12 (backends) | ✅ malformed-file suite in the fork (`lake(0026)`: 732 failing cases, F1–F12); next, one fix change per finding, starting with the varint hang (F1) and stale pooled bytes (F7). Parquet.Net fork: hostile-input suite, external readers, contract suite gating the daily rebase ([reference/forks.md](reference/forks.md)) |
 | **W7 Shared layers** | G13 | Phase 3 extraction; `IFormatDriver` and `Lake.TestSupport` before any Delta code |
 | **W8 Delta** | all Delta cells | ✅ Writer-feature table ([`docs/spec/delta-support.json`](../spec/delta-support.json), checked by `SupportDeclarationTests`); then the DAT reader, then writes ([delta.md](delta.md), gap review §8) |
 | **W9 Performance** | G11 | Micro and scenario benchmarks; request-count gates; resource envelope |
