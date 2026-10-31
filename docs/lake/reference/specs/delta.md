@@ -1,11 +1,14 @@
 # Delta Lake
 
 **Status:** reference, checked 2026-10-31, spec Delta Transaction Log Protocol (`delta-io/delta` `PROTOCOL.md` at
-`master` = `719768686369f1d52e6891aec1f7fa1be903975c`, read 2026-10-31; not yet a tagged pin). Lake.NET has **no
-Delta code**. What exists: the feature declaration [`docs/spec/delta-support.json`](../../../spec/delta-support.json),
-checked by `SupportDeclarationTests` (`tests/Iceberg.Net.Spec.Tests`), and the plan in
-[gap review §8](../../verification/gap-review-2026-10.md) and [goal.md](../../goal.md) (W8). The package will be
-`Lake.Delta`, built on the shared `Lake.Core`/`Lake.Data` layers, never on Iceberg.
+`master` = `719768686369f1d52e6891aec1f7fa1be903975c`, read 2026-10-31; not yet a tagged pin). Lake.NET has a Delta
+**reader** (`src/Lake.Delta`, not yet packed) and no Delta writer. Also in place: the feature declaration
+[`docs/spec/delta-support.json`](../../../spec/delta-support.json), checked by `SupportDeclarationTests`
+(`tests/Iceberg.Net.Spec.Tests`) and, for its `reader` field, by `DeltaFeatureDeclarationTests`
+(`tests/Lake.Delta.Tests`); and the plan in [gap review §8](../../verification/gap-review-2026-10.md) and
+[goal.md](../../goal.md) (W8). `Lake.Delta` references only the shared layers (today `Iceberg.Net.IO` and
+`Iceberg.Net.Puffin`; `Lake.Core`/`Lake.Data` after the phase 3 extraction), never an Iceberg project:
+`DependencyDirectionTests` gives it role `delta`.
 
 Every protocol statement below is from `PROTOCOL.md` unless marked **(impl)**: behaviour of a reference
 implementation (delta-spark, delta-rs, Delta Kernel) that the protocol does not mandate, or **(unverified)**.
@@ -98,6 +101,16 @@ Reconciliation of [`delta-support.json`](../../../spec/delta-support.json) (21 e
 Writer dependencies the declaration does not state: `rowTracking` and `clustering` require `domainMetadata`;
 `variantShredding` requires `variantType`. `SupportDeclarationTests` checks only that each entry has a status, kind
 and obligation, and that nine named writer features are present; it does not compare against the protocol.
+`DeltaFeatureDeclarationTests` checks each entry's `reader` field (`supported` / `refused` / `not-applicable`)
+against what the reader accepts (`DeltaFeatures.SupportedReaderFeatures`) and refuses each `refused` one by name.
+
+**Reader gate (Lake.Delta).** Reader versions 1–3. Reader features read: `columnMapping`, `deletionVectors`,
+`timestampNtz`, `typeWidening`, `v2Checkpoint`, `vacuumProtocolCheck`. Every other reader feature (`catalogManaged`,
+`variantType`, `variantShredding`, anything unknown) is refused before any data is read, all missing names in one
+`DeltaUnsupportedFeatureException`. A reader-writer feature listed only in `writerFeatures` counts as present
+**(impl)**: delta-spark 3.1 writes `(3, 7)` tables with `columnMapping` only in `writerFeatures` (DAT
+`iceberg_compat_v1`) and reads them with the mapping, although the protocol's column-mapping section names
+`readerFeatures` only.
 
 ## 4. Log replay, checkpoints and time travel
 
@@ -212,8 +225,9 @@ CRC-32 of `bitmapData` (4 bytes).
 one Iceberg blob, and an inline DV would be the blob minus its length and CRC. **Verified for stored DVs**
 (`DeltaDeletionVectorBytesTests`, on the Spark/Delta-written DV in delta-rs's `table-with-dv-small`): `offset` points
 at the big-endian `dataSize` after the version byte, the record decodes with the Iceberg codec, and the Iceberg encoder
-reproduces it byte for byte. Still open: delta-rs reading DVs we write, and whether inline DVs carry the portable magic
-(the protocol's own inline example uses another layout; see formats/puffin-and-deletion-vectors.md).
+reproduces it byte for byte. The reader accepts both RoaringBitmapArray layouts, portable (magic 1681511377 LE) and
+native (1681511376 BE, the layout of the protocol's own inline example; see formats/puffin-and-deletion-vectors.md),
+for inline and stored DVs. Still open: delta-rs reading DVs we write, and which layout delta-spark writes inline today.
 
 ## 7. Concurrency
 
@@ -297,28 +311,45 @@ anything is written.
 
 Order of work (goal W8; gap review §8, §9):
 
-1. ✅ **Writer-feature table**: `delta-support.json` + `SupportDeclarationTests`. Next: add the three missing
-   features (§3), resolve `checkpointProtection`, and have CI link each `supported`/`refused` entry to a test.
-2. ⏳ **Shared harness first**: `IFormatDriver`, a format-neutral `TableFingerprint`/`ShadowCompare` and the common
-   BDD feature set (gap review §9), so Delta is born on them.
-3. ⏳ **Reader on DAT**: the Delta Acceptance Tests (`delta-incubator/dat`) reader cases as committed fixtures
-   (regenerated, never hand-edited), every case's expected data compared; a `PROTOCOL.md` section map for
-   `tools/spec_trace.py` and tests tagged by section; decoders (JSON log, checkpoint Parquet, DV files, Z85) under the
-   `Corruption` contract with fuzz targets; DV byte-compatibility test against Iceberg's codec (§6).
+1. ✅ **Writer-feature table**: `delta-support.json` + `SupportDeclarationTests`; each entry now also states what the
+   reader does (`reader`, checked by `DeltaFeatureDeclarationTests`). Next: resolve `checkpointProtection`, and have CI
+   link each `supported`/`refused` writer entry to a test.
+2. ⏳ **Shared harness**: `IFormatDriver`, a format-neutral `TableFingerprint`/`ShadowCompare` and the common BDD
+   feature set (gap review §9). The reader came first: it uses only `Iceberg.Net.IO` and `Iceberg.Net.Puffin`, and
+   moves onto `Lake.Core`/`Lake.Data` with the phase 3 extraction.
+3. ✅ **Reader on DAT** (2026-10-31): `src/Lake.Delta`, `tests/Lake.Delta.Tests` (unit suite). Done:
+   - DAT v0.0.3 committed (`tests/Lake.Delta.Tests/fixtures/dat`, regenerated never hand-edited). **19/19 reader cases,
+     all 29 expected versions** compared typed and order-independently with Spark's output, plus version, protocol
+     versions and properties. None refused; a case that is neither read nor listed as refused (with its reason) fails.
+   - Log replay: listing, `_last_checkpoint` as a hint (malformed: ignored; ahead of a lagging listing: used),
+     classic, multi-part (incomplete: ignored) and V2 UUID-named checkpoints with sidecars, reconciliation of
+     protocol/metaData/txn/domainMetadata/add/remove, `commitInfo` of the snapshot version. Time travel by version and
+     by timestamp: file times made monotonic **(impl)**, `inCommitTimestamp` when enabled, the enablement split.
+   - Column mapping `none`/`name`/`id` (nested fields too; `id` refuses files without field IDs), partition values
+     per type (`""`/null, ISO and space-separated timestamps read as UTC, binary as UTF-8 bytes, decimals), type
+     widening (and refusal of unsupported `delta.typeChanges`), DVs `u`/`p`/`i`, `add.stats`.
+   - Decoders (JSON log, schema, stats, checkpoint Parquet, data Parquet, DV records, Z85) under the `Corruption`
+     contract: `InvalidDataException`, bounded JSON depth, a seeded byte-mutation sweep (`CorruptionTests`).
+   - DV byte-compatibility with Iceberg's codec (`DeltaDeletionVectorBytesTests`; the DAT DV decodes with it too).
+
+   Not done: a `PROTOCOL.md` section map for `tools/spec_trace.py` (it knows only Iceberg's spec/puffin/rest documents,
+   so Delta tests are untagged), SharpFuzz targets for the Delta decoders (`tests/Iceberg.Net.Fuzz`), file pruning on
+   stats, `stats_parsed`-only checkpoints beyond rendering them back to JSON, log compaction files (ignored; optional),
+   checksum (`.crc`) validation, decimals beyond `System.Decimal`'s range (refused), variant.
 4. ⏳ **Writes**: append, overwrite, delete (DVs or rewrite), then row tracking and checkpoints; each writer feature
-   honoured or refused (§8).
+   honoured or refused (§8), the commit path per §7 (put-if-absent, a fresh `commitInfo.txnId` per attempt).
 
 | Evidence | What it proves | State |
 |---|---|---|
-| DAT reader cases | Log replay, checkpoints, column mapping, DVs, time travel, partition values, as other engines wrote them | ⏳ |
-| delta-rs (`deltalake`, arrow-rs Parquet) oracle | Reads every table we write; we read its tables; `.history()` agrees with our log | ⏳ |
-| Spark + Delta oracle (parquet-java) | Same both ways; `DESCRIBE HISTORY` agrees; concurrent writers race us | ⏳ |
+| DAT reader cases | Log replay, checkpoints, column mapping, DVs, time travel, partition values, as other engines wrote them | ✅ reader: 19/19 cases, 29 versions |
+| delta-rs (`deltalake`, arrow-rs Parquet) oracle | Reads every table we write; we read its tables; `.history()` agrees with our log | ⏳ (we read its committed `table-with-dv-small`) |
+| Spark + Delta oracle (parquet-java) | Same both ways; `DESCRIBE HISTORY` agrees; concurrent writers race us | ⏳ (reading Spark-written tables: via DAT) |
 | DuckDB `delta` extension (Delta Kernel, `duckdb/duckdb-delta`) | A cheap third reader of our tables | ⏳ |
 | Put-if-absent fidelity | `If-None-Match` on every backend (moto, MinIO, AWS) in `EmulatorFidelityTests` style; refusal or a lock-based log store where unsupported; the identical-bytes hazard in §7 | ⏳ |
 | Conflict matrix | `WriteSerializable` and `Serializable` × {append, delete, update, merge, optimize, metadata, protocol}, plus `txn` idempotency, against Spark and delta-rs writing at the same time | ⏳ |
-| Checkpoint and log faults | Stale/missing `_last_checkpoint`, checkpoint without its commit, missing multi-part part, missing sidecar, cleanup racing time travel, vacuum within retention | ⏳ |
-| Serialization properties | `partitionValues` (nulls, `""`, escaping, time zones, decimals), stats truncation and `tightBounds`, inline Z85 DVs, column-mapping names after rename/drop/re-add — property-tested against delta-rs parsing | ⏳ |
-| ICT time travel | `inCommitTimestamp` vs S3 modification time, with an injectable clock (gap D6) | ⏳ |
+| Checkpoint and log faults | Stale/missing `_last_checkpoint`, checkpoint without its commit, missing multi-part part, missing sidecar, cleanup racing time travel, vacuum within retention | ◐ read side: malformed/lagging `_last_checkpoint`, missing part, missing sidecar, cleaned-up log (`LogReplayTests`, DAT `no_replay`) |
+| Serialization properties | `partitionValues` (nulls, `""`, escaping, time zones, decimals), stats truncation and `tightBounds`, inline Z85 DVs, column-mapping names after rename/drop/re-add — property-tested against delta-rs parsing | ◐ example-based parsing tests; no property tests or delta-rs comparison yet |
+| ICT time travel | `inCommitTimestamp` vs S3 modification time, with an injectable clock (gap D6) | ◐ read side (`LogReplayTests`); no injectable clock |
 
 ## 12. References
 
