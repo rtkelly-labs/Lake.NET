@@ -147,7 +147,8 @@ Lake.Parquet is supported under native AOT and trimming, and that is enforced an
 | `hashes <from> <count>` | the files written natively are byte for byte the JIT build's (not encrypted ones, whose nonces are random, nor gzip, whose zlib native AOT links itself) |
 | `corpus <dir>` | upstream's test files decoded to the same schema, values and levels as on the JIT |
 
-CI's `aot` job (required by `lake-ci`) runs every mode, 3,000 fixed and 2,000 fresh seeds. Locally:
+CI's `aot` job (required by `lake-ci`) runs every mode, 3,000 fixed and 2,000 fresh seeds, on Linux x64, Windows x64
+and macOS arm64. Locally:
 
 ```bash
 cd eng/lake/Lake.Parquet.AotTests
