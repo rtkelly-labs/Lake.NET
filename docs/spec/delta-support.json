@@ -4,31 +4,203 @@
     "spec": "https://github.com/delta-io/delta/blob/master/PROTOCOL.md",
     "pinned": null,
     "legacyVersions": {
-      "reader": { "1": "base", "2": "columnMapping", "3": "table features (readerFeatures list)" },
-      "writer": { "2": "appendOnly, invariants", "3": "checkConstraints", "4": "changeDataFeed, generatedColumns", "5": "columnMapping", "6": "identityColumns", "7": "table features (writerFeatures list)" }
-    }
+      "reader": {
+        "1": "base",
+        "2": "columnMapping",
+        "3": "table features (readerFeatures list)"
+      },
+      "writer": {
+        "2": "appendOnly, invariants",
+        "3": "checkConstraints",
+        "4": "changeDataFeed, generatedColumns",
+        "5": "columnMapping",
+        "6": "identityColumns",
+        "7": "table features (writerFeatures list)"
+      }
+    },
+    "readAt": "delta-io/delta master 719768686369f1d52e6891aec1f7fa1be903975c (2026-10-31); not yet pinned to a release tag"
   },
   "features": [
-    { "name": "appendOnly", "kind": "writer", "status": "planned", "writerObligation": "Refuse any commit that removes data (remove actions with dataChange=true) while delta.appendOnly=true", "phase": "write" },
-    { "name": "invariants", "kind": "writer", "status": "planned", "writerObligation": "Evaluate column invariants (delta.invariants metadata) on every written row, or refuse to write", "phase": "write" },
-    { "name": "checkConstraints", "kind": "writer", "status": "planned", "writerObligation": "Evaluate delta.constraints.* SQL expressions on every written row, or refuse to write (needs a SQL expression evaluator)", "phase": "write" },
-    { "name": "changeDataFeed", "kind": "writer", "status": "planned", "writerObligation": "When delta.enableChangeDataFeed=true, write cdc files for updates and deletes (or refuse those operations)", "phase": "write" },
-    { "name": "generatedColumns", "kind": "writer", "status": "planned", "writerObligation": "Compute or validate generation expressions for generated columns, or refuse to write", "phase": "write" },
-    { "name": "identityColumns", "kind": "writer", "status": "planned", "writerObligation": "Assign identity values and advance the high-water mark in metadata, or refuse to write", "phase": "write" },
-    { "name": "columnMapping", "kind": "reader-writer", "status": "planned", "writerObligation": "Resolve by physical name (name mode) or field ID (id mode); write physical names and IDs; keep maxColumnId", "phase": "read" },
-    { "name": "deletionVectors", "kind": "reader-writer", "status": "planned", "writerObligation": "Apply DVs on read; on write, keep DVs consistent with tightBounds and numRecords; Roaring64 bytes shared with Iceberg v3 (to be verified against Delta's DV test files)", "phase": "read" },
-    { "name": "timestampNtz", "kind": "reader-writer", "status": "planned", "writerObligation": "Read and write timestamp without time zone", "phase": "read" },
-    { "name": "v2Checkpoint", "kind": "reader-writer", "status": "planned", "writerObligation": "Read V2 checkpoints with sidecars; write V2 checkpoints when the feature is present", "phase": "read" },
-    { "name": "vacuumProtocolCheck", "kind": "reader-writer", "status": "planned", "writerObligation": "Vacuum must check the protocol before deleting files", "phase": "maintenance" },
-    { "name": "typeWidening", "kind": "reader-writer", "status": "planned", "writerObligation": "Read files written before a widening; record widenings in field metadata", "phase": "read" },
-    { "name": "variantType", "kind": "reader-writer", "status": "planned", "writerObligation": "Parquet variant encoding (shared with Iceberg v3 once Lake.Data has it)", "phase": "read" },
-    { "name": "rowTracking", "kind": "writer", "status": "planned", "writerObligation": "Assign baseRowId and defaultRowCommitVersion; keep row IDs through rewrites (as Iceberg v3 lineage)", "phase": "write" },
-    { "name": "domainMetadata", "kind": "writer", "status": "planned", "writerObligation": "Preserve domainMetadata actions; conflict-check them", "phase": "write" },
-    { "name": "clustering", "kind": "writer", "status": "planned", "writerObligation": "Preserve the clustering domain metadata; writes need not cluster", "phase": "write" },
-    { "name": "inCommitTimestamp", "kind": "writer", "status": "planned", "writerObligation": "Write commitInfo.inCommitTimestamp first in each commit, monotonically increasing; time travel by timestamp uses it", "phase": "write" },
-    { "name": "allowColumnDefaults", "kind": "writer", "status": "planned", "writerObligation": "Fill CURRENT_DEFAULT values for columns omitted on insert, or refuse", "phase": "write" },
-    { "name": "checkpointProtection", "kind": "writer", "status": "planned", "writerObligation": "Do not remove checkpoints or commits the feature protects during log cleanup", "phase": "maintenance" },
-    { "name": "icebergCompatV1", "kind": "writer", "status": "refused", "writerObligation": "UniForm: keep Iceberg metadata in step. Out of scope (VISION.md: no format conversion until each format stands alone)", "phase": "write" },
-    { "name": "icebergCompatV2", "kind": "writer", "status": "refused", "writerObligation": "As icebergCompatV1", "phase": "write" }
+    {
+      "name": "appendOnly",
+      "kind": "writer",
+      "status": "planned",
+      "writerObligation": "Refuse any commit that removes data (remove actions with dataChange=true) while delta.appendOnly=true",
+      "phase": "write"
+    },
+    {
+      "name": "invariants",
+      "kind": "writer",
+      "status": "planned",
+      "writerObligation": "Evaluate column invariants (delta.invariants metadata) on every written row, or refuse to write",
+      "phase": "write"
+    },
+    {
+      "name": "checkConstraints",
+      "kind": "writer",
+      "status": "planned",
+      "writerObligation": "Evaluate delta.constraints.* SQL expressions on every written row, or refuse to write (needs a SQL expression evaluator)",
+      "phase": "write"
+    },
+    {
+      "name": "changeDataFeed",
+      "kind": "writer",
+      "status": "planned",
+      "writerObligation": "When delta.enableChangeDataFeed=true, write cdc files for updates and deletes (or refuse those operations)",
+      "phase": "write"
+    },
+    {
+      "name": "generatedColumns",
+      "kind": "writer",
+      "status": "planned",
+      "writerObligation": "Compute or validate generation expressions for generated columns, or refuse to write",
+      "phase": "write"
+    },
+    {
+      "name": "identityColumns",
+      "kind": "writer",
+      "status": "planned",
+      "writerObligation": "Assign identity values and advance the high-water mark in metadata, or refuse to write",
+      "phase": "write"
+    },
+    {
+      "name": "columnMapping",
+      "kind": "reader-writer",
+      "status": "planned",
+      "writerObligation": "Resolve by physical name (name mode) or field ID (id mode); write physical names and IDs; keep maxColumnId",
+      "phase": "read"
+    },
+    {
+      "name": "deletionVectors",
+      "kind": "reader-writer",
+      "status": "planned",
+      "writerObligation": "Apply DVs on read; on write, keep DVs consistent with tightBounds and numRecords; Roaring64 bytes shared with Iceberg v3 (to be verified against Delta's DV test files)",
+      "phase": "read"
+    },
+    {
+      "name": "timestampNtz",
+      "kind": "reader-writer",
+      "status": "planned",
+      "writerObligation": "Read and write timestamp without time zone",
+      "phase": "read"
+    },
+    {
+      "name": "v2Checkpoint",
+      "kind": "reader-writer",
+      "status": "planned",
+      "writerObligation": "Read V2 checkpoints with sidecars; write V2 checkpoints when the feature is present",
+      "phase": "read"
+    },
+    {
+      "name": "vacuumProtocolCheck",
+      "kind": "reader-writer",
+      "status": "planned",
+      "writerObligation": "Vacuum must check the protocol before deleting files",
+      "phase": "maintenance"
+    },
+    {
+      "name": "typeWidening",
+      "kind": "reader-writer",
+      "status": "planned",
+      "writerObligation": "Read files written before a widening; record widenings in field metadata",
+      "phase": "read",
+      "note": "Defined in PROTOCOL.md sections but missing from its Valid Feature Names appendix at 7197686"
+    },
+    {
+      "name": "variantType",
+      "kind": "reader-writer",
+      "status": "planned",
+      "writerObligation": "Parquet variant encoding (shared with Iceberg v3 once Lake.Data has it)",
+      "phase": "read",
+      "note": "Defined in PROTOCOL.md sections but missing from its Valid Feature Names appendix at 7197686"
+    },
+    {
+      "name": "rowTracking",
+      "kind": "writer",
+      "status": "planned",
+      "writerObligation": "Assign baseRowId and defaultRowCommitVersion; keep row IDs through rewrites (as Iceberg v3 lineage)",
+      "phase": "write",
+      "requires": [
+        "domainMetadata"
+      ]
+    },
+    {
+      "name": "domainMetadata",
+      "kind": "writer",
+      "status": "planned",
+      "writerObligation": "Preserve domainMetadata actions; conflict-check them",
+      "phase": "write"
+    },
+    {
+      "name": "clustering",
+      "kind": "writer",
+      "status": "planned",
+      "writerObligation": "Preserve the clustering domain metadata; writes need not cluster",
+      "phase": "write",
+      "requires": [
+        "domainMetadata"
+      ]
+    },
+    {
+      "name": "inCommitTimestamp",
+      "kind": "writer",
+      "status": "planned",
+      "writerObligation": "Write commitInfo.inCommitTimestamp first in each commit, monotonically increasing; time travel by timestamp uses it",
+      "phase": "write"
+    },
+    {
+      "name": "allowColumnDefaults",
+      "kind": "writer",
+      "status": "planned",
+      "writerObligation": "Fill CURRENT_DEFAULT values for columns omitted on insert, or refuse",
+      "phase": "write"
+    },
+    {
+      "name": "checkpointProtection",
+      "kind": "writer",
+      "status": "planned",
+      "writerObligation": "Do not remove checkpoints or commits the feature protects during log cleanup",
+      "phase": "maintenance",
+      "note": "Not in PROTOCOL.md at 7197686; defined by delta-spark (unverified). Kept so a table that lists it is never written without honouring it."
+    },
+    {
+      "name": "icebergCompatV1",
+      "kind": "writer",
+      "status": "refused",
+      "writerObligation": "UniForm: keep Iceberg metadata in step. Out of scope (VISION.md: no format conversion until each format stands alone)",
+      "phase": "write"
+    },
+    {
+      "name": "icebergCompatV2",
+      "kind": "writer",
+      "status": "refused",
+      "writerObligation": "As icebergCompatV1",
+      "phase": "write"
+    },
+    {
+      "name": "variantShredding",
+      "kind": "reader-writer",
+      "status": "planned",
+      "requires": [
+        "variantType"
+      ],
+      "writerObligation": "Read shredded variant columns; write shredded or unshredded variant consistently with the table's shredding schema",
+      "phase": "read",
+      "note": "Defined in PROTOCOL.md sections but missing from its Valid Feature Names appendix at 7197686"
+    },
+    {
+      "name": "catalogManaged",
+      "kind": "reader-writer",
+      "status": "refused",
+      "writerObligation": "Commits go through the managing catalog, not a direct put-if-absent of the log file; refuse until a catalog-managed commit path exists",
+      "phase": "write"
+    },
+    {
+      "name": "materializePartitionColumns",
+      "kind": "writer",
+      "status": "planned",
+      "writerObligation": "Also write partition column values into the data files, not only into partitionValues",
+      "phase": "write"
+    }
   ]
 }

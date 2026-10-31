@@ -18,6 +18,10 @@ items it found that have since been fixed are listed first, so this page stays t
 | PQ1 (tests) No hostile-input testing of the managed Parquet decoder | fork `lake(0026): Malformed-file tests for the decoder` (branch `ccr-a26a1234-riyup4` of `rtkelly-labs/parquet-dotnet`) | 1,909 cases (parquet-testing `bad_data/` plus seeded truncations, bit flips and header edits of 11 fixtures): 1,177 pass, **731 known failures and 1 hang**, grouped as findings F1–F12 in the fork's change record. The decoder fixes (bounded allocations, wrapped exceptions, the varint hang, stale pooled bytes decoded as values) are still open, and the Parquet.Net backend must not become a default until they land |
 | PQ2 (part) No independent Parquet reader in the unit suite | same commit | `Iceberg.Net.DuckDbNet.Tests` (DuckDB's reader: values, field IDs, statistics, both directions) |
 
+**Found while writing the Delta and Cloudflare references:** `S3FileIO.WriteAsync(overwrite: false)` accepts a `412`
+when the existing object has the same bytes (recovering a create whose response was lost). That is safe for Iceberg's
+unique file names but not for Delta's shared `_delta_log/N.json` names: Lake.Delta needs a strict create.
+
 **Still open from that work:** existing tables or namespaces whose location already contains a wildcard now fail to vend (a 500, not a
 clean error); re-validate them at load.
 
