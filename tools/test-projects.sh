@@ -41,13 +41,18 @@ case "$cmd" in
     list="$(projects "$suite")"
     [[ -n "$list" ]] || { echo "suite '$suite' has no projects" >&2; exit 1; }
     # Every project runs even after one fails, so one red run reports every failing project.
+    # Each project also writes a TRX file; the failing tests are listed again at the very end, so they can be found
+    # without scrolling back through a suite's console output.
+    trx_dir="$(mktemp -d)"
     failed=()
     while read -r csproj; do
       if [[ -n "${GITHUB_ACTIONS:-}" ]]; then echo "::group::$csproj"; fi
-      dotnet test "$csproj" --nologo "$@" || failed+=("$csproj")
+      name="$(basename "$csproj" .csproj)"
+      dotnet test "$csproj" --nologo --logger "trx;LogFileName=$trx_dir/$name.trx" "$@" || failed+=("$csproj")
       if [[ -n "${GITHUB_ACTIONS:-}" ]]; then echo "::endgroup::"; fi
     done <<<"$list"
     if (( ${#failed[@]} )); then
+      if command -v python3 >/dev/null; then python3 -I tools/trx_failures.py "$trx_dir" || true; fi
       for csproj in "${failed[@]}"; do echo "::error::tests failed: $csproj" >&2; done
       exit 1
     fi

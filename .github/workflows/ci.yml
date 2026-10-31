@@ -114,6 +114,9 @@ jobs:
         env:
           ICEBERG_PYTHON: ${{ github.workspace }}/interop/.venv/bin/python
           ICEBERG_DUCKDB_REQUIRED: "1"
+          # The in-process REST servers log every request at Information; at Warning a failing test's output stays
+          # near the end of the log instead of thousands of request lines back.
+          Logging__LogLevel__Default: Warning
           # RestServer.Tests copies its own interop/ into the output directory, which the repository
           # lookup can mistake for the root. Use the runtime fetched by emulation/up.sh --spark.
           ICEBERG_SPARK_JAR: ${{ github.workspace }}/emulation/.cache/iceberg-spark-runtime-4.0_2.13-1.12.0.jar
@@ -151,6 +154,9 @@ jobs:
         env:
           ICEBERG_TEST_TARGET: emulation
           ICEBERG_REQUIRE_TARGET: "1"
+          # The in-process REST servers log every request at Information; at Warning a failing test's output stays
+          # near the end of the log instead of thousands of request lines back.
+          Logging__LogLevel__Default: Warning
           ICEBERG_PYTHON: ${{ github.workspace }}/interop/.venv/bin/python
         run: ./tools/test-projects.sh test regression --logger "console;verbosity=normal"
 
