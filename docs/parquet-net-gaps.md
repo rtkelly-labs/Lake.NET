@@ -111,16 +111,16 @@ Already covered by Parquet.Net, so not a blocker:
 
 ## Fork status
 
-The fork is upstream Parquet.Net's history, unchanged, with a stack of commits on top, rebased onto
-upstream's `master` every day ([its `docs/maintaining.md`](https://github.com/rtkelly-labs/parquet-dotnet/blob/master/docs/maintaining.md)):
+The fork is upstream Parquet.Net's history, unchanged, with a stack of commits on top, rebaselined onto
+upstream when its maintainer chooses to, after checking what upstream's changes broke ([its `docs/maintaining.md`](https://github.com/rtkelly-labs/parquet-dotnet/blob/master/docs/maintaining.md)):
 `lake(0001)` is its packaging, and each later `lake(NNNN)` commit is one change, with a record in its
 `docs/changes/` saying what it does, why, how it was evaluated and whether it has gone upstream. Every change also
 exists as a branch `lake/change/NNNN-name` (upstream plus that change and what it needs), which is what a person
 proposes upstream, by hand. The fork publishes **Lake.Parquet** (namespace `Lake.Parquet`, so it can sit beside
 Parquet.Net) from the same code.
 
-The submodule pins a commit of the fork's `master`. Because `master` is rebased, every head it moves away from is
-tagged `lake/stack/<date>-<sha>` first, so the pinned commit stays reachable; move the pin forward with
+The submodule pins a commit of the fork's `master`. A rebaseline rewrites `master`, but every head it moves away from
+is tagged `lake/stack/<date>-<sha>` first, so the pinned commit stays reachable; after a rebaseline, move the pin forward with
 `git -C external/parquet-dotnet fetch origin master && git -C external/parquet-dotnet checkout origin/master`.
 Fork suite at the pinned commit: 792 passed, 3 skipped on net8.0 and net10.0, with `pyarrow` and `pandas` installed
 for its Arrow interop test; CI runs it on Linux, Windows and macOS (`parquet-net-fork`).
