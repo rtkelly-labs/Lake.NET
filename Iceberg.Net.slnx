@@ -20,6 +20,7 @@
     <Project Path="src/Iceberg.Net.Puffin/Iceberg.Net.Puffin.csproj" />
     <Project Path="src/Iceberg.Net.RestServer/Iceberg.Net.RestServer.csproj" />
     <Project Path="src/Iceberg.Net.Spark/Iceberg.Net.Spark.csproj" />
+    <Project Path="src/Lake.Delta/Lake.Delta.csproj" />
   </Folder>
   <Folder Name="/tests/">
     <Project Path="tests/Iceberg.Net.Behaviour.Tests/Iceberg.Net.Behaviour.Tests.csproj" />
