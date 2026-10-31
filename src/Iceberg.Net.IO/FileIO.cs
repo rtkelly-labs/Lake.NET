@@ -389,7 +389,9 @@ public sealed class S3FileIO : IFileIO, ISupportsListing
         catch (AmazonS3Exception e) when (!overwrite && (int)e.StatusCode is 412 or 409)
         {
             // A retried PUT whose first attempt landed (response lost, e.g. 503 after apply) fails its own
-            // If-None-Match. Locations are unique per write, so identical bytes mean the object is ours.
+            // If-None-Match. Identical bytes mean the object is ours, provided no two writers ever write the same bytes
+            // to one location: Iceberg's names are unique per write, and Delta commit files carry a per-attempt
+            // commitInfo.txnId (docs/lake/reference/specs/delta.md, writer invariant 11).
             if (await ReadAllAsync(location, ct) is var existing && existing.AsSpan().SequenceEqual(content.Span)) return;
             throw new FileAlreadyExistsException(location);
         }

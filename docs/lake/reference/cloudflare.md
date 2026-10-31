@@ -113,9 +113,9 @@ that.
    short grace period could delete them.
 3. **Strict put-if-absent for Delta.** `S3FileIO.WriteAsync(overwrite: false)` accepts a `412` when the existing object
    holds the same bytes, which recovers a create whose response was lost. Iceberg file names are unique per write, so
-   that is safe there. A Delta commit file (`_delta_log/N.json`) is a shared name, and two writers with byte-identical
-   commits would both believe they won. *Handling:* Lake.Delta must use a strict create; see
-   [specs/delta.md](specs/delta.md). This applies on S3 as much as R2.
+   that is safe there. A Delta commit file (`_delta_log/N.json`) is a shared name. *Handling (decided):* every Delta
+   commit attempt embeds a fresh `commitInfo.txnId`, so two writers never write the same bytes, and byte equality
+   again proves ownership ([specs/delta.md](specs/delta.md), writer invariant 11). This applies on S3 as much as R2.
 4. **Checksums.** Fixed by `ChecksumsOnlyWhenRequired`. Integrity then relies on TLS plus Parquet's and Avro's own
    framing. Re-enable it (`ChecksumsOnlyWhenRequired = false`) if Cloudflare documents full-object CRC32 trailers.
 5. **Unicode equivalence.** Covered for single keys by the conformance suite. Partition values that differ only by
