@@ -209,10 +209,11 @@ CRC-32 of `bitmapData` (4 bytes).
 `length (4, BE, = 4 + |vector|) | D1 D3 39 64 | portable Roaring64 | CRC-32 (4, BE, over magic + vector)`
 (`Iceberg.Net.Puffin` `DeletionVector.Encode`/`Decode`, `RoaringPositionBitmap`, which already refuses keys above
 `int.MaxValue`). Read side by side, one Delta file record (`dataSize | bitmapData | checksum`) has the same bytes as
-one Iceberg blob, and an inline DV would be the blob minus its length and CRC. **This is a claim to be verified by a
-test**: decode Delta's own DV fixtures (DAT, delta-rs test data) with the Iceberg codec, and have delta-rs read DVs we
-write. Also (unverified): whether `offset` points at `dataSize` or at `bitmapData`, and whether an inline DV carries
-the magic number.
+one Iceberg blob, and an inline DV would be the blob minus its length and CRC. **Verified for stored DVs**
+(`DeltaDeletionVectorBytesTests`, on the Spark/Delta-written DV in delta-rs's `table-with-dv-small`): `offset` points
+at the big-endian `dataSize` after the version byte, the record decodes with the Iceberg codec, and the Iceberg encoder
+reproduces it byte for byte. Still open: delta-rs reading DVs we write, and whether inline DVs carry the portable magic
+(the protocol's own inline example uses another layout; see formats/puffin-and-deletion-vectors.md).
 
 ## 7. Concurrency
 
