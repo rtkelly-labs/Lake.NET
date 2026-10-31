@@ -102,7 +102,7 @@ public sealed record RestCatalogOptions
 /// Iceberg REST catalog client (open-api/rest-catalog-open-api.yaml). The server owns commit
 /// semantics: the client sends requirements + updates and the server applies them atomically.
 /// </summary>
-public sealed class RestCatalog : ICatalog, IViewCatalog
+public sealed partial class RestCatalog : ICatalog, IViewCatalog
 {
     private string ViewPath(TableIdentifier id) => $"{NsPath(id.Namespace)}/views/{Uri.EscapeDataString(id.Name)}";
 
@@ -212,7 +212,9 @@ public sealed class RestCatalog : ICatalog, IViewCatalog
         _defaultIo = ioFactory is null;
         _ioFactory = ioFactory ?? (props => new ResolvingFileIO(() => new S3FileIO(S3FileIOOptions.FromProperties(props))));
         Name = name;
-        _http = options.Handler is null ? new HttpClient() : new HttpClient(options.Handler);
+        // Redirects are not followed: the token request's body holds the client secret and every request the catalog's
+        // headers, and a redirect would send them on to wherever the response points. A custom Handler decides for itself.
+        _http = options.Handler is null ? new HttpClient(new SocketsHttpHandler { AllowAutoRedirect = false }) : new HttpClient(options.Handler);
         _http.BaseAddress = new Uri(options.Uri.ToString().TrimEnd('/') + "/");
         _token = options.Token;
         if (options.Token is not null || options.Credential is not null)
@@ -249,7 +251,7 @@ public sealed class RestCatalog : ICatalog, IViewCatalog
         if (_defaultIo && _options.AccessDelegation is null) RequireTrustedStorageEndpoint(merged);
         Endpoints = config?["endpoints"]?.AsArray().Select(e => e!.GetValue<string>()).ToList() ?? [];
         IdempotencyKeyLifetime = config?["idempotency-key-lifetime"]?.GetValue<string>() is { } lifetime ? System.Xml.XmlConvert.ToTimeSpan(lifetime) : null;
-        _prefix = merged.TryGetValue("prefix", out var p) && p.Length > 0 ? p.Trim('/') + "/" : "";
+        _prefix = merged.TryGetValue("prefix", out var p) && p.Length > 0 ? CheckedPrefix(p) : "";
         FileIO = _ioFactory(merged);
     }
 
@@ -284,16 +286,57 @@ public sealed class RestCatalog : ICatalog, IViewCatalog
     }
 
     /// <summary>
+    /// The server's <c>prefix</c>, as the path segments it puts between <c>v1/</c> and each route (ending in <c>/</c>).
+    /// It may hold several segments and percent-encoded characters (S3 Tables' is an encoded ARN), but nothing that
+    /// changes the shape of the path: no <c>.</c> or <c>..</c> segment, not even percent-encoded, and no query,
+    /// fragment, backslash or control character. Otherwise the catalog's token would go to another path on its host.
+    /// </summary>
+    private string CheckedPrefix(string prefix)
+    {
+        var trimmed = prefix.Trim('/');
+        var segments = trimmed.Split('/');
+        string Decoded(string s) { try { return Uri.UnescapeDataString(s); } catch (UriFormatException) { return s; } }
+        var bad = trimmed.Length == 0
+            || trimmed.Any(c => c is '?' or '#' or '\\' || char.IsControl(c) || char.IsWhiteSpace(c))
+            || segments.Any(s => s.Length == 0 || Decoded(s).Split('/', '\\').Any(d => d is "." or "..") || Decoded(s).Any(c => c is '?' or '#' || char.IsControl(c)));
+        var result = trimmed + "/";
+        // And the request URI it produces must sit exactly where the prefix says, below v1/.
+        var expected = _http.BaseAddress!.AbsolutePath + "v1/" + result;
+        if (!bad && !Uri.UnescapeDataString(new Uri(_http.BaseAddress!, "v1/" + result + "namespaces").AbsolutePath).StartsWith(Uri.UnescapeDataString(expected), StringComparison.Ordinal))
+            bad = true;
+        if (bad) throw new InvalidOperationException($"The server's prefix '{prefix}' would change the path requests are sent to; refusing it");
+        return result;
+    }
+
+    /// <summary>
+    /// Whether <paramref name="endpoint"/> is an AWS S3 service endpoint, over https with no path: <c>s3.amazonaws.com</c>,
+    /// <c>s3.{region}</c>, <c>s3-{region}</c>, <c>s3.dualstack.{region}</c>, <c>s3-fips[.dualstack].{region}</c>,
+    /// <c>s3-external-1</c> and S3 Express (<c>s3express-control.{region}</c>, <c>s3express-{zone}.{region}</c>), under
+    /// <c>amazonaws.com</c> or <c>amazonaws.com.cn</c>. Not a bucket's or access point's virtual host
+    /// (<c>{bucket}.s3.…</c>: path-style requests to it would land in that bucket, whoever owns it), and not other AWS
+    /// services that share the domain (API Gateway, load balancers, STS).
+    /// </summary>
+    public static bool IsS3ServiceEndpoint(Uri endpoint) =>
+        endpoint.IsAbsoluteUri && endpoint.Scheme == Uri.UriSchemeHttps && endpoint.UserInfo.Length == 0
+        && endpoint.AbsolutePath == "/" && endpoint.Query.Length == 0 && endpoint.Fragment.Length == 0
+        && S3ServiceHost().IsMatch(endpoint.Host);
+
+    [System.Text.RegularExpressions.GeneratedRegex(
+        @"^(?:s3(?:-fips)?(?:\.dualstack)?(?:[.-][a-z]{2}(?:-[a-z]+)+-\d+)?|s3-external-1|s3express-(?:control|[a-z0-9]+-az\d+)\.[a-z]{2}(?:-[a-z]+)+-\d+)\.amazonaws\.com(?:\.cn)?$",
+        System.Text.RegularExpressions.RegexOptions.IgnoreCase | System.Text.RegularExpressions.RegexOptions.CultureInvariant)]
+    private static partial System.Text.RegularExpressions.Regex S3ServiceHost();
+
+    /// <summary>
     /// Refuse a server-chosen <c>s3.endpoint</c> that the client would sign for with its own AWS credentials, unless it is
-    /// an AWS or loopback endpoint. With vended credentials or remote signing the server's own access is used instead.
+    /// an AWS S3 service endpoint (<see cref="IsS3ServiceEndpoint"/>) or loopback. With vended credentials or remote
+    /// signing the server's own access is used instead.
     /// </summary>
     private void RequireTrustedStorageEndpoint(IReadOnlyDictionary<string, string> props)
     {
         if (_options.AllowServerStorageEndpoint || !props.TryGetValue("s3.endpoint", out var endpoint) || endpoint.Length == 0) return;
         if (_options.Properties.TryGetValue("s3.endpoint", out var own) && own == endpoint) return; // the client's own choice
         if (props.ContainsKey("s3.access-key-id") || props.GetValueOrDefault("s3.remote-signing-enabled") == "true") return;
-        if (Uri.TryCreate(endpoint, UriKind.Absolute, out var u)
-            && (u.IsLoopback || u.Host.EndsWith(".amazonaws.com", StringComparison.OrdinalIgnoreCase) || u.Host.EndsWith(".amazonaws.com.cn", StringComparison.OrdinalIgnoreCase)))
+        if (Uri.TryCreate(endpoint, UriKind.Absolute, out var u) && (u.IsLoopback || IsS3ServiceEndpoint(u)))
             return;
         throw new InvalidOperationException($"The server set s3.endpoint to {endpoint}, which would receive requests signed with this client's AWS credentials; set it in RestCatalogOptions.Properties, or set RestCatalogOptions.AllowServerStorageEndpoint");
     }

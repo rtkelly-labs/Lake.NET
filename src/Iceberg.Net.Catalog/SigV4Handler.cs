@@ -24,7 +24,8 @@ public sealed class SigV4Handler : DelegatingHandler
         : this(ct => credentials.GetCredentialsAsync(), region, service, () => DateTime.UtcNow, inner) { }
 
     public SigV4Handler(Func<CancellationToken, Task<ImmutableCredentials>> credentials, string region, string service, Func<DateTime> clock, HttpMessageHandler? inner = null)
-        : base(inner ?? new HttpClientHandler())
+        // No redirects: a followed redirect would carry the signed headers, the session token among them, to its target.
+        : base(inner ?? new HttpClientHandler { AllowAutoRedirect = false })
     {
         _credentials = credentials;
         _region = region;
