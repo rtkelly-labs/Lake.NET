@@ -117,7 +117,7 @@ public abstract class AddFilesTests : IAsyncLifetime
         Assert.Equal(["2:b"], await RowsAsync(catalog));
     }
 
-    [Fact]
+    [SkippableFact]
     [Spec("ducklake: ducklake_column_mapping")]
     [Spec("ducklake: ducklake_name_mapping")]
     [Spec("ducklake: ducklake_data_file")]
@@ -144,7 +144,7 @@ public abstract class AddFilesTests : IAsyncLifetime
         Assert.Empty((await catalog.PlanScanAsync(await catalog.LoadTableAsync("main", "t"), Expr.GreaterThan("id", 3L))).Files);
     }
 
-    [Fact]
+    [SkippableFact]
     public async Task Columns_are_matched_by_name_whatever_their_order_or_field_ids()
     {
         var catalog = await LakeAsync();
@@ -163,7 +163,7 @@ public abstract class AddFilesTests : IAsyncLifetime
         Assert.Equal("name", mappings[0][2]);
     }
 
-    [Fact]
+    [SkippableFact]
     public async Task Files_with_one_layout_share_one_mapping_within_a_commit()
     {
         var catalog = await LakeAsync();
@@ -173,7 +173,7 @@ public abstract class AddFilesTests : IAsyncLifetime
         Assert.Equal([1L, 2L], (await _lake.SqlAsync("SELECT data_file_id FROM ducklake_data_file ORDER BY data_file_id")).Select(r => Convert.ToInt64(r[0])));
     }
 
-    [Fact]
+    [SkippableFact]
     public async Task Missing_extra_and_unreadable_columns_are_refused_unless_allowed()
     {
         var catalog = await LakeAsync();
@@ -202,7 +202,7 @@ public abstract class AddFilesTests : IAsyncLifetime
         Assert.Equal(["1:a"], await RowsAsync(catalog));
     }
 
-    [Fact]
+    [SkippableFact]
     public async Task Hive_partition_columns_come_from_the_path()
     {
         var catalog = await _lake.CreateAsync();
@@ -222,7 +222,7 @@ public abstract class AddFilesTests : IAsyncLifetime
         Assert.Single((await catalog.PlanScanAsync(table, Expr.IsNull("year"))).Files); // pruned by the path value's statistics
     }
 
-    [Fact]
+    [SkippableFact]
     public async Task Added_rows_take_row_ids_and_can_be_deleted_updated_and_compacted()
     {
         var catalog = await LakeAsync();
