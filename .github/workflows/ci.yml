@@ -24,7 +24,7 @@ jobs:
   unit:
     name: unit
     runs-on: ubuntu-latest
-    timeout-minutes: 20
+    timeout-minutes: 30
     permissions:
       contents: read
     steps:
@@ -55,7 +55,25 @@ jobs:
           retention-days: 30
 
       - name: Unit suite (spec, netstandard2.0, LINQ, EF Core, REST catalog behaviour)
-        run: ./tools/test-projects.sh test unit
+        run: ./tools/test-projects.sh test unit --collect:"XPlat Code Coverage" --results-directory "$RUNNER_TEMP/coverage"
+
+      # Merged line and branch coverage per package, ratcheted against docs/lake/verification/coverage-baseline.json
+      # (a drop of more than 0.5 points fails; a new package needs a baseline). Update it deliberately with
+      # `python3 tools/coverage_ratchet.py <Cobertura.xml> --update`.
+      - name: Coverage report and ratchet
+        if: ${{ !cancelled() }}
+        run: |
+          dotnet tool restore
+          dotnet reportgenerator -reports:"$RUNNER_TEMP/coverage/**/coverage.cobertura.xml" -targetdir:"$RUNNER_TEMP/coverage-report" \
+            -reporttypes:"Cobertura;HtmlSummary;MarkdownSummaryGithub" -assemblyfilters:"+Iceberg.Net.*;-*.Tests;-Iceberg.Net.TestSupport"
+          python3 tools/coverage_ratchet.py "$RUNNER_TEMP/coverage-report/Cobertura.xml" --suite unit --summary "$GITHUB_STEP_SUMMARY"
+
+      - uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
+        if: ${{ !cancelled() }}
+        with:
+          name: coverage-unit
+          path: ${{ runner.temp }}/coverage-report
+          retention-days: 14
 
       - name: Pack the libraries and smoke-test the packages
         run: ./tools/package-smoke.sh "$RUNNER_TEMP/nupkg"

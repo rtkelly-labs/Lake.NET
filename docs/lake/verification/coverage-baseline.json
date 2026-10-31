@@ -1,0 +1,14 @@
+{
+  "unit": {
+    "Iceberg.Net.Arrow": 94.9,
+    "Iceberg.Net.Avro": 96.4,
+    "Iceberg.Net.Catalog": 77.7,
+    "Iceberg.Net.Core": 83.4,
+    "Iceberg.Net.Data": 89.8,
+    "Iceberg.Net.EntityFrameworkCore": 91.1,
+    "Iceberg.Net.IO": 71.4,
+    "Iceberg.Net.Linq": 93.0,
+    "Iceberg.Net.Puffin": 97.4,
+    "Iceberg.Net.RestServer": 24.7
+  }
+}
