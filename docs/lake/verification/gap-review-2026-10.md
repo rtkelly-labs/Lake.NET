@@ -28,6 +28,7 @@ items it found that have since been fixed are listed first, so this page stays t
 | P2 Signer header deny-list; `PATCH`, tagging, KMS key | `fix(rest-server): the remote signer allows listed headers and methods only` | `RemoteSigningTests.The_signer_signs_only_listed_headers_and_methods` |
 | Stored locations with a wildcard failed to vend uncleanly (noted above) | `fix(rest-server): refuse vending for stored locations with IAM wildcards with an explicit 422` | `CredentialVendingTests.A_stored_location_with_an_iam_wildcard_gets_a_clean_refusal_instead_of_credentials` (old: a 400 from the STS vendor, not a 500 as recorded) |
 | P2 `SECURITY.md` threat model | `docs(security): a threat model; changelog and gap review` | — |
+| Delta not started (§8): no reader | `feat(delta): Lake.Delta, a Delta Lake reader on the shared layers` (read-only; writes still open) | `Lake.Delta.Tests`: all 19 DAT v0.0.3 reader cases (29 versions), a declaration test over `delta-support.json`, checkpoint shapes DAT lacks; also on Windows and macOS |
 
 **Found while writing the Delta and Cloudflare references:** `S3FileIO.WriteAsync(overwrite: false)` accepts a `412`
 when the existing object has the same bytes (recovering a create whose response was lost). That is safe for Iceberg's
@@ -47,7 +48,7 @@ attempt carries a fresh `commitInfo.txnId`, so no two writers write the same byt
 | DuckLake | 7-PR stack #49–#56. Top of stack: `lake/recover-ducklake` |
 | Parquet.Net backend | `ccr-87fadcf9-bxi9wr` |
 | Open readiness PRs | #26 (full-stack readiness), #48 (formal and chaos checks) |
-| Delta | Not started. Only `docs/lake/delta.md` exists. |
+| Delta | Not started at the review. Since then: a read-only reader (`Lake.Delta`, all DAT reader cases); writes not started. |
 
 Line references are to `main` unless a branch is named. Items marked **(bug?)** are probable defects found by
 reading the code. None of them has been reproduced.
