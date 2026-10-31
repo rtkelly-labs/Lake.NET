@@ -41,7 +41,10 @@ on both of our Parquet backends.
 | DuckLake | SQLite, PostgreSQL (EF Core) | one SQL transaction | local (S3 untested) |
 | Delta | none: storage only | put-if-absent of `_delta_log/NNN.json` | needs conditional create on every store; S3 `If-None-Match` |
 
-## Versions in use (to be consolidated into `interop/engines.json`)
+## Versions in use
+
+The authority is [`interop/engines.json`](../../../interop/engines.json); `EngineVersionManifestTests` fails when a
+file disagrees with it or names a pinned image with another tag. This table is a readable copy.
 
 | Engine | Version | Pinned in |
 |---|---|---|
