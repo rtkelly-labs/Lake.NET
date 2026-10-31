@@ -60,6 +60,13 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
   REST server) and the next version number continues from it.
 
 ### Added
+- `Lake.Delta` (not yet packed): a Delta Lake **reader** built only on the shared layers (`Iceberg.Net.IO`,
+  `Iceberg.Net.Puffin`). It replays the log from classic, multi-part and V2 (sidecar) checkpoints, takes snapshots by
+  version or timestamp (in-commit timestamps when enabled), and reads columns by name, physical name or field ID
+  (column mapping). It also handles partition values, type widening, deletion vectors (`u`, `p`, `i`, through
+  `RoaringPositionBitmap`) and `add.stats`. It refuses unsupported reader features by name before reading any data,
+  and corrupt logs, checkpoints and DVs fail with `InvalidDataException`. It passes every Delta Acceptance Tests
+  (DAT v0.0.3) reader case (`tests/Lake.Delta.Tests`). Writes are not implemented.
 - Cloudflare: `S3FileIOOptions.ForR2` (R2's S3 endpoint, region `auto`, jurisdictions, temporary credentials) and
   `RestCatalogOptions.ForBasinCatalog` (Basin Catalog, formerly R2 Data Catalog, with vended credentials); a live
   `cloudflare` workflow running the FileIO contract on R2 and Iceberg tables through Basin Catalog.
