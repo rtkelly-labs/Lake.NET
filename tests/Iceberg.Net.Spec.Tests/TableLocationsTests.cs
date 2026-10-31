@@ -36,4 +36,27 @@ public sealed class TableLocationsTests
     [InlineData("/wh/db.db/t")]
     [InlineData("file:///wh/t")]
     public void Locations_below_a_root_are_safe(string location) => TableLocations.RequireSafeRoot(location);
+
+    [Theory]
+    [InlineData(@"C:\Users\r\wh\t\data\f.parquet", "C:/Users/r/wh/t/data/f.parquet")]   // a Windows listing
+    [InlineData(@"C:\Users\r\wh\t/data/f.parquet", "C:/Users/r/wh/t/data/f.parquet")]    // metadata: location + "/data/…"
+    [InlineData("c:/Users/r/wh/t/data/f.parquet", "C:/Users/r/wh/t/data/f.parquet")]
+    [InlineData("file:///C:/Users/r/wh/t/data/f.parquet", "C:/Users/r/wh/t/data/f.parquet")]
+    [InlineData("s3://b/k\\x", "s3://b/k\\x")]                                             // object keys are left alone
+    public void On_Windows_every_spelling_of_a_local_file_normalises_the_same(string location, string normalised) =>
+        Assert.Equal(normalised, TableLocations.Normalise(location, windowsPaths: true));
+
+    [Fact]
+    public void Elsewhere_a_backslash_is_part_of_a_file_name()
+    {
+        Assert.Equal("/wh/t/a\\b.parquet", TableLocations.Normalise("/wh/t/a\\b.parquet", windowsPaths: false));
+        Assert.Equal("/wh/t/f.parquet", TableLocations.Normalise("file:///wh/t/f.parquet", windowsPaths: false));
+    }
+
+    [Fact]
+    public void A_listed_Windows_file_is_under_its_tables_metadata_built_prefix()
+    {
+        var prefix = TableLocations.Normalise(@"C:\Users\r\wh\t", windowsPaths: true).TrimEnd('/') + "/";
+        Assert.StartsWith(prefix, TableLocations.Normalise(@"C:\Users\r\wh\t\data\f.parquet", windowsPaths: true), StringComparison.Ordinal);
+    }
 }
