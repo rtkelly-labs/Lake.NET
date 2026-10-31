@@ -103,7 +103,8 @@ public static class DuckLakeDeleteFiles
     private static async Task<List<object?[]>> RowsAsync(IFileIO io, string location, byte[]? key, CancellationToken ct)
     {
         var rows = new List<object?[]>();
-        await foreach (var batch in ParquetFiles.ReadBatchesAsync(io, location, ReadSchema, null, new DataFileReadOptions { DecryptionKey = key }, ct)) rows.AddRange(batch.Rows);
+        await foreach (var batch in DuckLakeCatalog.Guard("Delete file", location, ParquetFiles.ReadBatchesAsync(io, location, ReadSchema, null, new DataFileReadOptions { DecryptionKey = key }, ct), ct))
+            rows.AddRange(batch.Rows);
         return rows;
     }
 
