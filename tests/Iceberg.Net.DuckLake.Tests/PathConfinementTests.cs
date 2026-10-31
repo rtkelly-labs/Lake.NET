@@ -45,11 +45,35 @@ public abstract class PathConfinementTests : IAsyncLifetime
 
     [SkippableTheory]
     [Spec("ducklake: Note on Paths")]
+    [InlineData("100%")]
+    [InlineData("a%20b")]
+    [InlineData("50%25off")]
+    public async Task Names_with_a_percent_sign_that_stay_one_directory_create_and_load(string name)
+    {
+        var catalog = await TableAsync(commits: 0);
+        await using (var tx = catalog.BeginTransaction())
+        {
+            await tx.CreateSchemaAsync(name);
+            await tx.CreateTableAsync(name, name, [new("id", DuckLakeType.Int64)]);
+            await tx.InsertAsync(name, name, [[1L]]);
+            await tx.CommitAsync();
+        }
+        var table = await catalog.LoadTableAsync(name, name);
+        Assert.Single(await catalog.ReadAsync(table));
+    }
+
+    [SkippableTheory]
+    [Spec("ducklake: Note on Paths")]
     [InlineData(".")]
     [InlineData("..")]
     [InlineData("a/b")]
     [InlineData("a\\b")]
     [InlineData("../escape")]
+    [InlineData("%2e%2e")]   // stored as %252e%252e, which the path check decodes to ".." on every load
+    [InlineData("%2E.")]
+    [InlineData("%2e")]
+    [InlineData(".%2e")]
+    [InlineData("%252e%252e")]
     public async Task Schema_and_table_names_that_are_not_one_directory_are_refused(string name)
     {
         var catalog = await TableAsync(commits: 0);
