@@ -9,6 +9,10 @@
     <!-- Interop target: rtkelly-labs/Parquet.SourceGenerator (Roslyn generator over Parquet.Net), used only by tests -->
     <PackageVersion Include="Parquet.SourceGenerator" Version="0.0.3" />
     <PackageVersion Include="Parquet.Net" Version="6.1.0" />
+    <!-- In-process DuckDB (ADO.NET provider with the native library for every RID), used only by tests: a second Parquet
+         reader with no Python or Docker. DuckDB 2.0 support is on DuckDB.NET's develop branch, not yet on NuGet
+         (docs/lake/reference/duckdb.md) -->
+    <PackageVersion Include="DuckDB.NET.Data.Full" Version="1.5.6.1" />
     <!-- netstandard2.0 build of Core/Avro: language-feature polyfills and the BCL pieces netstandard2.0 lacks -->
     <PackageVersion Include="PolySharp" Version="1.15.0" />
     <PackageVersion Include="System.Memory" Version="4.6.3" />
