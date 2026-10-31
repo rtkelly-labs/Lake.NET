@@ -140,6 +140,58 @@ public sealed class RemoteSigningTests
         Assert.Equal(HttpStatusCode.OK, (await PostAsync(http, writer, sign, Sign("HEAD", "http://s3.test:9000/bucket"))).Status);
     }
 
+    /// <summary>
+    /// Headers are an allow-list: what S3 clients send for a table's objects is signed, anything else is a 403, tags and
+    /// a client-chosen KMS key among them. Only GET, HEAD, PUT, POST and DELETE are signed.
+    /// </summary>
+    [Fact]
+    public async Task The_signer_signs_only_listed_headers_and_methods()
+    {
+        await using var host = ServerHost.Start(settings: Settings, services: s => s.AddSingleton<IFileIO>(new MemoryFileIO()));
+        using var http = host.Http();
+        var writer = await TokenAsync(http, "writer", "writer-secret");
+        await PostAsync(http, writer, "/v1/namespaces", new JsonObject { ["namespace"] = new JsonArray("db") });
+        await PostAsync(http, writer, "/v1/namespaces/db/tables", new JsonObject { ["name"] = "t", ["schema"] = Json.TypeJson.SchemaToJson(ScanPlanningTests.Schema) });
+        const string sign = "/v1/namespaces/db/tables/t/sign";
+        const string obj = "http://s3.test:9000/bucket/wh/db/t/data/00000-0.parquet";
+        JsonObject With(params (string Name, string Value)[] headers)
+        {
+            var o = new JsonObject { ["x-amz-content-sha256"] = new JsonArray("UNSIGNED-PAYLOAD") };
+            foreach (var (name, value) in headers) o[name] = new JsonArray(value);
+            return o;
+        }
+
+        // A put as the AWS SDKs send it (checksums, chunked trailer, conditional create, metadata, SSE-S3).
+        var put = With(("Content-Type", "application/octet-stream"), ("Content-Length", "100"), ("Content-Encoding", "aws-chunked"),
+            ("x-amz-decoded-content-length", "80"), ("x-amz-trailer", "x-amz-checksum-crc32"), ("x-amz-sdk-checksum-algorithm", "CRC32"),
+            ("If-None-Match", "*"), ("x-amz-meta-writer", "lake"), ("x-amz-server-side-encryption", "AES256"), ("x-amz-storage-class", "STANDARD"),
+            ("User-Agent", "aws-sdk"), ("amz-sdk-request", "attempt=1"), ("Expect", "100-continue"), ("traceparent", "00-abc-def-01"));
+        Assert.Equal(HttpStatusCode.OK, (await PostAsync(http, writer, sign, Sign("PUT", obj, put))).Status);
+        Assert.Equal(HttpStatusCode.OK, (await PostAsync(http, writer, sign, Sign("GET", obj, With(("Range", "bytes=0-9"), ("x-amz-checksum-mode", "ENABLED"))))).Status);
+        Assert.Equal(HttpStatusCode.OK, (await PostAsync(http, writer, sign, Sign("PUT", obj, With(("x-amz-server-side-encryption", "aws:kms"))))).Status);
+
+        foreach (var (name, value) in new[]
+                 {
+                     ("x-amz-tagging", "owner=mallory"), ("x-amz-tagging-directive", "REPLACE"),
+                     ("x-amz-server-side-encryption-aws-kms-key-id", "arn:aws:kms:us-east-1:111122223333:key/mallory"),
+                     ("x-amz-server-side-encryption-context", "e30="), ("x-amz-server-side-encryption-bucket-key-enabled", "false"),
+                     ("x-amz-website-redirect-location", "https://attacker.example/"), ("x-amz-acl", "public-read"),
+                     ("x-amz-grant-full-control", "id=mallory"), ("x-amz-object-lock-legal-hold", "ON"), ("x-amz-something-new", "1"), ("x-custom", "1"),
+                 })
+        {
+            var (status, body, _) = await PostAsync(http, writer, sign, Sign("PUT", obj, With((name, value))));
+            Assert.True(status == HttpStatusCode.Forbidden, $"{name}: {(int)status} {body}");
+        }
+        // SSE-KMS named by its mode alone is fine; any other mode is not.
+        Assert.Equal(HttpStatusCode.Forbidden, (await PostAsync(http, writer, sign, Sign("PUT", obj, With(("x-amz-server-side-encryption", "aws:fsx"))))).Status);
+
+        foreach (var method in new[] { "PATCH", "OPTIONS", "TRACE", "CONNECT", "PROPFIND" })
+        {
+            var (status, body, _) = await PostAsync(http, writer, sign, Sign(method, obj));
+            Assert.True(status == HttpStatusCode.Forbidden, $"{method}: {(int)status} {body}");
+        }
+    }
+
     [Fact]
     public async Task The_signer_signs_only_the_tables_own_objects_at_the_principals_level()
     {
