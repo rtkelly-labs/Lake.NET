@@ -171,6 +171,48 @@ public abstract class CatalogFaultTests : IAsyncLifetime
                 break;
         }
     }
+
+    [SkippableFact]
+    [Spec("ducklake: Conflict Resolution")]
+    public async Task A_commit_gives_up_after_MaxCommitAttempts_and_removes_its_files()
+    {
+        await LakeAsync();
+        var catalog = await _lake.OpenAsync(Fast with { MaxCommitAttempts = 3 });
+        var snapshots = (await catalog.ListSnapshotsAsync()).Count;
+        var files = _lake.Files().ToHashSet();
+        await using (var tx = catalog.BeginTransaction())
+        {
+            await tx.InsertAsync("main", "t", [[20L, "n"]]);
+            Assert.NotEmpty(_lake.Files().Except(files));
+            _faults.Arm(FaultPoint.BeforeCommand, 1, CatalogFaults.SqliteBusy, times: int.MaxValue); // busy for good
+            var e = await Assert.ThrowsAsync<DuckLakeConflictException>(() => tx.CommitAsync());
+            Assert.Contains("3 attempts", e.Message, StringComparison.Ordinal);
+            Assert.IsType<Microsoft.Data.Sqlite.SqliteException>(e.InnerException);
+            Assert.Equal(3, _faults.Fired); // one per attempt, then no more
+            _faults.Disarm();
+        }
+        Assert.Equal(snapshots, (await catalog.ListSnapshotsAsync()).Count);
+        Assert.Equal(files, _lake.Files().ToHashSet()); // nothing landed: its files are gone
+        Assert.Equal(Before, (await catalog.ReadAsync(await catalog.LoadTableAsync("main", "t"))).Select(r => $"{r[0]}:{r[1]}").Order(StringComparer.Ordinal));
+    }
+
+    [SkippableFact]
+    [Spec("ducklake: Conflict Resolution")]
+    public async Task A_transient_failure_on_every_attempt_but_the_last_still_commits_once()
+    {
+        await LakeAsync();
+        var catalog = await _lake.OpenAsync(Fast with { MaxCommitAttempts = 4 });
+        await using (var tx = catalog.BeginTransaction())
+        {
+            await tx.InsertAsync("main", "t", [[20L, "n"]]);
+            _faults.Arm(FaultPoint.BeforeCommit, error: CatalogFaults.SqliteBusy, times: 3);
+            await tx.CommitAsync();
+            Assert.Equal(3, _faults.Fired);
+            Assert.Equal(4, _faults.Commits);
+            _faults.Disarm();
+        }
+        Assert.Single(await catalog.ReadAsync(await catalog.LoadTableAsync("main", "t")), r => (long)r[0]! == 20);
+    }
 }
 
 public sealed class SqliteCatalogFaultTests10() : CatalogFaultTests(CatalogBackend.Sqlite, DuckLakeCatalog.FormatVersion10);
