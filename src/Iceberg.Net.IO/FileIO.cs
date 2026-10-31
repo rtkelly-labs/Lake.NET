@@ -63,20 +63,37 @@ public sealed class LocalFileIO : IFileIO, ISupportsListing
             var scheme => throw StorageScheme.Unsupported(scheme, location),
         };
 
-    public Task<byte[]> ReadAllAsync(string location, CancellationToken ct = default) => File.ReadAllBytesAsync(PathOf(location), ct);
+    // A missing parent directory is a missing file: callers handle FileNotFoundException alone, as they do for S3.
+    private static FileStream OpenExisting(string location)
+    {
+        try { return File.OpenRead(PathOf(location)); }
+        catch (DirectoryNotFoundException e) { throw new FileNotFoundException($"No such file: {location}", location, e); }
+    }
 
-    public Task<Stream> OpenReadAsync(string location, CancellationToken ct = default) => Task.FromResult<Stream>(File.OpenRead(PathOf(location)));
+    public async Task<byte[]> ReadAllAsync(string location, CancellationToken ct = default)
+    {
+        await using var fs = OpenExisting(location);
+        var buf = new byte[fs.Length];
+        await fs.ReadExactlyAsync(buf, ct);
+        return buf;
+    }
+
+    public Task<Stream> OpenReadAsync(string location, CancellationToken ct = default) => Task.FromResult<Stream>(OpenExisting(location));
 
     public async Task<byte[]> ReadRangeAsync(string location, long offset, int length, CancellationToken ct = default)
     {
-        await using var fs = File.OpenRead(PathOf(location));
+        await using var fs = OpenExisting(location);
         fs.Seek(offset, SeekOrigin.Begin);
         var buf = new byte[length];
         await fs.ReadExactlyAsync(buf, ct);
         return buf;
     }
 
-    public Task<long> LengthAsync(string location, CancellationToken ct = default) => Task.FromResult(new FileInfo(PathOf(location)).Length);
+    public Task<long> LengthAsync(string location, CancellationToken ct = default)
+    {
+        var info = new FileInfo(PathOf(location));
+        return info.Exists ? Task.FromResult(info.Length) : throw new FileNotFoundException($"No such file: {location}", location);
+    }
 
     public Task<bool> ExistsAsync(string location, CancellationToken ct = default) => Task.FromResult(File.Exists(PathOf(location)));
 
@@ -97,7 +114,8 @@ public sealed class LocalFileIO : IFileIO, ISupportsListing
 
     public Task DeleteAsync(string location, CancellationToken ct = default)
     {
-        File.Delete(PathOf(location));
+        try { File.Delete(PathOf(location)); }
+        catch (DirectoryNotFoundException) { /* already gone, as with a missing file */ }
         return Task.CompletedTask;
     }
 
@@ -287,6 +305,9 @@ public sealed class S3FileIO : IFileIO, ISupportsListing
         using var resp = await _s3.GetObjectAsync(new GetObjectRequest { BucketName = b, Key = k, ByteRange = new ByteRange(offset, offset + length - 1) }, ct);
         using var ms = new MemoryStream(length);
         await resp.ResponseStream.CopyToAsync(ms, ct);
+        // S3 answers a range that runs past the end with the bytes that exist; a short buffer must not pass for the range.
+        if (ms.Length != length)
+            throw new EndOfStreamException($"Read {ms.Length} of {length} bytes at {offset} from {location}: the object is shorter");
         return ms.ToArray();
     }
 
