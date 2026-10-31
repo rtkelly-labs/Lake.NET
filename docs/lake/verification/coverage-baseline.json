@@ -9,6 +9,7 @@
     "Iceberg.Net.IO": 71.4,
     "Iceberg.Net.Linq": 93.0,
     "Iceberg.Net.Puffin": 97.4,
-    "Iceberg.Net.RestServer": 24.7
+    "Iceberg.Net.RestServer": 24.7,
+    "Lake.Delta": 83.9
   }
 }

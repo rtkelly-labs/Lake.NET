@@ -65,7 +65,7 @@ jobs:
         run: |
           dotnet tool restore
           dotnet reportgenerator -reports:"$RUNNER_TEMP/coverage/**/coverage.cobertura.xml" -targetdir:"$RUNNER_TEMP/coverage-report" \
-            -reporttypes:"Cobertura;HtmlSummary;MarkdownSummaryGithub" -assemblyfilters:"+Iceberg.Net.*;-*.Tests;-Iceberg.Net.TestSupport"
+            -reporttypes:"Cobertura;HtmlSummary;MarkdownSummaryGithub" -assemblyfilters:"+Iceberg.Net.*;+Lake.*;-*.Tests;-Iceberg.Net.TestSupport;-Lake.TestSupport"
           python3 tools/coverage_ratchet.py "$RUNNER_TEMP/coverage-report/Cobertura.xml" --suite unit --summary "$GITHUB_STEP_SUMMARY"
 
       - uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
@@ -191,6 +191,7 @@ jobs:
         run: |
           dotnet test tests/Iceberg.Net.DuckDbNet.Tests --nologo
           dotnet test tests/Iceberg.Net.NetStandard.Tests --nologo
+          dotnet test tests/Lake.Delta.Tests --nologo
 
   ci:
     name: ci
