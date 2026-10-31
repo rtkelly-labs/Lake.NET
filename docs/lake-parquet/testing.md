@@ -141,11 +141,11 @@ Lake.Parquet is supported under native AOT and trimming, and that is enforced an
 
 | Mode | What it checks |
 |---|---|
-| `api` | the calls generated readers and writers make (typed fields of every type, nullable reads into `T?[]`, strings as chars and as UTF-8, decimals with their scale, timestamps with their kind, statistics) under every codec, encoding hint and page layout, and with encryption |
+| `api` | the calls generated readers and writers make (typed fields of every type, nullable reads into `T?[]`, strings as chars and as UTF-8, decimals with their scale, timestamps with their kind, statistics) under every codec, encoding hint and page layout, and with encryption; enum columns refused alike (they were the serializer's) |
 | `cases <from> <count>` | the conformance harness's generated cases, checked by its library-only oracles (values, levels, field IDs, row counts, statistics) |
 | `write`/`read <from> <count> <dir>` | files one build wrote, read by the other: JIT to native and native to JIT |
-| `hashes <from> <count>` | the files written natively are byte for byte the JIT build's (not encrypted ones, whose nonces are random, nor gzip, whose zlib native AOT links itself) |
-| `corpus <dir>` | upstream's test files decoded to the same schema, values and levels as on the JIT |
+| `hashes <from> <count>` | the files written natively are byte for byte the JIT build's; gzip cases compared written uncompressed, since native AOT links its own zlib (the gzip and encrypted files themselves are covered by the cross-build reads) |
+| `corpus <dir>` | upstream's test files decoded to the same schema, values and levels as on the JIT, encrypted ones with their documented keys; the one malformed file (a FIXED_LEN_BYTE_ARRAY with no length, refused by parquet-cpp too) must be refused, and anything else failing fails the run |
 
 CI's `aot` job (required by `lake-ci`) runs every mode, 3,000 fixed and 2,000 fresh seeds, on Linux x64, Windows x64
 and macOS arm64. Locally:
