@@ -43,7 +43,7 @@ Lake.NET 1.0 ships when every row is ✅ for every format. Status columns are up
 | G8 | Security: threat model, authorization matrix, credential scoping, storage confinement | 🟡 see gap review §2 | 🟡 path and SQL confinement open | ⏳ | 🟡 scheme routing ✅ |
 | G9 | Storage conformance suite on every FileIO; object stores beyond S3 or explicit refusal | 🟡 local + S3; others refused ✅ | ⏳ local only | ⏳ | ⏳ |
 | G10 | CI fails closed; scheduled heavy suites; code and pathway coverage with ratchets | 🟡 schedules ✅, unit-suite coverage ratchet ✅; fail-closed engines in #26, pathway coverage ⏳ | ⏳ | ⏳ | 🟡 |
-| G11 | Resource envelope: memory, request counts and time budgets at scale | ⏳ | 🟡 bench tool | ⏳ | ⏳ |
+| G11 | Resource envelope: memory, request counts and time budgets at scale | 🟡 exact request budgets (`RequestBudgetTests`), weekly micro benchmarks; scale suite ⏳ | 🟡 bench tool | ⏳ | ⏳ |
 | G12 | Platforms: Linux, Windows, macOS; net10 + netstandard2.0 consumers executed; both Parquet backends | 🟡 Windows/macOS `platform` job (local paths, maintenance, golden tables); net472 execution ⏳ | 🟡 both backends on branch | ⏳ | ⏳ |
 | G13 | Dependency direction enforced; one format never pulls in another | ✅ `DependencyDirectionTests` | ⏳ needs phase 3 | ⏳ | ✅ |
 | G14 | Per-package versions, API files, package validation against the last release | 🟡 package validation on every pack | ⏳ | ⏳ | 🟡 |

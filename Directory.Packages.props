@@ -42,6 +42,8 @@
     <PackageVersion Include="xunit" Version="2.9.2" />
     <!-- Code coverage (Directory.Build.targets adds it to every test project; CI merges the reports with ReportGenerator) -->
     <PackageVersion Include="coverlet.collector" Version="6.0.4" />
+    <!-- Micro benchmarks (benchmarks/Lake.Benchmarks.Micro; weekly in .github/workflows/benchmarks.yml) -->
+    <PackageVersion Include="BenchmarkDotNet" Version="0.15.2" />
     <PackageVersion Include="xunit.runner.visualstudio" Version="2.8.2" />
     <PackageVersion Include="Xunit.SkippableFact" Version="1.5.23" />
     <!-- Property-based / model-based testing (same major as Parquet.SourceGenerator's suite) -->
