@@ -150,7 +150,7 @@ public sealed partial class DuckLakeCatalog
             await db.TableStats.Where(x => goneTables.Contains(x.TableId)).ExecuteDeleteAsync(ct);
             await db.TableColumnStats.Where(x => goneTables.Contains(x.TableId)).ExecuteDeleteAsync(ct);
             await db.SchemaVersions.Where(x => goneTables.Contains(x.TableId)).ExecuteDeleteAsync(ct);
-            foreach (var inlined in await db.InlinedDataTables.Where(x => goneTables.Contains(x.TableId)).Select(x => x.TableName).ToListAsync(ct))
+            foreach (var inlined in (await db.InlinedDataTables.Where(x => goneTables.Contains(x.TableId)).ToListAsync(ct)).Select(DuckLakeInlinedData.Checked))
                 await RawAsync(db, $"DROP TABLE IF EXISTS {Db.Quote(inlined)}", 1, ct);
             await db.InlinedDataTables.Where(x => goneTables.Contains(x.TableId)).ExecuteDeleteAsync(ct);
             foreach (var id in goneTables) await RawAsync(db, $"DROP TABLE IF EXISTS {Db.Quote(InlinedDeleteTable(id))}", 1, ct);
@@ -158,7 +158,7 @@ public sealed partial class DuckLakeCatalog
 
         // Inlined rows deleted before every retained snapshot, and inlined deletions of files that are gone.
         var (rowId, begin, end) = DuckLakeInlinedData.SystemColumns(db.Is11);
-        foreach (var inlined in await db.InlinedDataTables.Select(x => x.TableName).ToListAsync(ct))
+        foreach (var inlined in (await db.InlinedDataTables.ToListAsync(ct)).Select(DuckLakeInlinedData.Checked))
             await RawAsync(db, $"DELETE FROM {Db.Quote(inlined)} WHERE {end} IS NOT NULL AND NOT EXISTS " +
                                $"(SELECT 1 FROM ducklake_snapshot s WHERE s.snapshot_id >= {Db.Quote(inlined)}.{begin} AND s.snapshot_id < {Db.Quote(inlined)}.{end})", 1, ct);
         if (fileIds.Count > 0)
