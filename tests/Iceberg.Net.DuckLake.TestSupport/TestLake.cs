@@ -50,9 +50,12 @@ public sealed class TestLake : IDisposable
     public DuckLakeStore Store => _store ??= Backend switch
     {
         // Pooling off: DuckDB opens the same file between our calls, and a pooled handle would outlive the test.
-        CatalogBackend.Sqlite => DuckLakeStore.Sqlite($"Data Source={SqliteFile};Pooling=False"),
-        _ => DuckLakeStore.PostgreSql(CreateDatabase()),
+        CatalogBackend.Sqlite => DuckLakeStore.Sqlite($"Data Source={SqliteFile};Pooling=False", ConfigureStore),
+        _ => DuckLakeStore.PostgreSql(CreateDatabase(), ConfigureStore),
     };
+
+    /// <summary>EF Core options for the store (interceptors such as <see cref="CatalogFaults"/>); set before first use of <see cref="Store"/>.</summary>
+    public Action<Microsoft.EntityFrameworkCore.DbContextOptionsBuilder>? ConfigureStore { get; set; }
 
     /// <summary>Whether the catalog database already exists (DuckDB then attaches without DATA_PATH).</summary>
     public bool CatalogExists => Backend == CatalogBackend.Sqlite ? File.Exists(SqliteFile) : _catalogCreated;

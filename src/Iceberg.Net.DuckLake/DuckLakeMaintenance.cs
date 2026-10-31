@@ -1,3 +1,4 @@
+using System.Data.Common;
 using Iceberg.Net.IO;
 using Microsoft.EntityFrameworkCore;
 
@@ -79,9 +80,38 @@ public sealed partial class DuckLakeCatalog
     public Task<DuckLakeExpiry> ExpireSnapshotsAsync(DateTimeOffset olderThan, bool dryRun = false, CancellationToken ct = default) =>
         ExpireAsync(snapshots => snapshots.Where(s => s.SnapshotTime < olderThan), dryRun, ct);
 
+    /// <summary>
+    /// Expiry in one database transaction, retried after a transient failure (nothing was written). When <c>COMMIT</c>
+    /// fails, the expiry happened if none of the chosen snapshots is left; certainly not after a transient failure, it is
+    /// retried; otherwise the outcome is unknown (<see cref="DuckLakeCommitStateUnknownException"/>; rerunning is safe).
+    /// </summary>
     private async Task<DuckLakeExpiry> ExpireAsync(Func<List<SnapshotEntity>, IEnumerable<SnapshotEntity>> choose, bool dryRun, CancellationToken ct)
     {
         using var scope = DuckLakeTelemetry.Start("ducklake.maintenance.expire", this);
+        for (var attempt = 0; ; attempt++)
+        {
+            try
+            {
+                var expiry = await ExpireOnceAsync(scope, choose, dryRun, ct);
+                scope.Succeeded();
+                return expiry;
+            }
+            catch (Exception e) when (DuckLakeFaults.IsTransient(e) && attempt + 1 < Math.Max(1, Options.MaxCommitAttempts))
+            {
+                scope.Retried(attempt + 2);
+                await Task.Delay(DuckLakeFaults.Backoff(Options, attempt), ct);
+            }
+            catch (Exception e)
+            {
+                scope.Failed(e);
+                throw;
+            }
+        }
+    }
+
+    private async Task<DuckLakeExpiry> ExpireOnceAsync(DuckLakeTelemetry.Scope scope, Func<List<SnapshotEntity>, IEnumerable<SnapshotEntity>> choose, bool dryRun,
+        CancellationToken ct)
+    {
         await using var db = Context(scope);
         await db.Database.OpenConnectionAsync(ct);
         await using var tx = await db.Database.BeginTransactionAsync(ct);
@@ -89,11 +119,7 @@ public sealed partial class DuckLakeCatalog
         if (snapshots.Count == 0) throw new InvalidDataException("ducklake_snapshot is empty");
         var latest = snapshots[^1].SnapshotId;
         var expired = choose(snapshots).Select(s => s.SnapshotId).Where(id => id != latest).Distinct().Order().ToList();
-        if (expired.Count == 0)
-        {
-            scope.Succeeded();
-            return new DuckLakeExpiry([], []);
-        }
+        if (expired.Count == 0) return new DuckLakeExpiry([], []);
         await db.Snapshots.Where(s => expired.Contains(s.SnapshotId)).ExecuteDeleteAsync(ct);
 
         // A versioned row is kept while some retained snapshot s has begin_snapshot <= s < end_snapshot.
@@ -167,10 +193,32 @@ public sealed partial class DuckLakeCatalog
                     await RawAsync(db, $"DELETE FROM {Db.Quote(InlinedDeleteTable(tableId))} WHERE file_id IN ({IdList(fileIds)})", 1, ct);
 
         await BulkInsert.InsertAsync(db, scheduled, ct);
-        if (dryRun) await tx.RollbackAsync(ct);
-        else await tx.CommitAsync(ct);
-        scope.Succeeded();
-        return new DuckLakeExpiry(expired, scheduled.Select(f => f.PathIsRelative == true ? DataPath + f.Path : f.Path).ToList());
+        var result = new DuckLakeExpiry(expired, scheduled.Select(f => f.PathIsRelative == true ? DataPath + f.Path : f.Path).ToList());
+        if (dryRun)
+        {
+            await tx.RollbackAsync(ct);
+            return result;
+        }
+        try
+        {
+            await tx.CommitAsync(ct);
+        }
+        catch (Exception e) when (e is not OperationCanceledException)
+        {
+            try { await tx.RollbackAsync(CancellationToken.None); }
+            catch (Exception r) when (r is DbException or InvalidOperationException) { /* gone with the connection */ }
+            bool? landed;
+            try
+            {
+                await using var check = Context(scope);
+                landed = !await check.Snapshots.AnyAsync(s => expired.Contains(s.SnapshotId), CancellationToken.None);
+            }
+            catch (Exception c) when (c is DbException or InvalidOperationException) { landed = null; }
+            if (landed == true) return result;
+            if (landed == false && DuckLakeFaults.IsTransient(e)) throw;
+            throw new DuckLakeCommitStateUnknownException("Expiry failed while committing; it may or may not have been applied (rerunning it is safe)", e);
+        }
+        return result;
     }
 
     /// <summary>Each table's directory (relative file paths resolve against it), from its latest catalog row.</summary>
