@@ -40,7 +40,7 @@ pinned local repository so CI does not depend on `extensions.duckdb.org`.
 | DuckDB.NET on NuGet | `1.5.6.1` (built on DuckDB 1.5.6), 2026-10-16 | nuget.org `DuckDB.NET.Data.Full` |
 | Lake.NET in-process DuckDB | DuckDB.NET 1.5.6.1 → DuckDB 1.5.6 | `Directory.Packages.props` |
 | Lake.NET Python oracles | DuckDB 1.5.5 (Iceberg, DuckLake 1.0); DuckDB 2.0.0 (DuckLake 1.1, extension unpinned) | `interop/pyproject.toml`, DuckLake branch `ci.yml` |
-| Known 1.5 → 2.0 differences that touched our tests | Lambda syntax (use a form both accept); view SQL stored unqualified by 2.0; encrypted-file filtered reads fail in DuckDB (pinned as a characterization test) | DuckLake branch commits `fb31b57`, `48f8cb0`, `7c03913` |
+| Known 1.5 → 2.0 differences that touched our tests | Lambda syntax (use a form both accept); view SQL stored unqualified by 2.0; encrypted-file filtered reads fail in DuckDB (pinned as a characterization test) | `lake/recover-ducklake` commits `a6d24b1`, `d635bc0`, `5618778` (`fb31b57`, `48f8cb0`, `7c03913` on `ccr-87fadcf9-bxi9wr`) |
 
 **Checklist when DuckDB.NET publishes 2.0:**
 
