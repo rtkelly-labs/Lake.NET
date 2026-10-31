@@ -196,6 +196,29 @@ public sealed class ModelBasedTests
         return row.Length == t.Schema.Columns.Count ? row : [.. row, .. new object?[t.Schema.Columns.Count - row.Length]];
     }
 
+    /// <summary>
+    /// Runs a keyed mutation. Equality deletes are refused when a partition source column is outside the key (after
+    /// EvolveSpec adds bucket(id), a key on event_date alone no longer decides a row's partition). A refusal is
+    /// accepted only when some spec makes it possible, and must leave the table unchanged; the model then stays as it is.
+    /// </summary>
+    private static async Task<bool> AppliedAsync(Table t, DeleteStrategy strategy, IEnumerable<string> key, Func<Task> mutate)
+    {
+        var keyNames = key.ToHashSet(StringComparer.Ordinal);
+        var mayRefuse = strategy == DeleteStrategy.EqualityDeletes && t.Metadata.PartitionSpecs.Any(sp => sp.Fields.Any(f =>
+            f.Transform is not VoidTransform && !keyNames.Contains(t.Schema.FindField(f.SourceId)?.Name ?? "")));
+        var before = t.Metadata.CurrentSnapshotId;
+        try
+        {
+            await mutate();
+            return true;
+        }
+        catch (ValidationException e) when (mayRefuse && e.Message.StartsWith("Equality deletes require every partition source", StringComparison.Ordinal))
+        {
+            if (t.Metadata.CurrentSnapshotId != before) throw new InvalidOperationException("a refused equality delete changed the table");
+            return false;
+        }
+    }
+
     private static async Task Apply(Table t, Op op, List<Row> model)
     {
         switch (op)
@@ -205,17 +228,20 @@ public sealed class ModelBasedTests
                 model.AddRange(x.Rows);
                 break;
             case Upsert x:
-                await TableMutations.UpsertAsync(t, x.Rows.Select(r => Full(t, r)).ToList(), strategy: x.S);
+                if (!await AppliedAsync(t, x.S, t.Schema.IdentifierFieldIds.Select(id => t.Schema.FindField(id)!.Name),
+                    () => TableMutations.UpsertAsync(t, x.Rows.Select(r => Full(t, r)).ToList(), strategy: x.S))) break;
                 model.RemoveAll(m => x.Rows.Any(r => (r.Id, r.Day) == (m.Id, m.Day)));
                 model.AddRange(x.Rows);
                 break;
             case ReplaceDays x:
-                await TableMutations.ReplaceGroupsAsync(t, x.Rows.Select(r => Full(t, r)).ToList(), ["event_date"], x.S);
+                if (!await AppliedAsync(t, x.S, ["event_date"],
+                    () => TableMutations.ReplaceGroupsAsync(t, x.Rows.Select(r => Full(t, r)).ToList(), ["event_date"], x.S))) break;
                 model.RemoveAll(m => x.Rows.Any(r => r.Day == m.Day));
                 model.AddRange(x.Rows);
                 break;
             case DeleteKeys x:
-                await TableMutations.DeleteByKeysAsync(t, ["id", "event_date"], x.Keys.Select(k => new object?[] { k.Id, 19_700 + k.Day }), x.S);
+                if (!await AppliedAsync(t, x.S, ["id", "event_date"],
+                    () => TableMutations.DeleteByKeysAsync(t, ["id", "event_date"], x.Keys.Select(k => new object?[] { k.Id, 19_700 + k.Day }), x.S))) break;
                 model.RemoveAll(m => x.Keys.Contains((m.Id, m.Day)));
                 break;
             case DeleteWhereIdMod x:
