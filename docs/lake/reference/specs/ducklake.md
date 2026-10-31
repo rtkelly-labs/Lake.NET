@@ -151,7 +151,8 @@ Data files are never rewritten on retry.
 | Compact (merge/rewrite) a file | delete from or compaction of that file; drop of T. Different files of one table commit side by side | ✅ `Compaction_conflicts_with_deletes_from_the_same_files_only` |
 | (any) | a kind this library does not know | conflicts only if it names a table we touch (`Unknown_change_kinds_conflict_only_on_tables_we_touch`) |
 
-Spec also retries SQLite `database is locked` during metadata writes; Lake.NET does not (gap D4). DuckDB never commits
+Spec also retries SQLite `database is locked` during metadata writes; Lake.NET does not until PR #58 lands (gap D4: it
+retries BUSY/LOCKED and PostgreSQL 40001/40P01 and recognises a lost commit acknowledgement). DuckDB never commits
 *concurrently* with Lake.NET in tests, only in turn (gap D5).
 
 ## 5. Data files and Parquet
@@ -263,9 +264,10 @@ Not implemented, failing with `NotSupportedException` when met: `variant`, geome
 | Scope | All Parquet data and delete files; Puffin vectors unencrypted | Also maintenance and flush outputs (`Maintenance_and_flushes_write_encrypted_files_too`) |
 | Added files | — | Refused (`Existing_files_cannot_be_added_to_an_encrypted_lake`) |
 
-Security consequence: the catalog database holds every key, so catalog read access is data read access. Open
-(gap S12): a NULL per-file key in an encrypted lake falls back to a plaintext read; no wrong-key, truncation,
-flipped-byte, swapped-file or key-leak tests.
+Security consequence: the catalog database holds every key, so catalog read access is data read access. Open until
+PR #58 lands (gap S12): a NULL per-file key in an encrypted lake falls back to a plaintext read; no wrong-key,
+truncation, flipped-byte or key-leak tests. After #58, swapping two files written together (one shared key, no AAD
+prefix) remains undetected.
 
 ## 10. Maintenance
 
@@ -349,7 +351,8 @@ move it in-process via DuckDB.NET: [../duckdb.md](../duckdb.md).
 Spec traceability: `[Spec("ducklake: …")]` links to `docs/spec/ducklake-sections.json` (98 sections);
 `tools/spec_trace.py matrix --check`, `drift --ducklake`.
 
-**Open gaps** ([gap review](../../verification/gap-review-2026-10.md)):
+**Open gaps** ([gap review](../../verification/gap-review-2026-10.md)). D4, D7, ST2 and S10–S12 are fixed in PR #58
+(stacked on the DuckLake PRs); the rows stay until it merges:
 
 | Gap | What is missing | Where |
 |---|---|---|
