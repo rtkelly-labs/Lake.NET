@@ -106,13 +106,13 @@ default options.
 
 ## Known issues
 
-These break decision 9 (a value silently changed). Each is fixed as a change with a failing test; this list shrinks
-as they land.
+Each broke decision 9 (a value silently changed) and is fixed as a change with a failing test, or waits on a decision.
 
 | Issue | Page | Status |
 |---|---|---|
-| A `decimal` with more digits than its column's precision is written anyway, making a file that breaks its own schema; digits beyond its scale are truncated | [decimal](types/decimal.md#known-issues) | Fix planned |
-| A `DateTime` outside 1677-09-21 … 2262-04-11 written as TIMESTAMP(ns) overflows and reads back as another date | [datetime](types/datetime.md#known-issues) | Fix planned |
+| Digits beyond a decimal column's scale are truncated on write (upstream's behaviour, kept) | [decimal](types/decimal.md#known-issues) | Needs a decision |
 | A TIMESTAMP that is not UTC-adjusted (a wall-clock time) converts a `Local` value to UTC on write, and reads as `Local` rather than `Unspecified` | [datetime](types/datetime.md#known-issues) | Needs a decision |
 | A DECIMAL that does not fit `System.Decimal` was rounded on read | [decimal](types/decimal.md) | Fixed, `lake(0061)` |
 | Columns in optional structs and lists failed through the typed API | [nested](types/nested.md) | Fixed, `lake(0062)` |
+| A `DateTime` outside 1677–2262 written as TIMESTAMP(ns) wrapped to another date | [datetime](types/datetime.md) | Fixed, `lake(0064)` |
+| A `decimal` wider than its column's precision was written, breaking the file's schema | [decimal](types/decimal.md) | Fixed, `lake(0065)` |

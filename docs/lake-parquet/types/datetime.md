@@ -36,12 +36,10 @@ Each representation keeps what its unit holds, so the field's unit is the choice
 | Representation | Range |
 |---|---|
 | TIMESTAMP(ms), TIMESTAMP(µs), INT96, DATE | all of `DateTime`, 0001-01-01 to 9999-12-31 |
-| TIMESTAMP(ns) | 1677-09-21 00:12:43 to 2262-04-11 23:47:16 UTC (a signed 64-bit count of nanoseconds since 1970) |
+| TIMESTAMP(ns) | 1677-09-21 00:12:43 to 2262-04-11 23:47:16 UTC (a signed 64-bit count of nanoseconds since 1970); a value outside is refused with `ArgumentOutOfRangeException` (`lake(0064)`; upstream wrapped it, so 1600-01-01 read back as 2184-07-20) |
 
 ## Known issues
 
-- **TIMESTAMP(ns) out of range overflows silently.** A `DateTime` outside 1677–2262 is written as a wrapped 64-bit
-  integer: 1600-01-01 reads back as 2184-07-20. To be fixed: refuse the value, naming the column and the range.
 - **Timestamps that are not UTC-adjusted.** `isAdjustedToUTC: false` means a wall-clock time with no zone. Today a
   `Local` value is still converted to UTC on write (12:00 in New York is stored as 17:00), and every value reads back
   with `Kind = Local`. For wall-clock semantics the value should be stored as it is and read back as `Unspecified`.
@@ -50,6 +48,6 @@ Each representation keeps what its unit holds, so the field's unit is the choice
 
 ## Tests
 
-`Types/EndToEndTypeTest`, `Types/DateBeforeEpochTest`, the conformance harness's timestamp kinds
+`Types/EndToEndTypeTest`, `Types/DateBeforeEpochTest`, `Types/TimestampNanosRangeTest`, the conformance harness's timestamp kinds
 (millis, micros, nanos, UTC-adjusted or not, legacy TIMESTAMP_MILLIS) against parquet-cpp in both directions, and the
 native AOT suite (`api`: every `DateTimeFormat`).

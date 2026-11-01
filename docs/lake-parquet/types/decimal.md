@@ -1,6 +1,6 @@
 # decimal and BigDecimal
 
-[Back to the type matrix](../types.md) · Status: write ⚠, read ⚠
+[Back to the type matrix](../types.md) · Status: write ⚠ (scale truncated), read ⚠ (exact or refused)
 
 ## Mapping
 
@@ -33,16 +33,17 @@ INT64 decimal keeps the column's scale (`1.50`). The values are equal.
 
 Statistics: an INT32 or INT64 decimal's bounds decode as `decimal`; a byte-array decimal's decode as `BigDecimal`.
 
+## Precision and scale on write
+
+- **A value wider than the column's precision is refused** (`ParquetException`), on INT32, INT64 and
+  FIXED_LEN_BYTE_ARRAY alike (`lake(0065)`). Upstream wrote it, making a file that breaks its own schema:
+  `DecimalDataField("x", 5, 2)` took `12345.6m`.
+- **Digits beyond the scale are truncated**, as upstream does and tests: `DecimalDataField("x", 9, 2)` writes `1.239m`
+  as 1.23. Decision 9 keeps upstream's default where changing it would change existing results, so this stays.
+
 ## Known issues
 
-- **A value with more digits than the column's precision is written anyway.** `DecimalDataField("x", 5, 2)` accepts
-  `12345.6m` and writes 1234560, seven digits in a five-digit column. The library reads it back, but the file breaks
-  its own schema: engines that check precision (Spark, Trino) reject or misread it. Only a value too wide for the
-  physical type (`decimal.MaxValue` in an INT64) is refused today.
-- **Digits beyond the scale are truncated.** `DecimalDataField("x", 9, 2)` writes `1.239m` as 1.23, with no error.
-
-Both are to be fixed as one change: a value that does not fit the column's precision and scale is refused, naming the
-value and the column; rounding becomes something asked for, not a default.
+- **Truncation beyond the scale is silent.** Whether to refuse it by default, or offer a strict option, is open.
 
 ## Tests
 
