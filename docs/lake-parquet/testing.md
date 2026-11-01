@@ -154,6 +154,32 @@ x64; macOS arm64 runners cost ten times as much, so that leg runs on a pull requ
 dispatched with `macos: true` (before a release, at least). Upstream's own `build.yml` is disabled in the fork's Actions
 settings; the `suite` job runs upstream's tests.
 
+**Instruction sets.** Native AOT compiles hardware intrinsics for a fixed instruction set, chosen at publish time. A
+default x64 publish has 128-bit vectors only. Measured on .NET 10, linux-x64, with a probe of
+`Vector*.IsHardwareAccelerated`:
+
+| Native AOT publish | Vector128 | Vector256 | Vector512 |
+|---|---|---|---|
+| default | ✓ | ✗ | ✗ |
+| `-p:IlcInstructionSet=x86-64-v3` | ✓ | ✓ | ✗ |
+| `-p:IlcInstructionSet=x86-64-v4` | ✓ | ✓ | ✓ |
+
+Under the JIT, .NET also leaves `Vector512` off on CPUs where it would slow smaller loops; `DOTNET_PreferredVectorBitWidth=512`
+turns it on. Before `lake(0087)`, the library's vector paths needed 256 bits, so a default native AOT build (and
+Arm64) ran their scalar fallbacks. Writing a boolean column was 45× slower than it now is, and decoding
+byte-stream-split floats and doubles 1.9× slower (BenchmarkDotNet numbers in the record). The native suite now runs
+in CI at the default instruction set, at `x86-64-v3` and on Arm64, and was run locally at `x86-64-v4` too. Every run
+writes files byte for byte the JIT build's. The `build` job's tests prefer 512-bit vectors, so the AVX-512 paths run
+where the runner has them.
+
+Further intrinsics work, each a change with its own benchmarks:
+- the 256- and 512-bit boolean paths write each vector's bits to the stream separately, which makes them slower
+  than the buffered 128-bit path (227 µs against 105 µs per million values);
+- byte-stream-split decoding has no real SIMD transpose yet;
+- bit-unpacking (dictionary indexes, levels) is unrolled scalar code, 6,600 generated lines, that a vector unpack
+  could replace;
+- statistics' min and max could use `TensorPrimitives`, keeping their NaN and signed-zero rules.
+
 **Coverage.** The target (decision 6): every line the package ships is run by the regression suite, and a line
 nothing can reach is left out. Measured on the package as it ships (members and branches stripped, renamed), on
 `staging/perf` at `8b7364fa`, with `DOTNET_PreferredVectorBitWidth=512` so the AVX-512 paths run (CI's `build` job

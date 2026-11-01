@@ -57,7 +57,12 @@ code and its tooling follow it.
    option, off by default.
 8. **Lake.Parquet supports native AOT and trimming, verified on every build.** The package is analyzer-clean with
    `IsAotCompatible` as a build error, and a native AOT regression suite, sharing the conformance harness's generator,
-   runs it natively against the JIT build (`testing.md`, "Native AOT"). A change that breaks either does not merge.
+   runs it natively against the JIT build (`testing.md`, "Native AOT"). A change that breaks either does not merge. Vector
+   code is written for what native AOT and Arm64 have: native AOT's default x64 instruction set accelerates 128-bit
+   vectors only (`Vector256.IsHardwareAccelerated` is false unless the app sets `IlcInstructionSet`), and Arm64's
+   vectors are 128 bits, so every vectorized path has a 128-bit form. CI runs the native suite at the default
+   instruction set, at `x86-64-v3` (AVX2) and on Arm64. Apps that deploy to AVX2 hardware can publish with
+   `<IlcInstructionSet>x86-64-v3</IlcInstructionSet>` for the wider paths.
 9. **Native .NET types are supported where the format has a matching type, losslessly by default.** `System.Half`
    for FLOAT16, `TimeOnly` and `TimeSpan` for TIME, and their kin are read and written through the core API, each
    with tests against other writers (the conformance harness's parquet-cpp oracle, both directions) and in the native
