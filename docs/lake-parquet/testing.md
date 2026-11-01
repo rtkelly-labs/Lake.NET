@@ -154,7 +154,7 @@ x64; macOS arm64 runners cost ten times as much, so that leg runs on a pull requ
 dispatched with `macos: true` (before a release, at least). Upstream's own `build.yml` is disabled in the fork's Actions
 settings; the `suite` job runs upstream's tests.
 
-**Coverage.** The modes together cover 91% of the package's lines (12,235 of 13,507). Code nothing in the package
+**Coverage.** The modes together cover 91% of the package's lines (12,375 of 13,562). Code nothing in the package
 calls is left out of it (decision 6; `lake(0050)` removed the 6,632 lines of uncalled big-endian bit-packing kernels),
 so the figure is of what ships. Uncalled code is found mechanically: ILLink in library mode, on a Lake build without
 its `InternalsVisibleTo` entries, removes every method the public API cannot reach (`lake(0054)`); those upstream's
