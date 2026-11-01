@@ -44,7 +44,11 @@ code and its tooling follow it.
    way, member by member through the hashed manifest (`eng/lake/strip-members.json`), so that everything the package
    ships is code the native AOT suite can run: first, upstream's big-endian bit-packing kernels, which only the
    deprecated `BIT_PACKED` encoding would use and which the reader refuses. A hash that changes, or a caller that
-   appears, fails the build until someone checks the member is still unneeded.
+   appears, fails the build until someone checks the member is still unneeded. Where a member is needed but one of its
+   branches served only the serializer (a dispatch arm for `string` values, whose fields are `ReadOnlyMemory<char>`
+   in the core API), the branch is left out the same way, by its condition and a hash of the branch. The coverage
+   target follows: every line the package ships is run by the regression suite (`testing.md`, "Coverage"), and a line
+   the public API cannot reach is either stripped or tested from the inside.
 7. **Performance work is on the core path, measured, and changes no file layout by default.** Changes target the calls
    generated readers and writers make (page I/O, compression, encoding, levels, statistics), each with its numbers in
    its record. Anything that changes the files written (data pages within a chunk, a page index, bloom filters) is an
@@ -57,19 +61,35 @@ code and its tooling follow it.
    with tests against other writers (the conformance harness's parquet-cpp oracle, both directions) and in the native
    AOT suite. Where a type has more than one Parquet representation, or a conversion could lose precision (TIME in
    nanoseconds as 100 ns ticks) or change what existing code reads (upstream reads TIME as `int`/`long`), the mapping
-   is opt-in, by an option or an explicit field, and the default stays upstream's. Every type's mapping, and each exception to
+   is opt-in, by an option or an explicit field, and the default stays upstream's. One exception, decided
+   1 November 2026: a value the file cannot hold exactly is refused on write rather than changed, even where upstream
+   changes it. A decimal with more fractional digits than its column's scale throws unless
+   `ParquetOptions.RoundDecimalsToScale` asks for upstream's truncation. Wall-clock semantics for TIMESTAMP columns
+   that are not UTC-adjusted (store the value as it is, read it back as `Unspecified`) are asked for with
+   `ParquetOptions.UnadjustedTimestampsAsWallClock`; the default stays upstream's. Every type's mapping, and each exception to
    it, is in [types.md](types.md).
 10. **The fork publishes its own package, `Lake.Parquet`**, renamed at build time, beside Parquet.Net rather than in
    place of it, with upstream's licence and attribution.
 
+11. **Nested data: the library owns levels and offsets; mapping objects belongs to Parquet.SourceGenerator.** The
+   package gets no reflection-based object mapper (decision 6). For lists, maps and structs at any depth it offers
+   leaf columns with definition and repetition levels (`WriteAllPartsAsync`, `ReadRawAsync`, and the typed `ReadAsync`
+   and `WriteAsync`), and an offsets layer between them: for a leaf, one offsets array per repeated ancestor and one
+   validity mask per optional ancestor, with the packed values — Arrow's layout — and the reverse for writing. These
+   are functions over spans, with no reflection or runtime generics, so native AOT is not affected. Generated code
+   assembles `List<List<T>>`, `Dictionary<K, V>` and nested records by walking offset ranges, and Lake.NET's read path
+   and Arrow bridge take the same layout. A write whose sibling leaves disagree on their shared ancestors' levels is
+   refused, since nothing else would catch it. Proven against parquet-cpp in the conformance harness (lists of lists,
+   maps of lists, lists of structs holding lists) and in the native AOT suite.
+
 ## Upstream
 
-11. **Changes go upstream by hand only.** Upstream does not accept issues, pull requests or comments written by an LLM.
+12. **Changes go upstream by hand only.** Upstream does not accept issues, pull requests or comments written by an LLM.
    A person proposes a change from its change branch, using its record ([upstreaming.md](upstreaming.md)). The aim is a
    stack that shrinks: a change leaves when upstream has it or an equivalent.
 
 ## Where things live
 
-12. **Decisions live in Lake.NET, detail lives with the change.** This folder is the fork's design and process; the
+13. **Decisions live in Lake.NET, detail lives with the change.** This folder is the fork's design and process; the
     fork carries its code, its tooling, a short `README.md` and `AGENTS.md`, and the per-change records, which are
     written in the change's own pull request.
