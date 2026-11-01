@@ -153,7 +153,7 @@ CI's `aot` job (required by `lake-ci`) runs every mode, 3,000 fixed and 2,000 fr
 x64; macOS arm64 runners cost ten times as much, so that leg runs on a pull request labelled `macos` or a run
 dispatched with `macos: true` (before a release, at least).
 
-**Coverage.** The modes together cover 90% of the package's lines (11,777 of 13,051). Code nothing in the package
+**Coverage.** The modes together cover 91% of the package's lines (11,837 of 13,066). Code nothing in the package
 calls is left out of it (decision 6; `lake(0050)` removed the 6,632 lines of uncalled big-endian bit-packing kernels),
 so the figure is of what ships. Uncalled code is found mechanically: ILLink in library mode, on a Lake build without
 its `InternalsVisibleTo` entries, removes every method the public API cannot reach (`lake(0054)`); those upstream's
