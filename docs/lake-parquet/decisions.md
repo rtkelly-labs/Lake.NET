@@ -48,7 +48,9 @@ code and its tooling follow it.
    branches served only the serializer (a dispatch arm for `string` values, whose fields are `ReadOnlyMemory<char>`
    in the core API), the branch is left out the same way, by its condition and a hash of the branch. The coverage
    target follows: every line the package ships is run by the regression suite (`testing.md`, "Coverage"), and a line
-   the public API cannot reach is either stripped or tested from the inside.
+   the public API cannot reach is either stripped or tested from the inside. Lines that can be neither (null checks the
+   compiler's nullable analysis needs, big-endian and AOT-only paths, unreachable throws inside expressions) stay,
+   each listed with its reason in `testing.md`; upstream's code is not rewritten just to reach 100%.
 7. **Performance work is on the core path, measured, and changes no file layout by default.** Changes target the calls
    generated readers and writers make (page I/O, compression, encoding, levels, statistics), each with its numbers in
    its record. Anything that changes the files written (data pages within a chunk, a page index, bloom filters) is an

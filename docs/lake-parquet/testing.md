@@ -164,6 +164,12 @@ sets it; the `suite` job keeps the default paths):
 | The native AOT suite's modes (`api`, `cases`, `write`/`read`, `hashes`, `corpus`), on its JIT build | 92.3% |
 | Those modes plus the xunit suite against the same build | **99.8% (13,693 of 13,725)** |
 
+**This is the done state, decided 1 November 2026:** every reachable line is tested, unreachable code is left out,
+and each line that remains is listed below with its reason. Upstream's code is not rewritten just to reach a literal
+100%. A change that adds code adds the check that runs it, and a new unreached line joins this table only with a
+reason. Native AOT is verified on every push by CI's `aot` jobs (Linux and Windows; macOS on request), which publish
+and run the whole native suite.
+
 Three rounds of coverage tests (`lake(0074)`, `lake(0083)`, `lake(0085)`) took it from 96.2%. Together with the earlier
 rounds, they found nine defects, each fixed with a failing test. Code no caller can reach left the package
 (`lake(0075)`, `lake(0084)`, `lake(0086)`). Every one of the 32 lines left is accounted for:
