@@ -116,3 +116,4 @@ Each broke decision 9 (a value silently changed) and is fixed as a change with a
 | Columns in optional structs and lists failed through the typed API | [nested](types/nested.md) | Fixed, `lake(0062)` |
 | A `DateTime` outside 1677–2262 written as TIMESTAMP(ns) wrapped to another date | [datetime](types/datetime.md) | Fixed, `lake(0064)` |
 | A `decimal` wider than its column's precision was written, breaking the file's schema | [decimal](types/decimal.md) | Fixed, `lake(0065)` |
+| A chunk of nulls only wrote min = max = 0 in its statistics (integers, decimals, INT96) | | Fixed, `lake(0069)` |
