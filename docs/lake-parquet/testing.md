@@ -154,26 +154,25 @@ x64; macOS arm64 runners cost ten times as much, so that leg runs on a pull requ
 dispatched with `macos: true` (before a release, at least). Upstream's own `build.yml` is disabled in the fork's Actions
 settings; the `suite` job runs upstream's tests.
 
-**Coverage.** Measured on the package as it ships (members stripped, renamed), on `master` at `1429aa1c`:
+**Coverage.** The target (decision 6): every line the package ships is run by the regression suite, and a line
+nothing can reach is left out. Measured on the package as it ships (members and branches stripped, renamed), on
+`staging/perf` at `73bd078b`:
 
 | Suite | Lines covered |
 |---|---|
-| The native AOT suite's modes (`api`, `cases`, `write`/`read`, `hashes`, `corpus`), on its JIT build | 91.8% (12,485 of 13,606) |
-| Those, plus the xunit suite against the same build (CI's `build` job) | 96.2% (13,084 of 13,606) |
+| The native AOT suite's modes (`api`, `cases`, `write`/`read`, `hashes`, `corpus`), on its JIT build | 92.3% (12,648 of 13,701) |
+| Those, plus the xunit suite against the same build (CI's `build` job) | 99.2% (13,630 of 13,733) |
 
-The 522 lines left, by why:
+Two rounds of coverage tests (`lake(0074)`, `lake(0083)`) took the combined figure from 96.2% to 99.2%. They found
+three defects (`lake(0076)`, `lake(0077)`, `lake(0078)`), on top of the six the earlier rounds found. The 103 lines
+left:
 
-| Kind | Lines | What would cover them |
-|---|---|---|
-| Reachable code no test runs yet | 274 | More `api` checks and tests, round by round. These rounds found six defects (`lake(0061)`, `lake(0062)`, `lake(0064)`, `lake(0065)`, `lake(0067)`, `lake(0069)`), so they are worth continuing |
-| Error branches for invalid data or unsupported input | 132 | Hand-corrupted files and refused inputs, one check per branch |
-| Members of the internal stream wrappers no public call reaches (a write-only stream's `Read`, `Seek`) | 93 | Nothing through the public API. They are overrides the `Stream` base class requires |
-| AVX-512 paths | 20 | A runner with AVX-512; GitHub's Linux runners vary |
-| Dictionary indexes 0 or 4 bytes wide | part of the reachable code | Width 0 cannot occur (a dictionary has an entry); width 4 needs 16.7 million distinct values |
-| `string`-typed encode, decode and statistics paths | part of the reachable code | None: a `string` field's type is `ReadOnlyMemory<char>`, so only the left-out serializer reached them. Removing them needs branch-level stripping, not yet decided |
-
-So 100% of lines is not a target the public API can reach. The measure that matters is that every reachable path
-has a check, and that the native build agrees with the JIT build on all of them.
+| Kind | What would cover or remove them |
+|---|---|
+| AVX-512 loops (boolean PLAIN encoding, byte stream split) | A runner with AVX-512 |
+| Null checks no caller can fail, which the compiler's nullable analysis relies on (stripping them fails the warnings-as-errors build; `lake(0084)` lists them) | Nothing: kept on purpose |
+| Guards that an earlier check makes unreachable (decimal overflow after `lake(0065)`'s precision check, `byte[]`-typed decode branches) | Branch entries, as `lake(0084)` added for others |
+| The internal write buffer's large-span path, RLE-encoded non-boolean pages (a non-standard layout a file could still have), a few schema error paths | More checks |
 
 Code nothing in the package calls is left out of it (decision 6; `lake(0050)` removed the 6,632 lines of uncalled
 big-endian bit-packing kernels), so the figure is of what ships. Uncalled code is found mechanically: ILLink in
