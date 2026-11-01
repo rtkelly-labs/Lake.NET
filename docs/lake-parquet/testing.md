@@ -156,23 +156,25 @@ settings; the `suite` job runs upstream's tests.
 
 **Coverage.** The target (decision 6): every line the package ships is run by the regression suite, and a line
 nothing can reach is left out. Measured on the package as it ships (members and branches stripped, renamed), on
-`staging/perf` at `73bd078b`:
+`staging/perf` at `8b7364fa`, with `DOTNET_PreferredVectorBitWidth=512` so the AVX-512 paths run (CI's `build` job
+sets it; the `suite` job keeps the default paths):
 
 | Suite | Lines covered |
 |---|---|
-| The native AOT suite's modes (`api`, `cases`, `write`/`read`, `hashes`, `corpus`), on its JIT build | 92.3% (12,648 of 13,701) |
-| Those, plus the xunit suite against the same build (CI's `build` job) | 99.2% (13,630 of 13,733) |
+| The native AOT suite's modes (`api`, `cases`, `write`/`read`, `hashes`, `corpus`), on its JIT build | 92.3% |
+| Those modes plus the xunit suite against the same build | **99.8% (13,693 of 13,725)** |
 
-Two rounds of coverage tests (`lake(0074)`, `lake(0083)`) took the combined figure from 96.2% to 99.2%. They found
-three defects (`lake(0076)`, `lake(0077)`, `lake(0078)`), on top of the six the earlier rounds found. The 103 lines
-left:
+Three rounds of coverage tests (`lake(0074)`, `lake(0083)`, `lake(0085)`) took it from 96.2%. Together with the earlier
+rounds, they found nine defects, each fixed with a failing test. Code no caller can reach left the package
+(`lake(0075)`, `lake(0084)`, `lake(0086)`). Every one of the 32 lines left is accounted for:
 
-| Kind | What would cover or remove them |
-|---|---|
-| AVX-512 loops (boolean PLAIN encoding, byte stream split) | A runner with AVX-512 |
-| Null checks no caller can fail, which the compiler's nullable analysis relies on (stripping them fails the warnings-as-errors build; `lake(0084)` lists them) | Nothing: kept on purpose |
-| Guards that an earlier check makes unreachable (decimal overflow after `lake(0065)`'s precision check, `byte[]`-typed decode branches) | Branch entries, as `lake(0084)` added for others |
-| The internal write buffer's large-span path, RLE-encoded non-boolean pages (a non-standard layout a file could still have), a few schema error paths | More checks |
+| Lines | Kind | Why it stays |
+|---|---|---|
+| 8 | Null checks no caller can fail: RLE's rented buffer (2) and its catch (3), a chunk's metadata (2 places), the footer's row groups, the writing column's level getters (2) | The compiler's nullable analysis relies on them; stripping them fails the warnings-as-errors build (`lake(0084)`) |
+| 5 | Big-endian byte swaps (`MemoryExtensions.ReadInt32`, Thrift `ReadDouble`) | Run only on big-endian hardware |
+| 2 | `GetNullable`'s `NotSupportedException` fallback | Runs only under native AOT, which this JIT measurement does not instrument |
+| 14 | Throws inside expressions, unreachable after an earlier check (`?? throw` on fixed lengths and constructor arguments, a switch arm for bit widths that cannot occur, the delta decoders' final type checks, `GetBitWidth`'s negative case, a decimal return an earlier one shadows), and an unused static field initializer | The manifest names members and statement branches, not sub-expressions |
+| 3 | `MeteredWriteStream.Dispose(bool)`, `ReadingColumn.Dispose`'s closing brace, a delta encoder's padding loop | Tests run them (`Coverage/*Test.cs`); the instrumenter does not count them |
 
 Code nothing in the package calls is left out of it (decision 6; `lake(0050)` removed the 6,632 lines of uncalled
 big-endian bit-packing kernels), so the figure is of what ships. Uncalled code is found mechanically: ILLink in
