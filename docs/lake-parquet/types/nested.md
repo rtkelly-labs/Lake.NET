@@ -19,6 +19,35 @@ reflection serializer's job, which the package leaves out (decision 6). Parquet.
 
 `DataField<int[]>` and `DataField<List<int>>` declare a legacy repeated column, with no LIST group around it.
 
+## The offsets layer: NestedLayout
+
+`Parquet.Data.NestedLayout` (decision 11, `lake(0079)`) turns a leaf's levels into Arrow's layout:
+
+- one offsets array per repeated ancestor: a list's elements, a map's key-value pairs;
+- one validity mask per optional ancestor: a null list, map or struct, or a null element;
+- the count of non-null leaf values, which belong in order to the last layer's slots whose masks are all true.
+
+`layout.ToLevels(...)` is the inverse, for `WriteAllPartsAsync`. A `List<List<int?>>` then assembles by walking
+offset ranges:
+
+```csharp
+NestedLayout l = NestedLayout.FromLevels(schema, leaf, definitionLevels, repetitionLevels, entries);
+for(int row = 0; row < l.SlotCounts[0]; row++)            // rows
+    for(int i = l.Offsets[0][row]; i < l.Offsets[0][row + 1]; i++)   // outer lists' elements
+        for(int j = l.Offsets[1][i]; j < l.Offsets[1][i + 1]; j++)   // inner lists' elements
+            ... l.Validity[2].IsValid[j] ? packed[next++] : null ...
+```
+
+It works at any depth. It is proven against Arrow itself: for each leaf of a pyarrow file with lists of lists, a
+map of lists and a list of structs holding a list, the offsets and validity match exactly the ones pyarrow builds.
+
+Leaves written to one row group under a shared list, map or struct must agree. The writer refuses a leaf whose
+levels describe different elements or nulls from a sibling's (`lake(0082)`), naming both columns.
+
+**For Parquet.SourceGenerator:** consumers of Lake.Parquet can assemble and shred `List<List<T>>`, maps and nested
+records through `NestedLayout` instead of emitting level arithmetic. That lifts its PARQ013 depth limit and its map
+restriction. That change is the generator's.
+
 ## VARIANT
 
 A VARIANT column is a group of a `metadata` and a `value` BYTE_ARRAY, plus shredded leaves. Each reads as a leaf;
@@ -26,6 +55,6 @@ there is no VARIANT decoder in the package.
 
 ## Tests
 
-`Types/NestedTypedApiTest`, upstream's `ListTest`, `StructureTest` and `RepeatableFieldsTest`, the conformance
+`Types/NestedTypedApiTest`, `Types/NestedLayoutTest`, `Types/NestedSiblingsTest`, upstream's `ListTest`, `StructureTest` and `RepeatableFieldsTest`, the conformance
 harness's three-level lists, structs and maps against parquet-cpp, and the native AOT suite (`api`: nested typed
-columns).
+columns, NestedLayout on the pyarrow file).

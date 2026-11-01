@@ -96,10 +96,10 @@ default options.
 | TIME(µs, ns), TIME_MICROS | `long` in the unit | `TimeMapping.TimeOnly` or `TimeSpan` | ⚠ | [time](types/time.md) |
 | TIMESTAMP(ms, µs), UTC-adjusted; TIMESTAMP_MILLIS, TIMESTAMP_MICROS | `DateTime`, `Kind = Utc` | | ✓ | [datetime](types/datetime.md) |
 | TIMESTAMP(ns) | `DateTime`, rounded down to 100 ns | | ⚠ | [datetime](types/datetime.md) |
-| TIMESTAMP, not UTC-adjusted | `DateTime`, `Kind = Local` | | ⚠ | [datetime](types/datetime.md) |
+| TIMESTAMP, not UTC-adjusted | `DateTime`, `Kind = Local` | `UnadjustedTimestampsAsWallClock` reads `Unspecified` wall-clock values | ⚠ | [datetime](types/datetime.md) |
 | INT96 | `DateTime`, `Kind = Unspecified`, rounded down to 100 ns | `TreatBigIntegersAsDates = false` reads `BigInteger` | ⚠ | [int96](types/int96.md) |
 | INTERVAL | `Interval` | | ✓ | [interval](types/interval.md) |
-| LIST, MAP, groups | each leaf column, with definition and repetition levels | | ⚠ | [nested](types/nested.md) |
+| LIST, MAP, groups | each leaf column, with definition and repetition levels; `NestedLayout` gives Arrow's offsets and validity | | ⚠ | [nested](types/nested.md) |
 | VARIANT | its `metadata` and `value` leaves as `byte[]`, shredded leaves as their types | | ⚠ | [nested](types/nested.md) |
 | NULL (UNKNOWN) | `int`, every value null | | ✓ | |
 | An INT64 that another library meant as a duration (pyarrow `duration`) | `long` | | ✓ | [time](types/time.md) |
@@ -110,10 +110,11 @@ Each broke decision 9 (a value silently changed) and is fixed as a change with a
 
 | Issue | Page | Status |
 |---|---|---|
-| Digits beyond a decimal column's scale are truncated on write (upstream's behaviour, kept) | [decimal](types/decimal.md#known-issues) | Needs a decision |
-| A TIMESTAMP that is not UTC-adjusted (a wall-clock time) converts a `Local` value to UTC on write, and reads as `Local` rather than `Unspecified` | [datetime](types/datetime.md#known-issues) | Needs a decision |
+| Digits beyond a decimal column's scale were truncated on write | [decimal](types/decimal.md) | Fixed, `lake(0072)`: refused unless `RoundDecimalsToScale` |
+| A TIMESTAMP that is not UTC-adjusted (a wall-clock time) converts a `Local` value to UTC on write, and reads as `Local` | [datetime](types/datetime.md#wall-clock-timestamps) | Option, `lake(0073)`: `UnadjustedTimestampsAsWallClock` |
 | A DECIMAL that does not fit `System.Decimal` was rounded on read | [decimal](types/decimal.md) | Fixed, `lake(0061)` |
 | Columns in optional structs and lists failed through the typed API | [nested](types/nested.md) | Fixed, `lake(0062)` |
 | A `DateTime` outside 1677–2262 written as TIMESTAMP(ns) wrapped to another date | [datetime](types/datetime.md) | Fixed, `lake(0064)` |
 | A `decimal` wider than its column's precision was written, breaking the file's schema | [decimal](types/decimal.md) | Fixed, `lake(0065)` |
+| Dictionary indexes of 2^24 and more were written corrupted (RLE's top byte) | | Fixed, `lake(0076)` |
 | A chunk of nulls only wrote min = max = 0 in its statistics (integers, decimals, INT96) | | Fixed, `lake(0069)` |
