@@ -45,7 +45,7 @@ Inspected with pyarrow (physical/logical types, field IDs). "main" is the reposi
 | `TimeSpan` | INT32 TIME(**ms**) | same | no Iceberg duration type; `time` is µs | ❌ |
 | `uint`, `ulong`, `ushort` | unsigned INT annotations | same | no unsigned types | ❌ |
 | field IDs | none | none | required for ID projection, or a name mapping | ⚠️ works via name mapping |
-| nested `struct`/`List<T>` | — | supported (Parquet.Net trees) | field IDs on **group** nodes too | ❌ blocked upstream (below) |
+| nested `struct`/`List<T>` | — | supported (Parquet.Net trees) | field IDs on **group** nodes too | ✅ in Lake.Parquet (group field IDs); ❌ in upstream Parquet.Net |
 | `timestamp_ns` (v3) | — | not offered (Parquet.Net has no nanos `DateTimeFormat`) | INT64 TIMESTAMP(ns) | ❌ blocked upstream |
 | Column statistics | row-group min/max/nulls (Parquet.Net) | same | per-file metrics by field ID | ✅ computed by `ParquetImport` |
 
@@ -68,6 +68,8 @@ fail and move into the compatible model.
 | NDV sketches at write time (Puffin) | **generator** + this library | an optional per-column hook fed with Iceberg single-value bytes during write → `ThetaSketch.Update`; produces Puffin statistics with no second scan | M |
 | Field IDs on nested groups | **Parquet.Net upstream** | lift `FieldId` to `Field` and emit/read it for struct/list/map — drafted issue + verified 19-line patch: [upstream/parquet-net-group-field-ids.md](upstream/parquet-net-group-field-ids.md) | S (upstream PR) |
 | `timestamp_ns` | **generator** (not upstream) | Measured: Parquet.Net 6.1 (and 4.25) has `DateTimeFormat.Timestamp` with `DateTimeTimeUnit.Nanos`, which writes `TIMESTAMP(NANOS)` and round-trips `DateTime` at its 100 ns precision (pyarrow: `timestamp[ns]`). The generator needs a `Nanoseconds` unit mapped to it, plus its Arrow bridge (which assumes µs) | S |
+| Nested lists of lists, maps, records in lists (PARQ013) | **generator**, on Lake.Parquet's `NestedLayout` | For consumers that reference Lake.Parquet (the generator already detects them), emit assembly as loops over `NestedLayout.Offsets` and `Validity` (reads) and build the layout to pass to `ToLevels` (writes), instead of emitting level arithmetic. That lifts the depth limit and the map restriction. Lake.Parquet refuses sibling leaves that disagree (`lake(0082)`), which catches emitter bugs. Decision 11 in [lake-parquet/decisions.md](lake-parquet/decisions.md); the library side is `lake(0079)`, proven against Arrow's own offsets | M |
+| Required struct groups | **generator** | Lake.Parquet's `StructField(name, fields, isNullable: false)` writes a required group: emit it for non-nullable members (the generator's notes assume groups are always optional, true of upstream 6.1 only) | S |
 | Decimal precision > 28 | generator + upstream | `System.Decimal` limit; would need a `BigInteger`-backed member type (Parquet.Net's plain encoder can't encode `BigInteger` today — generator rejects it with PARQ006) | M |
 
 A suggested shape for the generator side is a single opt-in profile, so the default behaviour of the generator does
