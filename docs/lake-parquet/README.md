@@ -12,6 +12,7 @@ too. This folder holds the fork's decisions; the fork holds the code, and one re
 | [vision.md](vision.md) | Why the fork exists, what it is and is not, how a change gets in |
 | [changes.md](changes.md) | The stack's rules and the change record format |
 | [maintaining.md](maintaining.md) | Operating the stack: refs, rebaselining onto upstream, staging, history, recovering |
+| [types.md](types.md) | How each .NET type maps to Parquet's types, both ways: the matrix, and a page per type with an exception |
 | [testing.md](testing.md) | The test layers, the conformance harness, change verification, benchmarks and profiling |
 | [upstreaming.md](upstreaming.md) | Handing changes to upstream, by hand |
 
