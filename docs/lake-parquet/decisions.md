@@ -57,7 +57,8 @@ code and its tooling follow it.
    with tests against other writers (the conformance harness's parquet-cpp oracle, both directions) and in the native
    AOT suite. Where a type has more than one Parquet representation, or a conversion could lose precision (TIME in
    nanoseconds as 100 ns ticks) or change what existing code reads (upstream reads TIME as `int`/`long`), the mapping
-   is opt-in, by an option or an explicit field, and the default stays upstream's.
+   is opt-in, by an option or an explicit field, and the default stays upstream's. Every type's mapping, and each exception to
+   it, is in [types.md](types.md).
 10. **The fork publishes its own package, `Lake.Parquet`**, renamed at build time, beside Parquet.Net rather than in
    place of it, with upstream's licence and attribution.
 
