@@ -1,6 +1,6 @@
 // Renovate: dependency update PRs for this repository (docs/dependencies.md), opened by Mend's hosted Renovate app.
-// The generic rules are meant to move into a shared preset (rtkelly-labs/renovate-config) used by every
-// rtkelly-labs repository; until then they live here.
+// The estate's own packages follow the shared first-party preset in rig (config/renovate/first-party.json), which
+// lets their releases through as soon as they ship. The generic rules below still live here.
 {
   $schema: 'https://docs.renovatebot.com/renovate-schema.json',
   extends: [
@@ -8,6 +8,8 @@
     ':semanticCommits',
     // Workflows pin actions to 40-character SHAs (AGENTS.md); keep them pinned, with the version as a comment.
     'helpers:pinGitHubActionDigests',
+    // The estate's own packages: no schedule or release-age wait. Rules below still win.
+    'github>rtkelly13/rig//config/renovate/first-party',
   ],
   labels: ['dependencies'],
   schedule: ['before 6am on monday'],
@@ -66,7 +68,13 @@
     {
       // The data plane: changes here can change what we write, so they are always reviewed.
       groupName: 'Parquet and Arrow',
-      matchPackageNames: ['ParquetSharp', 'Parquet.Net', 'Parquet.SourceGenerator', 'Apache.Arrow'],
+      matchPackageNames: ['ParquetSharp', 'Parquet.Net', 'Apache.Arrow'],
+      automerge: false,
+    },
+    {
+      // Our own generator is data plane too, so it is always reviewed. It is its own PR, proposed on release
+      // (first-party preset), rather than waiting in the Monday group above.
+      matchPackageNames: ['Parquet.SourceGenerator'],
       automerge: false,
     },
     {

@@ -61,6 +61,7 @@ Paket was considered and rejected:
 | Patch, digest and pin updates to NuGet packages and Actions merge themselves once CI passes | Low risk, and CI is the gate |
 | Never merged automatically: Parquet and Arrow (the data plane), the .NET SDK (new analyzer warnings are errors here), and everything under `interop/` and `emulation/` (labelled `oracle`) | These can change what we write, whether the build passes, or what the oracles report ([regression-suite.md](regression-suite.md)) |
 | Grouped: .NET 10 libraries, AWS SDK, Parquet and Arrow, test tooling, GitHub Actions, oracles and emulators, moto (the Python package and the image together) | Packages that release together are updated together |
+| The estate's own packages (rig's `config/renovate/first-party.json` preset) are proposed as soon as they are released, with no schedule or 3-day wait. Parquet.SourceGenerator is its own PR and, as data plane, never merged automatically | A fix in our own generator should reach this repository the day it ships, not a week later |
 | Spark stays on 4.0.x | The Spark image has to match the pinned `iceberg-spark-runtime-4.0_2.13` jar |
 | PR titles are `build(deps): …`, `ci(deps): …`, `build(oracles): …` | Conventional commits, which the changelog tooling reads |
 
