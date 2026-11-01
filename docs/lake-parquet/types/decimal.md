@@ -1,6 +1,6 @@
 # decimal and BigDecimal
 
-[Back to the type matrix](../types.md) · Status: write ⚠ (scale truncated), read ⚠ (exact or refused)
+[Back to the type matrix](../types.md) · Status: write ⚠ (exact or refused), read ⚠ (exact or refused)
 
 ## Mapping
 
@@ -35,15 +35,14 @@ Statistics: an INT32 or INT64 decimal's bounds decode as `decimal`; a byte-array
 
 ## Precision and scale on write
 
+A decimal is written only if its column holds it exactly:
+
 - **A value wider than the column's precision is refused** (`ParquetException`), on INT32, INT64 and
   FIXED_LEN_BYTE_ARRAY alike (`lake(0065)`). Upstream wrote it, making a file that breaks its own schema:
   `DecimalDataField("x", 5, 2)` took `12345.6m`.
-- **Digits beyond the scale are truncated**, as upstream does and tests: `DecimalDataField("x", 9, 2)` writes `1.239m`
-  as 1.23. Decision 9 keeps upstream's default where changing it would change existing results, so this stays.
-
-## Known issues
-
-- **Truncation beyond the scale is silent.** Whether to refuse it by default, or offer a strict option, is open.
+- **Digits beyond the scale are refused** (`lake(0072)`): `DecimalDataField("x", 9, 2)` refuses `1.239m`, and the
+  message names the option. Trailing zeros are not digits lost: `1.2300m` fits. `ParquetOptions.RoundDecimalsToScale
+  = true` restores upstream's truncation (1.239 → 1.23), as decision 9 asks for a lossy step.
 
 ## Tests
 
