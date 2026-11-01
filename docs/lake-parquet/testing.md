@@ -154,14 +154,36 @@ x64; macOS arm64 runners cost ten times as much, so that leg runs on a pull requ
 dispatched with `macos: true` (before a release, at least). Upstream's own `build.yml` is disabled in the fork's Actions
 settings; the `suite` job runs upstream's tests.
 
-**Coverage.** The modes together cover 91% of the package's lines (12,375 of 13,562). Code nothing in the package
-calls is left out of it (decision 6; `lake(0050)` removed the 6,632 lines of uncalled big-endian bit-packing kernels),
-so the figure is of what ships. Uncalled code is found mechanically: ILLink in library mode, on a Lake build without
-its `InternalsVisibleTo` entries, removes every method the public API cannot reach (`lake(0054)`); those upstream's
-own tests do not call join the manifest. Measure it on
-the JIT build of the suite, which runs the same code: `dotnet-coverage instrument` the copied `Lake.Parquet.dll`,
-then `dotnet-coverage collect --output-format cobertura` around the modes. A change that adds a code path adds the
-`api` check that reaches it.
+**Coverage.** Measured on the package as it ships (members stripped, renamed), on `master` at `1429aa1c`:
+
+| Suite | Lines covered |
+|---|---|
+| The native AOT suite's modes (`api`, `cases`, `write`/`read`, `hashes`, `corpus`), on its JIT build | 91.8% (12,485 of 13,606) |
+| Those, plus the xunit suite against the same build (CI's `build` job) | 96.2% (13,084 of 13,606) |
+
+The 522 lines left, by why:
+
+| Kind | Lines | What would cover them |
+|---|---|---|
+| Reachable code no test runs yet | 274 | More `api` checks and tests, round by round. These rounds found six defects (`lake(0061)`, `lake(0062)`, `lake(0064)`, `lake(0065)`, `lake(0067)`, `lake(0069)`), so they are worth continuing |
+| Error branches for invalid data or unsupported input | 132 | Hand-corrupted files and refused inputs, one check per branch |
+| Members of the internal stream wrappers no public call reaches (a write-only stream's `Read`, `Seek`) | 93 | Nothing through the public API. They are overrides the `Stream` base class requires |
+| AVX-512 paths | 20 | A runner with AVX-512; GitHub's Linux runners vary |
+| Dictionary indexes 0 or 4 bytes wide | part of the reachable code | Width 0 cannot occur (a dictionary has an entry); width 4 needs 16.7 million distinct values |
+| `string`-typed encode, decode and statistics paths | part of the reachable code | None: a `string` field's type is `ReadOnlyMemory<char>`, so only the left-out serializer reached them. Removing them needs branch-level stripping, not yet decided |
+
+So 100% of lines is not a target the public API can reach. The measure that matters is that every reachable path
+has a check, and that the native build agrees with the JIT build on all of them.
+
+Code nothing in the package calls is left out of it (decision 6; `lake(0050)` removed the 6,632 lines of uncalled
+big-endian bit-packing kernels), so the figure is of what ships. Uncalled code is found mechanically: ILLink in
+library mode, on a Lake build without its `InternalsVisibleTo` entries, removes every method the public API cannot
+reach (`lake(0054)`); those upstream's own tests do not call join the manifest.
+
+To measure it, use the JIT build of the suite, which runs the same code. `dotnet-coverage instrument` the copied
+`Lake.Parquet.dll`, then `dotnet-coverage collect --output-format cobertura` around the modes. Do the same around
+`dotnet test` of the renamed `Parquet.Test` for the combined figure. A change that adds a code path adds the `api`
+check that reaches it.
 
 Locally:
 
