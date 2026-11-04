@@ -9,7 +9,7 @@
     <VersionSuffix Condition="'$(VersionSuffix)' == ''">preview.1</VersionSuffix>
     <Authors>Ryan Kelly</Authors>
     <Copyright>Copyright (c) 2026 rtkelly-labs</Copyright>
-    <PackageLicenseExpression>MIT</PackageLicenseExpression>
+    <PackageLicenseExpression>Apache-2.0</PackageLicenseExpression>
     <PackageProjectUrl>https://github.com/rtkelly-labs/Iceberg.NET</PackageProjectUrl>
     <RepositoryUrl>https://github.com/rtkelly-labs/Iceberg.NET.git</RepositoryUrl>
     <PackageTags>iceberg;apache-iceberg;lakehouse;parquet;glue;s3</PackageTags>
@@ -27,5 +27,7 @@
   </PropertyGroup>
   <ItemGroup>
     <None Include="$(MSBuildThisFileDirectory)../PACKAGE_README.md" Pack="true" PackagePath="/" Visible="false" />
+    <!-- Apache-2.0 section 4(d): the NOTICE file travels with every distribution. -->
+    <None Include="$(MSBuildThisFileDirectory)../NOTICE" Pack="true" PackagePath="/" Visible="false" />
   </ItemGroup>
 </Project>

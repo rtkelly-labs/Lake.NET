@@ -45,4 +45,4 @@ var rows = await TableScan.ReadAllAsync(table);
 - [Changelog](https://github.com/rtkelly-labs/Iceberg.NET/blob/main/CHANGELOG.md)
 - [Security policy](https://github.com/rtkelly-labs/Iceberg.NET/blob/main/SECURITY.md)
 
-MIT licensed.
+Licensed under the Apache License 2.0; see the NOTICE file in the package for attributions.

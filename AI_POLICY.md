@@ -57,5 +57,5 @@ In alignment with open-source transparency best practices:
 
 ## 5. Intellectual Property & Licensing
 
-* Contributors must ensure that any AI-generated content does not violate third-party intellectual property rights or incorporate proprietary/copyleft source code inconsistent with this project's **MIT License**.
-* By submitting a pull request, you certify that you have the right to license the contribution under the project's [MIT License](LICENSE).
+* Contributors must ensure that any AI-generated content does not violate third-party intellectual property rights or incorporate proprietary/copyleft source code inconsistent with this project's **Apache License 2.0**. Code ported from another Apache-2.0 project (for example Apache Iceberg or Apache ORC Java) is credited in [NOTICE](NOTICE).
+* By submitting a pull request, you certify that you have the right to license the contribution under the project's [Apache License 2.0](LICENSE) (section 5 of the license).
