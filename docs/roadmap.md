@@ -192,6 +192,9 @@ Runs when dispatched in `.github/workflows/mutation.yml` (Puffin, and Core's tra
 
 ## Repository split
 
+Next: the rename to Lake.NET and the move to shared layers for several formats ([VISION.md](../VISION.md), [lake/](lake/README.md)).
+
+
 Completed in October 2026: the project lives in `rtkelly-labs/Iceberg.NET`, with its own SDK pin, build settings,
 tools and CI workflows. Keep the repository self-contained; code must not reference the original parent repository.
 
