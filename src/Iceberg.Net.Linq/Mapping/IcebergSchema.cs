@@ -19,10 +19,24 @@ public static class IcebergSchema
     /// the member type (nullable value types and nullable reference types are optional). <c>[IcebergKey]</c> members
     /// become identifier fields.
     /// </summary>
-    public static Schema FromType<T>(IcebergMapperOptions? options = null) => FromType(typeof(T), options);
+    public static Schema FromType<T>(IcebergMapperOptions? options = null) =>
+        FromType(typeof(T), options);
 
     public static Schema FromType(Type type, IcebergMapperOptions? options = null)
     {
+        if (options is null)
+        {
+            var iface = type.GetInterfaces().FirstOrDefault(i => i.IsGenericType && i.GetGenericTypeDefinition() == typeof(IIcebergMappable<>));
+            if (iface is not null)
+            {
+                var schemaProp = type.GetProperty("IcebergSchema", System.Reflection.BindingFlags.Public | System.Reflection.BindingFlags.Static);
+                if (schemaProp?.GetValue(null) is Schema staticSchema)
+                {
+                    return staticSchema;
+                }
+            }
+        }
+
         options ??= IcebergMapperOptions.Default;
         var nullability = new NullabilityInfoContext();
         var root = StructOf(type, options, nullability, []);

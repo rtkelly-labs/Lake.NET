@@ -16,6 +16,7 @@
     <Project Path="src/Iceberg.Net.Linq/Iceberg.Net.Linq.csproj" />
     <Project Path="src/Iceberg.Net.Puffin/Iceberg.Net.Puffin.csproj" />
     <Project Path="src/Iceberg.Net.RestServer/Iceberg.Net.RestServer.csproj" />
+    <Project Path="src/Iceberg.Net.SourceGenerator/Iceberg.Net.SourceGenerator.csproj" />
     <Project Path="src/Iceberg.Net.Spark/Iceberg.Net.Spark.csproj" />
   </Folder>
   <Folder Name="/tests/">

@@ -14,6 +14,7 @@
   <ItemGroup>
     <ProjectReference Include="../../src/Iceberg.Net.Data/Iceberg.Net.Data.csproj" />
     <ProjectReference Include="../../src/Iceberg.Net.Linq/Iceberg.Net.Linq.csproj" />
+    <ProjectReference Include="../../src/Iceberg.Net.SourceGenerator/Iceberg.Net.SourceGenerator.csproj" OutputItemType="Analyzer" ReferenceOutputAssembly="false" />
     <ProjectReference Include="../Iceberg.Net.TestSupport/Iceberg.Net.TestSupport.csproj" />
   </ItemGroup>
   <ItemGroup>

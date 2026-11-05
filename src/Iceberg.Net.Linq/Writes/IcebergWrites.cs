@@ -302,7 +302,7 @@ public static class IcebergWrites
     private static IIcebergRowBinding<T> Bind<T>(Table table, IIcebergRowMapper<T>? mapper)
     {
         var names = table.Metadata.Properties.GetValueOrDefault(NameMapping.Property);
-        return (mapper ?? new ReflectionRowMapper<T>()).Bind(table.Schema, names is null ? null : NameMapping.Parse(names));
+        return (mapper ?? IcebergRowMappers.For<T>()).Bind(table.Schema, names is null ? null : NameMapping.Parse(names));
     }
 
     private static List<object?[]> Rows<T>(Table table, IEnumerable<T> items, IIcebergRowMapper<T>? mapper) => Rows(table, items, Bind(table, mapper));

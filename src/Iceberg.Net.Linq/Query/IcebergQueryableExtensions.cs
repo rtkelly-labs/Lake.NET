@@ -8,11 +8,11 @@ namespace Iceberg.Net.Linq;
 /// <summary>Entry points and async terminals for LINQ over Iceberg tables.</summary>
 public static class IcebergQueryableExtensions
 {
-    /// <summary>Query <paramref name="table"/> as <typeparamref name="T"/>, mapped with <see cref="ReflectionRowMapper{T}"/>.</summary>
+    /// <summary>Query <paramref name="table"/> as <typeparamref name="T"/>, mapped with <see cref="IcebergRowMappers.For{T}"/>.</summary>
     public static IQueryable<T> AsQueryable<T>(this Table table, IcebergQueryOptions? options = null)
     {
         options ??= IcebergQueryOptions.Default;
-        return table.AsQueryable(new ReflectionRowMapper<T>(options.Mapping), options);
+        return table.AsQueryable(IcebergRowMappers.For<T>(options.Mapping), options);
     }
 
     /// <summary>Query <paramref name="table"/> as <typeparamref name="T"/> with a custom (e.g. source-generated) mapper.</summary>
