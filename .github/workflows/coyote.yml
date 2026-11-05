@@ -1,0 +1,81 @@
+name: coyote
+
+# Temporary evaluation: Coyote systematic concurrency testing of the MetastoreCatalog commit race
+# (experiments/coyote-commit-race). The latest Coyote release (1.7.11) does not target net10.0, so this builds Coyote
+# from source at a pinned commit that includes microsoft/coyote#534. Not a required check.
+on:
+  workflow_dispatch:
+    inputs:
+      iterations:
+        description: Coyote iterations per test
+        default: "1000"
+  pull_request:
+    paths:
+      - experiments/coyote-commit-race/**
+      - .github/workflows/coyote.yml
+
+permissions:
+  contents: read
+
+env:
+  COYOTE_REF: 926a8da7e36b150755ea4884be900f8bd8552d5d
+  COYOTE_VERSION: 1.7.11-net10.926a8da
+  COYOTE_CLI_TELEMETRY_OPTOUT: "1"
+  DOTNET_CLI_TELEMETRY_OPTOUT: "1"
+
+jobs:
+  commit-race:
+    runs-on: ubuntu-latest
+    timeout-minutes: 45
+    steps:
+      - uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0 # v7.0.0
+      - uses: actions/setup-dotnet@a98b56852c35b8e3190ac28c8c2271da59106c68 # v6
+        with:
+          global-json-file: global.json
+          dotnet-version: 10.0.x
+      # Outside the workspace, so this repo's Directory.Build.props and Directory.Packages.props do not apply.
+      - name: Build Coyote from source
+        run: |
+          start=$SECONDS
+          git clone -q https://github.com/microsoft/coyote "$RUNNER_TEMP/coyote"
+          cd "$RUNNER_TEMP/coyote"
+          git checkout -q "$COYOTE_REF"
+          rm global.json # pins an exact SDK feature band; any net10 SDK builds it
+          dotnet --version
+          for p in Source/Core/Core.csproj Source/Actors/Actors.csproj Source/Test/Test.csproj; do
+            dotnet pack "$p" -c Release -p:NetStandard2Supported=false -p:VersionSuffix=net10.926a8da \
+              -o "$RUNNER_TEMP/feed" --nologo -v quiet
+          done
+          dotnet build Tools/Coyote/Coyote.csproj -c Release -f net10.0 --nologo -v quiet
+          ls "$RUNNER_TEMP/feed" bin/net10.0/coyote.dll
+          echo "Coyote build: $((SECONDS - start)) s" >> "$GITHUB_STEP_SUMMARY"
+      - name: Build the spike
+        run: |
+          dotnet build experiments/coyote-commit-race -c Release --nologo \
+            -p:CoyoteVersion="$COYOTE_VERSION" -p:RestoreAdditionalProjectSources="$RUNNER_TEMP/feed"
+      - name: Rewrite
+        working-directory: experiments/coyote-commit-race/bin/Release/net10.0
+        run: |
+          ls CoyoteCommitRace.dll Iceberg.Net.*.dll | jq -R . | jq -s '{AssembliesPath: ".", Assemblies: .}' > rewrite.coyote.json
+          cat rewrite.coyote.json
+          dotnet "$RUNNER_TEMP/coyote/bin/net10.0/coyote.dll" rewrite rewrite.coyote.json
+      - name: Test
+        working-directory: experiments/coyote-commit-race/bin/Release/net10.0
+        run: |
+          set -o pipefail
+          start=$SECONDS
+          status=0
+          dotnet CoyoteCommitRace.dll "${{ inputs.iterations || '1000' }}" "$GITHUB_WORKSPACE/coyote-reports" \
+            | tee "$GITHUB_WORKSPACE/coyote-reports.log" || status=$?
+          { echo "Test step: $((SECONDS - start)) s, exit $status"; echo '```'
+            grep '^{' "$GITHUB_WORKSPACE/coyote-reports.log" | jq . || true
+            grep -v '^{' "$GITHUB_WORKSPACE/coyote-reports.log" | tail -20; echo '```'; } >> "$GITHUB_STEP_SUMMARY"
+          exit $status
+      - uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
+        if: always()
+        with:
+          name: coyote-reports
+          path: |
+            coyote-reports/
+            coyote-reports.log
+          if-no-files-found: ignore
