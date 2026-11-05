@@ -1,0 +1,16 @@
+<Project Sdk="Microsoft.NET.Sdk">
+  <!--
+    Temporary evaluation: Coyote systematic testing of the MetastoreCatalog commit race on net10.0.
+    Not in Iceberg.Net.slnx. Built only by .github/workflows/coyote.yml, which packs Coyote from source at a pinned
+    commit (net10 support, microsoft/coyote#534, is unreleased) into a local feed and passes its version here.
+  -->
+  <PropertyGroup>
+    <OutputType>Exe</OutputType>
+    <ManagePackageVersionsCentrally>false</ManagePackageVersionsCentrally>
+    <CoyoteVersion Condition="'$(CoyoteVersion)' == ''">1.7.11</CoyoteVersion>
+  </PropertyGroup>
+  <ItemGroup>
+    <PackageReference Include="Microsoft.Coyote.Test" Version="[$(CoyoteVersion)]" />
+    <ProjectReference Include="../../src/Iceberg.Net.Data/Iceberg.Net.Data.csproj" />
+  </ItemGroup>
+</Project>
