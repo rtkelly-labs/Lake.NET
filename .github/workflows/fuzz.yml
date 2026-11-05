@@ -1,8 +1,11 @@
 name: fuzz
 
 # Weekly coverage-guided fuzzing (SharpFuzz + libFuzzer) of the decoders for untrusted bytes
-# (see docs/regression-suite.md, "Fuzzing"). A finding fails its job and uploads the input.
+# (see docs/regression-suite.md, "Fuzzing"). A finding fails its job and uploads the input. The weekly run uses
+# 5 minutes per target: coverage plateaus within that, and the corpus replay step reports what it reached.
 on:
+  schedule:
+    - cron: "17 4 * * 1"
   workflow_dispatch:
     inputs:
       seconds:
@@ -28,7 +31,7 @@ jobs:
       - name: libFuzzer runtime
         run: sudo apt-get update -q && sudo apt-get install -y -q clang libclang-rt-18-dev
       - name: Fuzz ${{ matrix.target }}
-        run: tools/fuzz.sh ${{ matrix.target }} ${{ inputs.seconds || '900' }}
+        run: tools/fuzz.sh ${{ matrix.target }} ${{ inputs.seconds || (github.event_name == 'schedule' && '300') || '900' }}
       # libFuzzer's "cov:" counts only the native driver's edges; the .NET signal is "ft:". For line coverage, replay
       # the corpus through an uninstrumented build under a coverage collector (and, for metadata, the seeds alone).
       - name: Corpus line coverage
