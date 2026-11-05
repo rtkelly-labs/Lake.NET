@@ -109,6 +109,22 @@ In short:
 
 ## Verification roadmap
 
+The [formal-methods evaluation](formal-methods-and-retries.md) led to a
+[bounded commit/retry/cleanup pilot](../formal/commit-retry/README.md): three writer-mode combinations, four
+negative controls, a generated C# replay on v2/v3, and a required CI model-check job. Its assurance record states
+the bounds and the subsequently reproduced/fixed expiry recovery defect. Proofs for pure rules and
+broader implementation correspondence remain proposed work.
+
+[Chaos engineering and error propagation](chaos-engineering.md) adds a deterministic in-process experiment
+matrix to verification path #5: storage/catalog faults, trace ancestry, caller exception chains, retry metrics
+and independent table validation in a single report. Distributed REST, restart and Athena/Glue stages remain
+planned; the pilot runs as part of the unit suite and publishes its reports in CI.
+
+The [stability and retry design](stability-and-retries.md) now implements read-only status recovery, protects
+unresolved producers/staged files, and gives Athena durable request-token and resume mechanisms. Commit-wide
+elapsed budgets and binding fences now cover Data-layer write/maintenance paths. Catalog metadata deadlines,
+finer-grained schema compatibility and distributed crash/restart experiments remain follow-ups.
+
 Status: ✅ built and running in CI · 🟡 built, the rest needs something external · ⏳ not started.
 
 | # | Path | Status | What is built | What is left | Needs from outside this repo |

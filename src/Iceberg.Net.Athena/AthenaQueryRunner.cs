@@ -1,5 +1,6 @@
 using Amazon.Athena;
 using Amazon.Athena.Model;
+using System.Diagnostics;
 
 namespace Iceberg.Net.Athena;
 
@@ -27,6 +28,25 @@ public sealed class AthenaQueryFailedException(string queryExecutionId, string s
     public string QueryExecutionId { get; } = queryExecutionId;
     public string State { get; } = state;
     public string? Reason { get; } = reason;
+    public int? ErrorCategory { get; init; }
+    public int? ErrorType { get; init; }
+    /// <summary>A service hint that a new execution might succeed, not permission to replay a mutation.</summary>
+    public bool? Retryable { get; init; }
+    public string? ErrorMessage { get; init; }
+}
+
+/// <summary>Submission may have reached Athena. Recover using the same request token and identical parameters.</summary>
+public sealed class AthenaSubmissionUnknownException(string token, Exception inner)
+    : Exception($"Athena submission outcome is unknown; recover with client request token {token}", inner)
+{
+    public string ClientRequestToken { get; } = token;
+}
+
+/// <summary>A local wait expired; the server-side execution may still be running.</summary>
+public sealed class AthenaQueryTimedOutException(string id, TimeSpan timeout)
+    : TimeoutException($"Athena query {id} did not finish within {timeout}; resume polling this execution")
+{
+    public string QueryExecutionId { get; } = id;
 }
 
 /// <summary>
@@ -35,36 +55,67 @@ public sealed class AthenaQueryFailedException(string queryExecutionId, string s
 /// </summary>
 public sealed class AthenaQueryRunner(IAmazonAthena athena, AthenaQueryOptions options)
 {
-    public async Task<string> StartAsync(string sql, CancellationToken ct = default)
+    private void ValidatePollingOptions()
     {
+        if (options.PollInterval < TimeSpan.Zero || options.MaxPollInterval < options.PollInterval || options.Timeout < TimeSpan.Zero)
+            throw new ArgumentException("Athena poll intervals and timeout must be non-negative, and max poll interval must be at least the initial interval");
+    }
+
+    public Task<string> StartAsync(string sql, CancellationToken ct = default) => StartAsync(sql, Guid.NewGuid().ToString("N"), ct);
+
+    /// <summary>Submit or recover the same submission; persist the token and all request parameters before calling.</summary>
+    public async Task<string> StartAsync(string sql, string clientRequestToken, CancellationToken ct = default)
+    {
+        ArgumentNullException.ThrowIfNull(sql);
+        ValidatePollingOptions(); // Do not submit SQL that the configured runner cannot subsequently wait for.
+        if (clientRequestToken is null || clientRequestToken.Length is < 32 or > 128)
+            throw new ArgumentException("Athena client request tokens must contain 32 to 128 characters", nameof(clientRequestToken));
+        ct.ThrowIfCancellationRequested();
         var request = new StartQueryExecutionRequest
         {
             QueryString = sql,
             WorkGroup = options.WorkGroup,
-            ClientRequestToken = Guid.NewGuid().ToString("N"),
+            ClientRequestToken = clientRequestToken,
             ResultConfiguration = options.OutputLocation is null ? null : new ResultConfiguration { OutputLocation = options.OutputLocation },
             QueryExecutionContext = options.Database is null && options.Catalog is null ? null
                 : new QueryExecutionContext { Database = options.Database, Catalog = options.Catalog },
         };
-        return (await athena.StartQueryExecutionAsync(request, ct)).QueryExecutionId;
+        try { return (await athena.StartQueryExecutionAsync(request, ct)).QueryExecutionId; }
+        catch (Exception error) when (error is IOException or HttpRequestException or TimeoutException or OperationCanceledException
+            or Amazon.Runtime.AmazonUnmarshallingException
+            || error is AmazonAthenaException service && ((int)service.StatusCode is >= 500 or 429 || (int)service.StatusCode == 0))
+        {
+            throw new AthenaSubmissionUnknownException(clientRequestToken, error);
+        }
     }
 
     /// <summary>Wait for a query to finish; throws <see cref="AthenaQueryFailedException"/> if it failed or was cancelled.</summary>
     public async Task<QueryExecution> WaitAsync(string queryExecutionId, string sql = "", CancellationToken ct = default)
     {
-        var deadline = DateTimeOffset.UtcNow + options.Timeout;
+        ValidatePollingOptions();
+        var started = Stopwatch.GetTimestamp();
         var delay = options.PollInterval;
+        var firstPoll = true;
         while (true)
         {
+            if (!firstPoll && Stopwatch.GetElapsedTime(started) >= options.Timeout)
+                throw new AthenaQueryTimedOutException(queryExecutionId, options.Timeout);
+            firstPoll = false;
             var execution = (await athena.GetQueryExecutionAsync(new GetQueryExecutionRequest { QueryExecutionId = queryExecutionId }, ct)).QueryExecution;
             var state = execution.Status.State;
             if (state == QueryExecutionState.SUCCEEDED) return execution;
             if (state == QueryExecutionState.FAILED || state == QueryExecutionState.CANCELLED)
-                throw new AthenaQueryFailedException(queryExecutionId, state.Value, execution.Status.StateChangeReason, sql);
-            if (DateTimeOffset.UtcNow >= deadline)
-                throw new TimeoutException($"Athena query {queryExecutionId} still {state} after {options.Timeout}");
-            await Task.Delay(delay, ct);
-            delay = TimeSpan.FromTicks(Math.Min(delay.Ticks * 2, options.MaxPollInterval.Ticks));
+                throw new AthenaQueryFailedException(queryExecutionId, state.Value, execution.Status.StateChangeReason, sql)
+                {
+                    ErrorCategory = execution.Status.AthenaError?.ErrorCategory,
+                    ErrorType = execution.Status.AthenaError?.ErrorType,
+                    Retryable = execution.Status.AthenaError?.Retryable,
+                    ErrorMessage = execution.Status.AthenaError?.ErrorMessage,
+                };
+            var remaining = options.Timeout - Stopwatch.GetElapsedTime(started);
+            if (remaining <= TimeSpan.Zero) throw new AthenaQueryTimedOutException(queryExecutionId, options.Timeout);
+            await Task.Delay(TimeSpan.FromTicks(Math.Min(Math.Min(delay.Ticks, remaining.Ticks), TimeSpan.FromMilliseconds(int.MaxValue).Ticks)), ct);
+            delay = TimeSpan.FromTicks(delay.Ticks + Math.Min(delay.Ticks, options.MaxPollInterval.Ticks - delay.Ticks));
         }
     }
 
@@ -72,6 +123,16 @@ public sealed class AthenaQueryRunner(IAmazonAthena athena, AthenaQueryOptions o
     public async Task<AthenaQueryResult> RunAsync(string sql, CancellationToken ct = default)
     {
         var id = await StartAsync(sql, ct);
+        return await ResumeAsync(id, sql, ct);
+    }
+
+    /// <summary>Execute with a durable submission identity; this does not resubmit a failed execution.</summary>
+    public async Task<AthenaQueryResult> RunAsync(string sql, string clientRequestToken, CancellationToken ct = default) =>
+        await ResumeAsync(await StartAsync(sql, clientRequestToken, ct), sql, ct);
+
+    /// <summary>Resume an existing execution after a restart or local timeout; never starts another query.</summary>
+    public async Task<AthenaQueryResult> ResumeAsync(string id, string sql = "", CancellationToken ct = default)
+    {
         var execution = await WaitAsync(id, sql, ct);
         var columns = new List<string>();
         var rows = new List<IReadOnlyList<string?>>();

@@ -1,5 +1,8 @@
 # Managing table state — what the releases teach
 
+The implemented [stability and retry design](stability-and-retries.md) records the AWS/Iceberg reference contracts,
+read-only status-check budget, uncertainty guards, and Athena submission/recovery identities.
+
 Iceberg's state model has been hardened release by release, mostly in response to corruption and
 lost-update bugs found in production. A new implementation inherits every one of those lessons or
 re-discovers them. This page lists the state-related behaviour a port must reproduce, where it came from,
@@ -92,11 +95,23 @@ Two hazards are about wall-clock age, not ordering:
 |---|---|---|
 | `CommitFailedException` | Requirement failed or CAS lost; nothing was applied | refresh, re-apply, retry (producers do this) |
 | `CommitStateUnknownException` | The catalog may or may not have applied it | **do not retry blindly, do not delete files**; reload and check whether the snapshot exists |
+| `ValidationException` | The prepared data, original table identity, schema bindings or file-filter partition assumptions no longer hold | reject the old plan; rebuild the command and its inputs from current metadata |
 | `NoSuchTableException` / `NoSuchNamespaceException` / `AlreadyExistsException` | catalog-level state | caller's choice |
 
-For a service that needs exactly-once, the producer should stamp its own idempotency
-token into the snapshot summary (`SnapshotProducer.Set("iceberg-net.command-id", …)`) and, after an unknown
-outcome, look for it in the table's snapshots before retrying. That pattern needs no extra infrastructure.
+Producers and staged transactions now perform read-only recovery for uncertain outcomes, including lost
+connections. Positive evidence for every attempted snapshot in the same table UUID resolves success. Absence
+or mixed evidence remains unknown; failed reads retry under `commit.status-check.*`. Cancellation during a
+catalog swap is also potentially applied. Unresolved producer/staged objects cannot be replayed, and staged
+`DiscardAsync` preserves their artifacts.
+
+A command token in a snapshot summary (`SnapshotProducer.Set("iceberg-net.command-id", …)`) helps identify
+success, but absence after expiry does not establish failure and concurrent callers can both submit the same
+token. Exactly-once delivery needs durable, atomically enforced deduplication and checkpoint semantics beyond
+this lookup. See the [recovery design](stability-and-retries.md).
+
+Data-layer write/ref/expiry/compaction retries share `commit.retry.total-timeout-ms` and a retry count through
+nested producers and replans. A zero timeout allows the initial attempt only. These limits do not cancel an
+in-flight catalog call or replace status recovery. Partial compaction batches each have their own commit budget.
 
 ## Maintenance state
 

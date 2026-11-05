@@ -45,6 +45,30 @@ public sealed class AthenaRunnerEmulationTests
         PollInterval = TimeSpan.FromMilliseconds(10), MaxPollInterval = TimeSpan.FromMilliseconds(40), Timeout = TimeSpan.FromMinutes(1),
     });
 
+    private sealed class LostResponseAthena() : AmazonAthenaClient(AwsServiceClients.AthenaConfig())
+    {
+        public string? AppliedExecutionId { get; private set; }
+        public override async Task<StartQueryExecutionResponse> StartQueryExecutionAsync(StartQueryExecutionRequest request, CancellationToken ct = default)
+        {
+            var response = await base.StartQueryExecutionAsync(request, ct);
+            AppliedExecutionId = response.QueryExecutionId;
+            throw new IOException("Injected response loss after Athena accepted the submission");
+        }
+    }
+
+    [SkippableFact]
+    public async Task Lost_submission_response_recovers_the_actual_execution_with_another_runner()
+    {
+        RequireMoto();
+        Skip.IfNot((await MotoApi.ShimsAsync()).Contains("athena-start-query-idempotency"), "Restart moto with the Athena submission-idempotency shim");
+        using var losingClient = new LostResponseAthena();
+        var error = await Assert.ThrowsAsync<AthenaSubmissionUnknownException>(() => Runner(losingClient).StartAsync("SELECT 1"));
+        using var recoveryClient = AwsServiceClients.Athena();
+        var id = await Runner(recoveryClient).StartAsync("SELECT 1", error.ClientRequestToken);
+        Assert.Equal(losingClient.AppliedExecutionId, id);
+        await recoveryClient.StopQueryExecutionAsync(new StopQueryExecutionRequest { QueryExecutionId = id });
+    }
+
     [SkippableFact]
     public async Task Runner_waits_for_the_query_and_reads_every_row_without_the_header()
     {

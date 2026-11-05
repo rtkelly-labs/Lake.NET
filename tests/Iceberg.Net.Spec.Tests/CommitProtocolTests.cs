@@ -107,20 +107,28 @@ public sealed class CommitResolutionTests : IDisposable
         return t;
     }
 
-    [Theory]
-    [InlineData(true)]
-    [InlineData(false)]
-    public async Task Server_responded_unknowns_are_resolved_by_looking(bool applied)
+    [Fact]
+    public async Task Positive_snapshot_evidence_resolves_a_service_error()
     {
-        using var catalog = new UnknownOnceCatalog(_warehouse, applied, serverResponded: true);
+        using var catalog = new UnknownOnceCatalog(_warehouse, apply: true, serverResponded: true);
         var t = await Create(catalog);
         catalog.Armed = true;
         var result = await TableMutations.InsertAsync(t, LocalTableTests.Rows(10, 2));
 
         var rows = await TableScan.ReadAllAsync(await catalog.LoadTableAsync(t.Identifier));
         Assert.Equal(5, rows.Count);                         // exactly once either way
-        Assert.Equal(applied ? 1 : 2, result.Attempts);      // not applied ⇒ re-planned and committed again
+        Assert.Equal(1, result.Attempts);
         await TableValidator.AssertValidAsync(await catalog.LoadTableAsync(t.Identifier), new ValidationOptions { Deep = true, AllSnapshots = true });
+    }
+
+    [Fact]
+    public async Task Snapshot_absence_does_not_prove_failure_even_when_the_server_answered()
+    {
+        using var catalog = new UnknownOnceCatalog(_warehouse, apply: false, serverResponded: true);
+        var table = await Create(catalog);
+        catalog.Armed = true;
+        await Assert.ThrowsAsync<CommitStateUnknownException>(() => TableMutations.InsertAsync(table, LocalTableTests.Rows(10, 2)));
+        Assert.Equal(3, (await TableScan.ReadAllAsync(await catalog.LoadTableAsync(table.Identifier))).Count);
     }
 
     [Fact]

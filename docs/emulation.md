@@ -45,6 +45,7 @@ in `EmulatorFidelityTests` that also runs against AWS, which is how we know the 
 | 1 | Glue `UpdateTable` rejects a stale `VersionId` with `ConcurrentModificationException` | ignores `VersionId` | Concurrent Glue commits **silently lose snapshots** (observed: 4 writers → 3 snapshots) | check `VersionId` against the table's current version under a lock | `Glue_update_table_enforces_version_id` |
 | 2 | Glue `CreateTable` is atomic per name | racy under threads | two concurrent creates can both succeed | serialise create | (covered by conformance create tests) |
 | 3 | Athena `GetQueryResults` returns at most 1000 rows per page (`MaxResults` ≤ 1000, a SELECT's header row counting) with a `NextToken` | returns every row at once, ignores `MaxResults` | a client that ignores `NextToken` passes in emulation and drops rows on AWS | page the stored result by `MaxResults`/`NextToken`, refuse `MaxResults` > 1000 | `Athena_get_query_results_pages_at_1000_rows` |
+| 4 | Athena reuses the execution for the same `ClientRequestToken` and rejects changed parameters | ignores the token | recovering a lost submission creates duplicate executions | serialise token lookup/creation per account/region backend; compare complete request parameters | `Athena_submission_token_recovers_the_same_execution_and_rejects_changed_parameters` (same test in AWS mode; real AWS run outstanding) |
 
 `moto_server.py` lists the shims it applies at `GET /__shims`; a test of a shim skips (with "restart it") when the
 running moto predates that shim, rather than failing on a stale emulator.

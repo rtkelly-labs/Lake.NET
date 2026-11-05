@@ -90,6 +90,21 @@ public static class IcebergTelemetry
     /// <summary>A snapshot commit with its retries (span <c>iceberg.commit</c>).</summary>
     public static CommitScope StartCommit(string table, string? operation) => new(table, operation);
 
+    /// <summary>A read-only status check after an uncertain commit; absent evidence remains unknown.</summary>
+    public static void CommitStatusChecked(string table, long snapshotId, int attempt, bool present, Exception? error = null)
+    {
+        var activity = Activity.Current;
+        if (activity?.Source.Name != Name) return;
+        activity.AddEvent(new ActivityEvent("iceberg.commit.status-check", tags: new ActivityTagsCollection
+        {
+            [Tags.Table] = table,
+            [Tags.SnapshotId] = snapshotId,
+            ["iceberg.commit.status-check.attempt"] = attempt,
+            ["iceberg.commit.status-check.result"] = present ? Outcomes.Success : Outcomes.Unknown,
+            [Tags.ErrorType] = error?.GetType().FullName,
+        }));
+    }
+
     /// <summary>
     /// One catalog call (span <c>iceberg.catalog.{operation}</c>, kind client). Call <see cref="CatalogScope.Succeeded"/>
     /// before returning; a scope disposed without it is recorded as an error (an exception escaped).

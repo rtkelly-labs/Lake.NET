@@ -26,5 +26,6 @@
   <ItemGroup>
     <Using Include="Xunit" />
     <None Include="fixtures/**/*" CopyToOutputDirectory="PreserveNewest" />
+    <None Include="../../formal/commit-retry/traces/*.json" Link="formal/%(Filename)%(Extension)" CopyToOutputDirectory="PreserveNewest" />
   </ItemGroup>
 </Project>

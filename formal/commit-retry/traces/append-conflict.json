@@ -1,0 +1,40 @@
+{
+  "model": "CommitRetry",
+  "configuration": "AppendAppend; MaxAttempts=2; all bugs FALSE",
+  "property": "NoAppendRetryWitness",
+  "steps": [
+    {
+      "action": "prepare",
+      "writer": 1
+    },
+    {
+      "action": "prepare",
+      "writer": 2
+    },
+    {
+      "action": "commit",
+      "writer": 2
+    },
+    {
+      "action": "conflict",
+      "writer": 1
+    },
+    {
+      "action": "retry",
+      "writer": 1
+    },
+    {
+      "action": "prepare",
+      "writer": 1
+    },
+    {
+      "action": "commit",
+      "writer": 1
+    }
+  ],
+  "expectedRows": [
+    0,
+    1,
+    2
+  ]
+}

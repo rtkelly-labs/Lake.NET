@@ -17,6 +17,29 @@ namespace Iceberg.Net.Regression.Tests;
 [Collection(MotoServiceStateCollection.Name)] // the Athena case uses moto's process-wide result queue
 public sealed class EmulatorFidelityTests
 {
+    [SkippableFact]
+    public async Task Athena_submission_token_recovers_the_same_execution_and_rejects_changed_parameters()
+    {
+        var env = TestEnvironment.Current;
+        if (env.Target == Target.Aws) Require.Athena();
+        else
+        {
+            Require.Target();
+            Skip.IfNot((await MotoApi.ShimsAsync()).Contains("athena-start-query-idempotency"), "Restart moto with the Athena submission-idempotency shim");
+        }
+        using var client = AwsServiceClients.Athena();
+        var options = new AthenaQueryOptions
+        {
+            WorkGroup = env.AthenaWorkGroup ?? "primary",
+            OutputLocation = env.AthenaOutput ?? env.Warehouse.TrimEnd('/') + "/athena-results/",
+        };
+        var token = Guid.NewGuid().ToString("N");
+        var id = await new AthenaQueryRunner(client, options).StartAsync("SELECT 1", token);
+        Assert.Equal(id, await new AthenaQueryRunner(client, options).StartAsync("SELECT 1", token));
+        await Assert.ThrowsAsync<Ath.InvalidRequestException>(() => new AthenaQueryRunner(client, options).StartAsync("SELECT 2", token));
+        await client.StopQueryExecutionAsync(new Ath.StopQueryExecutionRequest { QueryExecutionId = id });
+    }
+
     private static string Location(string name) => $"{TestEnvironment.Current.Warehouse.TrimEnd('/')}/fidelity/{TestEnvironment.Current.RunId}/{name}";
 
     [SkippableFact]
