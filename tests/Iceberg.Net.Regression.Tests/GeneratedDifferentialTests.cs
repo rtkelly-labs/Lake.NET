@@ -44,14 +44,15 @@ public sealed class GeneratedDifferentialTests(ITestOutputHelper output) : IDisp
     }
 
     [SkippableFact]
-    public Task Generated_tables_written_by_dotnet_read_the_same_in_pyiceberg() => CampaignAsync("dotnet-writes", DotnetWritesAsync);
+    public Task Generated_tables_written_by_dotnet_read_the_same_in_pyiceberg() => CampaignAsync("dotnet-writes", DotnetWritesAsync, maxFormatVersion: 3);
 
+    // PyIceberg 0.12 cannot write format version 3 (apache/iceberg-python#1551), so this direction stays on v2.
     [SkippableFact]
-    public Task Generated_tables_written_by_pyiceberg_read_the_same_in_dotnet() => CampaignAsync("pyiceberg-writes", PyIcebergWritesAsync);
+    public Task Generated_tables_written_by_pyiceberg_read_the_same_in_dotnet() => CampaignAsync("pyiceberg-writes", PyIcebergWritesAsync, maxFormatVersion: 2);
 
     // ---------------------------------------------------------------- campaign
 
-    private async Task CampaignAsync(string direction, Func<Case, string, Task<Outcome>> run)
+    private async Task CampaignAsync(string direction, Func<Case, string, Task<Outcome>> run, int maxFormatVersion)
     {
         Skip.If(Seconds is null, "Differential campaign off: set ICEBERG_DIFFERENTIAL_SECONDS (the differential workflow does)");
         if (TestEnvironment.Current.LocalOracleSkipReason is { } reason) throw new InvalidOperationException(reason);
@@ -68,7 +69,7 @@ public sealed class GeneratedDifferentialTests(ITestOutputHelper output) : IDisp
         var repeats = 0;
         for (var seed = BaseSeed; budget.Elapsed < TimeSpan.FromSeconds(Seconds!.Value); seed++)
         {
-            var c = Case.Generate(seed);
+            var c = Case.Generate(seed, maxFormatVersion);
             var started = Stopwatch.StartNew();
             var outcome = await run(c, Path.Combine(_root, $"s{seed}"));
             oracleTime += started.Elapsed;
@@ -255,8 +256,12 @@ public sealed class GeneratedDifferentialTests(ITestOutputHelper output) : IDisp
     private static string LastLine(string message)
     {
         var lines = message.Split('\n', StringSplitOptions.RemoveEmptyEntries | StringSplitOptions.TrimEntries);
-        // The Python traceback's last line is the exception; keep the first line too (which command failed).
-        return lines.Length <= 2 ? message : lines[0] + " … " + lines[^1];
+        if (lines.Length <= 2) return message;
+        // Keep the first line (which command failed) and the exception line. PyIceberg's schema errors end in a table,
+        // not the exception, so take the last "...Error: " line and the table rows it marks as mismatched.
+        var exception = Array.FindLastIndex(lines, l => System.Text.RegularExpressions.Regex.IsMatch(l, @"^[A-Za-z_.]*(Error|Exception): "));
+        var marked = lines.Where(l => l.Contains('\u274c', StringComparison.Ordinal)).Select(l => l.Trim('\u2502', ' '));
+        return string.Join(" … ", new[] { lines[0], exception >= 0 ? lines[exception] : lines[^1] }.Concat(marked));
     }
 
     // ---------------------------------------------------------------- generated cases
@@ -304,10 +309,10 @@ public sealed class GeneratedDifferentialTests(ITestOutputHelper output) : IDisp
             Rows = Rows.Select(r => r.Where((_, i) => i != c).ToArray()).ToList(),
         };
 
-        public static Case Generate(int seed)
+        public static Case Generate(int seed, int maxFormatVersion)
         {
             var g = new Gen(new Random(seed));
-            var formatVersion = g.R.Next(2) == 0 ? 2 : 3;
+            var formatVersion = g.R.Next(2) == 0 ? 2 : maxFormatVersion;
             var columns = new List<NestedField> { NestedField.Require(g.NextId(), "id", PrimitiveType.Long) };
             var count = 1 + g.R.Next(8);
             for (var i = 0; i < count; i++)
@@ -384,11 +389,13 @@ public sealed class GeneratedDifferentialTests(ITestOutputHelper output) : IDisp
             _ => PrimitiveType.Date,
         };
 
-        /// <summary>Lists whose elements contain a struct are never null: PyIceberg 0.12 reads a null list of structs as
-        /// empty (known, see ShadowCompareTests.NestedRows), and the campaign should find new things.</summary>
+        /// <summary>Lists and maps whose values contain a struct are never null: PyIceberg 0.12 reads them as empty
+        /// (known: ShadowCompareTests.NestedRows for lists; apache/iceberg-python#4114 for maps, fixed by #4118 after
+        /// 0.12), and the campaign should find new things.</summary>
         private static bool HoldsStructList(IcebergType t) => t switch
         {
             ListType l => l.ElementType is StructType || HoldsStructList(l.ElementType),
+            MapType m => m.ValueType is StructType || HoldsStructList(m.ValueType),
             _ => false,
         };
 

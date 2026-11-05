@@ -371,7 +371,9 @@ def _canonical(field_type: Any) -> Callable[[Any], str]:
         return lambda v: "NaN" if v != v else struct.pack(">d", v).hex()
     if isinstance(field_type, DecimalType):
         scale = field_type.scale
-        return lambda v: str(int(decimal.Decimal(v).scaleb(scale)))
+        # The default 28-digit context would round decimal(29..38) unscaled values.
+        exact = decimal.Context(prec=100)
+        return lambda v: str(int(decimal.Decimal(v).scaleb(scale, context=exact)))
     if isinstance(field_type, UUIDType):
         return lambda v: str(
             v if isinstance(v, uuid.UUID) else uuid.UUID(bytes=bytes(v))
@@ -691,10 +693,24 @@ def cmd_inspect_puffin(location: str) -> dict[str, Any]:
     return result
 
 
+def _without_field_ids(field: pa.Field) -> pa.Field:
+    t = field.type
+    if pa.types.is_struct(t):
+        t = pa.struct([_without_field_ids(t.field(i)) for i in range(t.num_fields)])
+    elif pa.types.is_map(t):
+        t = pa.map_(_without_field_ids(t.key_field), _without_field_ids(t.item_field))
+    elif pa.types.is_list(t):
+        t = pa.list_(_without_field_ids(t.value_field))
+    return pa.field(field.name, t, nullable=field.nullable)
+
+
 def cmd_write_arrow(
     warehouse: Path, ipc_path: str, format_version: int
 ) -> dict[str, Any]:
     data = pa.ipc.open_file(ipc_path).read_all()
+    # The writer's field IDs travel as PARQUET:field_id metadata; PyIceberg resolves an appended table by those IDs when
+    # present, but create_table assigns fresh ones. Drop them so the append resolves by name, as a user's table would.
+    data = data.cast(pa.schema([_without_field_ids(f) for f in data.schema]))
     warehouse.mkdir(parents=True, exist_ok=True)
     catalog = load_catalog(
         "generated",
