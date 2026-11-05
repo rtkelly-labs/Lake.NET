@@ -108,7 +108,8 @@ The harness (`tests/Iceberg.Net.Fuzz`) holds each decoder to the `Corruption` co
 success, nothing else. Crashes, hangs (10 s) and out-of-memory (4 GB) inputs are saved under
 `fuzz/<target>/findings/`; turn each into a `CorruptionTests` case when fixing it. The corpus is seeded from the
 committed fixtures and kept between runs in `fuzz/<target>/corpus` (git-ignored). The fuzz workflow
-(`.github/workflows/fuzz.yml`) runs every target for 15 minutes when dispatched.
+(`.github/workflows/fuzz.yml`) runs every target weekly for 5 minutes, or for 15 minutes when dispatched, and
+replays each corpus under a coverage collector to report the lines it reached.
 
 ### Size limits
 
@@ -131,12 +132,14 @@ and its runs. So the limits that stop a decoder allocating or looping on a claim
 | Workflow | When | What |
 |---|---|---|
 | `ci.yml` | every PR, merge queue entry and push to `main` (its `ci` job is the required check, and fails unless every job below succeeds) | Three parallel jobs, one per `<CiSuite>` (`tools/test-projects.sh`): `unit` (L0, netstandard2.0, LINQ, EF Core, REST catalog behaviour, package smoke test, spec traceability matrix as an artifact; no Docker), `cross-engine` (all emulators + Spark + DuckDB: ecosystem, BDD, REST server) and `regression` (all emulators, `ICEBERG_REQUIRE_TARGET=1`: REST protocol, L1/L2) |
+| `differential.yml` | weekly (Monday 03:17 UTC, 900 s per direction, starting at a new seed each week), when dispatched, and on PRs that change the campaign, the PyIceberg oracle or `TableFingerprint` (600 s, seed 1) | Generated schemas and rows written by .NET and read by PyIceberg, and the reverse; fingerprints must match. Disagreements are shrunk and uploaded (`GeneratedDifferentialTests`) |
+| `fuzz.yml` | weekly (Monday 04:17 UTC, 300 s per target) and when dispatched (900 s default) | Coverage-guided fuzzing of every decoder target, then line coverage of the corpus (see [Fuzzing](#fuzzing)) |
 | `upkeep.yml` | when dispatched | spec drift vs apache/iceberg `main` (red only for upstream changes not yet reviewed with `tools/spec_trace.py drift --acknowledge`); the regression suite against `:latest` emulator images |
 | `aws.yml` | when dispatched, **dormant until `ICEBERG_AWS_ROLE_ARN` is set** | L1–L3 against AWS; shadow comparison of `ICEBERG_SHADOW_TABLES` |
 | `release.yml` | when dispatched (a dry run unless unticked) | Release build, the `unit` suite, pack, package smoke test, the commit's `ci` check; publishes the `CHANGELOG.md` version to NuGet (trusted publishing) |
 
-The main CI runs on pull requests, merge queue entries and pushes to `main`; AWS, fuzz, mutation and upkeep
-workflows are manually dispatched. Their comments do not establish an automatic schedule.
+The main CI runs on pull requests, merge queue entries and pushes to `main`. The differential and fuzz workflows also
+run weekly; AWS, mutation and upkeep workflows are manually dispatched. None of these is a required check.
 
 ## Adding tests
 

@@ -1,8 +1,11 @@
 name: fuzz
 
 # Weekly coverage-guided fuzzing (SharpFuzz + libFuzzer) of the decoders for untrusted bytes
-# (see docs/regression-suite.md, "Fuzzing"). A finding fails its job and uploads the input.
+# (see docs/regression-suite.md, "Fuzzing"). A finding fails its job and uploads the input. The weekly run uses
+# 5 minutes per target: coverage plateaus within that, and the corpus replay step reports what it reached.
 on:
+  schedule:
+    - cron: "17 4 * * 1"
   workflow_dispatch:
     inputs:
       seconds:
@@ -28,7 +31,38 @@ jobs:
       - name: libFuzzer runtime
         run: sudo apt-get update -q && sudo apt-get install -y -q clang libclang-rt-18-dev
       - name: Fuzz ${{ matrix.target }}
-        run: tools/fuzz.sh ${{ matrix.target }} ${{ inputs.seconds || '900' }}
+        run: tools/fuzz.sh ${{ matrix.target }} ${{ inputs.seconds || (github.event_name == 'schedule' && '300') || '900' }}
+      # libFuzzer's "cov:" counts only the native driver's edges; the .NET signal is "ft:". For line coverage, replay
+      # the corpus through an uninstrumented build under a coverage collector (and, for metadata, the seeds alone).
+      - name: Corpus line coverage
+        if: always()
+        env:
+          FUZZ_TARGET: ${{ matrix.target }}
+        run: |
+          dotnet tool install -g dotnet-coverage --version 18.11.2 >/dev/null
+          dotnet tool install -g dotnet-reportgenerator-globaltool --version 5.5.11 >/dev/null
+          dotnet publish tests/Iceberg.Net.Fuzz -c Release -o fuzz/replay-bin --nologo -v quiet
+          export FUZZ_TABLE_METADATA=$(ls tests/Iceberg.Net.Spec.Tests/fixtures/spark/ref/mor_v3/metadata/v*.metadata.json | sort -V | tail -1)
+          cover() { # <name> <inputs...>
+            local name=$1; shift
+            dotnet-coverage collect -f cobertura -o "fuzz/cov-$name.xml" "dotnet fuzz/replay-bin/Iceberg.Net.Fuzz.dll replay $*" | grep '^{' | tee "fuzz/cov-$name.json"
+            reportgenerator "-reports:fuzz/cov-$name.xml" "-targetdir:fuzz/cov-$name" -reporttypes:TextSummary \
+              "-assemblyfilters:+Iceberg.Net.Core;+Iceberg.Net.Avro;+Iceberg.Net.Puffin" >/dev/null
+            { echo "### $FUZZ_TARGET: $name"; echo '```'; cat "fuzz/cov-$name.json"; head -n 20 "fuzz/cov-$name/Summary.txt"; echo '```'; } >> "$GITHUB_STEP_SUMMARY"
+          }
+          cover corpus "fuzz/$FUZZ_TARGET/corpus"
+          if [ "$FUZZ_TARGET" = metadata ]; then
+            cover seeds tests/Iceberg.Net.Spec.Tests/fixtures/metadata/*.json "$FUZZ_TABLE_METADATA"
+          fi
+          cp -r "fuzz/$FUZZ_TARGET/corpus" fuzz/cov-corpus/corpus
+      - uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
+        if: always()
+        with:
+          name: fuzz-coverage-${{ matrix.target }}
+          path: |
+            fuzz/cov-*/
+            fuzz/cov-*.json
+          if-no-files-found: ignore
       - uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
         if: failure()
         with:
