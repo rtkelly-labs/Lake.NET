@@ -23,6 +23,32 @@ var target = Environment.GetEnvironmentVariable("FUZZ_TARGET") ?? (args.Length >
 var decode = Targets.All[target];
 var strict = Environment.GetEnvironmentVariable("FUZZ_STRICT") == "1";
 
+// Replay a corpus without libFuzzer (from an uninstrumented build, e.g. under a coverage collector): how many inputs
+// decode, how many fail with a format error, and any other exception (a finding the fuzzer should also have saved).
+if (args is ["replay", .. var dirs])
+{
+    int accepted = 0, rejected = 0, other = 0;
+    foreach (var file in dirs.SelectMany(d => Directory.Exists(d) ? Directory.EnumerateFiles(d) : new[] { d }))
+    {
+        try
+        {
+            decode(File.ReadAllBytes(file));
+            accepted++;
+        }
+        catch (Exception e) when (Corruption.IsFormatError(e))
+        {
+            rejected++;
+        }
+        catch (Exception e)
+        {
+            other++;
+            Console.Error.WriteLine($"{file}: {e.GetType().Name}: {e.Message}");
+        }
+    }
+    Console.WriteLine($"{{\"target\":\"{target}\",\"inputs\":{accepted + rejected + other},\"accepted\":{accepted},\"format_errors\":{rejected},\"other\":{other}}}");
+    return;
+}
+
 Fuzzer.LibFuzzer.Run(span =>
 {
     try
