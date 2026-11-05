@@ -17,6 +17,9 @@ Commands (all output is JSON on stdout so the C# suite can assert on it):
                                      number of files it planned; the expression format is in _expression()
     puffin-fixtures <out_dir>        reference Theta sketches (datasketches) and deletion vectors (pyroaring)
     inspect-puffin <file.puffin>     decode a Puffin file with PyIceberg + datasketches and report contents
+    write-arrow <warehouse> <file.arrow> <format-version>
+                                     create a table in a local SQLite catalog under <warehouse> from an Arrow IPC
+                                     file's schema and append its rows (the generated-table differential campaign)
 
 <catalog> is "glue" or "rest". Endpoints and credentials come from the same environment
 variables the C# regression suite reads (see docs/regression-suite.md), so both sides
@@ -688,6 +691,27 @@ def cmd_inspect_puffin(location: str) -> dict[str, Any]:
     return result
 
 
+def cmd_write_arrow(
+    warehouse: Path, ipc_path: str, format_version: int
+) -> dict[str, Any]:
+    data = pa.ipc.open_file(ipc_path).read_all()
+    warehouse.mkdir(parents=True, exist_ok=True)
+    catalog = load_catalog(
+        "generated",
+        type="sql",
+        uri=f"sqlite:///{warehouse}/catalog.db",
+        warehouse=f"file://{warehouse}",
+    )
+    catalog.create_namespace_if_not_exists("gen")
+    table = catalog.create_table(
+        "gen.t",
+        schema=data.schema,
+        properties={"format-version": str(format_version)},
+    )
+    table.append(data)
+    return {"metadata_location": table.metadata_location}
+
+
 def main(argv: list[str]) -> None:
     match argv:
         case ["fixtures", out]:
@@ -710,6 +734,8 @@ def main(argv: list[str]) -> None:
             result = cmd_puffin_fixtures(Path(out))
         case ["inspect-puffin", location]:
             result = cmd_inspect_puffin(location)
+        case ["write-arrow", warehouse, ipc_path, format_version]:
+            result = cmd_write_arrow(Path(warehouse), ipc_path, int(format_version))
         case _:
             raise SystemExit(__doc__)
     json.dump(result, sys.stdout)
