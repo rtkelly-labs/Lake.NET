@@ -14,6 +14,33 @@ using Microsoft.Coyote.SystematicTesting;
 //             the setup is not exploring interleavings and the product result means nothing (exit 2).
 //   product - the real InMemoryCatalog CAS with concurrent appenders and commit retries. Any bug fails (exit 1).
 // Usage: CoyoteCommitRace <iterations> <report-dir>
+//        CoyoteCommitRace baseline <runs>   (before rewriting: the same tests on the real thread pool)
+if (args is ["baseline", var n])
+{
+    foreach (var racy in new[] { true, false })
+    {
+        CommitRace.ResetStats();
+        int failures = 0, runs = int.Parse(n, System.Globalization.CultureInfo.InvariantCulture);
+        var clock = Stopwatch.StartNew();
+        for (var i = 0; i < runs; i++)
+        {
+            try { await CommitRace.RunAsync(racy); }
+            catch (Exception) { failures++; }
+        }
+        Console.WriteLine(JsonSerializer.Serialize(new
+        {
+            test = racy ? "canary" : "product",
+            mode = "baseline",
+            runs,
+            failures,
+            seconds = Math.Round(clock.Elapsed.TotalSeconds, 1),
+            runs_with_retry = CommitRace.RunsWithRetry,
+            max_attempts = CommitRace.MaxAttempts,
+        }));
+    }
+    return 0;
+}
+
 var iterations = args.Length > 0 ? uint.Parse(args[0], System.Globalization.CultureInfo.InvariantCulture) : 1000;
 var reportDir = args.Length > 1 ? args[1] : "coyote-reports";
 Directory.CreateDirectory(reportDir);
@@ -29,6 +56,7 @@ return product.NumOfFoundBugs == 0 ? 0 : 1;
 
 static TestReport Run(string name, Func<Task> test, uint iterations, string reportDir)
 {
+    CommitRace.ResetStats();
     var config = Configuration.Create()
         .WithTestingIterations(iterations)
         .WithRandomGeneratorSeed(20261105)
@@ -55,6 +83,8 @@ static TestReport Run(string name, Func<Task> test, uint iterations, string repo
         fair_steps = new[] { r.MinExploredFairSteps, r.MaxExploredFairSteps },
         controlled_operations = new[] { r.MinControlledOperations, r.MaxControlledOperations },
         concurrency_degree = new[] { r.MinConcurrencyDegree, r.MaxConcurrencyDegree },
+        runs_with_retry = CommitRace.RunsWithRetry,
+        max_attempts = CommitRace.MaxAttempts,
         uncontrolled = r.UncontrolledInvocations.OrderBy(s => s, StringComparer.Ordinal).ToArray(),
         internal_errors = r.InternalErrors.ToArray(),
         bug_reports = r.BugReports.ToArray(),
@@ -66,6 +96,17 @@ static TestReport Run(string name, Func<Task> test, uint iterations, string repo
 internal static class CommitRace
 {
     private const int Writers = 3;
+
+    // Statistics only (did the CAS-failure/retry path run?); no test state is shared between iterations.
+    private static int _runsWithRetry, _maxAttempts;
+    public static int RunsWithRetry => Volatile.Read(ref _runsWithRetry);
+    public static int MaxAttempts => Volatile.Read(ref _maxAttempts);
+
+    public static void ResetStats()
+    {
+        Volatile.Write(ref _runsWithRetry, 0);
+        Volatile.Write(ref _maxAttempts, 0);
+    }
 
     public static async Task RunAsync(bool racy)
     {
@@ -84,11 +125,18 @@ internal static class CommitRace
         var writers = Enumerable.Range(0, Writers).Select(w => Task.Run(async () =>
         {
             var table = await catalog.LoadTableAsync(id);
-            await TableMutations.InsertAsync(table, [new object?[] { (long)w * 10 }, new object?[] { (long)w * 10 + 1 }]);
+            var result = await TableMutations.InsertAsync(table, [new object?[] { (long)w * 10 }, new object?[] { (long)w * 10 + 1 }]);
+            return result.Attempts;
         })).ToArray();
         try
         {
-            await Task.WhenAll(writers);
+            var attempts = await Task.WhenAll(writers);
+            if (attempts.Max() > 1) Interlocked.Increment(ref _runsWithRetry);
+            int seen;
+            while ((seen = Volatile.Read(ref _maxAttempts)) < attempts.Max()
+                && Interlocked.CompareExchange(ref _maxAttempts, attempts.Max(), seen) != seen)
+            {
+            }
         }
         catch (CommitStateUnknownException e)
         {

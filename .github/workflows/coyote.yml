@@ -53,6 +53,13 @@ jobs:
         run: |
           dotnet build experiments/coyote-commit-race -c Release --nologo \
             -p:CoyoteVersion="$COYOTE_VERSION" -p:RestoreAdditionalProjectSources="$RUNNER_TEMP/feed"
+      # Baseline: the same tests, not rewritten, on the real thread pool. What does Coyote add over plain repetition?
+      - name: Baseline (uncontrolled)
+        working-directory: experiments/coyote-commit-race/bin/Release/net10.0
+        run: |
+          start=$SECONDS
+          dotnet CoyoteCommitRace.dll baseline "${{ inputs.iterations || '1000' }}" | tee baseline.log
+          { echo "Baseline step: $((SECONDS - start)) s"; echo '```'; grep '^{' baseline.log | jq -c .; echo '```'; } >> "$GITHUB_STEP_SUMMARY"
       - name: Rewrite
         working-directory: experiments/coyote-commit-race/bin/Release/net10.0
         run: |
