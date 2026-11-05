@@ -75,7 +75,7 @@ public sealed class GeneratedDifferentialTests(ITestOutputHelper output) : IDisp
             oracleTime += started.Elapsed;
             cases++;
             byCategory[outcome.Category] = byCategory.GetValueOrDefault(outcome.Category) + 1;
-            if (outcome.Category == "agree") continue;
+            if (outcome.Category is "agree" or KnownLimitation) continue;
             // Shrinking costs up to 40 oracle round trips: do it once per raw symptom, count repeats.
             if (!rawSeen.Add($"{outcome.Category}|{Signature(outcome.Detail)}"))
             {
@@ -169,6 +169,9 @@ public sealed class GeneratedDifferentialTests(ITestOutputHelper output) : IDisp
 
     // ---------------------------------------------------------------- directions
 
+    /// <summary>Counted in the outcomes but not shrunk or reported: a limitation upstream that is already known.</summary>
+    private const string KnownLimitation = "known-pyarrow-required-child-of-null-struct";
+
     private sealed record Outcome(string Category, string Detail)
     {
         public static readonly Outcome Agree = new("agree", "");
@@ -211,6 +214,11 @@ public sealed class GeneratedDifferentialTests(ITestOutputHelper output) : IDisp
         }
         catch (Exception e)
         {
+            // pyarrow rejects a required child that holds nulls under a null parent struct (Arrow allows the child
+            // values; pyarrow's non-nullable check does not look at the parent). Known, see compare-arrow in the oracle.
+            if (e.Message.Contains("cannot be viewed as non-nullable", StringComparison.Ordinal)
+                || e.Message.Contains("non-nullable but contains nulls", StringComparison.Ordinal))
+                return new(KnownLimitation, "");
             return new("pyiceberg-write-failed", LastLine(e.Message));
         }
         Table t;

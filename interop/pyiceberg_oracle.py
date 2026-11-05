@@ -710,7 +710,9 @@ def cmd_write_arrow(
     data = pa.ipc.open_file(ipc_path).read_all()
     # The writer's field IDs travel as PARQUET:field_id metadata; PyIceberg resolves an appended table by those IDs when
     # present, but create_table assigns fresh ones. Drop them so the append resolves by name, as a user's table would.
-    data = data.cast(pa.schema([_without_field_ids(f) for f in data.schema]))
+    # A schema swap, not a cast: pyarrow refuses to cast a struct whose required child holds nulls under null parents.
+    schema = pa.schema([_without_field_ids(f) for f in data.schema])
+    data = pa.Table.from_arrays(data.columns, schema=schema)
     warehouse.mkdir(parents=True, exist_ok=True)
     catalog = load_catalog(
         "generated",
