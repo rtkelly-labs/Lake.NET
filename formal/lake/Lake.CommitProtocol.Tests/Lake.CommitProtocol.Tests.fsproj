@@ -6,6 +6,8 @@
     <Compile Include="Support.fs" />
     <Compile Include="ModelTests.fs" />
     <Compile Include="TlcTests.fs" />
+    <Compile Include="Conformance.fs" />
+    <Compile Include="ConformanceTests.fs" />
   </ItemGroup>
   <ItemGroup>
     <PackageReference Include="Microsoft.NET.Test.Sdk" />
@@ -16,5 +18,7 @@
   </ItemGroup>
   <ItemGroup>
     <ProjectReference Include="../Lake.CommitProtocol/Lake.CommitProtocol.fsproj" />
+    <!-- Conformance: the real catalog and commit path, by relative path (formal/ is not in Iceberg.Net.slnx). -->
+    <ProjectReference Include="../../../src/Iceberg.Net.Data/Iceberg.Net.Data.csproj" />
   </ItemGroup>
 </Project>
