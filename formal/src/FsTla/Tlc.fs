@@ -101,8 +101,12 @@ let run (jarPath: string) (moduleName: string) (tla: string) (cfg: string) (dump
         File.WriteAllText(Path.Combine(dir.FullName, moduleName + ".cfg"), cfg)
         let dumpFile = Path.Combine(dir.FullName, "states.dump")
         let psi = ProcessStartInfo("java")
+        // SANY extracts the standard modules (TLC.tla, Integers.tla, ...) into java.io.tmpdir. Concurrent runs that share
+        // /tmp race on those files, so each run gets its own.
+        let javaTemp = Directory.CreateDirectory(Path.Combine(dir.FullName, "tmp")).FullName
         for a in
-            [ "-XX:+UseParallelGC"; "-cp"; jarPath; "tlc2.TLC"; "-workers"; "auto"; "-deadlock"
+            [ "-XX:+UseParallelGC"; "-Djava.io.tmpdir=" + javaTemp
+              "-cp"; jarPath; "tlc2.TLC"; "-workers"; "auto"; "-deadlock"
               "-metadir"; Path.Combine(dir.FullName, "states"); "-config"; moduleName + ".cfg" ] do
             psi.ArgumentList.Add a
         if dump then
