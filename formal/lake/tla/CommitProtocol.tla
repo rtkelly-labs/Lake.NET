@@ -51,6 +51,9 @@ Actions == {
 Has(bug, cfg) ==
     (bug \in cfg.Bugs)
 
+Wins(cfg, expected, s) ==
+    (Has([tag |-> "BlindSwap"], cfg) \/ (s.Pointer = expected))
+
 Awaiting(w, k, s) ==
     (LET matchValue == s.Writers[w]
      IN  ((matchValue.tag = "Waiting") /\ (matchValue.attempt = k)))
@@ -59,7 +62,7 @@ Apply(cfg, w, k, s) ==
     (LET meta == [tag |-> "Meta", writer |-> w, attempt |-> k]
      IN  (IF (~(meta \in (DOMAIN s.InFlight)))
            THEN [tag |-> "None"]
-           ELSE (LET won == (Has([tag |-> "BlindSwap"], cfg) \/ (s.Pointer = s.InFlight[meta]))
+           ELSE (LET won == Wins(cfg, s.InFlight[meta], s)
                  IN  [tag |-> "Some", Value |-> (LET v_Pointer == (IF won
                                          THEN meta
                                          ELSE s.Pointer)
@@ -222,7 +225,7 @@ IsMetaOf(w, f) ==
     ((f.tag = "Meta") /\ (f.writer = w))
 
 FailedNeverApplies(cfg, s) ==
-    (\A w \in (DOMAIN s.Writers) : ((s.Writers[w] # [tag |-> "Failed"]) \/ ((ByWriter(w, History(s)) = {}) /\ (~(\E m \in (DOMAIN s.InFlight) : IsMetaOf(w, m))))))
+    (\A w \in (DOMAIN s.Writers) : ((s.Writers[w] # [tag |-> "Failed"]) \/ ((ByWriter(w, History(s)) = {}) /\ (~(\E m \in (DOMAIN s.InFlight) : (IsMetaOf(w, m) /\ Wins(cfg, s.InFlight[m], s)))))))
 
 ReachableFilesExist(cfg, s) ==
     ((s.Pointer \in s.Store) /\ (LiveFiles(History(s)) \subseteq s.Store))

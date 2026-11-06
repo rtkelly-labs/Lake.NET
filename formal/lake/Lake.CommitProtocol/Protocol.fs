@@ -83,11 +83,15 @@ let beginCommit (cfg: Config) (w: Writer) (s: State) =
             | Overwrite p -> Set.filter (fun f -> partitionOf cfg f = p) (liveFiles h)
         Some(propose w 1 (Set.count h) removes { s with Store = Set.add (Data w) s.Store })
 
+/// Whether a swap request that expects this location wins the catalog's CAS now. Metadata files are never reused, so
+/// once the pointer has moved past a request's expected location, that request can never win.
+let wins (cfg: Config) (expected: File) (s: State) = has BlindSwap cfg || s.Pointer = expected
+
 let apply (cfg: Config) (w: Writer) (k: int) (s: State) =
     let meta = Meta(w, k)
     if not (Map.containsKey meta s.InFlight) then None
     else
-        let won = has BlindSwap cfg || s.Pointer = s.InFlight.[meta]
+        let won = wins cfg s.InFlight.[meta] s
         Some
             { s with
                 Pointer = (if won then meta else s.Pointer)
@@ -179,13 +183,14 @@ let atMostOnce (cfg: Config) (s: State) =
 /// Acknowledged commits stay in the history: a concurrent commit never loses one (appends never lose an append).
 let noLostCommit (cfg: Config) (s: State) = Set.isSubset s.Published (history s)
 
-/// A writer told its commit failed has nothing in the table and nothing left that could still land.
+/// A writer told its commit failed has nothing in the table and no request in flight that could still land. A request
+/// whose expected location is stale can never land, so a writer may report failure while one is outstanding.
 let failedNeverApplies (cfg: Config) (s: State) =
     Map.forall
         (fun w phase ->
             phase <> Failed
             || (Set.isEmpty (byWriter w (history s))
-                && not (Map.exists (fun m _ -> isMetaOf w m) s.InFlight)))
+                && not (Map.exists (fun m expected -> isMetaOf w m && wins cfg expected s) s.InFlight)))
         s.Writers
 
 /// The current metadata file and every live data file exist.
