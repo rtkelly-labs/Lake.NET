@@ -39,7 +39,13 @@ Actions == {
     [tag |-> "Timeout", writer |-> [tag |-> "W2"], attempt |-> 1],
     [tag |-> "Timeout", writer |-> [tag |-> "W2"], attempt |-> 2],
     [tag |-> "Timeout", writer |-> [tag |-> "W3"], attempt |-> 1],
-    [tag |-> "Timeout", writer |-> [tag |-> "W3"], attempt |-> 2]
+    [tag |-> "Timeout", writer |-> [tag |-> "W3"], attempt |-> 2],
+    [tag |-> "Resend", writer |-> [tag |-> "W1"], attempt |-> 1],
+    [tag |-> "Resend", writer |-> [tag |-> "W1"], attempt |-> 2],
+    [tag |-> "Resend", writer |-> [tag |-> "W2"], attempt |-> 1],
+    [tag |-> "Resend", writer |-> [tag |-> "W2"], attempt |-> 2],
+    [tag |-> "Resend", writer |-> [tag |-> "W3"], attempt |-> 1],
+    [tag |-> "Resend", writer |-> [tag |-> "W3"], attempt |-> 2]
 }
 
 Has(bug, cfg) ==
@@ -104,8 +110,9 @@ Propose(w, k, start, removes, s) ==
          v_Metadata == ((meta :> (h \cup {snapshot})) @@ s.Metadata)
          v_Store == (s.Store \cup {meta})
          v_InFlight == ((meta :> s.Pointer) @@ s.InFlight)
+         v_Sent == ((meta :> s.Pointer) @@ s.Sent)
          v_Writers == ((w :> [tag |-> "Waiting", attempt |-> k, start |-> start, removes |-> removes]) @@ s.Writers)
-     IN  [s EXCEPT !.Metadata = v_Metadata, !.Store = v_Store, !.InFlight = v_InFlight, !.Writers = v_Writers])
+     IN  [s EXCEPT !.Metadata = v_Metadata, !.Store = v_Store, !.InFlight = v_InFlight, !.Writers = v_Writers, !.Sent = v_Sent])
 
 Retry(cfg, w, k, s) ==
     (LET matchValue == s.Writers[w]
@@ -161,6 +168,18 @@ Timeout(cfg, w, k, s) ==
                   ELSE [tag |-> "Some", Value |-> (LET v_Writers == ((w :> [tag |-> "Unknown"]) @@ s1.Writers)
                         IN  [s1 EXCEPT !.Writers = v_Writers])])))
 
+Resend(cfg, w, k, s) ==
+    (IF (~UnknownOutcome(cfg, w, k, s))
+      THEN [tag |-> "None"]
+      ELSE (IF Has([tag |-> "NoIdempotencyKey"], cfg)
+             THEN (LET meta == [tag |-> "Meta", writer |-> w, attempt |-> k]
+                   IN  [tag |-> "Some", Value |-> (LET v_Faults == (s.Faults - 1)
+                            v_InFlight == ((meta :> s.Sent[meta]) @@ s.InFlight)
+                            v_Replies == [key \in ((DOMAIN s.Replies) \ {meta}) |-> s.Replies[key]]
+                        IN  [s EXCEPT !.InFlight = v_InFlight, !.Replies = v_Replies, !.Faults = v_Faults])])
+             ELSE [tag |-> "Some", Value |-> (LET v_Faults_2 == (s.Faults - 1)
+                   IN  [s EXCEPT !.Faults = v_Faults_2])]))
+
 LiveFiles(h) ==
     ((UNION {x.Adds : x \in h}) \ (UNION {x_2.Removes : x_2 \in h}))
 
@@ -186,7 +205,9 @@ Step(cfg, action, s) ==
                            THEN ServerError(cfg, action.writer, action.attempt, s)
                            ELSE (IF (action.tag = "Timeout")
                                   THEN Timeout(cfg, action.writer, action.attempt, s)
-                                  ELSE BeginCommit(cfg, action.writer, s))))))
+                                  ELSE (IF (action.tag = "Resend")
+                                         THEN Resend(cfg, action.writer, action.attempt, s)
+                                         ELSE BeginCommit(cfg, action.writer, s)))))))
 
 ByWriter(w, h) ==
     {x \in h : (x.Writer = [tag |-> "Some", Value |-> w])}
@@ -214,7 +235,7 @@ SerializableOverwrite(cfg, s) ==
     (LET h == History(s)
      IN  (\A o \in h : ConflictFree(cfg, h, o)))
 
-Init == state = [Pointer |-> [tag |-> "Meta0"], Metadata |-> ([tag |-> "Meta0"] :> {[SeqNo |-> 1, Writer |-> [tag |-> "None"], Attempt |-> 0, Adds |-> {[tag |-> "Seed"]}, Removes |-> {}, Start |-> 0]}), Store |-> {[tag |-> "Seed"], [tag |-> "Meta0"]}, InFlight |-> <<>>, Replies |-> <<>>, Writers |-> ([tag |-> "W1"] :> [tag |-> "Idle"] @@ [tag |-> "W2"] :> [tag |-> "Idle"] @@ [tag |-> "W3"] :> [tag |-> "Idle"]), Faults |-> 1, Published |-> {}]
+Init == state = [Pointer |-> [tag |-> "Meta0"], Metadata |-> ([tag |-> "Meta0"] :> {[SeqNo |-> 1, Writer |-> [tag |-> "None"], Attempt |-> 0, Adds |-> {[tag |-> "Seed"]}, Removes |-> {}, Start |-> 0]}), Store |-> {[tag |-> "Seed"], [tag |-> "Meta0"]}, InFlight |-> <<>>, Replies |-> <<>>, Writers |-> ([tag |-> "W1"] :> [tag |-> "Idle"] @@ [tag |-> "W2"] :> [tag |-> "Idle"] @@ [tag |-> "W3"] :> [tag |-> "Idle"]), Faults |-> 1, Sent |-> <<>>, Published |-> {}]
 
 Next == \E a \in Actions : LET r == Step(Cfg, a, state) IN (r.tag = "Some") /\ (state' = r.Value)
 

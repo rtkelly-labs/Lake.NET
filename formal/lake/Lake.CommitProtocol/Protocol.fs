@@ -62,6 +62,7 @@ let propose (w: Writer) (k: int) (start: int) (removes: Set<File>) (s: State) =
         Metadata = Map.add meta (Set.add snapshot h) s.Metadata
         Store = Set.add meta s.Store
         InFlight = Map.add meta s.Pointer s.InFlight
+        Sent = Map.add meta s.Pointer s.Sent
         Writers = Map.add w (Waiting(k, start, removes)) s.Writers }
 
 /// After attempt k definitely did not land: refresh, validate and try again, or give up.
@@ -145,6 +146,20 @@ let timeout (cfg: Config) (w: Writer) (k: int) (s: State) =
         if has RetryUnknownBlindly cfg then retry cfg w k s1
         else Some { s1 with Writers = Map.add w Unknown s1.Writers }
 
+/// The reply is lost and the client resends the request. With an idempotency key the catalog recognises it: a resend
+/// of a request still in flight joins it, and a resend of an applied one gets the stored reply, so nothing changes but
+/// the fault budget. Without a key it is a new request with the same expected location, applied (again) on its own.
+let resend (cfg: Config) (w: Writer) (k: int) (s: State) =
+    if not (unknownOutcome cfg w k s) then None
+    elif has NoIdempotencyKey cfg then
+        let meta = Meta(w, k)
+        Some
+            { s with
+                Faults = s.Faults - 1
+                InFlight = Map.add meta s.Sent.[meta] s.InFlight
+                Replies = Map.remove meta s.Replies }
+    else Some { s with Faults = s.Faults - 1 }
+
 let step (cfg: Config) (action: Action) (s: State) : State option =
     match action with
     | Begin w -> beginCommit cfg w s
@@ -153,6 +168,7 @@ let step (cfg: Config) (action: Action) (s: State) : State option =
     | Reject(w, k) -> reject cfg w k s
     | ServerError(w, k) -> serverError cfg w k s
     | Timeout(w, k) -> timeout cfg w k s
+    | Resend(w, k) -> resend cfg w k s
 
 // Invariants.
 

@@ -197,6 +197,9 @@ type Driver(cfg: Config, root: string) =
         | Timeout(w, k) ->
             replies.Remove((w, k)) |> ignore
             respond w k (fun r -> r.SetException(TimeoutException "injected timeout"))
+        // A resend with an idempotency key is invisible by design: the catalog joins it to the original request.
+        // InMemoryCatalog has no keys; the REST server's deduplication is what this action stands for.
+        | Resend _ -> ()
 
     member _.Observe() : Observed =
         let table = load ()

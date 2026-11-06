@@ -33,6 +33,7 @@ type TlcTests(output: ITestOutputHelper) =
     [<InlineData("DeleteOnUnknown")>]
     [<InlineData("SnapshotIsolation")>]
     [<InlineData("BlindSwap")>]
+    [<InlineData("NoIdempotencyKey")>]
     member _.``TLC catches each seeded bug, with a trace that replays in F#``(bugName: string) =
         let jar = tlcJar ()
         let bug, expected = CommitModel.seeded |> List.find (fun (b, _) -> sprintf "%A" b = bugName)
