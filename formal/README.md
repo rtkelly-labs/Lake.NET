@@ -137,7 +137,9 @@ After every step the driver compares the following with the model:
 - the live data files from a real scan plan.
 
 FsCheck generates and shrinks the runs. A further test checks that the comparison has teeth: the real system departs
-from each buggy model.
+from each writer-side buggy model (`RetryUnknownBlindly`, `DeleteOnUnknown`, `SnapshotIsolation`). `BlindSwap` is a
+property of the catalog, and `NoIdempotencyKey` is invisible to `InMemoryCatalog`, so neither has a real counterpart
+here.
 
 ## Prior art, and what this adds
 
@@ -152,7 +154,8 @@ from each buggy model.
   - **Idempotency keys.** There are none there; here, `Resend` and `NoIdempotencyKey` cover them.
   - **Scope.** Here: partitions, and serializable overwrite checked as a history invariant. There: copy-on-write and
     merge-on-read deletes, compaction, row-level consistent reads and snapshot isolation, which this model leaves out.
-  - **Tooling.** This model is checked exhaustively by TLC at a small size, rather than by simulation.
+  - **Checking.** That spec's README recommends FizzBee's simulation mode, which samples random histories. This model
+    is checked exhaustively by TLC at a small size.
 - **CockroachDB's [ParallelCommits](https://github.com/cockroachdb/cockroach/tree/HEAD/docs/tla-plus/ParallelCommits)**
   is the one public spec found that models an ambiguous commit outcome. Its committer reads durable state before
   concluding, and its `AckImpliesCommit` matches `NoLostCommit` here. The "look for your snapshot after a server
