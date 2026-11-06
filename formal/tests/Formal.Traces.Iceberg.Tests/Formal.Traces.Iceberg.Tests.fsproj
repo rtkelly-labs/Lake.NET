@@ -1,0 +1,29 @@
+<Project Sdk="Microsoft.NET.Sdk">
+  <PropertyGroup>
+    <LangVersion>latest</LangVersion>
+    <DisableImplicitFSharpCoreReference>true</DisableImplicitFSharpCoreReference>
+    <Nullable>disable</Nullable>
+    <IsPackable>false</IsPackable>
+    <IsTestProject>true</IsTestProject>
+  </PropertyGroup>
+  <ItemGroup>
+    <PackageReference Include="FSharp.Core" />
+  </ItemGroup>
+  <ItemGroup>
+    <Compile Include="Harness.fs" />
+    <Compile Include="CommitGrammarTests.fs" />
+    <Compile Include="ProjectionTests.fs" />
+    <Compile Include="BrokenWriterTests.fs" />
+    <Compile Include="SoakTraceTests.fs" />
+  </ItemGroup>
+  <ItemGroup>
+    <PackageReference Include="Microsoft.NET.Test.Sdk" />
+    <PackageReference Include="xunit" />
+    <PackageReference Include="xunit.runner.visualstudio" PrivateAssets="all" />
+  </ItemGroup>
+  <ItemGroup>
+    <ProjectReference Include="../../src/Formal.Traces.Iceberg/Formal.Traces.Iceberg.fsproj" />
+    <ProjectReference Include="../../../src/Iceberg.Net.Catalog/Iceberg.Net.Catalog.csproj" />
+    <ProjectReference Include="../../../src/Iceberg.Net.Data/Iceberg.Net.Data.csproj" />
+  </ItemGroup>
+</Project>
