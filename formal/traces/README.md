@@ -196,7 +196,7 @@ fault-injecting catalog for (2)). That shows exactly what each proposal buys.
   `BrokenWriterTests` drives the library's own commit through each fault deterministically.
 - **Production (described, not built):** read OTLP-exported spans into `SpanRecord`s, slice by commit span, and
   report violations. This is the shape of PObserve's checker: a parser into typed events with a partition key, a
-  demultiplexer, then one monitor per partition. Two things differ from the in-process case. Spans arrive out of
+  sequencer that orders them, a demultiplexer, then one monitor per partition. Two things differ from the in-process case. Spans arrive out of
   order and late, so a slice is checked once its root span has ended. A sampled trace may lack children, so a
   production checker should only check traces sampled as a whole (parent-based sampling), and report an incomplete
   slice as unknown, not as a violation.
@@ -207,7 +207,9 @@ fault-injecting catalog for (2)). That shows exactly what each proposal buys.
   spec by mapping each event to a spec action. Cirstea, Kuppe, Loillier and Merz (2024, arXiv:2404.16075) describe
   that method in general. When a trace fails, it does so without a counterexample: the result is the longest prefix
   that could be matched. A grammar gives more here: the position, the state and the allowed events. It gives less
-  elsewhere: it has no data, so it cannot check, for example, that a found snapshot is the one attempted (gap 3). The
+  elsewhere: it has no data, so it cannot check, for example, that a found snapshot is the one attempted (gap 3). Nor
+  does it tolerate gaps: that method only asks that some behaviour of the spec matches the trace, letting the checker
+  choose unlogged steps, whereas a grammar needs every event. Hence the sampling rule for production above. The
   model handles data; the grammar handles shape.
 - **Runtime verification.** Parametric trace slicing (Chen and Roşu, TACAS 2009), as above. PObserve, for the
   architecture of a production checker.
