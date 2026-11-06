@@ -2,6 +2,9 @@
   <Folder Name="/src/">
     <Project Path="src/FsTla/FsTla.fsproj" />
   </Folder>
+  <Folder Name="/tests/">
+    <Project Path="tests/FsTla.Tests/FsTla.Tests.fsproj" />
+  </Folder>
   <Folder Name="/lake/">
     <Project Path="lake/Lake.CommitProtocol/Lake.CommitProtocol.fsproj" />
     <Project Path="lake/Lake.CommitProtocol.Tests/Lake.CommitProtocol.Tests.fsproj" />
