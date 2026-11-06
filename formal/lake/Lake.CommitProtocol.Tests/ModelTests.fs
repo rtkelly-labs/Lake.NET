@@ -46,6 +46,15 @@ let ``retrying an unknown outcome blindly applies the commit twice`` () =
     let states = Model.replay model cfg retryUnknownWitness
     Assert.Equal<string list>([ "AtMostOnce" ], Model.violations model cfg (List.last states))
 
+/// The trace TLC reports for the same bug (its shortest): an overwrite retried blindly fails validation against its own
+/// landed commit, so the writer is told Failed while its snapshot is current.
+[<Fact>]
+let ``retrying an unknown overwrite blindly reports failure for a commit that landed`` () =
+    let cfg = CommitModel.withBug RetryUnknownBlindly standard
+    let states = Model.replay model cfg [ Begin W3; Apply(W3, 1); ServerError(W3, 1) ]
+    Assert.Equal(Failed, (List.last states).Writers.[W3])
+    Assert.Equal<string list>([ "FailedNeverApplies" ], Model.violations model cfg (List.last states))
+
 [<Fact>]
 let ``the correct protocol finds its commit after a server error instead of retrying`` () =
     let states = Model.replay model standard (List.take 3 retryUnknownWitness)

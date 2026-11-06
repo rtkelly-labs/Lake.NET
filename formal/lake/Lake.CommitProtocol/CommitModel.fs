@@ -51,9 +51,11 @@ let standard =
 
 let withBug (bug: Bug) (cfg: Config) = { cfg with Bugs = Set.add bug cfg.Bugs }
 
-/// The invariant each seeded bug must break.
+/// The invariants each seeded bug may break; TLC reports whichever its breadth-first search reaches first (the shortest
+/// trace). A blind retry after an unknown outcome either applies the commit twice (an append) or, for an overwrite, fails
+/// validation against its own landed commit, so the writer is told Failed although its snapshot is in the table.
 let seeded =
-    [ RetryUnknownBlindly, "AtMostOnce"
-      DeleteOnUnknown, "ReachableFilesExist"
-      SnapshotIsolation, "SerializableOverwrite"
-      BlindSwap, "NoLostCommit" ]
+    [ RetryUnknownBlindly, [ "AtMostOnce"; "FailedNeverApplies" ]
+      DeleteOnUnknown, [ "ReachableFilesExist" ]
+      SnapshotIsolation, [ "SerializableOverwrite" ]
+      BlindSwap, [ "NoLostCommit" ] ]
