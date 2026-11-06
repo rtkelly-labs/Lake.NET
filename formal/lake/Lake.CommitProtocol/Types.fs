@@ -53,6 +53,8 @@ type Bug =
     | SnapshotIsolation
     /// A catalog that swaps the pointer without comparing it to the expected location.
     | BlindSwap
+    /// A resent swap request carries no idempotency key, so the catalog evaluates it again as a new request.
+    | NoIdempotencyKey
 
 type Config =
     { Ops: Map<Writer, Op>
@@ -77,6 +79,9 @@ type State =
         Writers: Map<Writer, Phase>
         /// Faults left to inject.
         Faults: int
+        /// Every swap request sent: new metadata file -> the location it expects. An idempotency key lets the catalog
+        /// recognise a resend of one of these.
+        Sent: Map<File, File>
         /// Ghost: snapshots whose commit was acknowledged to the writer.
         Published: Set<Snapshot>
     }
@@ -97,3 +102,6 @@ type Action =
     | ServerError of writer: Writer * attempt: int
     /// No answer (CommitStateUnknownException, ServerResponded = false): the request may still be applied later.
     | Timeout of writer: Writer * attempt: int
+    /// No answer, and the client resends the same request with the same Idempotency-Key (RestCatalog's idempotent
+    /// retry, made only when the server advertises a key lifetime). The writer keeps waiting for attempt `attempt`.
+    | Resend of writer: Writer * attempt: int

@@ -10,7 +10,8 @@ let writerOf (a: Action) =
     | Ack(w, _)
     | Reject(w, _)
     | ServerError(w, _)
-    | Timeout(w, _) -> w
+    | Timeout(w, _)
+    | Resend(w, _) -> w
 
 let seedSnapshot =
     { SeqNo = 1
@@ -28,6 +29,7 @@ let init (cfg: Config) : State =
       Replies = Map.empty
       Writers = cfg.Ops |> Map.map (fun _ _ -> Idle)
       Faults = cfg.Faults
+      Sent = Map.empty
       Published = Set.empty }
 
 /// Every action of the writers in the configuration, for attempts 1..MaxAttempts.
@@ -58,4 +60,7 @@ let seeded =
     [ RetryUnknownBlindly, [ "AtMostOnce"; "FailedNeverApplies" ]
       DeleteOnUnknown, [ "ReachableFilesExist" ]
       SnapshotIsolation, [ "SerializableOverwrite" ]
-      BlindSwap, [ "NoLostCommit" ] ]
+      BlindSwap, [ "NoLostCommit" ]
+      // A keyless resend of a commit that landed loses its CAS: the writer deletes the current metadata file, or
+      // retries and applies its commit a second time.
+      NoIdempotencyKey, [ "ReachableFilesExist"; "AtMostOnce" ] ]

@@ -55,6 +55,22 @@ let ``retrying an unknown overwrite blindly reports failure for a commit that la
     Assert.Equal(Failed, (List.last states).Writers.[W3])
     Assert.Equal<string list>([ "FailedNeverApplies" ], Model.violations model cfg (List.last states))
 
+/// A resend of a commit that already landed, as an idempotency key prevents.
+let resendWitness = [ Begin W1; Apply(W1, 1); Resend(W1, 1); Apply(W1, 1); Reject(W1, 1) ]
+
+[<Fact>]
+let ``a resend without an idempotency key deletes the current metadata file`` () =
+    let cfg = CommitModel.withBug NoIdempotencyKey standard
+    let states = Model.replay model cfg resendWitness
+    Assert.Equal<string list>([ "ReachableFilesExist" ], Model.violations model cfg (List.last states))
+
+[<Fact>]
+let ``with an idempotency key the resend joins the original and the writer hears it won`` () =
+    let states = Model.replay model standard (List.take 3 resendWitness)
+    Assert.Equal(None, model.Step standard (Apply(W1, 1)) (List.last states))
+    let acked = Model.replay model standard (List.take 3 resendWitness @ [ Ack(W1, 1) ]) |> List.last
+    Assert.Equal(Succeeded, acked.Writers.[W1])
+
 [<Fact>]
 let ``the correct protocol finds its commit after a server error instead of retrying`` () =
     let states = Model.replay model standard (List.take 3 retryUnknownWitness)
