@@ -26,8 +26,9 @@ Neither needs Docker or Python. `FORMAL_TRACES_SOAK_SECONDS` lengthens the soak 
 
 ## The event vocabulary
 
-The grammar's alphabet is the protocol's observable actions. It is meant to be the same as the model's actions, so
-one union serves the model, the conformance tests and the trace check. It was derived from the failure taxonomy in
+The grammar's alphabet is the protocol's observable actions, as a client sees them. They refine the model's actions
+(see the alignment below), so the model, the conformance tests and the trace check share one vocabulary at two levels
+of detail. It was derived from the failure taxonomy in
 [docs/state-management.md](../../docs/state-management.md) and from the spans `IcebergTelemetry` emits.
 
 | Event | Meaning |
@@ -43,6 +44,26 @@ one union serves the model, the conformance tests and the trace check. It was de
 
 Events carry no payload. Identities (commit, table, snapshot) travel beside an event as its slice key, so the
 grammar describes the protocol's shape and nothing else.
+
+### Alignment with the model's `Action`
+
+The model (phase one) steps by a coarser union: `Begin | Apply | Ack | Reject | ServerError | Timeout`, each with
+a writer and an attempt number. A model step is atomic, while a trace records the client doing that step in several
+spans. So each model action corresponds to a short run of events, and the catalog-internal `Apply` corresponds to
+nothing a client span can see:
+
+| Model action | Trace events |
+|---|---|
+| `Begin w` | `Begin` (the writer is the slice key) |
+| `Apply (w, k)` | none (it happens inside the catalog; a server-side trace could record it) |
+| `Ack (w, k)` | `SwapApplied`, then `Committed` |
+| `Reject (w, k)` | `SwapRejected`, then `Retry Reload`, or `GaveUp` once attempts run out |
+| `ServerError (w, k)` | `SwapUnknown Reload Found` or `SwapUnknown Reload Absent`, then as `Reject` |
+| `Timeout (w, k)` | `SwapUnknown LeftUnknown` |
+
+The attempt number `k` has no counterpart in today's spans (gap 3 below). Once the model is merged, this table becomes
+a function from a parsed slice (its derivation) to the model's actions. That lets a recorded run also be replayed
+against the model, as etcd's trace validation does, and checked for data as well as shape.
 
 ## The commit grammar
 
