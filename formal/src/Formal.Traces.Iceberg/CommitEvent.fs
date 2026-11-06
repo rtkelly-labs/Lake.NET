@@ -4,9 +4,9 @@ namespace Formal.Traces.Iceberg
 /// learns during one logical commit (an <c>iceberg.commit</c> span). The cases are payload-free on purpose: the grammar
 /// is over the protocol's shape; identities (commit, table, snapshot) travel beside the event, as the slice key.
 ///
-/// This is meant to be the same vocabulary as the TLC model's actions, so one union serves the model, the
-/// conformance tests and the trace check. Until the model lands, it is derived from docs/state-management.md (the
-/// failure taxonomy) and from the spans IcebergTelemetry emits; Spans.fs documents the mapping.
+/// It refines the model's actions (Begin, Ack, Reject, ServerError, Timeout) to what a client's spans can show: one
+/// model step is several events here. formal/traces/README.md tabulates the correspondence. It is derived from
+/// docs/state-management.md (the failure taxonomy) and the spans IcebergTelemetry emits; Spans.fs maps the spans.
 type CommitEvent =
     /// The writer starts a logical commit (plans against the state it has loaded).
     | Begin
