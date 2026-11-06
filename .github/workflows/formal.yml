@@ -1,0 +1,81 @@
+name: formal
+
+# formal/: the FsTla translator and the commit-protocol model, checked by TLC. It runs only when the model, or the
+# production code it is checked against, changes. Java and TLC are installed here and nowhere else.
+on:
+  pull_request:
+    paths:
+      - formal/**
+      - .github/workflows/formal.yml
+      - global.json
+      - src/Iceberg.Net.Catalog/Catalog.cs
+      - src/Iceberg.Net.Data/SnapshotProducer.cs
+      - src/Iceberg.Net.Core/Metadata/MetadataUpdate.cs
+  push:
+    branches: [main]
+    paths:
+      - formal/**
+      - .github/workflows/formal.yml
+      - global.json
+      - src/Iceberg.Net.Catalog/Catalog.cs
+      - src/Iceberg.Net.Data/SnapshotProducer.cs
+      - src/Iceberg.Net.Core/Metadata/MetadataUpdate.cs
+  workflow_dispatch:
+
+concurrency:
+  group: ${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: ${{ github.event_name == 'pull_request' }}
+
+jobs:
+  formal:
+    name: formal (TLC)
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    permissions:
+      contents: read
+    env:
+      TLC_VERSION: v1.7.4
+      TLC_SHA256: 936a262061c914694dfd669a543be24573c45d5aa0ff20a8b96b23d01e050e88
+      # TLC tests fail rather than skip when the jar is missing.
+      FORMAL_REQUIRE_TLC: "1"
+      DOTNET_CLI_TELEMETRY_OPTOUT: "1"
+    steps:
+      - uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0 # v7.0.0
+
+      - uses: actions/setup-dotnet@a98b56852c35b8e3190ac28c8c2271da59106c68 # v6
+        with:
+          global-json-file: global.json
+
+      - uses: actions/setup-java@77dd5b2ce225ea11469928ac317850245a74ae78 # v6.2.0
+        with:
+          distribution: temurin
+          java-version: "21"
+
+      - name: Install TLC (tla2tools.jar, checksum pinned)
+        run: |
+          mkdir -p "$RUNNER_TEMP/tlc"
+          curl -sSfL -o "$RUNNER_TEMP/tlc/tla2tools.jar" \
+            "https://github.com/tlaplus/tlaplus/releases/download/$TLC_VERSION/tla2tools.jar"
+          echo "$TLC_SHA256  $RUNNER_TEMP/tlc/tla2tools.jar" | sha256sum --check
+          echo "TLA2TOOLS_JAR=$RUNNER_TEMP/tlc/tla2tools.jar" >> "$GITHUB_ENV"
+
+      - name: Build
+        run: dotnet build formal/Formal.slnx
+
+      # The generated TLA+ must match the committed module (lake/tla), every seeded bug must be caught, and the F#
+      # model must agree with TLC on every reachable state of the correct protocol.
+      - name: Test (translator, model, TLC, conformance against the real catalog)
+        run: >-
+          dotnet test formal/Formal.slnx --no-build
+          --logger "console;verbosity=normal"
+          --logger "trx;LogFilePrefix=formal"
+          --results-directory "$RUNNER_TEMP/formal-results"
+
+      - uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
+        if: ${{ !cancelled() }}
+        with:
+          name: formal-results
+          path: |
+            ${{ runner.temp }}/formal-results
+            formal/lake/tla
+          retention-days: 14
