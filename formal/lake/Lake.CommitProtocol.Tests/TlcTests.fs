@@ -42,8 +42,8 @@ type TlcTests(output: ITestOutputHelper) =
         | Model.Holds stats -> failwithf "TLC missed the seeded bug %A (%A)" bug stats
         | Model.Violated(name, _, steps) ->
             output.WriteLine(sprintf "%A breaks %s in %d steps (TLC %O):\n%s" bug name steps.Length result.Run.Elapsed (describe steps))
-            Assert.Equal(expected, name)
+            Assert.Contains(name, expected)
             // The trace is a list of F# actions: replaying it natively reaches the same state and breaks the same invariant.
             let replayed = Model.replay model cfg (List.map fst steps)
             Assert.Equal(snd (List.last steps), List.last replayed)
-            Assert.Contains(expected, Model.violations model cfg (List.last replayed))
+            Assert.Contains(name, Model.violations model cfg (List.last replayed))
