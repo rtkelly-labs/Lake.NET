@@ -87,18 +87,18 @@ applied later.
 |---|---|
 | `AtMostOnce` | No writer's commit is in the current history twice. |
 | `NoLostCommit` | Every acknowledged commit is in the current history (an ack implies a commit, and concurrent commits never lose one). |
-| `FailedNeverApplies` | A writer told its commit failed has nothing in the table and no request left that could still land. |
+| `FailedNeverApplies` | A writer told its commit failed has nothing in the table and no request in flight that could still win the CAS. (A request whose expected location is stale never can.) |
 | `ReachableFilesExist` | The current metadata file and every live data file exist. Nothing written for a commit that may have landed is deleted. |
 | `SerializableOverwrite` | No overwrite committed over a file added to its partition after it began. |
 
 **Seeded bugs**: each must be caught by TLC, and its trace must replay in F#.
 
-| Bug | Broken invariant(s) | Shortest trace TLC finds |
+| Bug | Broken invariant(s) | Trace (minimal form; TLC's own may also begin another writer) |
 |---|---|---|
 | `RetryUnknownBlindly`: retry after a server error without looking for the commit | `AtMostOnce` or `FailedNeverApplies` | `Begin W3; Apply(W3, 1); ServerError(W3, 1)`: the overwrite's blind retry fails validation against its own landed commit, so it reports Failed for a commit that is in the table. For an append it is a double apply instead (`ModelTests.retryUnknownWitness`). |
-| `DeleteOnUnknown`: delete the metadata file after an unknown outcome | `ReachableFilesExist` | a timed-out swap that is applied after its file was deleted |
-| `SnapshotIsolation`: skip retry-time validation | `SerializableOverwrite` | an overwrite retried over an append to its partition |
-| `BlindSwap`: a catalog that swaps without comparing | `NoLostCommit` | two writers on the same base; the second swap erases the acknowledged first |
+| `DeleteOnUnknown`: delete the metadata file after an unknown outcome | `ReachableFilesExist` | `Begin W2; Apply(W2, 1); ServerError(W2, 1)`: the swap landed and the reply was an error, so the writer deletes the file the catalog now points at |
+| `SnapshotIsolation`: skip retry-time validation | `SerializableOverwrite` | `Begin W1; Begin W3; Apply(W1, 1); ServerError(W3, 1); Apply(W3, 2)`: the overwrite of P retries on top of W1's append to P without re-validating, and removes it |
+| `BlindSwap`: a catalog that swaps without comparing | `NoLostCommit` | `Begin W1; Begin W2; Apply(W1, 1); Apply(W2, 1); Ack(W1, 1)`: two appends on the same base; the second swap erases the first, which is then acknowledged |
 | `NoIdempotencyKey`: a resend is evaluated as a new request | `ReachableFilesExist` or `AtMostOnce` | `Begin W1; Apply(W1, 1); Resend(W1, 1); Apply(W1, 1); Reject(W1, 1)`: the resend of a commit that landed loses its CAS, and the writer deletes the current metadata file |
 
 **The configuration CI checks** (`CommitModel.standard`):
