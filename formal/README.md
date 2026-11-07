@@ -68,9 +68,11 @@ It follows `SnapshotProducer.CommitAsync` and `MetastoreCatalog`'s write-then-sw
 The outcomes:
 
 - **Lost swap (`CommitFailedException`).** The writer deletes that metadata file, refreshes, re-validates and retries
-  up to `commit.retry.num-retries` times.
-- **Validation conflict.** If re-validating an overwrite finds a conflict, the commit fails (`ValidationException`).
-  That is serializable isolation.
+  up to `commit.retry.num-retries` times. Each retry of an overwrite or delete re-plans its removes against the new
+  table, as `SnapshotProducer` re-applies its predicate.
+- **Validation conflict.** Re-validating an overwrite or delete (`Overwrite`, `DeleteFiles`) fails the commit
+  (`ValidationException`) if a file was added to its partition since it began, or if a file its first attempt removed
+  is no longer live (Java's `failMissingDeletePaths`). That is serializable isolation.
 - **Server error (`CommitStateUnknownException` with `ServerResponded`).** The writer reloads the table and looks for
   its own snapshot before deciding whether to retry.
 - **Timeout.** The commit ends as unknown, and nothing written for it is deleted.
@@ -88,8 +90,8 @@ applied later.
 | `AtMostOnce` | No writer's commit is in the current history twice. |
 | `NoLostCommit` | Every acknowledged commit is in the current history (an ack implies a commit, and concurrent commits never lose one). |
 | `FailedNeverApplies` | A writer told its commit failed has nothing in the table and no request in flight that could still win the CAS. (A request whose expected location is stale never can.) |
-| `ReachableFilesExist` | The current metadata file and every live data file exist. Nothing written for a commit that may have landed is deleted. |
-| `SerializableRemoval` | No overwrite committed over a file added to its partition after it began. |
+| `ReachableFilesExist` | Every file reachable from a live snapshot exists: the current metadata file, the metadata file of every snapshot in its history, and every data file any of them added. Nothing written for a commit that may have landed is deleted. |
+| `SerializableRemoval` | No overwrite or delete committed over a concurrent change to its partition: nothing added to it or removed from it between the snapshot the writer began from and its own. |
 
 **Seeded bugs**: each must be caught by TLC, and its trace must replay in F#.
 
@@ -97,19 +99,23 @@ applied later.
 |---|---|---|
 | `RetryUnknownBlindly`: retry after a server error without looking for the commit | `AtMostOnce` or `FailedNeverApplies` | `Begin W3; Apply(W3, 1); ServerError(W3, 1)`: the overwrite's blind retry fails validation against its own landed commit, so it reports Failed for a commit that is in the table. For an append it is a double apply instead (`ModelTests.retryUnknownWitness`). |
 | `DeleteOnUnknown`: delete the metadata file after an unknown outcome | `ReachableFilesExist` | `Begin W2; Apply(W2, 1); ServerError(W2, 1)`: the swap landed and the reply was an error, so the writer deletes the file the catalog now points at |
-| `SnapshotIsolation`: skip retry-time validation | `SerializableRemoval` | `Begin W1; Begin W3; Apply(W1, 1); ServerError(W3, 1); Apply(W3, 2)`: the overwrite of P retries on top of W1's append to P without re-validating, and removes it |
+| `SnapshotIsolation`: skip retry-time validation | `SerializableRemoval` | `Begin W1; Begin W3; Apply(W1, 1); ServerError(W3, 1); Apply(W3, 2)`: the overwrite of P retries on top of W1's append to P without re-validating, re-plans, and removes the appended file |
 | `BlindSwap`: a catalog that swaps without comparing | `NoLostCommit` | `Begin W1; Begin W2; Apply(W1, 1); Apply(W2, 1); Ack(W1, 1)`: two appends on the same base; the second swap erases the first, which is then acknowledged |
 | `NoIdempotencyKey`: a resend is evaluated as a new request | `ReachableFilesExist` or `AtMostOnce` | `Begin W1; Apply(W1, 1); Resend(W1, 1); Apply(W1, 1); Reject(W1, 1)`: the resend of a commit that landed loses its CAS, and the writer deletes the current metadata file |
+| `NoMissingDeleteCheck`: check a retry for concurrent adds but not concurrent removals (`removers` configuration) | `SerializableRemoval` | `Begin W2; Begin W3; Apply(W2, 1); ServerError(W3, 1); Apply(W3, 2)`: the delete of P lands; the overwrite's retry finds nothing added, re-plans to remove nothing, and commits its replacement over the delete |
 
-**The configuration CI checks** (`CommitModel.standard`):
+**The configurations CI checks** (`CommitModel.configs`), each with two attempts per writer and one injected fault (a
+server error, a timeout or a resend):
 
-- three writers: two appends to different partitions, and an overwrite of the first partition;
-- two attempts each;
-- one injected fault (a server error, a timeout or a resend).
+| Configuration | Writers | TLC states (generated / distinct) |
+|---|---|---|
+| `standard` | two appends to different partitions, and an overwrite of the first | 14,541 / 5,808 |
+| `removers` | an append, a delete (`DeleteFiles`) and an overwrite, all of partition P | 9,094 / 3,636 |
 
 **Abstractions**:
 
-- **Data.** One data file per writer and a seed file, in two identity partitions.
+- **Data.** One data file per appending or overwriting writer and a seed file, in two identity partitions. A delete
+  adds no file.
 - **Begin is atomic.** A writer writes its data file, reads the table and sends attempt 1 in one step. The read and
   the swap are separate steps, which is where the races are.
 - **Retries are atomic too.** A retry's refresh, validation and new attempt are one step, and backoff is not modelled.
@@ -137,7 +143,8 @@ After every step the driver compares the following with the model:
 - the live data files from a real scan plan.
 
 FsCheck generates and shrinks the runs. A further test checks that the comparison has teeth: the real system departs
-from each writer-side buggy model (`RetryUnknownBlindly`, `DeleteOnUnknown`, `SnapshotIsolation`). `BlindSwap` is a
+from each writer-side buggy model (`RetryUnknownBlindly`, `DeleteOnUnknown`, `SnapshotIsolation`,
+`NoMissingDeleteCheck`). Both configurations run. `BlindSwap` is a
 property of the catalog, and `NoIdempotencyKey` is invisible to `InMemoryCatalog`, so neither has a real counterpart
 here.
 
@@ -152,8 +159,9 @@ here.
     `DeleteOnUnknown` and `RetryUnknownBlindly` need, and Vanlightly's cleanup-on-failure would be exactly the
     `DeleteOnUnknown` bug if the failure were ambiguous.
   - **Idempotency keys.** There are none there; here, `Resend` and `NoIdempotencyKey` cover them.
-  - **Scope.** Here: partitions, and serializable overwrite checked as a history invariant. There: copy-on-write and
-    merge-on-read deletes, compaction, row-level consistent reads and snapshot isolation, which this model leaves out.
+  - **Scope.** Here: partitions, file-level deletes, and serializable overwrite and delete checked as a history
+    invariant. There: copy-on-write and merge-on-read row deletes, compaction, row-level consistent reads and snapshot
+    isolation, which this model leaves out.
   - **Checking.** That spec's README recommends FizzBee's simulation mode, which samples random histories. This model
     is checked exhaustively by TLC at a small size.
 - **CockroachDB's [ParallelCommits](https://github.com/cockroachdb/cockroach/tree/HEAD/docs/tla-plus/ParallelCommits)**
@@ -191,8 +199,9 @@ dotnet test formal/Formal.slnx
 
 ## Traces (phase two)
 
-`traces/` will hold trace grammars that read recorded runs and OpenTelemetry spans of real commits as sequences of
-the same `Action` type, and check them against the model.
+Phase two reads recorded runs and OpenTelemetry spans of real commits, and checks them against the model. Spans see
+only what the client sees: a parsed trace is a client-observable refinement of `Action` (no `Apply`, and today no
+signal for `Resend`), mapped back to an `Action` list that the model replays. `traces/` holds its design.
 
 ## Open
 
