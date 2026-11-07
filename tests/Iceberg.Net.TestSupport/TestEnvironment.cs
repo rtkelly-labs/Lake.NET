@@ -194,9 +194,9 @@ public sealed class TestEnvironment
     private static string InteropDir() => Path.Combine(RepoDir(), "interop");
 
     /// <summary>The interpreter (or uv) and the arguments that run the oracle script.</summary>
-    private static (string File, string[] Prefix)? OracleCommand()
+    private static (string File, string[] Prefix)? OracleCommand(string name = "pyiceberg_oracle.py")
     {
-        var script = Path.Combine(InteropDir(), "pyiceberg_oracle.py");
+        var script = Path.Combine(InteropDir(), name);
         if (Env("ICEBERG_PYTHON") is { } python) return (python, ["-I", script]);
         var uv = (Environment.GetEnvironmentVariable("PATH") ?? "").Split(Path.PathSeparator).Select(p => Path.Combine(p, "uv")).FirstOrDefault(File.Exists);
         return uv is null ? null : (uv, ["run", "--quiet", "--project", InteropDir(), "python", "-I", script]);
@@ -205,9 +205,12 @@ public sealed class TestEnvironment
     public async Task<JsonNode> OracleAsync(params string[] args) => JsonNode.Parse(await OracleRawAsync(args))!;
 
     /// <summary>Run the PyIceberg oracle and return its stdout (a JSON document).</summary>
-    public async Task<string> OracleRawAsync(params string[] args)
+    public Task<string> OracleRawAsync(params string[] args) => InteropScriptRawAsync("pyiceberg_oracle.py", args);
+
+    /// <summary>Run another script in interop/ (e.g. duckdb_oracle.py) with the oracle's interpreter; returns its stdout.</summary>
+    public async Task<string> InteropScriptRawAsync(string script, params string[] args)
     {
-        var (file, prefix) = OracleCommand() ?? throw new InvalidOperationException(OracleSkipReason);
+        var (file, prefix) = OracleCommand(script) ?? throw new InvalidOperationException(OracleSkipReason);
         // ArgumentList quotes each argument correctly (JSON arguments contain quotes and spaces).
         var psi = new ProcessStartInfo(file) { RedirectStandardOutput = true, RedirectStandardError = true };
         foreach (var a in prefix.Concat(args)) psi.ArgumentList.Add(a);
@@ -215,7 +218,7 @@ public sealed class TestEnvironment
         var stdout = p.StandardOutput.ReadToEndAsync();
         var stderr = p.StandardError.ReadToEndAsync();
         await p.WaitForExitAsync().WaitAsync(TimeSpan.FromMinutes(5));
-        if (p.ExitCode != 0) throw new InvalidOperationException($"PyIceberg oracle failed ({p.ExitCode}): {await stderr}");
+        if (p.ExitCode != 0) throw new InvalidOperationException($"{script} failed ({p.ExitCode}): {await stderr}");
         return await stdout;
     }
 }

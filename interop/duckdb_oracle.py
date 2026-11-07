@@ -2,6 +2,9 @@
 
     duckdb_oracle.py probe                     {"available": true, "duckdb": ..., "iceberg": ...} or {"available": false, "reason": ...}
     duckdb_oracle.py read <metadata.json>...   {location: {"columns": [...], "rows": [[...], ...]} | {"error": ...}}
+    duckdb_oracle.py fingerprint <metadata.json>
+                                               the table as DuckDB reads it, in pyiceberg_oracle.py's fingerprint form
+                                               (the differential campaign's second oracle); a failure exits non-zero
 
 Output is the JSON document after the last @@ORACLE@@ marker on stdout. The extension is loaded from DuckDB's
 extension directory, installed from extensions.duckdb.org if missing (CI), or, offline, from the
@@ -105,6 +108,29 @@ def cmd_read(locations: list[str]) -> dict[str, Any]:
     return out
 
 
+def cmd_fingerprint(location: str) -> dict[str, Any]:
+    """Hash DuckDB's Arrow batches with the PyIceberg oracle's canonical form, column by column of the table's schema."""
+    import importlib.util
+    from pathlib import Path
+
+    from pyiceberg.table import StaticTable
+
+    # -I leaves the script's directory off sys.path, so load the sibling module by path.
+    spec = importlib.util.spec_from_file_location(
+        "pyiceberg_oracle", Path(__file__).with_name("pyiceberg_oracle.py")
+    )
+    assert spec is not None and spec.loader is not None
+    oracle = importlib.util.module_from_spec(spec)
+    spec.loader.exec_module(oracle)
+    fields = StaticTable.from_metadata(location).schema().columns
+    con, _ = connect()
+    literal = "'" + location.replace("'", "''") + "'"
+    names = ", ".join('"' + f.name.replace('"', '""') + '"' for f in fields)
+    query = f"SELECT {names} FROM iceberg_scan({literal})"
+    reader = con.sql(query).fetch_record_batch()
+    return oracle.fingerprint_batches(fields, reader)
+
+
 def main(argv: list[str]) -> None:
     if not argv:
         raise SystemExit(__doc__)
@@ -112,6 +138,8 @@ def main(argv: list[str]) -> None:
         emit(cmd_probe())
     elif argv[0] == "read":
         emit(cmd_read(argv[1:]))
+    elif argv[0] == "fingerprint" and len(argv) == 2:
+        emit(cmd_fingerprint(argv[1]))
     else:
         raise SystemExit(f"unknown command {argv[0]}")
 
