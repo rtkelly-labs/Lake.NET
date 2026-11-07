@@ -1,0 +1,28 @@
+<Project Sdk="Microsoft.NET.Sdk">
+  <PropertyGroup>
+    <IsTestProject>true</IsTestProject>
+  </PropertyGroup>
+  <ItemGroup>
+    <Compile Include="Support.fs" />
+    <Compile Include="ModelTests.fs" />
+    <Compile Include="TlcTests.fs" />
+    <Compile Include="Conformance.fs" />
+    <Compile Include="RestConformance.fs" />
+    <Compile Include="ConformanceTests.fs" />
+  </ItemGroup>
+  <ItemGroup>
+    <PackageReference Include="Microsoft.NET.Test.Sdk" />
+    <PackageReference Include="xunit" />
+    <PackageReference Include="xunit.runner.visualstudio" />
+    <PackageReference Include="Xunit.SkippableFact" />
+    <PackageReference Include="FsCheck" />
+    <PackageReference Include="Microsoft.AspNetCore.Mvc.Testing" />
+  </ItemGroup>
+  <ItemGroup>
+    <ProjectReference Include="../Lake.CommitProtocol/Lake.CommitProtocol.fsproj" />
+    <!-- Conformance: the real catalog and commit path, by relative path (formal/ is not in Iceberg.Net.slnx). -->
+    <ProjectReference Include="../../../src/Iceberg.Net.Data/Iceberg.Net.Data.csproj" />
+    <!-- REST conformance: RestCatalog against the server, hosted in-process. -->
+    <ProjectReference Include="../../../src/Iceberg.Net.RestServer/Iceberg.Net.RestServer.csproj" />
+  </ItemGroup>
+</Project>

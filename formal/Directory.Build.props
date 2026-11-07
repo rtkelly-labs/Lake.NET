@@ -1,0 +1,21 @@
+<Project>
+  <!--
+    formal/ is its own project that happens to live in Lake.NET. This file deliberately does not import the
+    repository's Directory.Build.props (C#-only settings such as LangVersion 12.0), so the folder can move to its
+    own repository unchanged. Projects outside formal/ that are referenced from here keep their own settings.
+  -->
+  <PropertyGroup>
+    <TargetFramework>net10.0</TargetFramework>
+    <TreatWarningsAsErrors>true</TreatWarningsAsErrors>
+    <WarnOn>3390;$(WarnOn)</WarnOn>
+    <ManagePackageVersionsCentrally>true</ManagePackageVersionsCentrally>
+    <GenerateDocumentationFile>false</GenerateDocumentationFile>
+    <IsPackable>false</IsPackable>
+    <!-- FSharp.Core comes from Directory.Packages.props, so a package built against an older one (FsCheck) cannot pull
+         the version down. -->
+    <DisableImplicitFSharpCoreReference>true</DisableImplicitFSharpCoreReference>
+  </PropertyGroup>
+  <ItemGroup Condition="'$(MSBuildProjectExtension)' == '.fsproj'">
+    <PackageReference Include="FSharp.Core" />
+  </ItemGroup>
+</Project>

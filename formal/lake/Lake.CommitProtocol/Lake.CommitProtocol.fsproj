@@ -1,0 +1,11 @@
+<Project Sdk="Microsoft.NET.Sdk">
+  <!-- The commit-protocol model. No reference to src/: the trace grammars and other tools can share its Action union. -->
+  <ItemGroup>
+    <Compile Include="Types.fs" />
+    <Compile Include="Protocol.fs" />
+    <Compile Include="CommitModel.fs" />
+  </ItemGroup>
+  <ItemGroup>
+    <ProjectReference Include="../../src/FsTla/FsTla.fsproj" />
+  </ItemGroup>
+</Project>

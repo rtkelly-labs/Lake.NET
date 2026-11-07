@@ -1,0 +1,11 @@
+<Project Sdk="Microsoft.NET.Sdk">
+  <!-- Generic: no reference to any Iceberg.Net project. -->
+  <ItemGroup>
+    <Compile Include="Values.fs" />
+    <Compile Include="TlaParse.fs" />
+    <Compile Include="Tla.fs" />
+    <Compile Include="Translate.fs" />
+    <Compile Include="Tlc.fs" />
+    <Compile Include="Model.fs" />
+  </ItemGroup>
+</Project>
