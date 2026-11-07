@@ -39,7 +39,8 @@ jobs:
           - direction: pyiceberg-writes
             filter: FullyQualifiedName~GeneratedDifferentialTests.Generated_tables_written_by_pyiceberg
     env:
-      ICEBERG_DIFFERENTIAL_SECONDS: ${{ inputs.seconds || (github.event_name == 'schedule' && '900') || '600' }}
+      # Pull requests get a short smoke run (the path filter matches the PR's whole diff, so every push re-runs it).
+      ICEBERG_DIFFERENTIAL_SECONDS: ${{ inputs.seconds || (github.event_name == 'schedule' && '900') || '120' }}
       ICEBERG_DIFFERENTIAL_OUT: ${{ github.workspace }}/differential-out
       ICEBERG_PYTHON: ${{ github.workspace }}/interop/.venv/bin/python
     steps:
