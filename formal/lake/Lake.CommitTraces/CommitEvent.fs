@@ -1,4 +1,4 @@
-namespace Formal.Traces.Iceberg
+namespace Lake.CommitTraces
 
 /// The commit protocol's observable actions: the trace grammar's alphabet. Each case is one thing a writer does or
 /// learns during one logical commit (an <c>iceberg.commit</c> span). The cases are payload-free on purpose: the grammar

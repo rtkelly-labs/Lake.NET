@@ -1,16 +1,5 @@
 <Project Sdk="Microsoft.NET.Sdk">
   <!-- Generic trace-grammar library: no reference to any Iceberg.Net project, so it can leave this repo unchanged. -->
-  <PropertyGroup>
-    <!-- The root Directory.Build.props sets a C# LangVersion; F# needs its own. -->
-    <LangVersion>latest</LangVersion>
-    <DisableImplicitFSharpCoreReference>true</DisableImplicitFSharpCoreReference>
-    <Nullable>disable</Nullable>
-    <GenerateDocumentationFile>true</GenerateDocumentationFile>
-    <IsPackable>false</IsPackable>
-  </PropertyGroup>
-  <ItemGroup>
-    <PackageReference Include="FSharp.Core" />
-  </ItemGroup>
   <ItemGroup>
     <Compile Include="Grammar.fs" />
     <Compile Include="Parser.fs" />

@@ -1,22 +1,13 @@
 <Project Sdk="Microsoft.NET.Sdk">
   <!-- Lake.NET's commit protocol as a trace grammar, and the projection from Iceberg.Net's spans onto it. -->
-  <PropertyGroup>
-    <LangVersion>latest</LangVersion>
-    <DisableImplicitFSharpCoreReference>true</DisableImplicitFSharpCoreReference>
-    <Nullable>disable</Nullable>
-    <GenerateDocumentationFile>true</GenerateDocumentationFile>
-    <IsPackable>false</IsPackable>
-  </PropertyGroup>
-  <ItemGroup>
-    <PackageReference Include="FSharp.Core" />
-  </ItemGroup>
   <ItemGroup>
     <Compile Include="CommitEvent.fs" />
     <Compile Include="CommitGrammar.fs" />
     <Compile Include="Spans.fs" />
   </ItemGroup>
   <ItemGroup>
-    <ProjectReference Include="../Formal.Traces/Formal.Traces.fsproj" />
+    <ProjectReference Include="../../src/Formal.Traces/Formal.Traces.fsproj" />
+    <ProjectReference Include="../Lake.CommitProtocol/Lake.CommitProtocol.fsproj" />
     <!-- Only for IcebergTelemetry's span and tag names, so the projection cannot drift from what the library emits. -->
     <ProjectReference Include="../../../src/Iceberg.Net.Core/Iceberg.Net.Core.csproj" />
   </ItemGroup>

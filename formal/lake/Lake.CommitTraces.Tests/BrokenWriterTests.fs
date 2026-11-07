@@ -1,12 +1,12 @@
 /// End to end on real spans: Iceberg.Net's own commit path parses under every injected outcome, and hand-written
 /// writers that break the protocol are caught, with the proposed telemetry. With today's telemetry the same broken
 /// writers pass, which is what the proposals in the README are for.
-module Formal.Traces.Iceberg.Tests.BrokenWriterTests
+module Lake.CommitTraces.Tests.BrokenWriterTests
 
 open System.Threading.Tasks
 open Formal.Traces
-open Formal.Traces.Iceberg
-open Formal.Traces.Iceberg.Tests.Harness
+open Lake.CommitTraces
+open Lake.CommitTraces.Tests.Harness
 open Iceberg.Net.Catalog
 open Iceberg.Net.Data
 open Iceberg.Net.Diagnostics

@@ -1,9 +1,9 @@
 /// The span-to-event mapping on hand-built span records, one row of the README's mapping table per case.
-module Formal.Traces.Iceberg.Tests.ProjectionTests
+module Lake.CommitTraces.Tests.ProjectionTests
 
 open System
 open Formal.Traces
-open Formal.Traces.Iceberg
+open Lake.CommitTraces
 open Iceberg.Net.Diagnostics
 open Xunit
 

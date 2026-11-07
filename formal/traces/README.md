@@ -17,11 +17,11 @@ commit protocol: protocol violation at event 3
 | Project | What it is |
 |---|---|
 | `src/Formal.Traces` | A generic library with no Iceberg.Net reference. It covers grammars over any event type, FIRST/FOLLOW, LL(1) table construction with conflict explanations, a table-driven parser with protocol-level errors, a bounded ambiguity search, and parametric slicing. |
-| `src/Formal.Traces.Iceberg` | Lake.NET's side: the event vocabulary (`CommitEvent`), the commit grammar (`CommitGrammar`) and the span projection (`Spans`). |
+| `lake/Lake.CommitTraces` | Lake.NET's side: the event vocabulary (`CommitEvent`), the commit grammar (`CommitGrammar`) and the span projection (`Spans`). |
 | `tests/Formal.Traces.Tests` | Library tests, including a differential property: on 1000 random grammars, the table, the parser and enumeration must agree. |
-| `tests/Formal.Traces.Iceberg.Tests` | Grammar properties, the projection, broken writers on real spans, and the in-process soak. |
+| `lake/Lake.CommitTraces.Tests` | Grammar properties, the projection, broken writers on real spans, and the in-process soak. |
 
-Run them with `dotnet test formal/tests/Formal.Traces.Tests` and `dotnet test formal/tests/Formal.Traces.Iceberg.Tests`.
+They are in `formal/Formal.slnx`, so the formal workflow runs them with the model's tests. On their own: `dotnet test formal/tests/Formal.Traces.Tests` and `dotnet test formal/lake/Lake.CommitTraces.Tests`.
 Neither needs Docker or Python. `FORMAL_TRACES_SOAK_SECONDS` lengthens the soak (the default is 3).
 
 ## The event vocabulary

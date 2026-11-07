@@ -1,7 +1,7 @@
-module Formal.Traces.Iceberg.Tests.CommitGrammarTests
+module Lake.CommitTraces.Tests.CommitGrammarTests
 
 open Formal.Traces
-open Formal.Traces.Iceberg
+open Lake.CommitTraces
 open Xunit
 open Xunit.Abstractions
 

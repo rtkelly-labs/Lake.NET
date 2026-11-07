@@ -1,4 +1,4 @@
-namespace Formal.Traces.Iceberg
+namespace Lake.CommitTraces
 
 open Formal.Traces
 
