@@ -33,13 +33,18 @@ let private conform (cfg: Config) (steps: (Action * State) list) =
     finally
         try Directory.Delete(root, true) with _ -> ()
 
-[<Fact>]
-let ``the real catalog follows the model along random runs`` () =
-    let property (choices: int list) = conform standard (Model.walk model standard choices)
+[<Theory>]
+[<InlineData("standard")>]
+[<InlineData("removers")>]
+let ``the real catalog follows the model along random runs`` (configName: string) =
+    let cfg = CommitModel.configs |> List.find (fst >> (=) configName) |> snd
+    let property (choices: int list) = conform cfg (Model.walk model cfg choices)
     Check.One(Config.QuickThrowOnFailure.WithMaxTest(100).WithEndSize(40), property)
 
-let private scenario (actions: Action list) =
-    conform standard (List.zip actions (Model.replay model standard actions |> List.tail))
+let private scenarioIn (cfg: Config) (actions: Action list) =
+    conform cfg (List.zip actions (Model.replay model cfg actions |> List.tail))
+
+let private scenario = scenarioIn standard
 
 [<Fact>]
 let ``after a server error the real writer finds its commit instead of retrying`` () =
@@ -59,18 +64,24 @@ let ``a lost swap is retried and a conflicting overwrite fails validation`` () =
           Ack(W1, 1)
           Reject(W3, 1) ]
 
+[<Fact>]
+let ``an overwrite retried after a concurrent delete of its files fails validation`` () =
+    scenarioIn CommitModel.removers ModelTests.concurrentRemoval
+
 /// The check has teeth: the real catalog does not follow a model with a seeded bug.
 [<Theory>]
 [<InlineData("RetryUnknownBlindly")>]
 [<InlineData("DeleteOnUnknown")>]
 [<InlineData("SnapshotIsolation")>]
+[<InlineData("NoMissingDeleteCheck")>]
 let ``the real catalog departs from each buggy model`` (bugName: string) =
-    let bug = CommitModel.seeded |> List.map fst |> List.find (fun b -> sprintf "%A" b = bugName)
-    let cfg = CommitModel.withBug bug standard
+    let bug, _, _ = CommitModel.seeded |> List.find (fun (b, _, _) -> sprintf "%A" b = bugName)
+    let cfg, _ = CommitModel.seededCase bug
     let actions =
         match bug with
         | RetryUnknownBlindly -> List.take 3 ModelTests.retryUnknownWitness
         | DeleteOnUnknown -> [ Begin W1; Timeout(W1, 1) ]
+        | NoMissingDeleteCheck -> ModelTests.concurrentRemoval
         | _ -> [ Begin W1; Begin W3; Apply(W1, 1); Apply(W3, 1); Ack(W1, 1); Reject(W3, 1) ]
     let steps = List.zip actions (Model.replay model cfg actions |> List.tail)
     let error = Assert.ThrowsAny<exn>(fun () -> conform cfg steps)

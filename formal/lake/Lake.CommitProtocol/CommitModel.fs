@@ -42,7 +42,7 @@ let model =
     |> Model.invariant "NoLostCommit" <@ Protocol.noLostCommit @>
     |> Model.invariant "FailedNeverApplies" <@ Protocol.failedNeverApplies @>
     |> Model.invariant "ReachableFilesExist" <@ Protocol.reachableFilesExist @>
-    |> Model.invariant "SerializableOverwrite" <@ Protocol.serializableOverwrite @>
+    |> Model.invariant "SerializableRemoval" <@ Protocol.serializableRemoval @>
 
 /// Two appends to different partitions and an overwrite of the first one, one retry each, one injected fault.
 let standard =
@@ -51,16 +51,32 @@ let standard =
       Faults = 1
       Bugs = Set.empty }
 
+/// Three removers of one partition: an append, a delete and an overwrite of P. This is where the concurrent-removal
+/// check (failMissingDeletePaths) matters: a delete or overwrite retried after another removed its files.
+let removers =
+    { standard with Ops = Map.ofList [ W1, Append P; W2, Delete P; W3, Overwrite P ] }
+
+/// The configurations CI checks the correct protocol in.
+let configs = [ "standard", standard; "removers", removers ]
+
 let withBug (bug: Bug) (cfg: Config) = { cfg with Bugs = Set.add bug cfg.Bugs }
 
-/// The invariants each seeded bug may break; TLC reports whichever its breadth-first search reaches first (the shortest
-/// trace). A blind retry after an unknown outcome either applies the commit twice (an append) or, for an overwrite, fails
-/// validation against its own landed commit, so the writer is told Failed although its snapshot is in the table.
+/// Each seeded bug, the configuration it is checked in, and the invariants it may break; TLC reports whichever its
+/// breadth-first search reaches first (the shortest trace). A blind retry after an unknown outcome either applies the
+/// commit twice (an append) or, for an overwrite, fails validation against its own landed commit, so the writer is told
+/// Failed although its snapshot is in the table.
 let seeded =
-    [ RetryUnknownBlindly, [ "AtMostOnce"; "FailedNeverApplies" ]
-      DeleteOnUnknown, [ "ReachableFilesExist" ]
-      SnapshotIsolation, [ "SerializableOverwrite" ]
-      BlindSwap, [ "NoLostCommit" ]
+    [ RetryUnknownBlindly, standard, [ "AtMostOnce"; "FailedNeverApplies" ]
+      DeleteOnUnknown, standard, [ "ReachableFilesExist" ]
+      SnapshotIsolation, standard, [ "SerializableRemoval" ]
+      BlindSwap, standard, [ "NoLostCommit" ]
       // A keyless resend of a commit that landed loses its CAS: the writer deletes the current metadata file, or
       // retries and applies its commit a second time.
-      NoIdempotencyKey, [ "ReachableFilesExist"; "AtMostOnce" ] ]
+      NoIdempotencyKey, standard, [ "ReachableFilesExist"; "AtMostOnce" ]
+      // A delete or overwrite retried after the other removed its files commits over that removal.
+      NoMissingDeleteCheck, removers, [ "SerializableRemoval" ] ]
+
+/// A seeded bug's configuration, with the bug, and the invariants it may break.
+let seededCase (bug: Bug) =
+    let _, cfg, expected = seeded |> List.find (fun (b, _, _) -> b = bug)
+    withBug bug cfg, expected

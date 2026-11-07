@@ -169,6 +169,9 @@ type Driver(cfg: Config, root: string) =
                             SnapshotProducer
                                 .Overwrite(table, (fun f -> string f.Partition.[0] = name))
                                 .AddFiles([ dataFile (Data w) p ])
+                        | Delete p ->
+                            let name = partitionName p
+                            SnapshotProducer.DeleteFiles(table, (fun f -> string f.Partition.[0] = name))
                     producer.Set(writerKey, sprintf "%A" w).WithRetries(cfg.MaxAttempts - 1).CommitAsync() :> Task))
             tasks.[w] <- task
             settle w signal

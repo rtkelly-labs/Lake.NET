@@ -84,10 +84,18 @@ Ack(w, k, s) ==
                  IN  [s EXCEPT !.Replies = v_Replies, !.Writers = v_Writers, !.Published = v_Published])]
            ELSE [tag |-> "None"]))
 
+History(s) ==
+    s.Metadata[s.Pointer]
+
+RemovesFiles(op) ==
+    ((op.tag = "Overwrite") \/ ((op.tag = "Delete") /\ TRUE))
+
 PartOf(op) ==
     (IF (op.tag = "Overwrite")
       THEN op.Item
-      ELSE op.Item)
+      ELSE (IF (op.tag = "Delete")
+             THEN op.Item
+             ELSE op.Item))
 
 PartitionOf(cfg, f) ==
     (IF (f.tag = "Data")
@@ -97,31 +105,42 @@ PartitionOf(cfg, f) ==
 AddsTo(cfg, p, x) ==
     (\E f \in x.Adds : (PartitionOf(cfg, f) = p))
 
-History(s) ==
-    s.Metadata[s.Pointer]
+LiveFiles(h) ==
+    ((UNION {x.Adds : x \in h}) \ (UNION {x_2.Removes : x_2 \in h}))
 
-Valid(cfg, w, start, s) ==
-    (LET matchValue == cfg.Ops[w]
-     IN  (IF (matchValue.tag = "Overwrite")
-           THEN (Has([tag |-> "SnapshotIsolation"], cfg) \/ (~(\E x \in History(s) : ((x.SeqNo > start) /\ AddsTo(cfg, matchValue.Item, x)))))
-           ELSE TRUE))
-
-Propose(w, k, start, removes, s) ==
+Valid(cfg, w, start, removedAtStart, s) ==
     (LET h == History(s)
-         snapshot == [SeqNo |-> (Cardinality(h) + 1), Writer |-> [tag |-> "Some", Value |-> w], Attempt |-> k, Adds |-> {[tag |-> "Data", writer |-> w]}, Removes |-> removes, Start |-> start]
+     IN  (((~RemovesFiles(cfg.Ops[w])) \/ Has([tag |-> "SnapshotIsolation"], cfg)) \/ ((~(\E x \in h : ((x.SeqNo > start) /\ AddsTo(cfg, PartOf(cfg.Ops[w]), x)))) /\ (Has([tag |-> "NoMissingDeleteCheck"], cfg) \/ (removedAtStart \subseteq LiveFiles(h))))))
+
+AddsOf(cfg, w) ==
+    (LET matchValue == cfg.Ops[w]
+     IN  (IF (matchValue.tag = "Append")
+           THEN {[tag |-> "Data", writer |-> w]}
+           ELSE (IF (matchValue.tag = "Overwrite")
+                  THEN {[tag |-> "Data", writer |-> w]}
+                  ELSE {})))
+
+PlanRemoves(cfg, w, h) ==
+    (IF RemovesFiles(cfg.Ops[w])
+      THEN {f \in LiveFiles(h) : (PartitionOf(cfg, f) = PartOf(cfg.Ops[w]))}
+      ELSE {})
+
+Propose(cfg, w, k, start, removedAtStart, s) ==
+    (LET h == History(s)
+         snapshot == [SeqNo |-> (Cardinality(h) + 1), Writer |-> [tag |-> "Some", Value |-> w], Attempt |-> k, Adds |-> AddsOf(cfg, w), Removes |-> PlanRemoves(cfg, w, h), Start |-> start]
          meta == [tag |-> "Meta", writer |-> w, attempt |-> k]
          v_Metadata == ((meta :> (h \cup {snapshot})) @@ s.Metadata)
          v_Store == (s.Store \cup {meta})
          v_InFlight == ((meta :> s.Pointer) @@ s.InFlight)
          v_Sent == ((meta :> s.Pointer) @@ s.Sent)
-         v_Writers == ((w :> [tag |-> "Waiting", attempt |-> k, start |-> start, removes |-> removes]) @@ s.Writers)
+         v_Writers == ((w :> [tag |-> "Waiting", attempt |-> k, start |-> start, removedAtStart |-> removedAtStart]) @@ s.Writers)
      IN  [s EXCEPT !.Metadata = v_Metadata, !.Store = v_Store, !.InFlight = v_InFlight, !.Writers = v_Writers, !.Sent = v_Sent])
 
 Retry(cfg, w, k, s) ==
     (LET matchValue == s.Writers[w]
      IN  (IF (matchValue.tag = "Waiting")
-           THEN (IF ((k < cfg.MaxAttempts) /\ Valid(cfg, w, matchValue.start, s))
-                  THEN [tag |-> "Some", Value |-> Propose(w, (k + 1), matchValue.start, matchValue.removes, s)]
+           THEN (IF ((k < cfg.MaxAttempts) /\ Valid(cfg, w, matchValue.start, matchValue.removedAtStart, s))
+                  THEN [tag |-> "Some", Value |-> Propose(cfg, w, (k + 1), matchValue.start, matchValue.removedAtStart, s)]
                   ELSE [tag |-> "Some", Value |-> (LET v_Writers == ((w :> [tag |-> "Failed"]) @@ s.Writers)
                         IN  [s EXCEPT !.Writers = v_Writers])])
            ELSE [tag |-> "None"]))
@@ -183,18 +202,11 @@ Resend(cfg, w, k, s) ==
              ELSE [tag |-> "Some", Value |-> (LET v_Faults_2 == (s.Faults - 1)
                    IN  [s EXCEPT !.Faults = v_Faults_2])]))
 
-LiveFiles(h) ==
-    ((UNION {x.Adds : x \in h}) \ (UNION {x_2.Removes : x_2 \in h}))
-
 BeginCommit(cfg, w, s) ==
     (IF (s.Writers[w] # [tag |-> "Idle"])
       THEN [tag |-> "None"]
       ELSE (LET h == History(s)
-                removes == (LET matchValue == cfg.Ops[w]
-                            IN  (IF (matchValue.tag = "Overwrite")
-                                  THEN {f \in LiveFiles(h) : (PartitionOf(cfg, f) = matchValue.Item)}
-                                  ELSE {}))
-            IN  [tag |-> "Some", Value |-> Propose(w, 1, Cardinality(h), removes, (LET v_Store == (s.Store \cup {[tag |-> "Data", writer |-> w]})
+            IN  [tag |-> "Some", Value |-> Propose(cfg, w, 1, Cardinality(h), PlanRemoves(cfg, w, h), (LET v_Store == (AddsOf(cfg, w) \cup s.Store)
                  IN  [s EXCEPT !.Store = v_Store]))]))
 
 Step(cfg, action, s) ==
@@ -236,11 +248,13 @@ ReachableFilesExist(cfg, s) ==
     (LET h == History(s)
      IN  (((s.Pointer \in s.Store) /\ ({MetadataOf(x) : x \in h} \subseteq s.Store)) /\ ((UNION {x_2.Adds : x_2 \in h}) \subseteq s.Store)))
 
-ConflictFree(cfg, h, o) ==
-    ((o.Writer.tag = "None") \/ (LET matchValue == cfg.Ops[o.Writer.Value]
-     IN  ((matchValue.tag = "Append") \/ (~(\E x \in h : (((x.SeqNo > o.Start) /\ (x.SeqNo < o.SeqNo)) /\ AddsTo(cfg, matchValue.Item, x)))))))
+Touches(cfg, p, x) ==
+    (AddsTo(cfg, p, x) \/ (\E f \in x.Removes : (PartitionOf(cfg, f) = p)))
 
-SerializableOverwrite(cfg, s) ==
+ConflictFree(cfg, h, o) ==
+    ((o.Writer.tag = "None") \/ ((~RemovesFiles(cfg.Ops[o.Writer.Value])) \/ (~(\E x \in h : (((x.SeqNo > o.Start) /\ (x.SeqNo < o.SeqNo)) /\ Touches(cfg, PartOf(cfg.Ops[o.Writer.Value]), x))))))
+
+SerializableRemoval(cfg, s) ==
     (LET h == History(s)
      IN  (\A o \in h : ConflictFree(cfg, h, o)))
 
@@ -258,6 +272,6 @@ Inv_FailedNeverApplies == FailedNeverApplies(Cfg, state)
 
 Inv_ReachableFilesExist == ReachableFilesExist(Cfg, state)
 
-Inv_SerializableOverwrite == SerializableOverwrite(Cfg, state)
+Inv_SerializableRemoval == SerializableRemoval(Cfg, state)
 
 ====
