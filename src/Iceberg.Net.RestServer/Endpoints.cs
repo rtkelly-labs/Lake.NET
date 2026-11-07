@@ -485,8 +485,8 @@ public static class Endpoints
     /// <summary>A <c>CommitTableRequest</c> body for the table the path names (its <c>identifier</c>, if given, must match).</summary>
     internal static TableCommit ParseTableCommit(TableIdentifier id, JsonNode body)
     {
-        if (body["identifier"] is { } given && !ParseIdentifier(given).Equals(id))
-            throw new BadRequestException($"The body's identifier {ParseIdentifier(given)} does not match the path's {id}");
+        if (body["identifier"] is { } given && Parse(() => ParseIdentifier(given)) is var named && !named.Equals(id))
+            throw new BadRequestException($"The body's identifier {named} does not match the path's {id}");
         return ParseCommit(id, body);
     }
 
