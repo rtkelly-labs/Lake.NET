@@ -44,5 +44,7 @@
     <PackageVersion Include="SharpFuzz" Version="2.3.0" />
     <!-- BDD: Gherkin features executed by xUnit (Reqnroll is the maintained successor of SpecFlow) -->
     <PackageVersion Include="Reqnroll.xUnit" Version="3.3.4" />
+    <!-- Macro benchmarks (benchmarks/Iceberg.Net.Benchmarks, outside the solution) -->
+    <PackageVersion Include="BenchmarkDotNet" Version="0.15.2" />
   </ItemGroup>
 </Project>

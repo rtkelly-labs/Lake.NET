@@ -1,0 +1,60 @@
+name: benchmarks
+
+# Macro benchmarks (benchmarks/Iceberg.Net.Benchmarks; see docs/regression-suite.md). Each run uploads its
+# BenchmarkDotNet reports and compares them with the last successful run on the same branch (else main). The job
+# fails when a benchmark's median time or allocations grew by more than 1.5×; a failed run is never used as the
+# baseline, so a regression keeps failing until it is fixed. Not a required check.
+on:
+  schedule:
+    - cron: "17 5 * * 1"
+  workflow_dispatch:
+  pull_request:
+    paths:
+      - benchmarks/**
+      - .github/workflows/benchmarks.yml
+
+permissions:
+  contents: read
+  actions: read
+
+concurrency:
+  group: benchmarks-${{ github.head_ref || github.ref_name }}
+  cancel-in-progress: true
+
+jobs:
+  benchmarks:
+    runs-on: ubuntu-latest
+    timeout-minutes: 60
+    env:
+      PROJECT: benchmarks/Iceberg.Net.Benchmarks
+      CURRENT: .bench/current
+      PREVIOUS: .bench/previous
+    steps:
+      - uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0 # v7.0.0
+      - uses: actions/setup-dotnet@a98b56852c35b8e3190ac28c8c2271da59106c68 # v6
+        with:
+          global-json-file: global.json
+      - run: dotnet build "$PROJECT" -c Release --nologo
+      - name: Run
+        run: dotnet run --project "$PROJECT" -c Release --no-build -- --filter '*' --artifacts "$CURRENT"
+      - uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
+        with:
+          name: benchmarks
+          path: ${{ env.CURRENT }}/results
+      - name: Previous run
+        env:
+          GH_TOKEN: ${{ github.token }}
+          BRANCH: ${{ github.head_ref || github.ref_name }}
+        run: |
+          for b in "$BRANCH" main; do
+            id="$(gh run list -R "$GITHUB_REPOSITORY" -w benchmarks.yml -b "$b" -s success -L 1 --json databaseId -q '.[0].databaseId')"
+            if [ -n "$id" ] && gh run download "$id" -R "$GITHUB_REPOSITORY" -n benchmarks -D "$PREVIOUS"; then
+              echo "Compared with run $id ($b)" >> "$GITHUB_STEP_SUMMARY"
+              exit 0
+            fi
+          done
+          echo "No previous successful run: this run is the baseline." >> "$GITHUB_STEP_SUMMARY"
+      - name: Compare
+        run: |
+          set -o pipefail
+          dotnet run --project "$PROJECT" -c Release --no-build -- compare "$PREVIOUS" "$CURRENT/results" | tee -a "$GITHUB_STEP_SUMMARY"
