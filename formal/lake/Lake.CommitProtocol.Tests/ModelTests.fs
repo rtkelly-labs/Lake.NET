@@ -24,17 +24,23 @@ let private walkProperty (cfg: Config) (check: (Action * State) list -> unit) =
     let property (choices: int list) = check (Model.walk model cfg choices)
     Check.One(Config.QuickThrowOnFailure.WithMaxTest(500).WithEndSize(60), property)
 
-[<Fact>]
-let ``every invariant holds along random walks of the correct protocol`` () =
-    walkProperty standard (fun steps ->
+[<Theory>]
+[<InlineData("standard")>]
+[<InlineData("removers")>]
+let ``every invariant holds along random walks of the correct protocol`` (configName: string) =
+    let cfg = CommitModel.configs |> List.find (fst >> (=) configName) |> snd
+    walkProperty cfg (fun steps ->
         for i, (action, state) in List.indexed steps do
-            match Model.violations model standard state with
+            match Model.violations model cfg state with
             | [] -> ()
             | broken -> failwithf "%A breaks %A after step %d (%A):\n%A" broken (List.map fst steps) (i + 1) action state)
 
-[<Fact>]
-let ``every state reached encodes to TLA+ and decodes back to itself`` () =
-    walkProperty standard (fun steps ->
+[<Theory>]
+[<InlineData("standard")>]
+[<InlineData("removers")>]
+let ``every state reached encodes to TLA+ and decodes back to itself`` (configName: string) =
+    let cfg = CommitModel.configs |> List.find (fst >> (=) configName) |> snd
+    walkProperty cfg (fun steps ->
         for _, state in steps do
             let text = Values.literalOf state
             let back = Values.decodeAs<State> (TlaParse.parse text)
@@ -85,3 +91,14 @@ let ``a timed-out attempt is never retried`` () =
     let landed = Model.replay model standard [ Begin W1; Timeout(W1, 1); Apply(W1, 1) ] |> List.last
     Assert.Equal(Meta(W1, 1), landed.Pointer)
     Assert.Empty(Model.violations model standard landed)
+
+/// A delete lands first; the overwrite of the same partition loses its swap, and its retry finds a file it removes gone.
+let concurrentRemoval = [ Begin W2; Begin W3; Apply(W2, 1); Apply(W3, 1); Ack(W2, 1); Reject(W3, 1) ]
+
+[<Fact>]
+let ``an overwrite retried after a concurrent delete of its files fails, and without the check commits over it`` () =
+    let removers = CommitModel.removers
+    Assert.Equal(Failed, (Model.replay model removers concurrentRemoval |> List.last).Writers.[W3])
+    let cfg, _ = CommitModel.seededCase NoMissingDeleteCheck
+    let landed = Model.replay model cfg (concurrentRemoval @ [ Apply(W3, 2) ]) |> List.last
+    Assert.Equal<string list>([ "SerializableRemoval" ], Model.violations model cfg landed)

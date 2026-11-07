@@ -3,8 +3,8 @@
 ///
 /// It follows SnapshotProducer.CommitAsync and MetastoreCatalog's write-then-swap: a writer writes a new metadata file
 /// on top of the current one and asks the catalog to swap the pointer. A lost swap deletes that file and retries
-/// (re-validating an overwrite); a server error reloads the table and looks for the writer's snapshot before
-/// retrying; a timeout ends the commit as unknown.
+/// (re-planning and re-validating an overwrite or delete); a server error reloads the table and looks for the
+/// writer's snapshot before retrying; a timeout ends the commit as unknown.
 [<ReflectedDefinition>]
 module Lake.CommitProtocol.Protocol
 
@@ -16,6 +16,14 @@ let partOf (op: Op) =
     match op with
     | Append p -> p
     | Overwrite p -> p
+    | Delete p -> p
+
+/// Whether the operation removes files (and so is validated on retry).
+let removesFiles (op: Op) =
+    match op with
+    | Append _ -> false
+    | Overwrite _ -> true
+    | Delete _ -> true
 
 let partitionOf (cfg: Config) (f: File) =
     match f with
@@ -41,21 +49,37 @@ let awaiting (w: Writer) (k: int) (s: State) =
 
 let addsTo (cfg: Config) (p: Part) (x: Snapshot) = Set.exists (fun f -> partitionOf cfg f = p) x.Adds
 
-/// Retry-time validation: an overwrite fails if a file was added to its partition after it began.
-let valid (cfg: Config) (w: Writer) (start: int) (s: State) =
+/// The data files the writer's commit adds: none for a delete.
+let addsOf (cfg: Config) (w: Writer) =
     match cfg.Ops.[w] with
-    | Append _ -> true
-    | Overwrite p -> has SnapshotIsolation cfg || not (Set.exists (fun x -> x.SeqNo > start && addsTo cfg p x) (history s))
+    | Delete _ -> Set.empty
+    | Append _ -> Set.singleton (Data w)
+    | Overwrite _ -> Set.singleton (Data w)
+
+/// The files an attempt removes, planned against the history it builds on: every live file of the partition for an
+/// overwrite or delete. Each attempt plans again, as SnapshotProducer re-applies its predicate.
+let planRemoves (cfg: Config) (w: Writer) (h: Set<Snapshot>) =
+    if removesFiles cfg.Ops.[w] then Set.filter (fun f -> partitionOf cfg f = partOf cfg.Ops.[w]) (liveFiles h)
+    else Set.empty
+
+/// Retry-time validation of an overwrite or delete (ValidateNoConflictingDataAsync): it fails if a file was added to its
+/// partition after it began, or if a file its first attempt removed is no longer live (failMissingDeletePaths).
+let valid (cfg: Config) (w: Writer) (start: int) (removedAtStart: Set<File>) (s: State) =
+    let h = history s
+    not (removesFiles cfg.Ops.[w])
+    || has SnapshotIsolation cfg
+    || (not (Set.exists (fun x -> x.SeqNo > start && addsTo cfg (partOf cfg.Ops.[w]) x) h)
+        && (has NoMissingDeleteCheck cfg || Set.isSubset removedAtStart (liveFiles h)))
 
 /// Write metadata attempt k on top of the current metadata and send the swap.
-let propose (w: Writer) (k: int) (start: int) (removes: Set<File>) (s: State) =
+let propose (cfg: Config) (w: Writer) (k: int) (start: int) (removedAtStart: Set<File>) (s: State) =
     let h = history s
     let snapshot =
         { SeqNo = Set.count h + 1
           Writer = Some w
           Attempt = k
-          Adds = Set.singleton (Data w)
-          Removes = removes
+          Adds = addsOf cfg w
+          Removes = planRemoves cfg w h
           Start = start }
     let meta = Meta(w, k)
     { s with
@@ -63,13 +87,14 @@ let propose (w: Writer) (k: int) (start: int) (removes: Set<File>) (s: State) =
         Store = Set.add meta s.Store
         InFlight = Map.add meta s.Pointer s.InFlight
         Sent = Map.add meta s.Pointer s.Sent
-        Writers = Map.add w (Waiting(k, start, removes)) s.Writers }
+        Writers = Map.add w (Waiting(k, start, removedAtStart)) s.Writers }
 
 /// After attempt k definitely did not land: refresh, validate and try again, or give up.
 let retry (cfg: Config) (w: Writer) (k: int) (s: State) =
     match s.Writers.[w] with
-    | Waiting(_, start, removes) ->
-        if k < cfg.MaxAttempts && valid cfg w start s then Some(propose w (k + 1) start removes s)
+    | Waiting(_, start, removedAtStart) ->
+        if k < cfg.MaxAttempts && valid cfg w start removedAtStart s then
+            Some(propose cfg w (k + 1) start removedAtStart s)
         else Some { s with Writers = Map.add w Failed s.Writers }
     | _ -> None
 
@@ -77,11 +102,7 @@ let beginCommit (cfg: Config) (w: Writer) (s: State) =
     if s.Writers.[w] <> Idle then None
     else
         let h = history s
-        let removes =
-            match cfg.Ops.[w] with
-            | Append _ -> Set.empty
-            | Overwrite p -> Set.filter (fun f -> partitionOf cfg f = p) (liveFiles h)
-        Some(propose w 1 (Set.count h) removes { s with Store = Set.add (Data w) s.Store })
+        Some(propose cfg w 1 (Set.count h) (planRemoves cfg w h) { s with Store = Set.union (addsOf cfg w) s.Store })
 
 /// Whether a swap request that expects this location wins the catalog's CAS now. Metadata files are never reused, so
 /// once the pointer has moved past a request's expected location, that request can never win.
@@ -207,15 +228,19 @@ let reachableFilesExist (cfg: Config) (s: State) =
     && Set.isSubset (Set.map metadataOf h) s.Store
     && Set.isSubset (Set.unionMany (Set.map (fun x -> x.Adds) h)) s.Store
 
-/// No overwrite committed over a file added to its partition after it began (serializable overwrite).
+/// Whether a snapshot changes partition p: adds a file to it or removes one from it.
+let touches (cfg: Config) (p: Part) (x: Snapshot) =
+    addsTo cfg p x || Set.exists (fun f -> partitionOf cfg f = p) x.Removes
+
+/// No overwrite or delete committed over a concurrent change to its partition: nothing added to it or removed from it
+/// between the snapshot the writer began from and its own (serializable).
 let conflictFree (cfg: Config) (h: Set<Snapshot>) (o: Snapshot) =
     match o.Writer with
     | Some w ->
-        match cfg.Ops.[w] with
-        | Overwrite p -> not (Set.exists (fun x -> x.SeqNo > o.Start && x.SeqNo < o.SeqNo && addsTo cfg p x) h)
-        | Append _ -> true
+        not (removesFiles cfg.Ops.[w])
+        || not (Set.exists (fun x -> x.SeqNo > o.Start && x.SeqNo < o.SeqNo && touches cfg (partOf cfg.Ops.[w]) x) h)
     | None -> true
 
-let serializableOverwrite (cfg: Config) (s: State) =
+let serializableRemoval (cfg: Config) (s: State) =
     let h = history s
     Set.forall (fun o -> conflictFree cfg h o) h

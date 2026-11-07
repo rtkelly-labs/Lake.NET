@@ -12,10 +12,12 @@ type Part =
     | P
     | Q
 
-/// What a writer commits: an append of one data file, or an overwrite that replaces a partition's live files with one.
+/// What a writer commits: an append of one data file, an overwrite that replaces a partition's live files with one
+/// (SnapshotProducer.Overwrite), or a delete of a partition's live files (SnapshotProducer.DeleteFiles).
 type Op =
     | Append of Part
     | Overwrite of Part
+    | Delete of Part
 
 /// Files in the object store: the seed data file (partition P), one data file per writer, the initial metadata file,
 /// and the metadata file each writer writes for each commit attempt.
@@ -35,10 +37,11 @@ type Snapshot =
       Removes: Set<File>
       Start: int }
 
-/// Where a writer's commit stands. Waiting: attempt `attempt` has been sent to the catalog.
+/// Where a writer's commit stands. Waiting: attempt `attempt` has been sent to the catalog. `removedAtStart` is what the
+/// first attempt removed: each retry re-plans its removes, but validates that these are all still live.
 type Phase =
     | Idle
-    | Waiting of attempt: int * start: int * removes: Set<File>
+    | Waiting of attempt: int * start: int * removedAtStart: Set<File>
     | Succeeded
     | Failed
     | Unknown
@@ -49,12 +52,14 @@ type Bug =
     | RetryUnknownBlindly
     /// Delete the new metadata file after an unknown outcome, as if the commit had lost.
     | DeleteOnUnknown
-    /// Skip the retry-time check for files added to an overwritten partition (snapshot isolation, not serializable).
+    /// Skip retry-time validation of an overwrite or delete altogether (WithSnapshotIsolation): a retry only re-plans.
     | SnapshotIsolation
     /// A catalog that swaps the pointer without comparing it to the expected location.
     | BlindSwap
     /// A resent swap request carries no idempotency key, so the catalog evaluates it again as a new request.
     | NoIdempotencyKey
+    /// Check a retry for concurrently added files but not for concurrently removed ones (no failMissingDeletePaths).
+    | NoMissingDeleteCheck
 
 type Config =
     { Ops: Map<Writer, Op>
