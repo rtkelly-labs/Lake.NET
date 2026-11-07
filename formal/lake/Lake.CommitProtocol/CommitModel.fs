@@ -3,15 +3,17 @@ module Lake.CommitProtocol.CommitModel
 
 open FsTla
 
+/// The writer an action belongs to (None: orphan cleanup).
 let writerOf (a: Action) =
     match a with
-    | Begin w -> w
+    | Begin w -> Some w
     | Apply(w, _)
     | Ack(w, _)
     | Reject(w, _)
     | ServerError(w, _)
     | Timeout(w, _)
-    | Resend(w, _) -> w
+    | Resend(w, _) -> Some w
+    | CleanOrphans -> None
 
 let seedSnapshot =
     { SeqNo = 1
@@ -32,9 +34,13 @@ let init (cfg: Config) : State =
       Sent = Map.empty
       Published = Set.empty }
 
-/// Every action of the writers in the configuration, for attempts 1..MaxAttempts.
+/// Every action of the writers in the configuration, for attempts 1..MaxAttempts, and orphan cleanup if it runs.
 let actions (cfg: Config) : Action list =
-    Values.all<Action> [ 1 .. cfg.MaxAttempts ] |> List.filter (fun a -> cfg.Ops.ContainsKey(writerOf a))
+    Values.all<Action> [ 1 .. cfg.MaxAttempts ]
+    |> List.filter (fun a ->
+        match writerOf a with
+        | Some w -> cfg.Ops.ContainsKey w
+        | None -> cfg.Cleaner)
 
 let model =
     Model.define "CommitProtocol" <@ Protocol.step @> init actions
@@ -49,6 +55,7 @@ let standard =
     { Ops = Map.ofList [ W1, Append P; W2, Append Q; W3, Overwrite P ]
       MaxAttempts = 2
       Faults = 1
+      Cleaner = false
       Bugs = Set.empty }
 
 /// Three removers of one partition: an append, a delete and an overwrite of P. This is where the concurrent-removal
@@ -56,8 +63,11 @@ let standard =
 let removers =
     { standard with Ops = Map.ofList [ W1, Append P; W2, Delete P; W3, Overwrite P ] }
 
+/// The standard writers with orphan cleanup running between any two steps: cleanup racing in-flight commits.
+let cleanup = { standard with Cleaner = true }
+
 /// The configurations CI checks the correct protocol in.
-let configs = [ "standard", standard; "removers", removers ]
+let configs = [ "standard", standard; "removers", removers; "cleanup", cleanup ]
 
 let withBug (bug: Bug) (cfg: Config) = { cfg with Bugs = Set.add bug cfg.Bugs }
 
@@ -74,7 +84,9 @@ let seeded =
       // retries and applies its commit a second time.
       NoIdempotencyKey, standard, [ "ReachableFilesExist"; "AtMostOnce" ]
       // A delete or overwrite retried after the other removed its files commits over that removal.
-      NoMissingDeleteCheck, removers, [ "SerializableRemoval" ] ]
+      NoMissingDeleteCheck, removers, [ "SerializableRemoval" ]
+      // Cleanup deletes a commit's new files before its request is applied, and the commit then lands on them.
+      OrphanCleanupNoAge, cleanup, [ "ReachableFilesExist" ] ]
 
 /// A seeded bug's configuration, with the bug, and the invariants it may break.
 let seededCase (bug: Bug) =

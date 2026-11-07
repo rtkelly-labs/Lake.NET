@@ -51,8 +51,9 @@ let private conform (driverName: string) (cfg: Config) (steps: (Action * State) 
 
 let configsAndDrivers =
     let data = TheoryData<string, string>()
-    for name, _ in CommitModel.configs do
-        for d in drivers do
+    for name, cfg in CommitModel.configs do
+        // Orphan cleanup is model-only (see Driver.Step).
+        for d in (if cfg.Cleaner then [] else drivers) do
             data.Add(name, d)
     data
 

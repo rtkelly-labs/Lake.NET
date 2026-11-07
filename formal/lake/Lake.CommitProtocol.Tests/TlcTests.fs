@@ -19,6 +19,7 @@ type TlcTests(output: ITestOutputHelper) =
     [<SkippableTheory>]
     [<InlineData("standard")>]
     [<InlineData("removers")>]
+    [<InlineData("cleanup")>]
     member _.``TLC finds no violation in the correct protocol, and agrees with the F# model on every state``(configName: string) =
         let jar = tlcJar ()
         let cfg = CommitModel.configs |> List.find (fst >> (=) configName) |> snd
@@ -38,6 +39,7 @@ type TlcTests(output: ITestOutputHelper) =
     [<InlineData("BlindSwap")>]
     [<InlineData("NoIdempotencyKey")>]
     [<InlineData("NoMissingDeleteCheck")>]
+    [<InlineData("OrphanCleanupNoAge")>]
     member _.``TLC catches each seeded bug, with a trace that replays in F#``(bugName: string) =
         let jar = tlcJar ()
         let bug, _, _ = CommitModel.seeded |> List.find (fun (b, _, _) -> sprintf "%A" b = bugName)

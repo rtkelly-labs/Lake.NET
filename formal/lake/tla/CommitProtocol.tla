@@ -4,7 +4,7 @@ EXTENDS Integers, FiniteSets, TLC
 
 VARIABLE state
 
-Cfg == [Ops |-> ([tag |-> "W1"] :> [tag |-> "Append", Item |-> [tag |-> "P"]] @@ [tag |-> "W2"] :> [tag |-> "Append", Item |-> [tag |-> "Q"]] @@ [tag |-> "W3"] :> [tag |-> "Overwrite", Item |-> [tag |-> "P"]]), MaxAttempts |-> 2, Faults |-> 1, Bugs |-> {}]
+Cfg == [Ops |-> ([tag |-> "W1"] :> [tag |-> "Append", Item |-> [tag |-> "P"]] @@ [tag |-> "W2"] :> [tag |-> "Append", Item |-> [tag |-> "Q"]] @@ [tag |-> "W3"] :> [tag |-> "Overwrite", Item |-> [tag |-> "P"]]), MaxAttempts |-> 2, Faults |-> 1, Cleaner |-> FALSE, Bugs |-> {}]
 
 Actions == {
     [tag |-> "Begin", writer |-> [tag |-> "W1"]],
@@ -202,6 +202,34 @@ Resend(cfg, w, k, s) ==
              ELSE [tag |-> "Some", Value |-> (LET v_Faults_2 == (s.Faults - 1)
                    IN  [s EXCEPT !.Faults = v_Faults_2])]))
 
+MetadataOf(x) ==
+    (IF (x.Writer.tag = "None")
+      THEN [tag |-> "Meta0"]
+      ELSE [tag |-> "Meta", writer |-> x.Writer.Value, attempt |-> x.Attempt])
+
+Reachable(s, f) ==
+    (LET h == History(s)
+     IN  (((f = s.Pointer) \/ (f \in {MetadataOf(x) : x \in h})) \/ (\E x_2 \in h : (f \in x_2.Adds))))
+
+IsWaiting(w, s) ==
+    (LET matchValue == s.Writers[w]
+     IN  ((matchValue.tag = "Waiting") /\ TRUE))
+
+IsMetaOf(w, f) ==
+    ((f.tag = "Meta") /\ (f.writer = w))
+
+Young(s, f) ==
+    (IF (f.tag = "Data")
+      THEN (IsWaiting(f.writer, s) \/ (\E m \in (DOMAIN s.InFlight) : IsMetaOf(f.writer, m)))
+      ELSE ((f.tag = "Meta") /\ ((f \in (DOMAIN s.InFlight)) \/ Awaiting(f.writer, f.attempt, s))))
+
+CleanOrphans(cfg, s) ==
+    (LET doomed == {f \in s.Store : ((~Reachable(s, f)) /\ (Has([tag |-> "OrphanCleanupNoAge"], cfg) \/ (~Young(s, f))))}
+     IN  (IF ((~cfg.Cleaner) \/ (doomed = {}))
+           THEN [tag |-> "None"]
+           ELSE [tag |-> "Some", Value |-> (LET v_Store == (s.Store \ doomed)
+                 IN  [s EXCEPT !.Store = v_Store])]))
+
 BeginCommit(cfg, w, s) ==
     (IF (s.Writers[w] # [tag |-> "Idle"])
       THEN [tag |-> "None"]
@@ -222,7 +250,9 @@ Step(cfg, action, s) ==
                                   THEN Timeout(cfg, action.writer, action.attempt, s)
                                   ELSE (IF (action.tag = "Resend")
                                          THEN Resend(cfg, action.writer, action.attempt, s)
-                                         ELSE BeginCommit(cfg, action.writer, s)))))))
+                                         ELSE (IF (action.tag = "CleanOrphans")
+                                                THEN CleanOrphans(cfg, s)
+                                                ELSE BeginCommit(cfg, action.writer, s))))))))
 
 ByWriter(w, h) ==
     {x \in h : (x.Writer = [tag |-> "Some", Value |-> w])}
@@ -233,16 +263,8 @@ AtMostOnce(cfg, s) ==
 NoLostCommit(cfg, s) ==
     (s.Published \subseteq History(s))
 
-IsMetaOf(w, f) ==
-    ((f.tag = "Meta") /\ (f.writer = w))
-
 FailedNeverApplies(cfg, s) ==
     (\A w \in (DOMAIN s.Writers) : ((s.Writers[w] # [tag |-> "Failed"]) \/ ((ByWriter(w, History(s)) = {}) /\ (~(\E m \in (DOMAIN s.InFlight) : (IsMetaOf(w, m) /\ Wins(cfg, s.InFlight[m], s)))))))
-
-MetadataOf(x) ==
-    (IF (x.Writer.tag = "None")
-      THEN [tag |-> "Meta0"]
-      ELSE [tag |-> "Meta", writer |-> x.Writer.Value, attempt |-> x.Attempt])
 
 ReachableFilesExist(cfg, s) ==
     (LET h == History(s)

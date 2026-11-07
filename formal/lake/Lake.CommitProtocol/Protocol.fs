@@ -42,6 +42,11 @@ let isMetaOf (w: Writer) (f: File) =
     | Meta(x, _) -> x = w
     | _ -> false
 
+let isWaiting (w: Writer) (s: State) =
+    match s.Writers.[w] with
+    | Waiting _ -> true
+    | _ -> false
+
 let awaiting (w: Writer) (k: int) (s: State) =
     match s.Writers.[w] with
     | Waiting(a, _, _) -> a = k
@@ -185,6 +190,34 @@ let resend (cfg: Config) (w: Writer) (k: int) (s: State) =
                 Replies = Map.remove meta s.Replies }
     else Some { s with Faults = s.Faults - 1 }
 
+/// The metadata file each snapshot was committed in.
+let metadataOf (x: Snapshot) =
+    match x.Writer with
+    | Some w -> Meta(w, x.Attempt)
+    | None -> Meta0
+
+/// What orphan cleanup keeps: the current metadata file, the metadata file of every snapshot in its history (the
+/// metadata log), and every data file any of those snapshots added.
+let reachable (s: State) (f: File) =
+    let h = history s
+    f = s.Pointer || Set.contains f (Set.map metadataOf h) || Set.exists (fun x -> Set.contains f x.Adds) h
+
+/// Whether a file is younger than orphan cleanup's age cutoff. The model has no clock. It assumes that the cutoff (at
+/// least 24 hours) outlasts every commit, including a request whose outcome was unknown and which lands late: a file is
+/// young while the writer that wrote it is still waiting on a commit or still has that request in flight.
+let young (s: State) (f: File) =
+    match f with
+    | Data w -> isWaiting w s || Map.exists (fun m _ -> isMetaOf w m) s.InFlight
+    | Meta(w, k) -> Map.containsKey f s.InFlight || awaiting w k s
+    | _ -> false
+
+/// Orphan cleanup: read the current metadata and delete every file it does not reach, unless it is young. Enabled only
+/// when there is something to delete.
+let cleanOrphans (cfg: Config) (s: State) =
+    let doomed = Set.filter (fun f -> not (reachable s f) && (has OrphanCleanupNoAge cfg || not (young s f))) s.Store
+    if not cfg.Cleaner || Set.isEmpty doomed then None
+    else Some { s with Store = Set.difference s.Store doomed }
+
 let step (cfg: Config) (action: Action) (s: State) : State option =
     match action with
     | Begin w -> beginCommit cfg w s
@@ -194,6 +227,7 @@ let step (cfg: Config) (action: Action) (s: State) : State option =
     | ServerError(w, k) -> serverError cfg w k s
     | Timeout(w, k) -> timeout cfg w k s
     | Resend(w, k) -> resend cfg w k s
+    | CleanOrphans -> cleanOrphans cfg s
 
 // Invariants.
 
@@ -213,12 +247,6 @@ let failedNeverApplies (cfg: Config) (s: State) =
             || (Set.isEmpty (byWriter w (history s))
                 && not (Map.exists (fun m expected -> isMetaOf w m && wins cfg expected s) s.InFlight)))
         s.Writers
-
-/// The metadata file each snapshot was committed in.
-let metadataOf (x: Snapshot) =
-    match x.Writer with
-    | Some w -> Meta(w, x.Attempt)
-    | None -> Meta0
 
 /// Every file reachable from a live snapshot exists: the current metadata file, the metadata file of every snapshot in
 /// its history (time travel reads them), and every data file any of those snapshots added, removed later or not.
