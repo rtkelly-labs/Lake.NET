@@ -106,10 +106,13 @@ FUZZ_STRICT=1 tools/fuzz.sh roaring 600            # also flag low-level excepti
 
 The harness (`tests/Iceberg.Net.Fuzz`) holds each decoder to the `Corruption` contract: a format error or
 success, nothing else. Crashes, hangs (10 s) and out-of-memory (4 GB) inputs are saved under
-`fuzz/<target>/findings/`; turn each into a `CorruptionTests` case when fixing it. The corpus is seeded from the
-committed fixtures and kept between runs in `fuzz/<target>/corpus` (git-ignored). The fuzz workflow
-(`.github/workflows/fuzz.yml`) runs every target weekly for 5 minutes, or for 15 minutes when dispatched, and
-replays each corpus under a coverage collector to report the lines it reached.
+`fuzz/<target>/findings/`; turn each into a `CorruptionTests` case when fixing it. Each run seeds
+`fuzz/<target>/seeds` from every committed fixture of the target's format (all tables under `tests/**/fixtures/`)
+and keeps what it finds in `fuzz/<target>/corpus` (both git-ignored). The JSON targets also get a libFuzzer
+dictionary of the spec's keys and enum values (`tests/Iceberg.Net.Fuzz/dicts/`). The fuzz workflow
+(`.github/workflows/fuzz.yml`) runs every target weekly for 5 minutes, or for 15 minutes when dispatched, carries
+the corpus from run to run in the Actions cache, and replays the seeds alone and the seeds with the corpus under a
+coverage collector to report the lines each reached.
 
 ### Size limits
 
