@@ -20,7 +20,6 @@ on:
     paths:
       - tests/Iceberg.Net.Regression.Tests/GeneratedDifferentialTests.cs
       - interop/pyiceberg_oracle.py
-      - interop/duckdb_oracle.py
       - src/Iceberg.Net.Data/TableFingerprint.cs
       - .github/workflows/differential.yml
 
@@ -45,7 +44,9 @@ jobs:
       ICEBERG_DIFFERENTIAL_OUT: ${{ github.workspace }}/differential-out
       ICEBERG_PYTHON: ${{ github.workspace }}/interop/.venv/bin/python
       # The second oracle for .NET-written tables (its iceberg extension downloads from extensions.duckdb.org).
-      ICEBERG_DIFFERENTIAL_DUCKDB: "1"
+      # Weekly and dispatched runs only: it costs 2.4x per case, which would halve the cases a 120 s PR run covers.
+      # Dispatch on the branch to check a change to duckdb_oracle.py.
+      ICEBERG_DIFFERENTIAL_DUCKDB: ${{ github.event_name != 'pull_request' && '1' || '0' }}
     steps:
       - uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0 # v7.0.0
       - uses: actions/setup-dotnet@a98b56852c35b8e3190ac28c8c2271da59106c68 # v6
