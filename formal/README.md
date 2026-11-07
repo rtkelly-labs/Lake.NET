@@ -4,8 +4,9 @@ Lake.NET's commit protocol, written once in F# and checked in two ways:
 
 - **TLC model-checks it.** FsTla translates the F# model to TLA+, and TLC explores every reachable state of a small
   configuration.
-- **It is an oracle for the production code.** FsCheck walks the same model and drives the real `InMemoryCatalog` and
-  `SnapshotProducer` step by step with the same actions, comparing the two after every step.
+- **It is an oracle for the production code.** FsCheck walks the same model and drives the real `SnapshotProducer`
+  step by step with the same actions, against `InMemoryCatalog` and against `RestCatalog` talking to the REST server,
+  comparing the two after every step.
 
 The model and the code under test share one type, `Action`, so a TLC counterexample is a list of F# values. You can
 replay it natively, step it in a debugger, or turn it into a conformance scenario.
@@ -121,18 +122,30 @@ server error, a timeout or a resend):
 - **Retries are atomic too.** A retry's refresh, validation and new attempt are one step, and backoff is not modelled.
 - **Unreachable rejections.** A catalog that rejects on its own requirement checks (as opposed to a lost CAS) cannot
   occur in this configuration.
-- **Resend and the conformance driver.** `Resend` stands for the REST server's deduplication, which `InMemoryCatalog`
-  does not have, so the conformance driver treats a keyed resend as the invisible no-op the key makes it.
+- **Resend.** `Resend` stands for the REST server's `Idempotency-Key` deduplication. `InMemoryCatalog` has no keys, so
+  its driver treats a keyed resend as the no-op the key makes it; the REST driver sends it and checks the replay.
 
 ### Conformance against the real catalog
 
-`Conformance.fs` runs the real thing:
+Each writer is a real `SnapshotProducer` commit on its own task. Two drivers hold its commit until the model's next
+action says what happens to it:
 
-- An `InMemoryCatalog` subclass holds every writer's pointer swap until the driver plays the model's next action:
+- **`InMemoryCatalog`** (`Conformance.fs`). A subclass holds every writer's pointer swap:
   - `Apply` runs the catalog's own CAS;
   - `Ack` / `Reject` hand the writer its result;
   - `ServerError` and `Timeout` hand it the exceptions the production code sees.
-- Each writer is a real `SnapshotProducer` commit on its own task.
+- **`RestCatalog` against the REST server** (`RestConformance.fs`), hosted in-process over its in-memory store and
+  over its SQLite store. The client's message handler holds each commit request:
+  - `Apply` forwards it, and the server checks its requirements, writes the metadata file and swaps (or answers 409);
+  - `Ack` / `Reject` hand the writer the server's 200 or 409;
+  - `ServerError` answers 500 without forwarding, and `Timeout` fails the call while the request stays held;
+  - `Resend` sends the request again with its `Idempotency-Key`. Before `Apply` the copy follows the original to the
+    server; after it, the copy goes now. Either way the server must replay the original response.
+
+  The client's own idempotent retries are off, so each injected fault is one action. Requests reach the server one at
+  a time, so a stale one fails the server's requirement check (409) rather than its store's compare-and-swap. Under REST the server writes a
+  metadata file only for a request that wins, so the metadata files compared are those of the snapshots in the
+  history.
 
 After every step the driver compares the following with the model:
 
@@ -142,11 +155,12 @@ After every step the driver compares the following with the model:
 - the snapshot history;
 - the live data files from a real scan plan.
 
-FsCheck generates and shrinks the runs. A further test checks that the comparison has teeth: the real system departs
-from each writer-side buggy model (`RetryUnknownBlindly`, `DeleteOnUnknown`, `SnapshotIsolation`,
-`NoMissingDeleteCheck`). Both configurations run. `BlindSwap` is a
-property of the catalog, and `NoIdempotencyKey` is invisible to `InMemoryCatalog`, so neither has a real counterpart
-here.
+FsCheck generates and shrinks the runs, with both configurations against all three backends. A model action the real
+system cannot take (a request it does not hold, or a reply other than the one the model expects) is also a difference.
+A further test checks that the comparison has teeth: the real system departs from each writer-side buggy model
+(`RetryUnknownBlindly`, `DeleteOnUnknown`, `SnapshotIsolation`, `NoMissingDeleteCheck`), and the REST server departs
+from `NoIdempotencyKey`, since it deduplicates the resend that the buggy model applies again. `BlindSwap` is a property
+of the catalog and has no real counterpart.
 
 ## Prior art, and what this adds
 
@@ -207,8 +221,9 @@ signal for `Resend`), mapped back to an `Action` list that the model replays. `t
 
 - **Apalache**, or another SMT backend, for inductive invariants and larger parameters than TLC's explicit-state
   search reaches.
-- **More catalogs under conformance.** The REST client against the REST server (with real idempotency-key
-  deduplication, which would make `Resend` observable), Glue, and JDBC.
+- **More catalogs under conformance.** Glue (it needs the moto emulator) and `JdbcCatalog`. The REST server runs over
+  its SQLite store here, but the driver forwards one request at a time, so the server's requirement check rejects a
+  stale request before the store's SQL compare-and-swap could lose a race.
 - **More protocol.** Snapshot expiry and orphan cleanup racing in-flight commits, multi-table transactions, and
   branches.
 - **Liveness.** For example, every writer eventually finishes when faults are bounded.
