@@ -104,6 +104,16 @@ public sealed class ProtocolTests
         {
             ["updates"] = new JsonArray(new JsonObject { ["action"] = "no-such-action" }),
         }));
+        // Found by the rest-commit fuzz target: a malformed body identifier (a non-string level, or invalid UTF-8 in a name) was a 500.
+        AssertError(HttpStatusCode.BadRequest, "BadRequestException", await SendAsync(http, HttpMethod.Post, "/v1/namespaces/db/tables/t", new JsonObject
+        {
+            ["identifier"] = new JsonObject { ["namespace"] = new JsonArray(5), ["name"] = "t" },
+            ["updates"] = new JsonArray(),
+        }));
+        byte[] invalidUtf8 = [.. "{\"identifier\": {\"namespace\": [\"db\"], \"name\": \""u8, 0xFF, .. "\"}, \"updates\": []}"u8];
+        using (var bad = new HttpRequestMessage(HttpMethod.Post, "/v1/namespaces/db/tables/t") { Content = new ByteArrayContent(invalidUtf8) })
+        using (var resp = await http.SendAsync(bad))
+            Assert.Equal(HttpStatusCode.BadRequest, resp.StatusCode);
         AssertError(HttpStatusCode.UnprocessableEntity, "UnprocessableEntityException", await SendAsync(http, HttpMethod.Post, "/v1/namespaces/db/properties", new JsonObject
         {
             ["updates"] = new JsonObject { ["a"] = "1" },
