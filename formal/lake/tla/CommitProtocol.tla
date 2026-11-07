@@ -227,8 +227,14 @@ IsMetaOf(w, f) ==
 FailedNeverApplies(cfg, s) ==
     (\A w \in (DOMAIN s.Writers) : ((s.Writers[w] # [tag |-> "Failed"]) \/ ((ByWriter(w, History(s)) = {}) /\ (~(\E m \in (DOMAIN s.InFlight) : (IsMetaOf(w, m) /\ Wins(cfg, s.InFlight[m], s)))))))
 
+MetadataOf(x) ==
+    (IF (x.Writer.tag = "None")
+      THEN [tag |-> "Meta0"]
+      ELSE [tag |-> "Meta", writer |-> x.Writer.Value, attempt |-> x.Attempt])
+
 ReachableFilesExist(cfg, s) ==
-    ((s.Pointer \in s.Store) /\ (LiveFiles(History(s)) \subseteq s.Store))
+    (LET h == History(s)
+     IN  (((s.Pointer \in s.Store) /\ ({MetadataOf(x) : x \in h} \subseteq s.Store)) /\ ((UNION {x_2.Adds : x_2 \in h}) \subseteq s.Store)))
 
 ConflictFree(cfg, h, o) ==
     ((o.Writer.tag = "None") \/ (LET matchValue == cfg.Ops[o.Writer.Value]
