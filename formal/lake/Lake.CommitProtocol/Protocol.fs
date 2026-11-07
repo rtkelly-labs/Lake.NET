@@ -193,9 +193,19 @@ let failedNeverApplies (cfg: Config) (s: State) =
                 && not (Map.exists (fun m expected -> isMetaOf w m && wins cfg expected s) s.InFlight)))
         s.Writers
 
-/// The current metadata file and every live data file exist.
+/// The metadata file each snapshot was committed in.
+let metadataOf (x: Snapshot) =
+    match x.Writer with
+    | Some w -> Meta(w, x.Attempt)
+    | None -> Meta0
+
+/// Every file reachable from a live snapshot exists: the current metadata file, the metadata file of every snapshot in
+/// its history (time travel reads them), and every data file any of those snapshots added, removed later or not.
 let reachableFilesExist (cfg: Config) (s: State) =
-    Set.contains s.Pointer s.Store && Set.isSubset (liveFiles (history s)) s.Store
+    let h = history s
+    Set.contains s.Pointer s.Store
+    && Set.isSubset (Set.map metadataOf h) s.Store
+    && Set.isSubset (Set.unionMany (Set.map (fun x -> x.Adds) h)) s.Store
 
 /// No overwrite committed over a file added to its partition after it began (serializable overwrite).
 let conflictFree (cfg: Config) (h: Set<Snapshot>) (o: Snapshot) =
