@@ -1,7 +1,6 @@
 <Project Sdk="Microsoft.NET.Sdk">
   <!-- Macro benchmarks, run by .github/workflows/benchmarks.yml. Not in Iceberg.Net.slnx: CI builds and tests the
-       solution, and these take minutes. Build and run with
-       `dotnet run -c Release --project benchmarks/Iceberg.Net.Benchmarks -- --filter '*'`. -->
+       solution, and these take minutes. How to run them: docs/regression-suite.md (Performance). -->
   <PropertyGroup>
     <OutputType>Exe</OutputType>
     <IsPackable>false</IsPackable>
