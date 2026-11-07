@@ -1,7 +1,7 @@
 /// In-process trace capture: a fault-injecting catalog, an ActivityListener, and the two enrichments that stand in
 /// for the proposed telemetry (classified catalog failures, resolution events) so tests can check against both
 /// today's spans and the proposed ones.
-module Formal.Traces.Iceberg.Tests.Harness
+module Lake.CommitTraces.Tests.Harness
 
 open System
 open System.Collections.Concurrent
@@ -10,7 +10,7 @@ open System.Diagnostics
 open System.IO
 open System.Runtime.ExceptionServices
 open System.Threading.Tasks
-open Formal.Traces.Iceberg
+open Lake.CommitTraces
 open Iceberg.Net.Catalog
 open Iceberg.Net.Diagnostics
 open Iceberg.Net.Metadata

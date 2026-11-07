@@ -40,8 +40,6 @@
     <PackageVersion Include="Xunit.SkippableFact" Version="1.5.23" />
     <!-- Property-based / model-based testing (same major as Parquet.SourceGenerator's suite) -->
     <PackageVersion Include="FsCheck" Version="3.4.0" />
-    <!-- F# runtime for formal/ (FsCheck alone would pull in FSharp.Core 5) -->
-    <PackageVersion Include="FSharp.Core" Version="10.1.401" />
     <!-- Coverage-guided fuzzing harness (tests/Iceberg.Net.Fuzz, tools/fuzz.sh) -->
     <PackageVersion Include="SharpFuzz" Version="2.3.0" />
     <!-- BDD: Gherkin features executed by xUnit (Reqnroll is the maintained successor of SpecFlow) -->

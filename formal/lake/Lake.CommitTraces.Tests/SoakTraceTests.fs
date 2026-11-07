@@ -1,13 +1,13 @@
 /// The first data source: a soak run captured in process. Writers race on one table through the library's real
 /// commit paths (append, insert, upsert, delete under every strategy) while the catalog injects unknown outcomes; every
 /// logical commit in the recorded trace must parse, with today's telemetry and with the proposed attributes.
-module Formal.Traces.Iceberg.Tests.SoakTraceTests
+module Lake.CommitTraces.Tests.SoakTraceTests
 
 open System
 open System.Collections.Concurrent
 open System.Threading.Tasks
-open Formal.Traces.Iceberg
-open Formal.Traces.Iceberg.Tests.Harness
+open Lake.CommitTraces
+open Lake.CommitTraces.Tests.Harness
 open Iceberg.Net.Catalog
 open Iceberg.Net.Data
 open Iceberg.Net.Metadata
