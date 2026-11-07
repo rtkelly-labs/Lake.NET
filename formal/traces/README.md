@@ -47,9 +47,9 @@ grammar describes the protocol's shape and nothing else.
 
 ### Alignment with the model's `Action`
 
-The model (phase one) steps by a coarser union: `Begin | Apply | Ack | Reject | ServerError | Timeout`, each with
-a writer and an attempt number. A model step is atomic, while a trace records the client doing that step in several
-spans. So each model action corresponds to a short run of events, and the catalog-internal `Apply` corresponds to
+`CommitEvent` is a client-observable refinement of the model's `Action` (`formal/lake/Lake.CommitProtocol`), and
+`Actions.ofSlice` maps a parsed slice back to it. A model step is atomic, while a trace records the client doing that
+step in several spans. So each visible model action corresponds to a short run of events, and the rest correspond to
 nothing a client span can see:
 
 | Model action | Trace events |
@@ -58,12 +58,21 @@ nothing a client span can see:
 | `Apply (w, k)` | none (it happens inside the catalog; a server-side trace could record it) |
 | `Ack (w, k)` | `SwapApplied`, then `Committed` |
 | `Reject (w, k)` | `SwapRejected`, then `Retry Reload`, or `GaveUp` once attempts run out |
-| `ServerError (w, k)` | `SwapUnknown Reload Found` or `SwapUnknown Reload Absent`, then as `Reject` |
+| `ServerError (w, k)` | `SwapUnknown`, then a reload (`Found`, `Absent` or `ReloadFailed`); after `Absent`, as `Reject` |
 | `Timeout (w, k)` | `SwapUnknown LeftUnknown` |
+| `Resend (w, k)` | none (the idempotency key joins it to the original request; gap 7) |
+| `CleanOrphans` | none (maintenance, not a commit) |
 
-The attempt number `k` has no counterpart in today's spans (gap 3 below). Once the model is merged, this table becomes
-a function from a parsed slice (its derivation) to the model's actions. That lets a recorded run also be replayed
-against the model, as etcd's trace validation does, and checked for data as well as shape.
+The attempt number `k` is not on the spans (gap 3); `ofSlice` recovers it by counting swaps, one per attempt. A slice
+with today's unclassified `SwapFailed` maps to no action, so `ofSlice` returns an error there (gap 1).
+
+`ConformanceTraceTests` checks the mapping against the model itself. The model's conformance driver runs real
+`SnapshotProducer` commits on `InMemoryCatalog` along random walks of the model (the `standard` and `removers`
+configurations; the driver does not drive orphan cleanup). The spans those commits emit must parse, and
+`Actions.ofSlice` must return exactly the visible actions the driver took for every writer that finished. This also
+confirms that the model's `Timeout` reaches the trace as `SwapUnknown LeftUnknown`: the metastore catalog wraps a
+transport timeout as an unknown outcome the server did not answer. The REST driver is a follow-up: its in-process
+server emits spans on the same `ActivitySource`, so server-side spans need separating from the client's first.
 
 ## The commit grammar
 
@@ -185,6 +194,10 @@ fault-injecting catalog for (2)). That shows exactly what each proposal buys.
 6. **Catalog spans tag only failures.** A successful catalog call has status Ok but no `iceberg.outcome`, unlike
    commit spans. The projection handles both, but an exporter that drops status would lose successes.
    *Proposal:* `Succeeded` sets `iceberg.outcome = success`.
+7. **Idempotent resends are invisible.** `RestCatalog` resends a timed-out commit with the same idempotency key, and
+   the server joins it to the original request. Neither side records it, so a trace cannot show the model's `Resend`,
+   and a resend that the server failed to deduplicate would look like a second, independent attempt.
+   *Proposal:* an `iceberg.commit.resend` event on the `commit_table` span, tagged with the attempt it repeats.
 
 ## Data sources
 
