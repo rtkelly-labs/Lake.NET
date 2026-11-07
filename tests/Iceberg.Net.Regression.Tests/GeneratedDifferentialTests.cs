@@ -24,7 +24,9 @@ namespace Iceberg.Net.Regression.Tests;
 ///   <item>.NET writes (inserts in batches, optionally a delete by copy-on-write or position deletes), PyIceberg reads.
 ///   Half of these tables are partitioned (identity, bucket, truncate, year/month/day/hour over top-level columns), and
 ///   each partitioned case also runs one equality filter on a partition source through both scans: the full-table
-///   fingerprint reads every file, so a wrong partition value only shows once a filter prunes by it.</item>
+///   fingerprint reads every file, so a wrong partition value only shows once a filter prunes by it. Half of them also
+///   evolve the schema after the first batch (add, drop, rename, promote, and re-add a dropped name with a new field ID),
+///   so later batches and every read meet files written under an older schema.</item>
 ///   <item>PyIceberg writes (oracle <c>write-arrow</c>, from an Arrow IPC file of the same rows), both read.</item>
 /// </list>
 /// A disagreement is shrunk (drop columns, drop the delete, merge batches, drop rows) and the smallest failing table
@@ -110,6 +112,7 @@ public sealed class GeneratedDifferentialTests(ITestOutputHelper output) : IDisp
                 ["delete"] = shrunk.Delete?.ToString(),
                 ["partition"] = shrunk.PartitionText,
                 ["filter"] = shrunk.Filter?.ToString(),
+                ["evolution"] = shrunk.EvolutionText,
                 ["original_schema"] = c.Schema.ToString(),
             });
             output.WriteLine($"seed {seed}: {last.Category}: {Truncate(last.Detail, 300)} (shrunk to {shrunk.Schema.Columns.Count} columns, {shrunk.Rows.Count} rows)");
@@ -374,9 +377,85 @@ public sealed class GeneratedDifferentialTests(ITestOutputHelper output) : IDisp
         public override string ToString() => $"{Column} == {JsonLiteral().ToJsonString()}";
     }
 
-    private sealed record Case(int Seed, int FormatVersion, Schema Schema, List<object?[]> Rows, int Batches, DeleteSpec? Delete,
-        IReadOnlyList<PartitionPick>? Partition = null, FilterPick? Filter = null)
+    /// <summary>One schema change applied after the first batch. Never touches the id column, the filter column or a
+    /// partition source.</summary>
+    private abstract record SchemaChange(string Column)
     {
+        public abstract void Apply(SchemaUpdate update);
+
+        /// <summary>Reshape a row of the old schema (column names in <paramref name="names"/>, updated in place).</summary>
+        public abstract object?[] Reshape(object?[] row, List<string> names);
+    }
+
+    /// <summary>An optional long, filled from the row id; reuses a dropped column's name when one precedes it, which a
+    /// reader resolving by name instead of field ID gets wrong.</summary>
+    private sealed record AddChange(string Column) : SchemaChange(Column)
+    {
+        public override void Apply(SchemaUpdate update) => update.AddColumn(Column, PrimitiveType.Long);
+
+        public override object?[] Reshape(object?[] row, List<string> names)
+        {
+            names.Add(Column);
+            var id = (long)row[0]!;
+            return [.. row, id % 3 == 0 ? null : id * 7 - 11];
+        }
+
+        public override string ToString() => $"add {Column} long";
+    }
+
+    private sealed record DropChange(string Column) : SchemaChange(Column)
+    {
+        public override void Apply(SchemaUpdate update) => update.DeleteColumn(Column);
+
+        public override object?[] Reshape(object?[] row, List<string> names)
+        {
+            var i = names.IndexOf(Column);
+            names.RemoveAt(i);
+            return row.Where((_, j) => j != i).ToArray();
+        }
+
+        public override string ToString() => $"drop {Column}";
+    }
+
+    private sealed record RenameChange(string Column, string NewName) : SchemaChange(Column)
+    {
+        public override void Apply(SchemaUpdate update) => update.RenameColumn(Column, NewName);
+
+        public override object?[] Reshape(object?[] row, List<string> names)
+        {
+            names[names.IndexOf(Column)] = NewName;
+            return row;
+        }
+
+        public override string ToString() => $"rename {Column} to {NewName}";
+    }
+
+    /// <summary>int to long or float to double.</summary>
+    private sealed record PromoteChange(string Column, PrimitiveType To) : SchemaChange(Column)
+    {
+        public override void Apply(SchemaUpdate update) => update.UpdateColumn(Column, To);
+
+        public override object?[] Reshape(object?[] row, List<string> names)
+        {
+            var i = names.IndexOf(Column);
+            var copy = (object?[])row.Clone();
+            copy[i] = copy[i] switch
+            {
+                int v => (long)v,
+                float v => (double)v,
+                var v => v,
+            };
+            return copy;
+        }
+
+        public override string ToString() => $"promote {Column} to {To}";
+    }
+
+    private sealed record Case(int Seed, int FormatVersion, Schema Schema, List<object?[]> Rows, int Batches, DeleteSpec? Delete,
+        IReadOnlyList<PartitionPick>? Partition = null, FilterPick? Filter = null, IReadOnlyList<SchemaChange>? Evolution = null)
+    {
+        public string? EvolutionText => Evolution is { Count: > 0 } e ? string.Join("; ", e) : null;
+
         public int ExpectedRows => Delete is null ? Rows.Count : Rows.Count(r => !Delete.Deletes((long)r[0]!));
 
         public string? PartitionText => Partition is { Count: > 0 } p ? $"[{string.Join(", ", p)}]" : null;
@@ -401,9 +480,27 @@ public sealed class GeneratedDifferentialTests(ITestOutputHelper output) : IDisp
             }
             var t = await catalog.CreateTableAsync(new CreateTableRequest(TableIdentifier.Of("gen", "t"), Schema, Spec: spec, FormatVersion: FormatVersion));
             var size = Math.Max(1, (Rows.Count + Batches - 1) / Batches);
-            foreach (var chunk in Rows.Chunk(size)) await TableMutations.InsertAsync(t, chunk);
+            var chunks = Rows.Chunk(size).ToList();
+            await TableMutations.InsertAsync(t, chunks[0]);
+            if (Evolution is { Count: > 0 } evolution)
+            {
+                await t.UpdateSchemaAsync(update =>
+                {
+                    foreach (var change in evolution) change.Apply(update);
+                });
+            }
+            foreach (var chunk in chunks.Skip(1)) await TableMutations.InsertAsync(t, chunk.Select(Reshape).ToList());
             if (Delete is { } d) await TableMutations.DeleteWhereAsync(t, r => d.Deletes((long)r[0]!), d.Strategy);
             return t;
+        }
+
+        /// <summary>A generated row in the evolved schema's shape.</summary>
+        private object?[] Reshape(object?[] row)
+        {
+            if (Evolution is not { Count: > 0 } evolution) return row;
+            var names = Schema.Columns.Select(c => c.Name).ToList();
+            foreach (var change in evolution) row = change.Reshape(row, names);
+            return row;
         }
 
         /// <summary>Candidates one step smaller, most aggressive first.</summary>
@@ -416,6 +513,16 @@ public sealed class GeneratedDifferentialTests(ITestOutputHelper output) : IDisp
             if (Partition is { Count: > 0 }) yield return this with { Partition = null };
             if (Partition is { Count: > 1 })
                 foreach (var p in Partition) yield return this with { Partition = [p] };
+            if (Evolution is { Count: > 0 } evolution)
+            {
+                yield return this with { Evolution = null };
+                if (evolution.Count > 1)
+                    for (var e = 0; e < evolution.Count; e++)
+                    {
+                        var skip = e;
+                        yield return this with { Evolution = evolution.Where((_, i) => i != skip).ToList() };
+                    }
+            }
             if (Batches > 1) yield return this with { Batches = 1 };
             if (Rows.Count is > 1 and <= 8)
                 for (var r = 0; r < Rows.Count; r++)
@@ -431,7 +538,59 @@ public sealed class GeneratedDifferentialTests(ITestOutputHelper output) : IDisp
             Rows = Rows.Select(r => r.Where((_, i) => i != c).ToArray()).ToList(),
             Partition = Partition?.Where(p => p.Column != Schema.Columns[c].Name).ToList(),
             Filter = Filter?.Column == Schema.Columns[c].Name ? null : Filter,
+            // A change to the removed column goes with it; so does an add that reused its name.
+            Evolution = Evolution?.Where(e => e.Column != Schema.Columns[c].Name).ToList(),
         };
+
+        /// <summary>Half the cases get one to three schema changes after the first batch, over top-level columns other
+        /// than the id, the filter column and partition sources; each column changes at most once. A separate Random,
+        /// so the schemas, rows, partitions and filters of every seed stay as before.</summary>
+        private static List<SchemaChange>? EvolutionFor(int seed, Schema schema, IReadOnlyList<PartitionPick>? partition, FilterPick? filter)
+        {
+            var r = new Random(seed ^ 0x5EED0E70);
+            if (r.Next(2) == 0) return null;
+            var pinned = new HashSet<string>(StringComparer.Ordinal) { "id" };
+            foreach (var p in partition ?? []) pinned.Add(p.Column);
+            if (filter is not null) pinned.Add(filter.Column);
+            var free = schema.Columns.Where(c => !pinned.Contains(c.Name)).OrderBy(_ => r.Next()).ToList();
+            var changes = new List<SchemaChange>();
+            var dropped = new List<string>();
+            for (var n = 1 + r.Next(3); n > 0; n--)
+            {
+                var kind = r.Next(4);
+                if (kind == 3 || free.Count == 0)
+                {
+                    // Re-add a dropped name (a new field ID under an old name) or a fresh one.
+                    var name = dropped.Count > 0 && r.Next(2) == 0 ? dropped[0] : $"added{changes.Count}";
+                    dropped.Remove(name);
+                    changes.Add(new AddChange(name));
+                    continue;
+                }
+                var promotable = free.FindIndex(c => c.Type.TypeId is TypeId.Int or TypeId.Float);
+                var column = kind == 2 && promotable >= 0 ? free[promotable] : free[0];
+                free.Remove(column);
+                switch (kind)
+                {
+                    case 0:
+                        changes.Add(new DropChange(column.Name));
+                        dropped.Add(column.Name);
+                        break;
+                    case 1:
+                        changes.Add(new RenameChange(column.Name, column.Name + "_renamed"));
+                        break;
+                    case 2 when column.Type.TypeId is TypeId.Int:
+                        changes.Add(new PromoteChange(column.Name, PrimitiveType.Long));
+                        break;
+                    case 2 when column.Type.TypeId is TypeId.Float:
+                        changes.Add(new PromoteChange(column.Name, PrimitiveType.Double));
+                        break;
+                    default:
+                        changes.Add(new RenameChange(column.Name, column.Name + "_renamed"));
+                        break;
+                }
+            }
+            return changes;
+        }
 
         private static readonly Transform[] Transforms =
         [
@@ -491,7 +650,8 @@ public sealed class GeneratedDifferentialTests(ITestOutputHelper output) : IDisp
                 : new DeleteSpec(2 + g.R.Next(5), 0, g.R.Next(2) == 0 ? DeleteStrategy.CopyOnWrite : DeleteStrategy.PositionDeletes);
             var batches = 1 + g.R.Next(3);
             var (partition, filter) = partitioned ? PartitionAndFilter(seed, schema, rows) : (null, null);
-            return new Case(seed, formatVersion, schema, rows, batches, delete, partition, filter);
+            var evolution = partitioned ? EvolutionFor(seed, schema, partition, filter) : null;
+            return new Case(seed, formatVersion, schema, rows, batches, delete, partition, filter, evolution);
         }
     }
 
