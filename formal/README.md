@@ -158,8 +158,9 @@ After every step the driver compares the following with the model:
 FsCheck generates and shrinks the runs, with both configurations against all three backends. A model action the real
 system cannot take (a request it does not hold, or a reply other than the one the model expects) is also a difference.
 A further test checks that the comparison has teeth: the real system departs from each writer-side buggy model
-(`RetryUnknownBlindly`, `DeleteOnUnknown`, `SnapshotIsolation`, `NoMissingDeleteCheck`), and the REST server departs
-from `NoIdempotencyKey`, since it deduplicates the resend that the buggy model applies again. `BlindSwap` is a property
+(`RetryUnknownBlindly`, `DeleteOnUnknown`, `SnapshotIsolation`, `NoMissingDeleteCheck`). Under REST it also departs
+from `NoIdempotencyKey`: the buggy model applies the resent request a second time, and the driver holds no request
+to apply. That the server replays the resend instead is checked by the `Resend` step itself, in the positive tests. `BlindSwap` is a property
 of the catalog and has no real counterpart.
 
 ## Prior art, and what this adds
