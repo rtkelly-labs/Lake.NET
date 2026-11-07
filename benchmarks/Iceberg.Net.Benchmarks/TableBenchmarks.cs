@@ -67,7 +67,11 @@ public class TableBenchmarks
     }
 
     [Benchmark(Description = "Plan a full scan over 200 manifests")]
-    public async Task<int> PlanAllAsync() => (await TableScan.PlanAsync(_manyManifests, Expression.True)).Tasks.Count;
+    public async Task<int> PlanAllAsync()
+    {
+        await Task.Delay(5); // Deliberate slowdown: checks that the comparison step fails. Reverted next commit.
+        return (await TableScan.PlanAsync(_manyManifests, Expression.True)).Tasks.Count;
+    }
 
     [Benchmark(Description = "Plan a filtered scan over 200 manifests (partition pruning)")]
     public async Task<int> PlanFilteredAsync() => (await TableScan.PlanAsync(_manyManifests, Expr.Equal("p", 7))).Tasks.Count;
