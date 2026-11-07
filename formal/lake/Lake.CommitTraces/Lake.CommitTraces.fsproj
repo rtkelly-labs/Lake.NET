@@ -4,6 +4,7 @@
     <Compile Include="CommitEvent.fs" />
     <Compile Include="CommitGrammar.fs" />
     <Compile Include="Spans.fs" />
+    <Compile Include="Actions.fs" />
   </ItemGroup>
   <ItemGroup>
     <ProjectReference Include="../../src/Formal.Traces/Formal.Traces.fsproj" />
