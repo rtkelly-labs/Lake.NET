@@ -3,14 +3,17 @@
     <OutputType>Exe</OutputType>
     <IsPackable>false</IsPackable>
     <RootNamespace>Iceberg.Net.Fuzz</RootNamespace>
-    <Description>Coverage-guided fuzzing (SharpFuzz + libFuzzer) of the decoders for untrusted bytes; run with tools/fuzz.sh.</Description>
+    <Description>Coverage-guided fuzzing (SharpFuzz + libFuzzer) of the decoders for untrusted bytes and of the REST server's request bodies; run with tools/fuzz.sh.</Description>
   </PropertyGroup>
   <ItemGroup>
+    <FrameworkReference Include="Microsoft.AspNetCore.App" />
     <PackageReference Include="SharpFuzz" />
   </ItemGroup>
   <ItemGroup>
     <ProjectReference Include="../../src/Iceberg.Net.Core/Iceberg.Net.Core.csproj" />
     <ProjectReference Include="../../src/Iceberg.Net.Avro/Iceberg.Net.Avro.csproj" />
     <ProjectReference Include="../../src/Iceberg.Net.Puffin/Iceberg.Net.Puffin.csproj" />
+    <!-- The REST targets drive the server's request parsing and commit path (no HTTP). -->
+    <ProjectReference Include="../../src/Iceberg.Net.RestServer/Iceberg.Net.RestServer.csproj" />
   </ItemGroup>
 </Project>

@@ -272,10 +272,7 @@ public static class Endpoints
         v1.MapPost(Tbl, async (string @namespace, string table, HttpRequest req, CatalogService svc, CancellationToken ct) =>
         {
             var id = await AuthorizedAsync(req.HttpContext, CatalogPrivilege.Write, @namespace, table);
-            var body = await BodyAsync(req, ct);
-            if (body["identifier"] is { } given && !ParseIdentifier(given).Equals(id))
-                throw new BadRequestException($"The body's identifier {ParseIdentifier(given)} does not match the path's {id}");
-            var committed = await svc.CommitTableAsync(ParseCommit(id, body), ct);
+            var committed = await svc.CommitTableAsync(ParseTableCommit(id, await BodyAsync(req, ct)), ct);
             return await TableResultAsync(req, committed, options, vendor, signer, includeConfig: false);
         });
 
@@ -361,8 +358,7 @@ public static class Endpoints
 
         v1.MapPost("/transactions/commit", async (HttpRequest req, CatalogService svc, CancellationToken ct) =>
         {
-            var body = await BodyAsync(req, ct);
-            var commits = Parse(() => body["table-changes"]!.AsArray().Select(c => ParseCommit(ParseIdentifier(c!["identifier"]!), c)).ToList());
+            var commits = ParseTransaction(await BodyAsync(req, ct));
             foreach (var c in commits) await req.HttpContext.RequireAsync(CatalogPrivilege.Write, c.Identifier.Namespace, c.Identifier.Name);
             await svc.CommitAsync(commits, ct);
             return Results.NoContent();
@@ -485,6 +481,18 @@ public static class Endpoints
 
     private static TableIdentifier ParseIdentifier(JsonNode n) =>
         new(new Namespace(n["namespace"]!.AsArray().Select(l => l!.GetValue<string>()).ToList()), n["name"]!.GetValue<string>());
+
+    /// <summary>A <c>CommitTableRequest</c> body for the table the path names (its <c>identifier</c>, if given, must match).</summary>
+    internal static TableCommit ParseTableCommit(TableIdentifier id, JsonNode body)
+    {
+        if (body["identifier"] is { } given && !ParseIdentifier(given).Equals(id))
+            throw new BadRequestException($"The body's identifier {ParseIdentifier(given)} does not match the path's {id}");
+        return ParseCommit(id, body);
+    }
+
+    /// <summary>A <c>CommitTransactionRequest</c> body.</summary>
+    internal static List<TableCommit> ParseTransaction(JsonNode body) =>
+        Parse(() => body["table-changes"]!.AsArray().Select(c => ParseCommit(ParseIdentifier(c!["identifier"]!), c)).ToList());
 
     private static TableCommit ParseCommit(TableIdentifier id, JsonNode body) => Parse(() => new TableCommit(
         id,

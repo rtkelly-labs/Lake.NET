@@ -16,5 +16,6 @@
   </ItemGroup>
   <ItemGroup>
     <InternalsVisibleTo Include="Iceberg.Net.RestServer.Tests" />
+    <InternalsVisibleTo Include="Iceberg.Net.Fuzz" />
   </ItemGroup>
 </Project>
