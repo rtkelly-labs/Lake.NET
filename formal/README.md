@@ -83,7 +83,9 @@ configuration. It deletes every stored file that the current metadata does not r
 file a live snapshot added) unless the file is younger than its cutoff. The model has no clock, so it treats a file as
 young while its writer is still waiting on a commit or still has a request in flight. This is the timing assumption the
 real cutoff (at least 24 hours, 3 days by default) rests on: every commit request lands or dies within the cutoff,
-including one whose outcome was unknown and that lands late.
+including one whose outcome was unknown and that lands late. Once a timed-out request has been applied and lost, or
+has been answered with an error, its files are orphans and cleanup may delete them, even while its writer's outcome is
+still `Unknown`: nothing then reaches them.
 
 **Actions** (`Types.fs`): `Begin w`, `Apply(w, k)` (the catalog's CAS of attempt `k`), and the ways the reply reaches
 the writer: `Ack`, `Reject`, `ServerError`, `Timeout`, and `Resend` (the client resends the request with the same
@@ -132,6 +134,9 @@ server error, a timeout or a resend):
 - **Retries are atomic too.** A retry's refresh, validation and new attempt are one step, and backoff is not modelled.
 - **Unreachable rejections.** A catalog that rejects on its own requirement checks (as opposed to a lost CAS) cannot
   occur in this configuration.
+- **Files are born at `Begin`.** Every data file is written by the writer that commits it, so its age is tied to that
+  writer. Committing a file that already exists and is old (adopting it with `ParquetImport`, as `add_files` does) races
+  cleanup with no cutoff to protect it, and the model cannot express that.
 - **Orphan cleanup is model-only.** The real cleanup will not touch a file younger than 24 hours, so the conformance
   drivers cannot perform `CleanOrphans`, and conformance skips the `cleanup` configuration.
 - **Resend.** `Resend` stands for the REST server's `Idempotency-Key` deduplication. `InMemoryCatalog` has no keys, so
@@ -240,4 +245,6 @@ signal for `Resend`), mapped back to an `Action` list that the model replays. `t
 - **More protocol.** Snapshot expiry, multi-table transactions, and branches. Expiry needs each snapshot to carry
   its full set of live files: the model stores snapshots as changes (`Adds`, `Removes`), so dropping an expired
   snapshot would also drop files that later snapshots still hold.
-- **Liveness.** For example, every writer eventually finishes when faults are bounded.
+- **Liveness.** That every writer eventually finishes under fairness needs temporal properties in FsTla. What is
+  checked now is the safety half: the TLC test goes through every reachable state and fails on one where no action is
+  enabled but a writer has not finished (`Succeeded`, `Failed` or `Unknown`).

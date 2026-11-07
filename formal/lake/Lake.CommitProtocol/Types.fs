@@ -1,6 +1,6 @@
 /// The vocabulary of Lake.NET's commit protocol: who commits, what the catalog and object store hold, and the
 /// actions that change them. Action is the shared contract: the TLC model steps by it, the conformance tests drive
-/// the real catalog by it, and recorded runs (traces) are read as sequences of it.
+/// the real catalog by it, and recorded runs (traces) are read as sequences of its actions that a writer can observe.
 namespace Lake.CommitProtocol
 
 type Writer =

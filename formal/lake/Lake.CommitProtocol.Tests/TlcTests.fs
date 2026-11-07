@@ -31,6 +31,13 @@ type TlcTests(output: ITestOutputHelper) =
         let states = result.States |> Option.defaultWith (fun () -> failwith "TLC wrote no state dump")
         let problems = Model.differential model cfg states true
         Assert.True(problems.IsEmpty, String.Join("\n\n", problems))
+        // No writer is ever stuck: in every reachable state where nothing can happen, each writer has finished. (A safety
+        // check over TLC's states; that every writer eventually finishes under fairness is not checked.)
+        let finished = function | Succeeded | Failed | Unknown -> true | _ -> false
+        let stuck =
+            states
+            |> List.filter (fun st -> List.isEmpty (Model.enabled model cfg st) && not (Map.forall (fun _ p -> finished p) st.Writers))
+        Assert.True(stuck.IsEmpty, sprintf "%d reachable states have no step but an unfinished writer, e.g.\n%A" stuck.Length (List.tryHead stuck))
 
     [<SkippableTheory>]
     [<InlineData("RetryUnknownBlindly")>]
