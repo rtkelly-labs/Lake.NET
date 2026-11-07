@@ -82,7 +82,7 @@ public sealed class GeneratedDifferentialTests(ITestOutputHelper output) : IDisp
             oracleTime += started.Elapsed;
             cases++;
             byCategory[outcome.Category] = byCategory.GetValueOrDefault(outcome.Category) + 1;
-            if (outcome.Category is "agree" or KnownLimitation) continue;
+            if (outcome.Category is "agree" || outcome.Category.StartsWith("known-", StringComparison.Ordinal)) continue;
             // Shrinking costs up to 40 oracle round trips: do it once per raw symptom, count repeats.
             if (!rawSeen.Add($"{outcome.Category}|{Signature(outcome.Detail)}"))
             {
@@ -224,13 +224,38 @@ public sealed class GeneratedDifferentialTests(ITestOutputHelper output) : IDisp
         }
         catch (Exception e)
         {
+            // pyarrow cannot filter a table that holds a uuid (an Arrow extension type) at any depth.
+            if (e.Message.Contains("ArrowNotImplementedError: extension", StringComparison.Ordinal) && c.Schema.Columns.Any(col => HoldsUuid(col.Type)))
+                return new("known-pyarrow-filter-over-uuid", "");
             return new("pyiceberg-filter-failed", LastLine(e.Message));
         }
         string Ids(List<long> ids) => $"[{string.Join(",", ids.Take(20))}{(ids.Count > 20 ? ",…" : "")}] ({ids.Count})";
         if (!ours.SequenceEqual(expected)) return new("dotnet-filter-rows", $"{f}: expected {Ids(expected)}, .NET read {Ids(ours)}");
-        if (!theirs.SequenceEqual(expected)) return new("pyiceberg-filter-rows", $"{f}: expected {Ids(expected)}, PyIceberg read {Ids(theirs)}");
+        if (!theirs.SequenceEqual(expected))
+            return TruncateOverflows(c, f)
+                ? new("known-truncate-overflow", "")
+                : new("pyiceberg-filter-rows", $"{f}: expected {Ids(expected)}, PyIceberg read {Ids(theirs)}");
         return Outcome.Agree;
     }
+
+    private static bool HoldsUuid(IcebergType t) => t switch
+    {
+        StructType s => s.Fields.Any(f => HoldsUuid(f.Type)),
+        ListType l => HoldsUuid(l.ElementType),
+        MapType m => HoldsUuid(m.KeyType) || HoldsUuid(m.ValueType),
+        _ => t.TypeId == TypeId.Uuid,
+    };
+
+    /// <summary>truncate[W] of an int or long within W of the type's minimum: v - (((v % W) + W) % W) overflows. Java's
+    /// reference implementation and .NET wrap; PyIceberg's Python integers do not, so its projected literal never
+    /// matches the written partition value.</summary>
+    private static bool TruncateOverflows(Case c, FilterPick f) =>
+        c.Partition?.Any(p => p.Column == f.Column && p.Transform is TruncateTransform t && f.Value switch
+        {
+            int i => i < int.MinValue + t.Width,
+            long l => l < long.MinValue + t.Width,
+            _ => false,
+        }) == true;
 
     private static async Task<Outcome> PyIcebergWritesAsync(Case c, string dir)
     {
