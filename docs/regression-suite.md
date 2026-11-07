@@ -101,6 +101,7 @@ libFuzzer for long unattended runs, one decoder at a time:
 sudo apt-get install clang libclang-rt-18-dev     # libFuzzer runtime
 tools/fuzz.sh manifest 600                         # metadata view-metadata manifest-list manifest puffin
                                                    # deletion-vector roaring mumbling theta
+                                                   # rest-commit rest-transaction
 FUZZ_STRICT=1 tools/fuzz.sh roaring 600            # also flag low-level exceptions a Corruption.Guard converted
 ```
 
@@ -109,7 +110,16 @@ success, nothing else. Crashes, hangs (10 s) and out-of-memory (4 GB) inputs are
 `fuzz/<target>/findings/`; turn each into a `CorruptionTests` case when fixing it. Each run seeds
 `fuzz/<target>/seeds` from every committed fixture of the target's format (all tables under `tests/**/fixtures/`)
 and keeps what it finds in `fuzz/<target>/corpus` (both git-ignored). The JSON targets also get a libFuzzer
-dictionary of the spec's keys and enum values (`tests/Iceberg.Net.Fuzz/dicts/`). The fuzz workflow
+dictionary of the spec's keys and enum values (`tests/Iceberg.Net.Fuzz/dicts/`).
+
+The `rest-commit` and `rest-transaction` targets fuzz the REST server's request bodies, without HTTP. Each body
+is parsed as `POST /v1/namespaces/{ns}/tables/{table}` or `POST /v1/transactions/commit` parses it, then committed
+through `CatalogService` to two tables in a fresh in-memory store. The contract is the server's:
+- A bad request gets a 4xx from `ErrorModel.Classify`, never a 500 or an escaping exception.
+- A rejected commit moves no pointer and leaves no file behind.
+- An accepted commit writes metadata that reads back.
+
+They are seeded from hand-written requests in `tests/Iceberg.Net.Fuzz/seeds/`. The fuzz workflow
 (`.github/workflows/fuzz.yml`) runs every target weekly for 5 minutes, or for 15 minutes when dispatched, carries
 the corpus from run to run in the Actions cache, and replays the seeds alone and the seeds with the corpus under a
 coverage collector to report the lines each reached.

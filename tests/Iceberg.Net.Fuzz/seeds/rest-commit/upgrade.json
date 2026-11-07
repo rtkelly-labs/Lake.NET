@@ -1,0 +1,18 @@
+{
+ "requirements": [
+  {
+   "type": "assert-table-uuid",
+   "uuid": "00000000-0000-0000-0000-000000000000"
+  }
+ ],
+ "updates": [
+  {
+   "action": "upgrade-format-version",
+   "format-version": 3
+  },
+  {
+   "action": "assign-uuid",
+   "uuid": "9c12d441-03fe-4693-9a96-a0705ddf69c1"
+  }
+ ]
+}

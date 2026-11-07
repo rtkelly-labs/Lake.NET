@@ -1,0 +1,44 @@
+{
+ "updates": [
+  {
+   "action": "add-snapshot",
+   "snapshot": {
+    "snapshot-id": 1001,
+    "sequence-number": 1,
+    "timestamp-ms": 1700000000000,
+    "manifest-list": "/nonexistent/snap-1001.avro",
+    "summary": {
+     "operation": "append",
+     "added-data-files": "1"
+    },
+    "schema-id": 0
+   }
+  },
+  {
+   "action": "set-statistics",
+   "statistics": {
+    "snapshot-id": 1001,
+    "statistics-path": "/nonexistent/stats.puffin",
+    "file-size-in-bytes": 100,
+    "file-footer-size-in-bytes": 50,
+    "blob-metadata": [
+     {
+      "type": "apache-datasketches-theta-v1",
+      "snapshot-id": 1001,
+      "sequence-number": 1,
+      "fields": [
+       1
+      ],
+      "properties": {
+       "ndv": "3"
+      }
+     }
+    ]
+   }
+  },
+  {
+   "action": "remove-statistics",
+   "snapshot-id": 1001
+  }
+ ]
+}

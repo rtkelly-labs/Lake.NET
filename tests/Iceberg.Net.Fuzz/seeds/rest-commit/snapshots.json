@@ -1,0 +1,71 @@
+{
+ "requirements": [
+  {
+   "type": "assert-ref-snapshot-id",
+   "ref": "main",
+   "snapshot-id": null
+  }
+ ],
+ "updates": [
+  {
+   "action": "add-snapshot",
+   "snapshot": {
+    "snapshot-id": 1001,
+    "sequence-number": 1,
+    "timestamp-ms": 1700000000000,
+    "manifest-list": "/nonexistent/snap-1001.avro",
+    "summary": {
+     "operation": "append",
+     "added-data-files": "1"
+    },
+    "schema-id": 0
+   }
+  },
+  {
+   "action": "set-snapshot-ref",
+   "ref-name": "main",
+   "type": "branch",
+   "snapshot-id": 1001
+  },
+  {
+   "action": "add-snapshot",
+   "snapshot": {
+    "snapshot-id": 1002,
+    "sequence-number": 2,
+    "timestamp-ms": 1700000000000,
+    "manifest-list": "/nonexistent/snap-1001.avro",
+    "summary": {
+     "operation": "append",
+     "added-data-files": "1"
+    },
+    "schema-id": 0,
+    "parent-snapshot-id": 1001
+   }
+  },
+  {
+   "action": "set-snapshot-ref",
+   "ref-name": "audit",
+   "type": "tag",
+   "snapshot-id": 1001,
+   "max-ref-age-ms": 86400000
+  },
+  {
+   "action": "set-snapshot-ref",
+   "ref-name": "main",
+   "type": "branch",
+   "snapshot-id": 1002,
+   "min-snapshots-to-keep": 1,
+   "max-snapshot-age-ms": 1000
+  },
+  {
+   "action": "remove-snapshot-ref",
+   "ref-name": "audit"
+  },
+  {
+   "action": "remove-snapshots",
+   "snapshot-ids": [
+    1001
+   ]
+  }
+ ]
+}

@@ -24,7 +24,7 @@ jobs:
     strategy:
       fail-fast: false
       matrix:
-        target: [metadata, view-metadata, manifest-list, manifest, puffin, deletion-vector, roaring, mumbling, theta]
+        target: [metadata, view-metadata, manifest-list, manifest, puffin, deletion-vector, roaring, mumbling, theta, rest-commit, rest-transaction]
     steps:
       - uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0 # v7.0.0
       - uses: actions/setup-dotnet@a98b56852c35b8e3190ac28c8c2271da59106c68 # v6
@@ -55,7 +55,7 @@ jobs:
             local name=$1; shift
             dotnet-coverage collect -f cobertura -o "fuzz/cov-$name.xml" "dotnet fuzz/replay-bin/Iceberg.Net.Fuzz.dll replay $*" | grep '^{' | tee "fuzz/cov-$name.json"
             reportgenerator "-reports:fuzz/cov-$name.xml" "-targetdir:fuzz/cov-$name" -reporttypes:TextSummary \
-              "-assemblyfilters:+Iceberg.Net.Core;+Iceberg.Net.Avro;+Iceberg.Net.Puffin" >/dev/null
+              "-assemblyfilters:+Iceberg.Net.Core;+Iceberg.Net.Avro;+Iceberg.Net.Puffin;+Iceberg.Net.Catalog;+Iceberg.Net.RestServer" >/dev/null
             { echo "### $FUZZ_TARGET: $name"; echo '```'; cat "fuzz/cov-$name.json"; head -n 20 "fuzz/cov-$name/Summary.txt"; echo '```'; } >> "$GITHUB_STEP_SUMMARY"
           }
           cover corpus "fuzz/$FUZZ_TARGET/corpus" "fuzz/$FUZZ_TARGET/seeds"

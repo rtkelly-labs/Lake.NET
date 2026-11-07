@@ -81,5 +81,7 @@ internal static class Targets
         ["roaring"] = b => RoaringPositionBitmap.Deserialize(b),
         ["mumbling"] = b => MumblingBitmap.Deserialize(b),
         ["theta"] = b => ThetaSketch.Deserialize(b),
+        ["rest-commit"] = RestTargets.Commit,
+        ["rest-transaction"] = RestTargets.Transaction,
     };
 }

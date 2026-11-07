@@ -1,0 +1,66 @@
+{
+ "requirements": [
+  {
+   "type": "assert-last-assigned-field-id",
+   "last-assigned-field-id": 3
+  }
+ ],
+ "updates": [
+  {
+   "action": "add-schema",
+   "schema": {
+    "type": "struct",
+    "schema-id": 1,
+    "fields": [
+     {
+      "id": 1,
+      "name": "id",
+      "required": true,
+      "type": "long"
+     },
+     {
+      "id": 2,
+      "name": "data",
+      "required": false,
+      "type": "string"
+     },
+     {
+      "id": 3,
+      "name": "ts",
+      "required": false,
+      "type": "timestamptz"
+     },
+     {
+      "id": 4,
+      "name": "tags",
+      "required": false,
+      "type": {
+       "type": "list",
+       "element-id": 5,
+       "element": "string",
+       "element-required": true
+      }
+     },
+     {
+      "id": 6,
+      "name": "attrs",
+      "required": false,
+      "type": {
+       "type": "map",
+       "key-id": 7,
+       "key": "string",
+       "value-id": 8,
+       "value": "decimal(9,2)",
+       "value-required": false
+      }
+     }
+    ]
+   },
+   "last-column-id": 8
+  },
+  {
+   "action": "set-current-schema",
+   "schema-id": -1
+  }
+ ]
+}
