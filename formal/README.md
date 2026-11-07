@@ -23,7 +23,9 @@ It is not part of `Iceberg.Net.slnx`, and nothing in `src/` depends on it.
 | `lake/Lake.CommitProtocol` | The commit protocol: `Types.fs` (the vocabulary, including `Action`), `Protocol.fs` (step and invariants, translated to TLA+), `CommitModel.fs` (the model and the configurations CI checks). |
 | `lake/Lake.CommitProtocol.Tests` | Model tests, TLC tests, and conformance against the real catalog. This is the one project that references `src/` (by relative path). |
 | `lake/tla` | The generated `CommitProtocol.tla` / `.cfg`. They are committed so a reviewer can read the TLA+, and a test fails if they drift from the F#. |
-| `traces/` | Reserved for phase two (see [Traces](#traces-phase-two)). |
+| `src/Formal.Traces`, `tests/Formal.Traces.Tests` | Phase two's generic library: trace grammars, LL(1) tables, bounded ambiguity search and parametric slicing. It references nothing from Iceberg.Net. |
+| `lake/Lake.CommitTraces`, `lake/Lake.CommitTraces.Tests` | The commit protocol as a trace grammar, the projection from Iceberg.Net's spans onto it, and `Actions.ofSlice` back to `Action`. |
+| `traces/` | Phase two's design (see [Traces](#traces-phase-two)). |
 
 ## How a model is written
 
@@ -233,7 +235,9 @@ dotnet test formal/Formal.slnx
 
 Phase two reads recorded runs and OpenTelemetry spans of real commits, and checks them against the model. Spans see
 only what the client sees: a parsed trace is a client-observable refinement of `Action` (no `Apply`, and today no
-signal for `Resend`), mapped back to an `Action` list that the model replays. `traces/` holds its design.
+signal for `Resend`), mapped back to an `Action` list. `ConformanceTraceTests` runs this folder's conformance driver
+along random walks of the model and requires the spans to read back as exactly the actions the driver took. Design,
+grammar, ambiguity argument and telemetry gaps are in [traces/README.md](traces/README.md).
 
 ## Open
 

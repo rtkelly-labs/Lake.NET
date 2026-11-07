@@ -1,0 +1,9 @@
+<Project Sdk="Microsoft.NET.Sdk">
+  <!-- Generic trace-grammar library: no reference to any Iceberg.Net project, so it can leave this repo unchanged. -->
+  <ItemGroup>
+    <Compile Include="Grammar.fs" />
+    <Compile Include="Parser.fs" />
+    <Compile Include="Ambiguity.fs" />
+    <Compile Include="Slicing.fs" />
+  </ItemGroup>
+</Project>
