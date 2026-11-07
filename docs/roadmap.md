@@ -170,9 +170,12 @@ catches.
 | Iceberg.Net.Core (metadata state machine) | 246 | 130 + 3 timeouts | 54 | 59 | 54.1% | 2026-10-23 (baseline; `MetadataBuilderTests` written from its survivors since) |
 | Iceberg.Net.Core (metadata state machine) | 247 | 186 | 42 | 19 | 75.3% | 2026-10-23, after `MetadataBuilderTests` (most survivors left are error-message text) |
 | Iceberg.Net.Data (delete applicability, `DeleteFiles.cs`) | 97 | 67 + 16 timeouts | 3 | 11 | 85.6% | 2026-10-23 |
-| Iceberg.Net.Catalog (`Catalog.cs`: create, commit, transactions) | 175 | 74 + 2 timeouts | 51 | 48 | 43.4% | 2026-11-07 (baseline; `CatalogCommitTests` written from its survivors since; most uncovered mutants are paths only the catalog test projects reach) |
-| Iceberg.Net.Data (row-level writes: `TableMutations.cs`, `UpdateMerge.cs`) | 321 | 219 + 4 timeouts | 82 | 16 | 69.5% | 2026-11-07 (baseline; `KeyedWriteEdgeTests` written from its survivors since) |
-| Iceberg.Net.Data (commit path: `SnapshotProducer.cs`, `StagedCommit.cs`) | 554 | 334 + 6 timeouts | 161 | 53 | 61.4% | 2026-11-07 (baseline; `SnapshotProducer` 66.6%, `StagedCommit` 37.4%. `SnapshotSummaryTests` written from the summary-field survivors since. Most of the rest are retry backoff arithmetic and error-message text) |
+| Iceberg.Net.Catalog (`Catalog.cs`: create, commit, transactions) | 175 | 74 + 2 timeouts | 51 | 48 | 43.4% | 2026-11-07 (baseline; most uncovered mutants are paths only the catalog test projects reach) |
+| Iceberg.Net.Catalog (`Catalog.cs`: create, commit, transactions) | 175 | 80 + 2 timeouts | 45 | 48 | 46.9% | 2026-11-07, after `CatalogCommitTests` |
+| Iceberg.Net.Data (row-level writes: `TableMutations.cs`, `UpdateMerge.cs`) | 321 | 219 + 4 timeouts | 82 | 16 | 69.5% | 2026-11-07 (baseline) |
+| Iceberg.Net.Data (row-level writes: `TableMutations.cs`, `UpdateMerge.cs`) | 321 | 230 + 4 timeouts | 74 | 13 | 72.9% | 2026-11-07, after `KeyedWriteEdgeTests` |
+| Iceberg.Net.Data (commit path: `SnapshotProducer.cs`, `StagedCommit.cs`) | 554 | 334 + 6 timeouts | 161 | 53 | 61.4% | 2026-11-07 (baseline; `SnapshotProducer` 66.6%, `StagedCommit` 37.4%) |
+| Iceberg.Net.Data (commit path: `SnapshotProducer.cs`, `StagedCommit.cs`) | 554 | 366 + 6 timeouts | 129 | 53 | 67.2% | 2026-11-07, after `SnapshotSummaryTests` (`SnapshotProducer` 73.6%; `StagedCommit` unchanged. Most survivors left are retry backoff arithmetic and error-message text) |
 
 Runs when dispatched in `.github/workflows/mutation.yml`, uploading the reports. Dispatch picks the configs (default:
 all); each runs as its own job. Every config tests against `Iceberg.Net.Spec.Tests` alone, so code that only other test

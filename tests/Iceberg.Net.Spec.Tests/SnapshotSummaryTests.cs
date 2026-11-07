@@ -91,7 +91,7 @@ public sealed class SnapshotSummaryTests : IDisposable
         Total("total-position-deletes", live.Where(IsPosition).Sum(f => f.RecordCount));
         Total("total-equality-deletes", live.Where(IsEquality).Sum(f => f.RecordCount));
 
-        // Changes: present exactly when non-zero (the spec's fields are optional; ours omit zeros), and equal to the diff.
+        // Changes: equal to the diff. The spec makes these fields optional; this writer omits a zero, except the added data counts.
         Change("added-data-files", added.Count(IsData));
         Change("added-records", added.Where(IsData).Sum(f => f.RecordCount));
         Change("added-files-size", added.Where(IsData).Sum(f => f.FileSizeInBytes));
@@ -115,7 +115,7 @@ public sealed class SnapshotSummaryTests : IDisposable
 
         void Change(string key, long expected)
         {
-            // The added data counts are always written; every other change field only when non-zero, as Java does.
+            // The added data counts are always written; every other change field only when non-zero.
             if (expected == 0 && key is not ("added-data-files" or "added-records" or "added-files-size"))
                 Assert.False(summary.ContainsKey(key), $"{context}: {key} = {summary.GetValueOrDefault(key)}, files say 0");
             else
