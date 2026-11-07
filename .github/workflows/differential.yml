@@ -1,6 +1,6 @@
 name: differential
 
-# Differential campaign against PyIceberg on generated schemas and rows
+# Differential campaign against PyIceberg (and, for .NET-written tables, DuckDB) on generated schemas and rows
 # (tests/Iceberg.Net.Regression.Tests/GeneratedDifferentialTests.cs). Not a required check: it runs weekly, on demand, and on
 # pull requests that change the campaign or the oracle. A disagreement fails the job; the shrunk tables and
 # summary.json are uploaded either way. The weekly run starts at a new seed each time (run number × 100000, well past
@@ -20,6 +20,7 @@ on:
     paths:
       - tests/Iceberg.Net.Regression.Tests/GeneratedDifferentialTests.cs
       - interop/pyiceberg_oracle.py
+      - interop/duckdb_oracle.py
       - src/Iceberg.Net.Data/TableFingerprint.cs
       - .github/workflows/differential.yml
 
@@ -43,6 +44,8 @@ jobs:
       ICEBERG_DIFFERENTIAL_SECONDS: ${{ inputs.seconds || (github.event_name == 'schedule' && '900') || '120' }}
       ICEBERG_DIFFERENTIAL_OUT: ${{ github.workspace }}/differential-out
       ICEBERG_PYTHON: ${{ github.workspace }}/interop/.venv/bin/python
+      # The second oracle for .NET-written tables (its iceberg extension downloads from extensions.duckdb.org).
+      ICEBERG_DIFFERENTIAL_DUCKDB: "1"
     steps:
       - uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0 # v7.0.0
       - uses: actions/setup-dotnet@a98b56852c35b8e3190ac28c8c2271da59106c68 # v6
@@ -51,8 +54,8 @@ jobs:
       - uses: astral-sh/setup-uv@e58605a9b6da7c637471fab8847a5e5a6b8df081 # v5
         with:
           enable-cache: true
-      - name: Install PyIceberg oracle
-        run: uv sync --project interop
+      - name: Install PyIceberg and DuckDB oracles
+        run: uv sync --project interop --group duckdb
       - name: Seed
         env:
           SEED_INPUT: ${{ inputs.seed }}
