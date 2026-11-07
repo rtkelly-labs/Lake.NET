@@ -1,22 +1,44 @@
 name: mutation
 
-# Weekly Stryker.NET runs (see docs/roadmap.md, "Mutation testing"). Too slow for
-# PR CI. Each job uploads the HTML/JSON report; record notable score changes in the roadmap's mutation table.
+# Stryker.NET runs (see docs/roadmap.md, "Mutation testing"). Too slow for PR CI. Each job uploads the
+# HTML/JSON report; record notable score changes in the roadmap's mutation table.
 # The break threshold in each config is 0, so a run fails only if Stryker itself fails.
+# `configs` picks a subset (space-separated names, e.g. "stryker-commit stryker-writes"); empty runs them all.
 on:
   workflow_dispatch:
+    inputs:
+      configs:
+        description: Space-separated config names (empty runs all)
+        default: ""
 
 permissions:
   contents: read
 
 jobs:
+  pick:
+    runs-on: ubuntu-latest
+    outputs:
+      configs: ${{ steps.pick.outputs.configs }}
+    steps:
+      - id: pick
+        env:
+          CONFIGS: ${{ inputs.configs }}
+        run: |
+          all="stryker-puffin stryker-core stryker-metadata stryker-deletes stryker-commit stryker-catalog stryker-writes"
+          picked="${CONFIGS:-$all}"
+          for c in $picked; do
+            case " $all " in *" $c "*) ;; *) echo "::error::Unknown config $c"; exit 1 ;; esac
+          done
+          echo "configs=$(printf '%s\n' $picked | jq -R . | jq -sc .)" >> "$GITHUB_OUTPUT"
+
   stryker:
+    needs: pick
     runs-on: ubuntu-latest
     timeout-minutes: 180
     strategy:
       fail-fast: false
       matrix:
-        config: [stryker-puffin, stryker-core, stryker-metadata, stryker-deletes]
+        config: ${{ fromJSON(needs.pick.outputs.configs) }}
     steps:
       - uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0 # v7.0.0
       - uses: actions/setup-dotnet@a98b56852c35b8e3190ac28c8c2271da59106c68 # v6
@@ -26,6 +48,20 @@ jobs:
       - name: Mutation run
         working-directory: mutation
         run: dotnet stryker --config-file ${{ matrix.config }}.json --output "$RUNNER_TEMP/${{ matrix.config }}"
+      - name: Score
+        if: always()
+        env:
+          REPORT: ${{ runner.temp }}/${{ matrix.config }}/reports/mutation-report.json
+        run: |
+          [ -f "$REPORT" ] || exit 0
+          jq -r --arg c "${{ matrix.config }}" '
+            [.files[].mutants[].status] as $s
+            | ($s | map(select(. == "Killed")) | length) as $k
+            | ($s | map(select(. == "Timeout")) | length) as $t
+            | ($s | map(select(. == "Survived")) | length) as $sv
+            | ($s | map(select(. == "NoCoverage")) | length) as $nc
+            | "| \($c) | \($k + $t + $sv + $nc) | \($k) + \($t) timeouts | \($sv) | \($nc) | \(if ($k + $t + $sv + $nc) > 0 then (100 * ($k + $t) / ($k + $t + $sv + $nc) * 10 | round / 10) else 0 end)% |"' \
+            "$REPORT" | { echo "| Config | Mutants | Killed | Survived | No coverage | Score |"; echo "|---|---|---|---|---|---|"; cat; } >> "$GITHUB_STEP_SUMMARY"
       - uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
         if: always()
         with:
