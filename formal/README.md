@@ -78,9 +78,17 @@ The outcomes:
   its own snapshot before deciding whether to retry.
 - **Timeout.** The commit ends as unknown, and nothing written for it is deleted.
 
+**Orphan cleanup** (`Maintenance.DeleteOrphanFilesAsync`) can run between any two steps in the `cleanup`
+configuration. It deletes every stored file that the current metadata does not reach (the metadata log and every data
+file a live snapshot added) unless the file is younger than its cutoff. The model has no clock, so it treats a file as
+young while its writer is still waiting on a commit or still has a request in flight. This is the timing assumption the
+real cutoff (at least 24 hours, 3 days by default) rests on: every commit request lands or dies within the cutoff,
+including one whose outcome was unknown and that lands late.
+
 **Actions** (`Types.fs`): `Begin w`, `Apply(w, k)` (the catalog's CAS of attempt `k`), and the ways the reply reaches
 the writer: `Ack`, `Reject`, `ServerError`, `Timeout`, and `Resend` (the client resends the request with the same
-`Idempotency-Key`, as `RestCatalog` does when the server advertises a key lifetime). Splitting `Apply` from the reply
+`Idempotency-Key`, as `RestCatalog` does when the server advertises a key lifetime), and `CleanOrphans` (table
+maintenance). Splitting `Apply` from the reply
 is what makes unknown outcomes expressible: a request can be applied and its reply lost, or time out and still be
 applied later.
 
@@ -104,6 +112,7 @@ applied later.
 | `BlindSwap`: a catalog that swaps without comparing | `NoLostCommit` | `Begin W1; Begin W2; Apply(W1, 1); Apply(W2, 1); Ack(W1, 1)`: two appends on the same base; the second swap erases the first, which is then acknowledged |
 | `NoIdempotencyKey`: a resend is evaluated as a new request | `ReachableFilesExist` or `AtMostOnce` | `Begin W1; Apply(W1, 1); Resend(W1, 1); Apply(W1, 1); Reject(W1, 1)`: the resend of a commit that landed loses its CAS, and the writer deletes the current metadata file |
 | `NoMissingDeleteCheck`: check a retry for concurrent adds but not concurrent removals (`removers` configuration) | `SerializableRemoval` | `Begin W2; Begin W3; Apply(W2, 1); ServerError(W3, 1); Apply(W3, 2)`: the delete of P lands; the overwrite's retry finds nothing added, re-plans to remove nothing, and commits its replacement over the delete |
+| `OrphanCleanupNoAge`: orphan cleanup with no age cutoff (`cleanup` configuration) | `ReachableFilesExist` | `Begin W1; CleanOrphans; Apply(W1, 1)`: cleanup deletes the new data and metadata files of a commit still in flight, and the commit then lands on them |
 
 **The configurations CI checks** (`CommitModel.configs`), each with two attempts per writer and one injected fault (a
 server error, a timeout or a resend):
@@ -112,6 +121,7 @@ server error, a timeout or a resend):
 |---|---|---|
 | `standard` | two appends to different partitions, and an overwrite of the first | 14,541 / 5,808 |
 | `removers` | an append, a delete (`DeleteFiles`) and an overwrite, all of partition P | 9,094 / 3,636 |
+| `cleanup` | as `standard`, with orphan cleanup able to run between any two steps | 22,403 / 8,443 |
 
 **Abstractions**:
 
@@ -122,6 +132,8 @@ server error, a timeout or a resend):
 - **Retries are atomic too.** A retry's refresh, validation and new attempt are one step, and backoff is not modelled.
 - **Unreachable rejections.** A catalog that rejects on its own requirement checks (as opposed to a lost CAS) cannot
   occur in this configuration.
+- **Orphan cleanup is model-only.** The real cleanup will not touch a file younger than 24 hours, so the conformance
+  drivers cannot perform `CleanOrphans`, and conformance skips the `cleanup` configuration.
 - **Resend.** `Resend` stands for the REST server's `Idempotency-Key` deduplication. `InMemoryCatalog` has no keys, so
   its driver treats a keyed resend as the no-op the key makes it; the REST driver sends it and checks the replay.
 
@@ -225,6 +237,7 @@ signal for `Resend`), mapped back to an `Action` list that the model replays. `t
 - **More catalogs under conformance.** Glue (it needs the moto emulator) and `JdbcCatalog`. The REST server runs over
   its SQLite store here, but the driver forwards one request at a time, so the server's requirement check rejects a
   stale request before the store's SQL compare-and-swap could lose a race.
-- **More protocol.** Snapshot expiry and orphan cleanup racing in-flight commits, multi-table transactions, and
-  branches.
+- **More protocol.** Snapshot expiry, multi-table transactions, and branches. Expiry needs each snapshot to carry
+  its full set of live files: the model stores snapshots as changes (`Adds`, `Removes`), so dropping an expired
+  snapshot would also drop files that later snapshots still hold.
 - **Liveness.** For example, every writer eventually finishes when faults are bounded.
