@@ -7,6 +7,9 @@ using Apache.Arrow.Ipc;
 using Iceberg.Net.Arrow;
 using Iceberg.Net.Catalog;
 using Iceberg.Net.Data;
+using Iceberg.Net.Expressions;
+using Iceberg.Net.Partitioning;
+using Iceberg.Net.Transforms;
 using Iceberg.Net.Types;
 using Xunit.Abstractions;
 
@@ -18,7 +21,10 @@ namespace Iceberg.Net.Regression.Tests;
 /// random rows from a seed, writes them with one implementation, and compares what each implementation reads, by
 /// <see cref="TableFingerprint"/> (shared canonical form with the oracle's <c>fingerprint</c> command):
 /// <list type="bullet">
-///   <item>.NET writes (inserts in batches, optionally a delete by copy-on-write or position deletes), PyIceberg reads.</item>
+///   <item>.NET writes (inserts in batches, optionally a delete by copy-on-write or position deletes), PyIceberg reads.
+///   Half of these tables are partitioned (identity, bucket, truncate, year/month/day/hour over top-level columns), and
+///   each partitioned case also runs one equality filter on a partition source through both scans: the full-table
+///   fingerprint reads every file, so a wrong partition value only shows once a filter prunes by it.</item>
 ///   <item>PyIceberg writes (oracle <c>write-arrow</c>, from an Arrow IPC file of the same rows), both read.</item>
 /// </list>
 /// A disagreement is shrunk (drop columns, drop the delete, merge batches, drop rows) and the smallest failing table
@@ -29,6 +35,7 @@ namespace Iceberg.Net.Regression.Tests;
 [Trait("Category", "Differential")]
 [Spec("Scan Planning")]
 [Spec("Nested Types")]
+[Spec("Partition Transforms")]
 public sealed class GeneratedDifferentialTests(ITestOutputHelper output) : IDisposable
 {
     private static string? Env(string name) => Environment.GetEnvironmentVariable(name) is { Length: > 0 } v ? v : null;
@@ -69,13 +76,13 @@ public sealed class GeneratedDifferentialTests(ITestOutputHelper output) : IDisp
         var repeats = 0;
         for (var seed = BaseSeed; budget.Elapsed < TimeSpan.FromSeconds(Seconds!.Value); seed++)
         {
-            var c = Case.Generate(seed, maxFormatVersion);
+            var c = Case.Generate(seed, maxFormatVersion, partitioned: direction == "dotnet-writes");
             var started = Stopwatch.StartNew();
             var outcome = await run(c, Path.Combine(_root, $"s{seed}"));
             oracleTime += started.Elapsed;
             cases++;
             byCategory[outcome.Category] = byCategory.GetValueOrDefault(outcome.Category) + 1;
-            if (outcome.Category is "agree" or KnownLimitation) continue;
+            if (outcome.Category is "agree" || outcome.Category.StartsWith("known-", StringComparison.Ordinal)) continue;
             // Shrinking costs up to 40 oracle round trips: do it once per raw symptom, count repeats.
             if (!rawSeen.Add($"{outcome.Category}|{Signature(outcome.Detail)}"))
             {
@@ -101,6 +108,8 @@ public sealed class GeneratedDifferentialTests(ITestOutputHelper output) : IDisp
                 ["rows"] = shrunk.Rows.Count,
                 ["batches"] = shrunk.Batches,
                 ["delete"] = shrunk.Delete?.ToString(),
+                ["partition"] = shrunk.PartitionText,
+                ["filter"] = shrunk.Filter?.ToString(),
                 ["original_schema"] = c.Schema.ToString(),
             });
             output.WriteLine($"seed {seed}: {last.Category}: {Truncate(last.Detail, 300)} (shrunk to {shrunk.Schema.Columns.Count} columns, {shrunk.Rows.Count} rows)");
@@ -188,8 +197,65 @@ public sealed class GeneratedDifferentialTests(ITestOutputHelper output) : IDisp
         {
             return new("dotnet-write-failed", e.GetType().Name + ": " + e.Message);
         }
-        return await CompareAsync(t, c.ExpectedRows);
+        var outcome = await CompareAsync(t, c.ExpectedRows);
+        return outcome != Outcome.Agree || c.Filter is null ? outcome : await CompareFilteredAsync(t, c);
     }
+
+    /// <summary>One equality filter, three answers: the generated rows, .NET's scan, PyIceberg's scan. Both scans prune
+    /// by the partition values and column metrics .NET wrote, so a wrong value drops rows from one or both.</summary>
+    private static async Task<Outcome> CompareFilteredAsync(Table t, Case c)
+    {
+        var f = c.Filter!;
+        var expected = c.ExpectedIds(f);
+        List<long> ours;
+        try
+        {
+            ours = (await TableScan.ReadAsync(t, Expr.Equal(f.Column, f.Value))).Select(r => (long)r[0]!).Order().ToList();
+        }
+        catch (Exception e)
+        {
+            return new("dotnet-filter-failed", e.GetType().Name + ": " + e.Message);
+        }
+        List<long> theirs;
+        try
+        {
+            var py = await TestEnvironment.Current.OracleAsync("read-filter", t.MetadataLocation!, f.Json().ToJsonString());
+            theirs = py["ids"]!.AsArray().Select(i => i!.GetValue<long>()).ToList();
+        }
+        catch (Exception e)
+        {
+            // pyarrow cannot filter a table that holds a uuid (an Arrow extension type) at any depth.
+            if (e.Message.Contains("ArrowNotImplementedError: extension", StringComparison.Ordinal) && c.Schema.Columns.Any(col => HoldsUuid(col.Type)))
+                return new("known-pyarrow-filter-over-uuid", "");
+            return new("pyiceberg-filter-failed", LastLine(e.Message));
+        }
+        string Ids(List<long> ids) => $"[{string.Join(",", ids.Take(20))}{(ids.Count > 20 ? ",…" : "")}] ({ids.Count})";
+        if (!ours.SequenceEqual(expected)) return new("dotnet-filter-rows", $"{f}: expected {Ids(expected)}, .NET read {Ids(ours)}");
+        if (!theirs.SequenceEqual(expected))
+            return TruncateOverflows(c, f)
+                ? new("known-truncate-overflow", "")
+                : new("pyiceberg-filter-rows", $"{f}: expected {Ids(expected)}, PyIceberg read {Ids(theirs)}");
+        return Outcome.Agree;
+    }
+
+    private static bool HoldsUuid(IcebergType t) => t switch
+    {
+        StructType s => s.Fields.Any(f => HoldsUuid(f.Type)),
+        ListType l => HoldsUuid(l.ElementType),
+        MapType m => HoldsUuid(m.KeyType) || HoldsUuid(m.ValueType),
+        _ => t.TypeId == TypeId.Uuid,
+    };
+
+    /// <summary>truncate[W] of an int or long within W of the type's minimum: v - (((v % W) + W) % W) overflows. Java's
+    /// reference implementation and .NET wrap; PyIceberg's Python integers do not, so its projected literal never
+    /// matches the written partition value.</summary>
+    private static bool TruncateOverflows(Case c, FilterPick f) =>
+        c.Partition?.Any(p => p.Column == f.Column && p.Transform is TruncateTransform t && f.Value switch
+        {
+            int i => i < int.MinValue + t.Width,
+            long l => l < long.MinValue + t.Width,
+            _ => false,
+        }) == true;
 
     private static async Task<Outcome> PyIcebergWritesAsync(Case c, string dir)
     {
@@ -280,15 +346,60 @@ public sealed class GeneratedDifferentialTests(ITestOutputHelper output) : IDisp
         public override string ToString() => $"id % {Modulus} == {Remainder} by {Strategy}";
     }
 
-    private sealed record Case(int Seed, int FormatVersion, Schema Schema, List<object?[]> Rows, int Batches, DeleteSpec? Delete)
+    private sealed record PartitionPick(string Column, Transform Transform)
+    {
+        public override string ToString() => $"{Transform}({Column})";
+    }
+
+    /// <summary>An equality filter on a top-level column. <see cref="Value"/> is the physical value as stored in the
+    /// rows (int days, long micros), which the binder accepts; the oracle gets ISO strings for dates and timestamps.</summary>
+    private sealed record FilterPick(string Column, IcebergType Type, object Value)
+    {
+        public JsonObject Json() => new() { ["op"] = "eq", ["term"] = Column, ["value"] = JsonLiteral() };
+
+        private JsonNode JsonLiteral() => (Type.TypeId, Value) switch
+        {
+            (TypeId.Date, int days) => DateOnly.FromDayNumber(days + 719_162).ToString("yyyy-MM-dd", System.Globalization.CultureInfo.InvariantCulture),
+            (TypeId.Timestamp, long us) => Iso(us),
+            (TypeId.TimestampTz, long us) => Iso(us) + "+00:00",
+            (_, int i) => i,
+            (_, long l) => l,
+            (_, string text) => text,
+            _ => throw new NotSupportedException($"{Type} filter value {Value}"),
+        };
+
+        private static string Iso(long micros) =>
+            new DateTime(DateTime.UnixEpoch.Ticks + micros * 10, DateTimeKind.Utc).ToString("yyyy-MM-ddTHH:mm:ss.ffffff", System.Globalization.CultureInfo.InvariantCulture);
+
+        public override string ToString() => $"{Column} == {JsonLiteral().ToJsonString()}";
+    }
+
+    private sealed record Case(int Seed, int FormatVersion, Schema Schema, List<object?[]> Rows, int Batches, DeleteSpec? Delete,
+        IReadOnlyList<PartitionPick>? Partition = null, FilterPick? Filter = null)
     {
         public int ExpectedRows => Delete is null ? Rows.Count : Rows.Count(r => !Delete.Deletes((long)r[0]!));
+
+        public string? PartitionText => Partition is { Count: > 0 } p ? $"[{string.Join(", ", p)}]" : null;
+
+        public List<long> ExpectedIds(FilterPick f)
+        {
+            var index = Schema.Columns.ToList().FindIndex(c => c.Name == f.Column);
+            return Rows.Where(r => Equals(r[index], f.Value) && (Delete is null || !Delete.Deletes((long)r[0]!)))
+                .Select(r => (long)r[0]!).Order().ToList();
+        }
 
         public async Task<Table> WriteWithDotnetAsync(string dir)
         {
             var catalog = new InMemoryCatalog(dir);
             await catalog.CreateNamespaceAsync(Namespace.Of("gen"));
-            var t = await catalog.CreateTableAsync(new CreateTableRequest(TableIdentifier.Of("gen", "t"), Schema, FormatVersion: FormatVersion));
+            PartitionSpec? spec = null;
+            if (Partition is { Count: > 0 })
+            {
+                var builder = PartitionSpec.BuilderFor(Schema);
+                foreach (var p in Partition) builder.Add(p.Column, p.Transform);
+                spec = builder.Build();
+            }
+            var t = await catalog.CreateTableAsync(new CreateTableRequest(TableIdentifier.Of("gen", "t"), Schema, Spec: spec, FormatVersion: FormatVersion));
             var size = Math.Max(1, (Rows.Count + Batches - 1) / Batches);
             foreach (var chunk in Rows.Chunk(size)) await TableMutations.InsertAsync(t, chunk);
             if (Delete is { } d) await TableMutations.DeleteWhereAsync(t, r => d.Deletes((long)r[0]!), d.Strategy);
@@ -302,6 +413,9 @@ public sealed class GeneratedDifferentialTests(ITestOutputHelper output) : IDisp
             if (Rows.Count > 1) yield return this with { Rows = Rows.Skip(Rows.Count / 2).ToList() };
             for (var c = Schema.Columns.Count - 1; c >= 1; c--) yield return WithoutColumn(c);
             if (Delete is not null) yield return this with { Delete = null };
+            if (Partition is { Count: > 0 }) yield return this with { Partition = null };
+            if (Partition is { Count: > 1 })
+                foreach (var p in Partition) yield return this with { Partition = [p] };
             if (Batches > 1) yield return this with { Batches = 1 };
             if (Rows.Count is > 1 and <= 8)
                 for (var r = 0; r < Rows.Count; r++)
@@ -315,9 +429,46 @@ public sealed class GeneratedDifferentialTests(ITestOutputHelper output) : IDisp
         {
             Schema = new Schema(0, Schema.Columns.Where((_, i) => i != c)),
             Rows = Rows.Select(r => r.Where((_, i) => i != c).ToArray()).ToList(),
+            Partition = Partition?.Where(p => p.Column != Schema.Columns[c].Name).ToList(),
+            Filter = Filter?.Column == Schema.Columns[c].Name ? null : Filter,
         };
 
-        public static Case Generate(int seed, int maxFormatVersion)
+        private static readonly Transform[] Transforms =
+        [
+            Transform.Identity, Transform.Bucket(1), Transform.Bucket(4), Transform.Bucket(7), Transform.Bucket(16),
+            Transform.Truncate(1), Transform.Truncate(3), Transform.Truncate(10), Transform.Truncate(100),
+            Transform.Year, Transform.Month, Transform.Day, Transform.Hour,
+        ];
+
+        /// <summary>Filter literals the oracle's expression format carries without loss.</summary>
+        private static bool Filterable(IcebergType t) => t.TypeId is TypeId.Int or TypeId.Long or TypeId.String or TypeId.Date or TypeId.Timestamp or TypeId.TimestampTz;
+
+        /// <summary>Half the cases get one or two partition fields over distinct top-level primitive columns (floats,
+        /// doubles and nanosecond timestamps left out), plus an equality filter on a filterable partition source with
+        /// a value drawn from the rows. A separate Random, so the schemas and rows of every seed stay as before.</summary>
+        private static (List<PartitionPick>?, FilterPick?) PartitionAndFilter(int seed, Schema schema, List<object?[]> rows)
+        {
+            var r = new Random(seed ^ 0x2C1B3C6D);
+            if (r.Next(2) == 0) return (null, null);
+            var sources = schema.Columns
+                .Where(c => c.Type.IsPrimitive && c.Type.TypeId is not (TypeId.Float or TypeId.Double or TypeId.TimestampNs or TypeId.TimestampTzNs))
+                .OrderBy(_ => r.Next()).Take(1 + r.Next(2)).ToList();
+            var picks = new List<PartitionPick>();
+            foreach (var c in sources)
+            {
+                var valid = Transforms.Where(t => t.CanTransform(c.Type)).ToList();
+                if (valid.Count > 0) picks.Add(new PartitionPick(c.Name, valid[r.Next(valid.Count)]));
+            }
+            if (picks.Count == 0) return (null, null);
+            var columns = schema.Columns.ToList();
+            var filterable = picks.Select(p => columns.FindIndex(c => c.Name == p.Column)).Where(i => Filterable(columns[i].Type)).ToList();
+            if (filterable.Count == 0) return (picks, null);
+            var index = filterable[r.Next(filterable.Count)];
+            var values = rows.Select(row => row[index]).Where(v => v is not null).ToList();
+            return (picks, values.Count == 0 ? null : new FilterPick(columns[index].Name, columns[index].Type, values[r.Next(values.Count)]!));
+        }
+
+        public static Case Generate(int seed, int maxFormatVersion, bool partitioned = false)
         {
             var g = new Gen(new Random(seed));
             var formatVersion = g.R.Next(2) == 0 ? 2 : maxFormatVersion;
@@ -338,7 +489,9 @@ public sealed class GeneratedDifferentialTests(ITestOutputHelper output) : IDisp
             }).ToList();
             DeleteSpec? delete = g.R.Next(2) == 0 ? null
                 : new DeleteSpec(2 + g.R.Next(5), 0, g.R.Next(2) == 0 ? DeleteStrategy.CopyOnWrite : DeleteStrategy.PositionDeletes);
-            return new Case(seed, formatVersion, schema, rows, 1 + g.R.Next(3), delete);
+            var batches = 1 + g.R.Next(3);
+            var (partition, filter) = partitioned ? PartitionAndFilter(seed, schema, rows) : (null, null);
+            return new Case(seed, formatVersion, schema, rows, batches, delete, partition, filter);
         }
     }
 

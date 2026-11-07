@@ -818,7 +818,8 @@ public sealed class SnapshotProducer
             var present = values.Where(v => v is not null).ToList();
             bool? containsNan = f.Type.TypeId is TypeId.Float or TypeId.Double ? present.Any(v => v is double d && double.IsNaN(d)) : null;
             if (present.Count == 0) return new FieldSummary(values.Count > 0, containsNan, null, null);
-            var comparer = Comparer<object?>.Create((a, b) => a is string sa ? string.CompareOrdinal(sa, (string)b!) : ((IComparable)a!).CompareTo(b));
+            // Iceberg's order: strings by code point, binary and fixed as unsigned bytes, uuids big-endian.
+            var comparer = Comparer<object?>.Create((a, b) => Expressions.ValueComparer.Compare(a!, b!));
             return new FieldSummary(
                 present.Count < values.Count,
                 containsNan,
