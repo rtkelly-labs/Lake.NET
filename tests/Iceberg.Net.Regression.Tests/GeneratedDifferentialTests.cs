@@ -76,9 +76,13 @@ public sealed class GeneratedDifferentialTests(ITestOutputHelper output) : IDisp
         var oracleTime = TimeSpan.Zero;
         var rawSeen = new HashSet<string>(StringComparer.Ordinal);
         var repeats = 0;
+        var (partitioned, filtered, evolved) = (0, 0, 0);
         for (var seed = BaseSeed; budget.Elapsed < TimeSpan.FromSeconds(Seconds!.Value); seed++)
         {
             var c = Case.Generate(seed, maxFormatVersion, partitioned: direction == "dotnet-writes");
+            if (c.Partition is { Count: > 0 }) partitioned++;
+            if (c.Filter is not null) filtered++;
+            if (c.Evolution is { Count: > 0 }) evolved++;
             var started = Stopwatch.StartNew();
             var outcome = await run(c, Path.Combine(_root, $"s{seed}"));
             oracleTime += started.Elapsed;
@@ -125,6 +129,9 @@ public sealed class GeneratedDifferentialTests(ITestOutputHelper output) : IDisp
             ["seconds"] = Math.Round(budget.Elapsed.TotalSeconds),
             ["cases"] = cases,
             ["seconds_per_case"] = cases == 0 ? null : Math.Round(oracleTime.TotalSeconds / cases, 2),
+            ["partitioned_cases"] = partitioned,
+            ["filtered_cases"] = filtered,
+            ["evolved_cases"] = evolved,
             ["outcomes"] = new JsonObject(byCategory.Select(kv => KeyValuePair.Create(kv.Key, (JsonNode?)kv.Value))),
             ["distinct_disagreements"] = signatures.Count,
             ["repeated_symptoms_not_shrunk"] = repeats,
