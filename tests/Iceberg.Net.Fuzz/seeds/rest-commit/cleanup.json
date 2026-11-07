@@ -1,0 +1,16 @@
+{
+ "updates": [
+  {
+   "action": "remove-partition-specs",
+   "spec-ids": [
+    0
+   ]
+  },
+  {
+   "action": "remove-schemas",
+   "schema-ids": [
+    0
+   ]
+  }
+ ]
+}

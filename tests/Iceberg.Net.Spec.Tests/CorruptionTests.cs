@@ -234,6 +234,18 @@ public sealed class CorruptionTests(ITestOutputHelper output)
         }
     }
 
+    /// <summary>A type parameter too large for an int is a format error, not an <see cref="OverflowException"/> (found by the REST fuzz target).</summary>
+    [Spec("Schemas and Data Types")]
+    [Theory]
+    [InlineData("decimal(99999999999, 2)")]
+    [InlineData("decimal(10, 99999999999)")]
+    [InlineData("fixed[99999999999]")]
+    public void Out_of_range_type_parameters_fail_with_a_format_error(string type)
+    {
+        var e = Record.Exception(() => TypeJson.TypeFromJson(JsonValue.Create(type)!));
+        Assert.True(e is not null && IsFormatError(e), $"{type} threw {e?.GetType().Name ?? "nothing"}");
+    }
+
     /// <summary>Wrong JSON types anywhere in the metadata tree must produce a format error.</summary>
     [Spec("Table Metadata and Snapshots")]
     [Fact]

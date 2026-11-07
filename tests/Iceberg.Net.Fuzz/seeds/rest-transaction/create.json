@@ -1,0 +1,104 @@
+{
+ "table-changes": [
+  {
+   "identifier": {
+    "namespace": [
+     "fuzz"
+    ],
+    "name": "new"
+   },
+   "requirements": [
+    {
+     "type": "assert-create"
+    }
+   ],
+   "updates": [
+    {
+     "action": "assign-uuid",
+     "uuid": "2cc52516-5e73-41f2-b139-545d41a4e151"
+    },
+    {
+     "action": "upgrade-format-version",
+     "format-version": 2
+    },
+    {
+     "action": "add-schema",
+     "schema": {
+      "type": "struct",
+      "schema-id": 0,
+      "fields": [
+       {
+        "id": 1,
+        "name": "id",
+        "required": true,
+        "type": "long"
+       },
+       {
+        "id": 2,
+        "name": "data",
+        "required": false,
+        "type": "string"
+       },
+       {
+        "id": 3,
+        "name": "ts",
+        "required": false,
+        "type": "timestamptz"
+       },
+       {
+        "id": 4,
+        "name": "tags",
+        "required": false,
+        "type": {
+         "type": "list",
+         "element-id": 5,
+         "element": "string",
+         "element-required": true
+        }
+       },
+       {
+        "id": 6,
+        "name": "attrs",
+        "required": false,
+        "type": {
+         "type": "map",
+         "key-id": 7,
+         "key": "string",
+         "value-id": 8,
+         "value": "decimal(9,2)",
+         "value-required": false
+        }
+       }
+      ]
+     }
+    },
+    {
+     "action": "set-current-schema",
+     "schema-id": -1
+    },
+    {
+     "action": "add-spec",
+     "spec": {
+      "spec-id": 0,
+      "fields": []
+     }
+    },
+    {
+     "action": "set-default-spec",
+     "spec-id": -1
+    },
+    {
+     "action": "add-sort-order",
+     "sort-order": {
+      "order-id": 0,
+      "fields": []
+     }
+    },
+    {
+     "action": "set-default-sort-order",
+     "sort-order-id": -1
+    }
+   ]
+  }
+ ]
+}
