@@ -126,15 +126,19 @@ public static partial class TypeJson
     private static IcebergType ParseParameterised(string s)
     {
         var m = DecimalRe().Match(s);
-        if (m.Success) return new DecimalType(int.Parse(m.Groups[1].Value, CultureInfo.InvariantCulture), int.Parse(m.Groups[2].Value, CultureInfo.InvariantCulture));
+        if (m.Success) return new DecimalType(Parameter(m.Groups[1].Value, s), Parameter(m.Groups[2].Value, s));
         m = FixedRe().Match(s);
-        if (m.Success) return new FixedType(int.Parse(m.Groups[1].Value, CultureInfo.InvariantCulture));
+        if (m.Success) return new FixedType(Parameter(m.Groups[1].Value, s));
         m = GeometryRe().Match(s);
         if (m.Success) return new GeometryType(m.Groups[1].Value.Trim());
         m = GeographyRe().Match(s);
         if (m.Success) return new GeographyType(m.Groups[1].Value.Trim(), m.Groups[2].Success ? m.Groups[2].Value.Trim() : null);
         throw new NotSupportedException($"Unknown type '{s}'");
     }
+
+    /// <summary>A type's integer parameter; one too large for an int is a format error, not an overflow.</summary>
+    private static int Parameter(string digits, string type) =>
+        int.TryParse(digits, NumberStyles.None, CultureInfo.InvariantCulture, out var v) ? v : throw new FormatException($"Type '{type}' has an out-of-range parameter");
 
     private static NestedField FieldFromJson(JsonNode n) => new(
         n["id"]!.GetValue<int>(),
