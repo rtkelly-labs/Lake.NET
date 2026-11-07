@@ -9,6 +9,8 @@ on:
       - .github/workflows/formal.yml
       - global.json
       - src/Iceberg.Net.Catalog/Catalog.cs
+      - src/Iceberg.Net.Catalog/RestCatalog.cs
+      - src/Iceberg.Net.RestServer/**
       - src/Iceberg.Net.Data/SnapshotProducer.cs
       - src/Iceberg.Net.Core/Metadata/MetadataUpdate.cs
   push:
@@ -18,6 +20,8 @@ on:
       - .github/workflows/formal.yml
       - global.json
       - src/Iceberg.Net.Catalog/Catalog.cs
+      - src/Iceberg.Net.Catalog/RestCatalog.cs
+      - src/Iceberg.Net.RestServer/**
       - src/Iceberg.Net.Data/SnapshotProducer.cs
       - src/Iceberg.Net.Core/Metadata/MetadataUpdate.cs
   workflow_dispatch:
