@@ -57,8 +57,17 @@ public static class ManifestCodec
         return bytes;
     }
 
+    /// <summary>
+    /// Each fixed type (uuid, fixed, decimal) is named after its partition field. Shared names would be valid Avro:
+    /// the second field would refer to the first one's type by name. But PyIceberg's reader does not resolve those
+    /// references ("Type not recognized: uuid_fixed"), so a table with two uuid partition fields could not be read there.
+    /// </summary>
     public static AvroRecord PartitionSchema(StructType partitionType) =>
-        new("r102", partitionType.Fields.Select(f => Opt(f.Name, ToAvro(f.Type), f.Id)).ToList());
+        new("r102", partitionType.Fields.Select(f => Opt(f.Name, ToAvro(f.Type) switch
+        {
+            AvroFixed fixedType => fixedType with { Name = $"{fixedType.Name}_{f.Id}" },
+            var other => other,
+        }, f.Id)).ToList());
 
     public static AvroRecord ManifestEntrySchema(int formatVersion, StructType partitionType)
     {
