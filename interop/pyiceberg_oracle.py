@@ -375,8 +375,9 @@ def _canonical(field_type: Any) -> Callable[[Any], str]:
         exact = decimal.Context(prec=100)
         return lambda v: str(int(decimal.Decimal(v).scaleb(scale, context=exact)))
     if isinstance(field_type, UUIDType):
+        # PyArrow gives bytes; DuckDB exports UUIDs as strings.
         return lambda v: str(
-            v if isinstance(v, uuid.UUID) else uuid.UUID(bytes=bytes(v))
+            v if isinstance(v, (uuid.UUID, str)) else uuid.UUID(bytes=bytes(v))
         )
     if isinstance(field_type, (BinaryType, FixedType)):
         return lambda v: bytes(v).hex()
@@ -407,20 +408,27 @@ def _h(text: str) -> int:
 
 
 def cmd_fingerprint(location: str) -> dict[str, Any]:
-    import pyarrow.compute as pc
-
     s3 = {"client.region": os.environ.get("AWS_REGION", "eu-west-1")}
     if endpoint := os.environ.get("ICEBERG_S3_ENDPOINT"):
         s3 |= {"s3.endpoint": endpoint, "s3.path-style-access": "true"}
     table = StaticTable.from_metadata(location, properties=s3)
-    fields = table.schema().columns
+    return fingerprint_batches(
+        table.schema().columns, table.scan().to_arrow_batch_reader()
+    )
+
+
+def fingerprint_batches(fields: list[Any], batches: Any) -> dict[str, Any]:
+    """The fingerprint of Arrow record batches holding the top-level columns `fields` (by name); shared with
+    duckdb_oracle.py, which reads the same table through DuckDB."""
+    import pyarrow.compute as pc
+
     canon = [_canonical(f.field_type) for f in fields]
     mask = (1 << 64) - 1
     columns = {
         f.field_id: {"name": f.name, "count": 0, "nulls": 0, "hash": 0} for f in fields
     }
     rows, row_hash = 0, 0
-    for batch in table.scan().to_arrow_batch_reader():
+    for batch in batches:
         arrays = []
         for f in fields:
             arr = batch.column(f.name)

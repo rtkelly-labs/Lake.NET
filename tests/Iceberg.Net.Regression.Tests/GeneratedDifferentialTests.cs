@@ -21,6 +21,9 @@ namespace Iceberg.Net.Regression.Tests;
 ///   <item>.NET writes (inserts in batches, optionally a delete by copy-on-write or position deletes), PyIceberg reads.</item>
 ///   <item>PyIceberg writes (oracle <c>write-arrow</c>, from an Arrow IPC file of the same rows), both read.</item>
 /// </list>
+/// With ICEBERG_DIFFERENTIAL_DUCKDB=1, .NET-written tables are also read by DuckDB's iceberg extension
+/// (interop/duckdb_oracle.py), and a disagreement counts against .NET only when the two oracles agree with each other;
+/// an oracle that stands alone is reported as an oracle disagreement, which is shrunk and kept but does not fail the run.
 /// A disagreement is shrunk (drop columns, drop the delete, merge batches, drop rows) and the smallest failing table
 /// is kept under ICEBERG_DIFFERENTIAL_OUT. Off unless ICEBERG_DIFFERENTIAL_SECONDS is set (the <c>differential</c>
 /// workflow sets it); it then fails, rather than skips, when the oracle is missing.
@@ -34,6 +37,7 @@ public sealed class GeneratedDifferentialTests(ITestOutputHelper output) : IDisp
     private static string? Env(string name) => Environment.GetEnvironmentVariable(name) is { Length: > 0 } v ? v : null;
     private static int? Seconds => int.TryParse(Env("ICEBERG_DIFFERENTIAL_SECONDS"), out var s) ? s : null;
     private static int BaseSeed => int.TryParse(Env("ICEBERG_DIFFERENTIAL_SEED"), out var s) ? s : 1;
+    private static bool DuckDb => Env("ICEBERG_DIFFERENTIAL_DUCKDB") == "1";
     private static string OutDir => Env("ICEBERG_DIFFERENTIAL_OUT") ?? Path.Combine(Path.GetTempPath(), "iceberg-dotnet-differential-out");
 
     private readonly string _root = Path.Combine(Path.GetTempPath(), "iceberg-dotnet-differential", Guid.NewGuid().ToString("N"));
@@ -67,6 +71,7 @@ public sealed class GeneratedDifferentialTests(ITestOutputHelper output) : IDisp
         var oracleTime = TimeSpan.Zero;
         var rawSeen = new HashSet<string>(StringComparer.Ordinal);
         var repeats = 0;
+        var duckDbUnsupported = new SortedDictionary<string, int>(StringComparer.Ordinal);
         for (var seed = BaseSeed; budget.Elapsed < TimeSpan.FromSeconds(Seconds!.Value); seed++)
         {
             var c = Case.Generate(seed, maxFormatVersion);
@@ -76,6 +81,14 @@ public sealed class GeneratedDifferentialTests(ITestOutputHelper output) : IDisp
             cases++;
             byCategory[outcome.Category] = byCategory.GetValueOrDefault(outcome.Category) + 1;
             if (outcome.Category is "agree" or KnownLimitation) continue;
+            if (outcome.Category == DuckDbUnsupported)
+            {
+                // Not shrunk: what DuckDB cannot read is a coverage gap, listed by message.
+                var message = Truncate(System.Text.RegularExpressions.Regex.Replace(
+                    System.Text.RegularExpressions.Regex.Replace(outcome.Detail, @"(/[^\s'""]+)+", "<path>"), @"\d+", "#"), 200);
+                duckDbUnsupported[message] = duckDbUnsupported.GetValueOrDefault(message) + 1;
+                continue;
+            }
             // Shrinking costs up to 40 oracle round trips: do it once per raw symptom, count repeats.
             if (!rawSeen.Add($"{outcome.Category}|{Signature(outcome.Detail)}"))
             {
@@ -92,6 +105,7 @@ public sealed class GeneratedDifferentialTests(ITestOutputHelper output) : IDisp
             findings.Add(new JsonObject
             {
                 ["seed"] = seed,
+                ["side"] = OracleSide.Contains(last.Category) ? "oracle" : "dotnet",
                 ["category"] = last.Category,
                 ["detail"] = Truncate(last.Detail, 2000),
                 ["new_signature"] = first,
@@ -115,13 +129,18 @@ public sealed class GeneratedDifferentialTests(ITestOutputHelper output) : IDisp
             ["seconds_per_case"] = cases == 0 ? null : Math.Round(oracleTime.TotalSeconds / cases, 2),
             ["outcomes"] = new JsonObject(byCategory.Select(kv => KeyValuePair.Create(kv.Key, (JsonNode?)kv.Value))),
             ["distinct_disagreements"] = signatures.Count,
+            ["distinct_dotnet_disagreements"] = signatures.Count(s => !OracleSide.Contains(s[..s.IndexOf('|', StringComparison.Ordinal)])),
+            ["distinct_oracle_disagreements"] = signatures.Count(s => OracleSide.Contains(s[..s.IndexOf('|', StringComparison.Ordinal)])),
+            ["duckdb_oracle"] = DuckDb && direction == "dotnet-writes",
+            ["duckdb_unsupported"] = new JsonObject(duckDbUnsupported.Select(kv => KeyValuePair.Create(kv.Key, (JsonNode?)kv.Value))),
             ["repeated_symptoms_not_shrunk"] = repeats,
             ["findings"] = findings,
         };
         var text = summary.ToJsonString(new JsonSerializerOptions { WriteIndented = true });
         await File.WriteAllTextAsync(Path.Combine(outDir, "summary.json"), text);
         output.WriteLine(text);
-        Assert.True(signatures.Count == 0, $"{signatures.Count} distinct disagreement(s) with PyIceberg in {cases} generated tables; see {outDir}");
+        var dotnetSide = signatures.Count(s => !OracleSide.Contains(s[..s.IndexOf('|', StringComparison.Ordinal)]));
+        Assert.True(dotnetSide == 0, $"{dotnetSide} distinct disagreement(s) against .NET in {cases} generated tables; see {outDir}");
     }
 
     private static string Signature(string detail)
@@ -172,6 +191,12 @@ public sealed class GeneratedDifferentialTests(ITestOutputHelper output) : IDisp
     /// <summary>Counted in the outcomes but not shrunk or reported: a limitation upstream that is already known.</summary>
     private const string KnownLimitation = "known-pyarrow-required-child-of-null-struct";
 
+    /// <summary>Counted and listed by message, not shrunk: DuckDB failed to read a table PyIceberg and .NET agree on.</summary>
+    private const string DuckDbUnsupported = "duckdb-unsupported";
+
+    /// <summary>One oracle disagrees with .NET and the other oracle: evidence against that oracle, not against .NET.</summary>
+    private static readonly HashSet<string> OracleSide = new(StringComparer.Ordinal) { "pyiceberg-differs", "duckdb-differs" };
+
     private sealed record Outcome(string Category, string Detail)
     {
         public static readonly Outcome Agree = new("agree", "");
@@ -188,7 +213,7 @@ public sealed class GeneratedDifferentialTests(ITestOutputHelper output) : IDisp
         {
             return new("dotnet-write-failed", e.GetType().Name + ": " + e.Message);
         }
-        return await CompareAsync(t, c.ExpectedRows);
+        return await CompareAsync(t, c.ExpectedRows, DuckDb);
     }
 
     private static async Task<Outcome> PyIcebergWritesAsync(Case c, string dir)
@@ -235,7 +260,7 @@ public sealed class GeneratedDifferentialTests(ITestOutputHelper output) : IDisp
         return await CompareAsync(t, c.Rows.Count);
     }
 
-    private static async Task<Outcome> CompareAsync(Table t, int expectedRows)
+    private static async Task<Outcome> CompareAsync(Table t, int expectedRows, bool duckDb = false)
     {
         TableFingerprint ours;
         try
@@ -256,9 +281,34 @@ public sealed class GeneratedDifferentialTests(ITestOutputHelper output) : IDisp
             return new("pyiceberg-read-failed", LastLine(e.Message));
         }
         if (ours.Rows != expectedRows) return new("dotnet-row-count", $"expected {expectedRows} rows, .NET read {ours.Rows}");
-        var diffs = ours.DifferencesFrom(theirs);
-        if (diffs.Count > 0) return new("mismatch", string.Join("; ", diffs));
-        return ours.RowHash != theirs.RowHash ? new("mismatch", "row hash only") : Outcome.Agree;
+        var pyDiff = Difference(ours, theirs);
+        if (!duckDb) return pyDiff is null ? Outcome.Agree : new("mismatch", pyDiff);
+        TableFingerprint duck;
+        try
+        {
+            var text = await TestEnvironment.Current.InteropScriptRawAsync("duckdb_oracle.py", "fingerprint", t.MetadataLocation!);
+            duck = TableFingerprint.FromJson(text[(text.LastIndexOf("@@ORACLE@@", StringComparison.Ordinal) + "@@ORACLE@@".Length)..]);
+        }
+        catch (Exception e)
+        {
+            return pyDiff is null ? new(DuckDbUnsupported, LastLine(e.Message)) : new("mismatch", pyDiff);
+        }
+        var duckDiff = Difference(ours, duck);
+        return (pyDiff, duckDiff) switch
+        {
+            (null, null) => Outcome.Agree,
+            (null, _) => new("duckdb-differs", duckDiff!),
+            (_, null) => new("pyiceberg-differs", pyDiff!),
+            // Both oracles disagree with .NET: against .NET when they agree with each other.
+            _ => Difference(theirs, duck) is null ? new("mismatch", pyDiff!) : new("mismatch-three-way", $"PyIceberg: {pyDiff} | DuckDB: {duckDiff}"),
+        };
+    }
+
+    private static string? Difference(TableFingerprint a, TableFingerprint b)
+    {
+        var diffs = a.DifferencesFrom(b);
+        if (diffs.Count > 0) return string.Join("; ", diffs);
+        return a.RowHash != b.RowHash ? "row hash only" : null;
     }
 
     private static string LastLine(string message)
