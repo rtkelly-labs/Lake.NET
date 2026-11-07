@@ -60,6 +60,8 @@ type Bug =
     | NoIdempotencyKey
     /// Check a retry for concurrently added files but not for concurrently removed ones (no failMissingDeletePaths).
     | NoMissingDeleteCheck
+    /// Orphan cleanup with no age cutoff: it deletes every file the current metadata does not reach, however new.
+    | OrphanCleanupNoAge
 
 type Config =
     { Ops: Map<Writer, Op>
@@ -67,6 +69,8 @@ type Config =
       MaxAttempts: int
       /// Failed replies (server errors and timeouts) the environment may inject in one run.
       Faults: int
+      /// Whether orphan cleanup (Maintenance.DeleteOrphanFilesAsync) may run between any two steps.
+      Cleaner: bool
       Bugs: Set<Bug> }
 
 type State =
@@ -91,8 +95,8 @@ type State =
         Published: Set<Snapshot>
     }
 
-/// One step of the protocol. Begin is the writer's; Apply is the catalog's; the rest are how the reply to attempt
-/// `attempt` reaches the writer.
+/// One step of the protocol. Begin is the writer's; Apply is the catalog's; CleanOrphans is table maintenance's; the
+/// rest are how the reply to attempt `attempt` reaches the writer.
 type Action =
     /// The writer writes its data file, reads the table, writes metadata attempt 1 and sends the swap.
     | Begin of writer: Writer
@@ -110,3 +114,5 @@ type Action =
     /// No answer, and the client resends the same request with the same Idempotency-Key (RestCatalog's idempotent
     /// retry, made only when the server advertises a key lifetime). The writer keeps waiting for attempt `attempt`.
     | Resend of writer: Writer * attempt: int
+    /// Orphan cleanup deletes every file that the current metadata does not reach and that is older than its cutoff.
+    | CleanOrphans

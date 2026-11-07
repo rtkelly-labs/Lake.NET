@@ -27,6 +27,7 @@ let private walkProperty (cfg: Config) (check: (Action * State) list -> unit) =
 [<Theory>]
 [<InlineData("standard")>]
 [<InlineData("removers")>]
+[<InlineData("cleanup")>]
 let ``every invariant holds along random walks of the correct protocol`` (configName: string) =
     let cfg = CommitModel.configs |> List.find (fst >> (=) configName) |> snd
     walkProperty cfg (fun steps ->
@@ -38,6 +39,7 @@ let ``every invariant holds along random walks of the correct protocol`` (config
 [<Theory>]
 [<InlineData("standard")>]
 [<InlineData("removers")>]
+[<InlineData("cleanup")>]
 let ``every state reached encodes to TLA+ and decodes back to itself`` (configName: string) =
     let cfg = CommitModel.configs |> List.find (fst >> (=) configName) |> snd
     walkProperty cfg (fun steps ->
@@ -102,3 +104,19 @@ let ``an overwrite retried after a concurrent delete of its files fails, and wit
     let cfg, _ = CommitModel.seededCase NoMissingDeleteCheck
     let landed = Model.replay model cfg (concurrentRemoval @ [ Apply(W3, 2) ]) |> List.last
     Assert.Equal<string list>([ "SerializableRemoval" ], Model.violations model cfg landed)
+
+/// Cleanup runs while W1's commit is in flight, then the commit lands. After a timeout the request may still land, so
+/// its files are kept. After a server error the request is finished: its metadata file is an orphan, but the data file
+/// is still young, since the writer retries with it.
+[<Fact>]
+let ``orphan cleanup keeps the files of a commit in flight, and without the age cutoff deletes them`` () =
+    let cleanup = CommitModel.cleanup
+    let racing = [ Begin W1; CleanOrphans; Apply(W1, 1) ]
+    Assert.Equal(None, model.Step cleanup CleanOrphans (Model.replay model cleanup [ Begin W1 ] |> List.last))
+    let timedOut = Model.replay model cleanup [ Begin W1; Timeout(W1, 1) ] |> List.last
+    Assert.Equal(None, model.Step cleanup CleanOrphans timedOut)
+    let errored = Model.replay model cleanup [ Begin W1; ServerError(W1, 1); CleanOrphans ] |> List.last
+    Assert.True(errored.Store.Contains(Data W1) && not (errored.Store.Contains(Meta(W1, 1))))
+    let cfg, _ = CommitModel.seededCase OrphanCleanupNoAge
+    let landed = Model.replay model cfg racing |> List.last
+    Assert.Equal<string list>([ "ReachableFilesExist" ], Model.violations model cfg landed)

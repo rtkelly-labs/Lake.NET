@@ -240,6 +240,8 @@ type RestDriver(cfg: Config, root: string, store: string) =
             if pending.ContainsKey((w, k)) then resends.[(w, k)] <- resends.GetValueOrDefault((w, k)) + 1
             elif held.ContainsKey((w, k)) then resend w k held.[(w, k)]
             else notPerformable "Resend(%A, %d), but there is no such request" w k
+        // Orphan cleanup is checked in the model only: the real one keeps files younger than 24 hours.
+        | CleanOrphans -> notPerformable "orphan cleanup is not driven"
 
     member _.Observe() : Observed = observe cfg catalog locations (phaseOf tasks blocked.Keys)
 

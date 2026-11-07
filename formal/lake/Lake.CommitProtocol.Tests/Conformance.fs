@@ -282,6 +282,8 @@ type Driver(cfg: Config, root: string) =
         // A resend with an idempotency key is invisible by design: the catalog joins it to the original request.
         // InMemoryCatalog has no keys; RestDriver checks the REST server's deduplication.
         | Resend _ -> ()
+        // Orphan cleanup is checked in the model only: the real one keeps files younger than 24 hours.
+        | CleanOrphans -> notPerformable "orphan cleanup is not driven"
 
     member _.Observe() : Observed = observe cfg catalog locations (phaseOf tasks blocked.Keys)
 
