@@ -99,6 +99,22 @@ public static class IcebergTelemetry
     public static CatalogScope StartCatalogCall(string catalogName, string catalogType, string operation, string? table = null) =>
         new(catalogName, catalogType, operation, table);
 
+    /// <summary>
+    /// The client resends the current catalog request with the same idempotency key (resend <paramref name="resend"/>,
+    /// 1-based) after <paramref name="exception"/> or HTTP <paramref name="status"/>. Recorded as an
+    /// <c>iceberg.catalog.resend</c> event on the current <c>iceberg.catalog.*</c> span, so a trace tells a resend the
+    /// server deduplicates from a new attempt. Does nothing outside a catalog span.
+    /// </summary>
+    public static void Resending(int resend, Exception? exception = null, int? status = null)
+    {
+        if (Activity.Current is not { } span || span.Source != ActivitySource
+            || !span.OperationName.StartsWith("iceberg.catalog.", StringComparison.Ordinal)) return;
+        var tags = new ActivityTagsCollection { ["iceberg.catalog.resend"] = resend };
+        if (exception is not null) tags[Tags.ErrorType] = exception.GetType().FullName;
+        if (status is { } code) tags["http.response.status_code"] = code;
+        span.AddEvent(new ActivityEvent("iceberg.catalog.resend", tags: tags));
+    }
+
     private static double Seconds(long startTimestamp) => (Stopwatch.GetTimestamp() - startTimestamp) / (double)Stopwatch.Frequency;
 
     private static void SetError(Activity? activity, string outcome, Exception? e)

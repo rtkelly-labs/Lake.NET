@@ -577,14 +577,21 @@ public sealed class RestCatalog : ICatalog, IViewCatalog
             }
             catch (Exception e) when (e is HttpRequestException || e is TaskCanceledException && !ct.IsCancellationRequested)
             {
-                if (canRetry) { await Task.Delay(_options.IdempotentRetryDelay * (1 << attempt), ct); continue; }
+                if (canRetry)
+                {
+                    await Task.Delay(_options.IdempotentRetryDelay * (1 << attempt), ct);
+                    IcebergTelemetry.Resending(attempt + 1, exception: e);
+                    continue;
+                }
                 if (commit) throw new CommitStateUnknownException($"Commit request to {path} failed in flight", e);
                 throw;
             }
             if (canRetry && ((int)resp.StatusCode == 429 || (int)resp.StatusCode is >= 500 and <= 504 and not 501))
             {
+                var status = (int)resp.StatusCode;
                 resp.Dispose();
                 await Task.Delay(_options.IdempotentRetryDelay * (1 << attempt), ct);
+                IcebergTelemetry.Resending(attempt + 1, status: status);
                 continue;
             }
             break;
