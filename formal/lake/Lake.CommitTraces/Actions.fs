@@ -6,7 +6,7 @@ open Lake.CommitProtocol
 ///
 /// Only the writer's own steps are visible. Apply happens inside the catalog, Resend is joined to its original request by
 /// the idempotency key, and CleanOrphans is maintenance, not a commit, so none of them appears in a slice. The attempt
-/// number is not on the spans (telemetry gap 3); it is recovered by counting swaps, since each attempt makes exactly one.
+/// number is recovered by counting swaps, since each attempt makes exactly one (Spans.snapshots checks it against the tag).
 [<RequireQualifiedAccess>]
 module Actions =
 

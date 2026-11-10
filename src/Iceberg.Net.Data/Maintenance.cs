@@ -1,6 +1,7 @@
 using System.Globalization;
 using Iceberg.Net.Avro;
 using Iceberg.Net.Catalog;
+using Iceberg.Net.Diagnostics;
 using Iceberg.Net.Expressions;
 using Iceberg.Net.Manifests;
 using Iceberg.Net.Metadata;
@@ -77,13 +78,28 @@ public static class Maintenance
     {
         options ??= new ExpireOptions();
         var policy = CommitRetryPolicy.From(table.Metadata);
+        using var telemetry = IcebergTelemetry.StartCommit(table.Identifier.ToString(), "expire-snapshots");
+        try
+        {
+            return await ExpireAsync(table, options, policy, telemetry, ct);
+        }
+        catch (Exception e) when (telemetry.FailedWith(e)) { throw; }
+    }
+
+    private static async Task<ExpireResult> ExpireAsync(
+        Table table, ExpireOptions options, CommitRetryPolicy policy, IcebergTelemetry.CommitScope telemetry, CancellationToken ct)
+    {
         for (var attempt = 0; ; attempt++)
         {
             var m = table.Metadata;
             // Checked on every attempt: a retry refreshes the table, and another writer may have turned GC off meanwhile.
             RequireGc(m);
             var (expire, removedRefs) = PlanExpiry(m, options);
-            if (expire.Count == 0 && removedRefs.Count == 0) return new ExpireResult([], []);
+            if (expire.Count == 0 && removedRefs.Count == 0)
+            {
+                telemetry.NothingToCommit();
+                return new ExpireResult([], []);
+            }
             var requirements = new List<UpdateRequirement> { new UpdateRequirement.AssertTableUuid(m.TableUuid) };
             requirements.AddRange(m.Refs.OrderBy(kv => kv.Key, StringComparer.Ordinal).Select(kv => new UpdateRequirement.AssertRefSnapshotId(kv.Key, kv.Value.SnapshotId)));
             var updates = new List<MetadataUpdate>();
@@ -92,10 +108,12 @@ public static class Maintenance
             try
             {
                 await table.CommitAsync(requirements, updates, ct);
+                telemetry.Committed(); // file cleanup below does not change the outcome
             }
-            catch (CommitFailedException) when (attempt < policy.NumRetries)
+            catch (CommitFailedException e) when (attempt < policy.NumRetries)
             {
                 var wait = Math.Min(policy.MaxWaitMs, policy.MinWaitMs * (1 << Math.Min(attempt, 20)));
+                telemetry.Retrying(attempt + 1, e, TimeSpan.FromMilliseconds(wait));
                 await Task.Delay(wait + Random.Shared.Next(wait / 10 + 1), ct);
                 await table.RefreshAsync(ct);
                 continue;

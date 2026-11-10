@@ -1,7 +1,7 @@
 # Trace grammars
 
 The model checks the commit protocol as designed. These grammars check that recorded runs followed it. A run is a set
-of OpenTelemetry spans, captured in process today and exported over OTLP later. It is projected onto the protocol's
+of OpenTelemetry spans, captured in process for now and exported over OTLP later. It is projected onto the protocol's
 events, sliced into one sequence per logical commit, and each slice is parsed. A slice that does not parse is a
 protocol violation. The parser reports it in protocol terms: the event, the state the writer was in, what was allowed
 there, and what happened instead:
@@ -35,11 +35,11 @@ of detail. It was derived from the failure taxonomy in
 |---|---|
 | `Begin` | A logical commit starts. |
 | `SwapApplied` / `SwapRejected` / `SwapUnknown` | The catalog applied the swap, refused it (`CommitFailedException`), or may have applied it (`CommitStateUnknownException`). |
-| `SwapFailed` | The swap failed and the trace does not say how. This is all today's telemetry records (see the gaps below). |
+| `SwapFailed` | The swap failed with something other than a conflict or an unknown outcome (for example a stale-state `ArgumentException`), so the trace does not say whether the catalog applied it. |
 | `Reload` / `ReloadFailed` | The writer reloaded the table, or failed to. |
 | `Retry` | The writer backs off after a lost race. |
 | `RetryAfterUnknown` | The writer backs off after an outcome it never resolved. No rule produces it, so it is always a violation. |
-| `Found` / `Absent` | The writer resolved an unknown outcome: the attempted snapshot is in the reloaded table, or it is not. This needs proposed telemetry. |
+| `Found` / `Absent` | The writer resolved an unknown outcome: the attempted snapshot is in the reloaded table, or it is not. |
 | `Committed` / `NothingToCommit` / `GaveUp` / `LeftUnknown` / `Aborted` | How the commit ended. |
 
 Events carry no payload. Identities (commit, table, snapshot) travel beside an event as its slice key, so the
@@ -60,11 +60,12 @@ nothing a client span can see:
 | `Reject (w, k)` | `SwapRejected`, then `Retry Reload`, or `GaveUp` once attempts run out |
 | `ServerError (w, k)` | `SwapUnknown`, then a reload (`Found`, `Absent` or `ReloadFailed`); after `Absent`, as `Reject` |
 | `Timeout (w, k)` | `SwapUnknown LeftUnknown` |
-| `Resend (w, k)` | none (the idempotency key joins it to the original request; gap 7) |
+| `Resend (w, k)` | none yet: an `iceberg.catalog.resend` event on the `commit_table` span records it, but the projection does not read it |
 | `CleanOrphans` | none (maintenance, not a commit) |
 
-The attempt number `k` is not on the spans (gap 3); `ofSlice` recovers it by counting swaps, one per attempt. A slice
-with today's unclassified `SwapFailed` maps to no action, so `ofSlice` returns an error there (gap 1).
+`ofSlice` recovers the attempt number `k` by counting swaps, one per attempt; `Spans.snapshots` checks that count
+against the `iceberg.commit.attempt` tag on each swap. A slice with an unclassified `SwapFailed` maps to no action, so
+`ofSlice` returns an error there.
 
 `ConformanceTraceTests` checks the mapping against the model itself. The model's conformance driver runs real
 `SnapshotProducer` commits on `InMemoryCatalog` along random walks of the model (the `standard` and `removers`
@@ -99,9 +100,9 @@ Each nonterminal is a state a writer can be in, and its doc string is what a vio
   apply.
 - **After a back-off**, the next attempt starts from a reload (`Backoff`).
 
-`Unclassified` and `Reloaded` exist so that today's spans, which cannot tell a rejection from an unknown outcome,
-still parse. They allow whatever either outcome would allow. That is sound, but weaker: see
-[What today's telemetry cannot see](#what-todays-telemetry-cannot-see).
+`Unclassified` and `Reloaded` exist so that a swap failure the catalog did not classify (`SwapFailed`) still parses.
+They allow whatever either a rejection or an unknown outcome would allow. That is sound, but weaker: see
+[What the telemetry records](#what-the-telemetry-records).
 
 ## Why a regular grammar, and why per-commit slices
 
@@ -155,56 +156,51 @@ reader would build the same records. For each `iceberg.commit` span C:
 | Direct child `iceberg.catalog.commit_table`, by `iceberg.outcome` | success (status Ok, no outcome tag) → `SwapApplied`; `conflict` → `SwapRejected`; `unknown` → `SwapUnknown`; anything else → `SwapFailed` |
 | Direct child `iceberg.catalog.load_table` | success → `Reload`, otherwise `ReloadFailed` |
 | Event `iceberg.commit.retry` on C | `error.type` ending in `CommitStateUnknownException` → `RetryAfterUnknown`, otherwise `Retry` |
-| Event `iceberg.commit.resolution` on C (proposed) | `found` → `Found`, `absent` → `Absent` |
+| Event `iceberg.commit.resolution` on C | `found` → `Found`, `absent` → `Absent` |
 | C ends, by `iceberg.outcome` | `success` → `Committed`, `noop` → `NothingToCommit`, `conflict` → `GaveUp`, `unknown` → `LeftUnknown`, `cancelled` / `error` → `Aborted` |
 
 Events are ordered by time. At equal times the start comes first and the end last. The slice key is C's trace and span
 ID, with the table name kept for messages. `commit_table` spans with no `iceberg.commit` parent are counted and
 reported, not checked.
 
-## What today's telemetry cannot see
+`Spans.snapshots` then checks the data the grammar cannot: each swap's `iceberg.commit.attempt` is the number of
+retries before it plus one, a `found` resolution names the snapshot of the swap before it, and the committed snapshot
+is the last one applied or found.
 
-These are proposals only. Nothing here changes `src/`. The tests check every run twice: once against the spans as
-recorded, and once with the proposed attributes filled in by the harness (a first-chance exception handler for (1), the
-fault-injecting catalog for (2)). That shows exactly what each proposal buys.
+## What the telemetry records
 
-1. **Catalog commits do not classify failures.** `MetastoreCatalog.CommitTableAsync` and
-   `RestCatalog.CommitTableAsync` never call `FailedWith`, so every failed `commit_table` span has `iceberg.outcome =
-   error` and no `error.type`. A conflict and an unknown outcome look the same, which is why `SwapFailed` and
-   `Unclassified` exist.
-   *Proposal:* `catch (Exception e) when (telemetry.FailedWith(e)) { throw; }` in both, as `CommitTransactionAsync`
-   already does.
-2. **The resolution of an unknown outcome is not recorded.** After `SwapUnknown` and a reload, the trace does not
-   say whether the snapshot was found. A writer that finds its commit applied and then commits again is
-   indistinguishable from one that found it absent and retried.
-   *Proposal:* in `SnapshotProducer.AppliedAsync`, an event `iceberg.commit.resolution` on the commit span with tag
-   `iceberg.commit.resolution` = `found` | `absent`.
-   With (1) and (2), both broken writers in `BrokenWriterTests` are caught. Without them, both pass. The tests assert
-   both halves.
-3. **Catalog spans do not say which attempt they belong to.** The projection relies on parent links and time order.
-   *Proposal:* `iceberg.commit.attempt` and the attempted `iceberg.snapshot.id` on `commit_table`. These would let the
-   checker match a resolution to its swap explicitly, and check that a `Found` snapshot is the one that swap
-   attempted.
-4. **Ref, expiry and evolution commits have no commit span.** `SnapshotManagement` (branches, tags, rollback),
-   `Maintenance.ExpireAsync`, and schema, spec and property changes call `Table.CommitAsync` directly, so their
-   `commit_table` spans are orphans: counted, not checked. Compaction and manifest rewrites go through
-   `SnapshotProducer` and are checked.
-   *Proposal:* a `CommitScope` around each such retry loop.
+`IcebergTelemetry` records what the checker needs; [docs/telemetry.md](../../docs/telemetry.md) lists the spans and
+tags. Each item below was once a gap that forced a weaker check.
+
+1. **Catalog commits classify failures.** `commit_table` spans tag `iceberg.outcome` as `conflict`, `unknown` and
+   so on, with `error.type`, so a rejection and an unknown outcome project to different events. `SwapFailed` and
+   `Unclassified` remain for anything else, such as a stale-state `ArgumentException`.
+2. **The resolution of an unknown outcome is recorded.** After a reload, `SnapshotProducer` adds an
+   `iceberg.commit.resolution` event (`found` or `absent`) to the commit span. Without it, a writer that finds its
+   commit applied and commits again is indistinguishable from one that found it absent and retried. With (1) and (2),
+   both broken writers in `BrokenWriterTests` are caught.
+3. **Catalog commits say which attempt they are.** A `commit_table` inside a commit carries `iceberg.commit.attempt`
+   and the attempted `iceberg.snapshot.id`, and a resolution names the snapshot it looked for, which is what
+   `Spans.snapshots` checks.
+4. **Ref, expiry and evolution commits have commit spans.** `SnapshotManagement` (branches, tags, rollback),
+   `Maintenance.ExpireAsync`, and schema and spec evolution open an `iceberg.commit` span around their retry loops
+   (operations `manage-snapshots`, `expire-snapshots`, `update-schema`, `update-spec`), so their swaps are checked by
+   the same grammar. They add no snapshot, so `Spans.snapshots` has nothing to match for them. One-shot commits with
+   no retry loop (`SetPropertiesAsync`, `ReplaceSortOrderAsync`, statistics, name mapping, the cherry-pick
+   fast-forward) still commit directly and remain orphans: counted, not checked.
 5. **Multi-table transactions** (`commit_transaction`) are out of scope for this grammar.
-6. **Catalog spans tag only failures.** A successful catalog call has status Ok but no `iceberg.outcome`, unlike
-   commit spans. The projection handles both, but an exporter that drops status would lose successes.
-   *Proposal:* `Succeeded` sets `iceberg.outcome = success`.
-7. **Idempotent resends are invisible.** `RestCatalog` resends a timed-out commit with the same idempotency key, and
-   the server joins it to the original request. Neither side records it, so a trace cannot show the model's `Resend`,
-   and a resend that the server failed to deduplicate would look like a second, independent attempt.
-   *Proposal:* an `iceberg.commit.resend` event on the `commit_table` span, tagged with the attempt it repeats.
+6. **Catalog spans tag success.** A successful catalog call sets `iceberg.outcome = success` as well as status Ok, so
+   an exporter that drops status keeps it.
+7. **Idempotent resends are recorded, not yet projected.** Each time `RestCatalog` resends a request with the same
+   idempotency key, it adds an `iceberg.catalog.resend` event to the catalog span (named for the catalog, since any
+   mutating call can be resent). The projection does not read it yet, so the model's `Resend` has no trace event.
 
 ## Data sources
 
 - **In CI (built):** the soak in `SoakTraceTests`. Four writers race on one in-memory table through the library's real
   paths: append, insert, upsert, and delete under every strategy. Meanwhile the catalog injects unknown outcomes: one
   of each kind first, then 15% of swaps at random. An `ActivityListener` captures the spans. Every commit must parse,
-  both as recorded and with the proposals filled in. The run must also reach every branch the faults and races can
+  and `Spans.snapshots` must find nothing wrong. The run must also reach every branch the faults and races can
   reach (applied, rejected, unknown found, unknown absent, left unknown, retry), so it cannot pass vacuously.
   `BrokenWriterTests` drives the library's own commit through each fault deterministically.
 - **Production (described, not built):** read OTLP-exported spans into `SpanRecord`s, slice by commit span, and
@@ -220,7 +216,8 @@ fault-injecting catalog for (2)). That shows exactly what each proposal buys.
   spec by mapping each event to a spec action. Cirstea, Kuppe, Loillier and Merz (2024, arXiv:2404.16075) describe
   that method in general. When a trace fails, it does so without a counterexample: the result is the longest prefix
   that could be matched. A grammar gives more here: the position, the state and the allowed events. It gives less
-  elsewhere: it has no data, so it cannot check, for example, that a found snapshot is the one attempted (gap 3). Nor
+  elsewhere: it has no data, so it cannot check, for example, that a found snapshot is the one attempted; `Spans.snapshots` does
+  that beside it. Nor
   does it tolerate gaps: that method only asks that some behaviour of the spec matches the trace, letting the checker
   choose unlogged steps, whereas a grammar needs every event. Hence the sampling rule for production above. The
   model handles data; the grammar handles shape.

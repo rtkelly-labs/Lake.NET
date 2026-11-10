@@ -68,7 +68,7 @@ type Capture(ns: string) =
 
     do ActivitySource.AddActivityListener listener
 
-    /// The spans as today's telemetry records them.
+    /// The spans as the telemetry records them.
     member _.Spans = spans |> Seq.map Spans.ofActivity |> List.ofSeq
 
     interface IDisposable with
