@@ -308,6 +308,7 @@ public sealed class SnapshotProducer
                 };
                 try
                 {
+                    telemetry.Attempting(snapshot.SnapshotId);
                     await _table.CommitAsync(requirements, [new MetadataUpdate.AddSnapshot(snapshot), SetBranch(snapshot.SnapshotId)], ct);
                 }
                 catch (ArgumentException stale) when (_table.Metadata.FormatVersion > 1)

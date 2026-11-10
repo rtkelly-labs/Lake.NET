@@ -93,3 +93,32 @@ let ``Interleaved commits are sliced apart``() =
     let report, _ = Spans.check spans
     Assert.Equal(2, report.Slices)
     Assert.True(report.Passed, Spans.explain report)
+
+/// An unknown outcome found applied, then committed: attempt 1 sent snapshot 7, the resolution found 7, the commit is 7.
+let private resolvedRun (attempt: string) (found: string) (committed: string) =
+    let resolution =
+        { Name = Spans.Names.resolution
+          Time = at 35
+          Tags = Map [ Spans.Names.resolutionTag, "found"; IcebergTelemetry.Tags.SnapshotId, found ] }
+    let c = commit "success" 100 [ resolution ]
+    [ { c with Tags = c.Tags.Add(IcebergTelemetry.Tags.SnapshotId, committed) }
+      span Spans.Names.commitTable "s1" "c" 5 10 "Error" [
+          IcebergTelemetry.Tags.Outcome, "unknown"
+          IcebergTelemetry.Tags.CommitAttempt, attempt
+          IcebergTelemetry.Tags.SnapshotId, "7" ]
+      span Spans.Names.loadTable "l1" "c" 30 35 "Ok" [] ]
+
+[<Fact>]
+let ``Swaps, resolutions and the commit agree on the snapshot``() =
+    let spans = resolvedRun "1" "7" "7"
+    Assert.True(Spans.check spans |> fst |> _.Passed)
+    Assert.Empty(Spans.snapshots spans)
+
+[<Theory>]
+[<InlineData("2", "7", "7", "tagged attempt 2 after 0 retries")>]
+[<InlineData("1", "8", "8", "resolution found snapshot 8, but the swap before it attempted 7")>]
+[<InlineData("1", "7", "9", "committed snapshot 9, but the last swap applied or found 7")>]
+let ``The data check reports a mismatch the grammar cannot see``(attempt: string, found: string, committed: string, message: string) =
+    let spans = resolvedRun attempt found committed
+    Assert.True(Spans.check spans |> fst |> _.Passed) // the shape is fine
+    Assert.Contains(message, Assert.Single(Spans.snapshots spans))

@@ -159,6 +159,49 @@ module Spans =
                   for _, event in List.sortBy fst timed -> { Key = key; Event = event } ]
         { Events = events; OrphanCatalogCommits = orphans }
 
+    /// What the grammar cannot check, because it has no data: that each catalog commit is tagged with the attempt it
+    /// belongs to (one more than the retries before it), that a found resolution names the snapshot the swap before it
+    /// attempted, and that a committed snapshot is the one its last applied swap, or its found resolution, attempted.
+    /// Checked only where the tags are present. Returns one message per mismatch.
+    let snapshots (spans: SpanRecord seq) : string list =
+        let spans = List.ofSeq spans
+        let swaps =
+            spans
+            |> List.filter (fun s -> s.Name = Names.commitTable)
+            |> List.groupBy _.ParentSpanId
+            |> Map.ofList
+        let snapshotOf (tags: Map<string, string>) = tags |> Map.tryFind IcebergTelemetry.Tags.SnapshotId
+        [ for c in spans |> List.filter (fun s -> s.Name = Names.commit) do
+              let mine = swaps |> Map.tryFind c.SpanId |> Option.defaultValue [] |> List.sortBy _.Start
+              let retriesBefore (t: DateTime) = c.Events |> List.filter (fun e -> e.Name = Names.retry && e.Time <= t) |> List.length
+              for s in mine do
+                  match tag IcebergTelemetry.Tags.CommitAttempt s with
+                  | Some attempt when attempt <> string (retriesBefore s.Start + 1) ->
+                      yield $"commit span %s{c.SpanId}: catalog commit %s{s.SpanId} is tagged attempt %s{attempt} after %d{retriesBefore s.Start} retries"
+                  | _ -> ()
+              let found =
+                  [ for e in c.Events do
+                        if e.Name = Names.resolution && Map.tryFind Names.resolutionTag e.Tags = Some "found" then
+                            match snapshotOf e.Tags with
+                            | Some id -> yield e.Time, id, mine |> List.filter (fun s -> s.Start <= e.Time) |> List.tryLast
+                            | None -> () ]
+              for _, id, before in found do
+                  match before |> Option.bind (fun s -> snapshotOf s.Tags) with
+                  | Some attempted when attempted <> id ->
+                      yield $"commit span %s{c.SpanId}: resolution found snapshot %s{id}, but the swap before it attempted %s{attempted}"
+                  | _ -> ()
+              // The snapshot that each applied swap and each found resolution settled on, in time order.
+              let settled =
+                  [ for s in mine do
+                        match swap s, snapshotOf s.Tags with
+                        | SwapApplied, Some id -> yield s.End, id
+                        | _ -> ()
+                    for t, id, _ in found -> t, id ]
+              match finish c, snapshotOf c.Tags, settled |> List.sortBy fst |> List.tryLast with
+              | Committed, Some committed, Some(_, last) when committed <> last ->
+                  yield $"commit span %s{c.SpanId}: committed snapshot %s{committed}, but the last swap applied or found %s{last}"
+              | _ -> () ]
+
     /// Project and check a recorded run.
     let check (spans: SpanRecord seq) : TraceReport<CommitKey, CommitEvent> * Projection =
         let projection = project spans

@@ -159,6 +159,9 @@ public sealed class TelemetryTests : IDisposable
         Assert.All(catalogCommits, a => Assert.Equal(ActivityKind.Client, a.Kind));
         Assert.Equal([ActivityStatusCode.Error, ActivityStatusCode.Ok], catalogCommits.OrderBy(a => a.StartTimeUtc).Select(a => a.Status));
         Assert.Equal(["conflict", "success"], catalogCommits.OrderBy(a => a.StartTimeUtc).Select(a => a.GetTagItem(T.Outcome)));
+        // Each catalog commit names its attempt; the winning one names the committed snapshot.
+        Assert.Equal([1, 2], catalogCommits.OrderBy(a => a.StartTimeUtc).Select(a => a.GetTagItem(T.CommitAttempt)));
+        Assert.Equal(t.Metadata.CurrentSnapshotId, catalogCommits.MaxBy(a => a.StartTimeUtc)!.GetTagItem(T.SnapshotId));
         Assert.Contains(Spans("iceberg.catalog.load_table"), a => a.ParentSpanId == commit.SpanId); // the refresh between attempts
 
         var table = t.Identifier.ToString();
@@ -245,6 +248,11 @@ public sealed class TelemetryTests : IDisposable
         var swaps = Spans("iceberg.catalog.commit_table").Where(a => a.ParentSpanId == commit.SpanId).OrderBy(a => a.StartTimeUtc).ToList();
         Assert.Equal(IcebergTelemetry.Outcomes.Unknown, swaps[0].GetTagItem(T.Outcome));
         Assert.Equal(applied ? 1 : 2, swaps.Count);
+        // The resolution names the snapshot the first swap attempted; found, that is the committed one.
+        Assert.Equal(1, swaps[0].GetTagItem(T.CommitAttempt));
+        Assert.Contains(resolution.Tags, kv => kv.Key == T.SnapshotId && Equals(kv.Value, swaps[0].GetTagItem(T.SnapshotId)));
+        if (applied) Assert.Equal(snapshot.SnapshotId, swaps[0].GetTagItem(T.SnapshotId));
+        else Assert.Equal(snapshot.SnapshotId, swaps[1].GetTagItem(T.SnapshotId));
         Assert.Equal(applied ? 0 : 1, commit.Events.Count(e => e.Name == "iceberg.commit.retry"));
     }
 
