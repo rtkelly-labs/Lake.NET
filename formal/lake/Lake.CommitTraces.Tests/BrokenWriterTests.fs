@@ -1,6 +1,6 @@
 /// End to end on real spans: Iceberg.Net's own commit path parses under every injected outcome, and hand-written
-/// writers that break the protocol are caught, with the proposed telemetry. With today's telemetry the same broken
-/// writers pass, which is what the proposals in the README are for.
+/// writers that break the protocol are caught. The catalog's commit_table spans classify their failures, so a writer
+/// that ignores an unknown outcome is caught on the spans as recorded.
 module Lake.CommitTraces.Tests.BrokenWriterTests
 
 open System.Threading.Tasks
@@ -107,23 +107,24 @@ type BrokenWriterTests(output: ITestOutputHelper) =
     member _.``A writer that retries an unknown outcome blindly is caught``() =
         task {
             let! today, proposed = record [ { Apply = false; Responded = true } ] blindRetry
-            Assert.Equal<CommitEvent list>([ Begin; SwapUnknown; Retry; Reload; SwapApplied; Committed ], eventsOf proposed)
-            let report = check "proposed" proposed
-            let _, e = Assert.Single report.Violations
-            Assert.Equal("Uncertain", e.State)
-            Assert.Equal(Lookahead.Event Retry, e.Got)
-            Assert.Contains("must reload and look for the snapshot", Spans.explain report)
-            // Today the failure is unclassified, so a retry after it is allowed: the gap the proposals close.
-            Assert.True((check "today" today).Passed)
+            for label, spans in [ "today", today; "proposed", proposed ] do
+                Assert.Equal<CommitEvent list>([ Begin; SwapUnknown; Retry; Reload; SwapApplied; Committed ], eventsOf spans)
+                let report = check label spans
+                let _, e = Assert.Single report.Violations
+                Assert.Equal("Uncertain", e.State)
+                Assert.Equal(Lookahead.Event Retry, e.Got)
+                Assert.Contains("must reload and look for the snapshot", Spans.explain report)
         }
 
     [<Fact>]
     member _.``A writer that commits again after its commit was applied is caught``() =
         task {
             let! today, proposed = record [ { Apply = true; Responded = true } ] doubleApply
-            let report = check "proposed" proposed
-            let _, e = Assert.Single report.Violations
-            Assert.Equal("Done", e.State)
-            Assert.Equal(Lookahead.Event SwapApplied, e.Got)
-            Assert.True((check "today" today).Passed)
+            // Today the reload's result is not on the span, so the second swap is caught as not allowed after a reload
+            // that resolved an unknown outcome; with the resolution event, as a swap after the commit was found.
+            for label, spans, state in [ "today", today, "Resolving"; "proposed", proposed, "Done" ] do
+                let report = check label spans
+                let _, e = Assert.Single report.Violations
+                Assert.Equal(state, e.State)
+                Assert.Equal(Lookahead.Event SwapApplied, e.Got)
         }

@@ -43,13 +43,15 @@ observe them), as does `dotnet-counters monitor --counters Iceberg.Net`.
 | `iceberg.catalog.{operation}` | client | `load_table`, `create_table`, `commit_table`, `commit_transaction`, `drop_table` on the metastore catalogs (Glue, JDBC, in-memory) and the REST catalog | `iceberg.catalog.name`, `iceberg.catalog.type` (e.g. `GlueCatalog`, `RestCatalog`), `iceberg.catalog.operation`, `iceberg.table`, `iceberg.outcome` |
 
 A commit's catalog calls are its children: a commit that lost one race shows two `iceberg.catalog.commit_table`
-spans (the first with error status), the `load_table` of the refresh between them, and `iceberg.commit.attempts = 2`.
+spans (the first with outcome `conflict`), the `load_table` of the refresh between them, and `iceberg.commit.attempts = 2`.
 
 **Outcomes** (`iceberg.outcome`): `success`; `noop` (nothing to commit); `conflict` (a `CommitFailedException` that
 retries did not resolve); `unknown` (`CommitStateUnknownException`: the catalog may have applied it); `cancelled`;
-`error`. Failed spans have status `Error`, `error.type` set to the exception type and an `exception` event. Catalog
-spans classify only success vs `error`: a lost race at the catalog level is expected, and the enclosing commit span
-says whether it was resolved.
+`error`. Failed spans have status `Error`, `error.type` set to the exception type and an `exception` event. Every
+catalog span carries an outcome, `success` included. `commit_table` classifies its failures like a commit does: a lost
+race is `conflict` and a swap whose result is unknown is `unknown`, so a trace shows what each attempt met. Whether the
+enclosing commit resolved it is on the commit span. `commit_transaction` classifies the same way; the other catalog
+operations record `success` or `error`.
 
 **Nesting of commits.** Row-level mutations re-plan on conflict around a `SnapshotProducer` with no retries of its own.
 A commit scope opened while another is open for the same table on the same async flow reports into the outer one,

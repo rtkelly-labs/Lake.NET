@@ -150,13 +150,14 @@ public sealed class TelemetryTests : IDisposable
         Assert.Equal(2, catalogCommits.Count);
         Assert.All(catalogCommits, a => Assert.Equal(ActivityKind.Client, a.Kind));
         Assert.Equal([ActivityStatusCode.Error, ActivityStatusCode.Ok], catalogCommits.OrderBy(a => a.StartTimeUtc).Select(a => a.Status));
+        Assert.Equal(["conflict", "success"], catalogCommits.OrderBy(a => a.StartTimeUtc).Select(a => a.GetTagItem(T.Outcome)));
         Assert.Contains(Spans("iceberg.catalog.load_table"), a => a.ParentSpanId == commit.SpanId); // the refresh between attempts
 
         var table = t.Identifier.ToString();
         Assert.Equal(1, Sum("iceberg.commit.retries", table));
         Assert.Equal(2, Sum("iceberg.commit.attempts", table, (T.Outcome, IcebergTelemetry.Outcomes.Success)));
         Assert.Single(_measurements, m => m.Instrument == "iceberg.commit.duration" && Equals(m.Tags[T.Table], table) && Equals(m.Tags[T.Outcome], "success"));
-        Assert.Equal(1, _measurements.Count(m => m.Instrument == "iceberg.catalog.duration" && Equals(m.Tags[T.CatalogOperation], "commit_table") && Equals(m.Tags[T.Outcome], "error")));
+        Assert.Equal(1, _measurements.Count(m => m.Instrument == "iceberg.catalog.duration" && Equals(m.Tags[T.CatalogOperation], "commit_table") && Equals(m.Tags[T.Outcome], "conflict")));
         Assert.NotNull(result);
     }
 

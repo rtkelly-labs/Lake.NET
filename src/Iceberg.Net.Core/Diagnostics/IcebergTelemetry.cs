@@ -320,10 +320,11 @@ public static class IcebergTelemetry
             if (table is not null) Activity.SetTag(Tags.Table, table);
         }
 
-        /// <summary>The call returned normally.</summary>
+        /// <summary>The call returned normally. Tags the outcome, as a failure does, so every span carries one.</summary>
         public void Succeeded()
         {
             _outcome = Outcomes.Success;
+            Activity?.SetTag(Tags.Outcome, Outcomes.Success);
             Activity?.SetStatus(ActivityStatusCode.Ok);
         }
 
