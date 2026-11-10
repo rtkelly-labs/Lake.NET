@@ -86,15 +86,16 @@ module Spans =
 
     let private tag key (span: SpanRecord) = span.Tags |> Map.tryFind key
 
-    /// A catalog span's outcome. Catalog spans tag only failures; a success is status Ok with no outcome tag.
+    /// A catalog span's outcome. Catalog spans tag every outcome; spans from releases that tagged only failures have
+    /// status Ok and no tag on success.
     let catalogOutcome (span: SpanRecord) =
         match tag IcebergTelemetry.Tags.Outcome span with
         | Some outcome -> outcome
         | None when span.Status = "Ok" -> IcebergTelemetry.Outcomes.Success
         | None -> IcebergTelemetry.Outcomes.Error
 
-    /// <c>iceberg.catalog.commit_table</c> by outcome. Today every failure is "error" (the catalog's commit does not
-    /// classify what it throws), which projects to <see cref="SwapFailed"/>.
+    /// <c>iceberg.catalog.commit_table</c> by outcome. A failure the span does not classify ("error", as every failure
+    /// was before the catalogs called FailedWith) projects to <see cref="SwapFailed"/>.
     let swap (span: SpanRecord) =
         match catalogOutcome span with
         | o when o = IcebergTelemetry.Outcomes.Success -> SwapApplied

@@ -16,8 +16,8 @@ type CommitEvent =
     | SwapRejected
     /// The catalog may or may not have applied it (<c>CommitStateUnknownException</c>).
     | SwapUnknown
-    /// The swap failed and the trace does not say how. Today's catalog spans do not classify failures, so a
-    /// production trace has only this; the grammar then allows what either a rejection or an unknown outcome allows.
+    /// The swap failed and the trace does not say how: a catalog span with outcome "error" (any failure, in releases
+    /// before commit_table classified them). The grammar then allows what either a rejection or an unknown outcome allows.
     | SwapFailed
     /// The writer reloaded the table from the catalog.
     | Reload

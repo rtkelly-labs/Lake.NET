@@ -278,14 +278,19 @@ public abstract partial class MetastoreCatalog(string name, IFileIO io) : ICatal
     public async Task<TableMetadata> CommitTableAsync(TableCommit commit, CancellationToken ct = default)
     {
         using var telemetry = IcebergTelemetry.StartCatalogCall(Name, GetType().Name, "commit_table", commit.Identifier.ToString());
-        var currentLocation = await CurrentMetadataLocationAsync(commit.Identifier, ct);
-        var current = currentLocation is null ? null : await ReadMetadataAsync(currentLocation, ct);
-        foreach (var req in commit.Requirements) req.Validate(current);
-        if (current is null) throw new NoSuchTableException($"Table {commit.Identifier} does not exist");
+        try
+        {
+            var currentLocation = await CurrentMetadataLocationAsync(commit.Identifier, ct);
+            var current = currentLocation is null ? null : await ReadMetadataAsync(currentLocation, ct);
+            foreach (var req in commit.Requirements) req.Validate(current);
+            if (current is null) throw new NoSuchTableException($"Table {commit.Identifier} does not exist");
 
-        var builder = TableMetadataBuilder.From(current, Clock).ApplyAll(commit.Updates);
-        if (builder.Changes.Count == 0) return telemetry.Succeeded(current);
-        return telemetry.Succeeded(await WriteAndSwapAsync(commit.Identifier, current, builder.Build, ct));
+            var builder = TableMetadataBuilder.From(current, Clock).ApplyAll(commit.Updates);
+            if (builder.Changes.Count == 0) return telemetry.Succeeded(current);
+            return telemetry.Succeeded(await WriteAndSwapAsync(commit.Identifier, current, builder.Build, ct));
+        }
+        // Records conflict, unknown or error on the span, so a trace tells a lost swap from an unknown outcome.
+        catch (Exception e) when (telemetry.FailedWith(e)) { throw; }
     }
 
     public async Task CommitTransactionAsync(IReadOnlyList<TableCommit> commits, CancellationToken ct = default)

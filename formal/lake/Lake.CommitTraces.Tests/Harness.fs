@@ -1,6 +1,5 @@
-/// In-process trace capture: a fault-injecting catalog, an ActivityListener, and the two enrichments that stand in
-/// for the proposed telemetry (classified catalog failures, resolution events) so tests can check against both
-/// today's spans and the proposed ones.
+/// In-process trace capture: a fault-injecting catalog, an ActivityListener, and the enrichment that stands in for the
+/// proposed resolution events, so tests can check against both today's spans and the proposed ones.
 module Lake.CommitTraces.Tests.Harness
 
 open System
@@ -8,7 +7,6 @@ open System.Collections.Concurrent
 open System.Collections.Generic
 open System.Diagnostics
 open System.IO
-open System.Runtime.ExceptionServices
 open System.Threading.Tasks
 open Lake.CommitTraces
 open Iceberg.Net.Catalog
@@ -61,10 +59,9 @@ type FaultyCatalog(warehouse: string, seed: int, rate: float) =
             }
             :> Task
 
-/// Records every Iceberg.Net span whose table is in <paramref name="ns"/>, and how each failed catalog commit failed.
+/// Records every Iceberg.Net span whose table is in <paramref name="ns"/>.
 type Capture(ns: string) =
     let spans = ConcurrentQueue<Activity>()
-    let failures = ConcurrentDictionary<string, string * string>()
 
     let mine (a: Activity) =
         match a.GetTagItem IcebergTelemetry.Tags.Table with
@@ -78,38 +75,13 @@ type Capture(ns: string) =
             ActivityStopped = (fun a -> if mine a then spans.Enqueue a)
         )
 
-    // Stands in for the proposed `catch (Exception e) when (telemetry.FailedWith(e))` in CommitTableAsync: the last
-    // exception thrown while a commit_table span is current is the one that leaves it.
-    let firstChance =
-        EventHandler<FirstChanceExceptionEventArgs>(fun _ args ->
-            match Activity.Current with
-            | a when not (isNull a) && a.OperationName = Spans.Names.commitTable && mine a ->
-                failures[a.SpanId.ToHexString()] <- (IcebergTelemetry.OutcomeOf args.Exception, args.Exception.GetType().FullName)
-            | _ -> ())
-
-    do
-        ActivitySource.AddActivityListener listener
-        AppDomain.CurrentDomain.FirstChanceException.AddHandler firstChance
+    do ActivitySource.AddActivityListener listener
 
     /// The spans as today's telemetry records them.
     member _.Spans = spans |> Seq.map Spans.ofActivity |> List.ofSeq
 
-    /// Failure classification per commit_table span ID.
-    member _.Failures = failures :> IReadOnlyDictionary<_, _>
-
     interface IDisposable with
-        member _.Dispose() =
-            AppDomain.CurrentDomain.FirstChanceException.RemoveHandler firstChance
-            listener.Dispose()
-
-/// Tag failed commit_table spans with their outcome and error type, as the proposed FailedWith call would.
-let classify (failures: IReadOnlyDictionary<string, string * string>) (spans: SpanRecord list) =
-    spans
-    |> List.map (fun s ->
-        match failures.TryGetValue s.SpanId with
-        | true, (outcome, errorType) when s.Name = Spans.Names.commitTable && Spans.catalogOutcome s <> IcebergTelemetry.Outcomes.Success ->
-            { s with Tags = s.Tags.Add(IcebergTelemetry.Tags.Outcome, outcome).Add(IcebergTelemetry.Tags.ErrorType, errorType) }
-        | _ -> s)
+        member _.Dispose() = listener.Dispose()
 
 /// Add the proposed resolution event to each commit span: after a resolvable unknown outcome, at the end of the reload
 /// that resolved it, found or absent. A writer that never resolved the outcome gets no event.
@@ -137,9 +109,9 @@ let resolve (applied: IReadOnlyDictionary<string, bool>) (spans: SpanRecord list
                       | _ -> () ]
             { c with Events = c.Events @ resolutions })
 
-/// The proposed telemetry: classified failures and resolution events.
+/// The proposed telemetry: resolution events.
 let enrich (capture: Capture) (catalog: FaultyCatalog) =
-    capture.Spans |> classify capture.Failures |> resolve catalog.Applied
+    capture.Spans |> resolve catalog.Applied
 
 let schema =
     Schema(
