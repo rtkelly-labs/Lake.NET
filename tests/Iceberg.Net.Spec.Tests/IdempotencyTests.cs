@@ -1,6 +1,8 @@
+using System.Diagnostics;
 using System.Net;
 using System.Text;
 using Iceberg.Net.Catalog;
+using Iceberg.Net.Diagnostics;
 using Iceberg.Net.Metadata;
 
 namespace Iceberg.Net.Spec.Tests;
@@ -79,5 +81,32 @@ public sealed class IdempotencyTests
         using var catalog = await Connect(server);
         await Assert.ThrowsAsync<CommitStateUnknownException>(() => catalog.CommitTableAsync(new TableCommit(TableIdentifier.Of("n", "t"), [], [])));
         Assert.Equal(4, server.Keys.Count); // first try + 3 retries
+    }
+
+    [Fact]
+    public async Task Each_resend_is_an_event_on_the_catalog_span()
+    {
+        var table = TableIdentifier.Of("n", "resend_" + Guid.NewGuid().ToString("N"));
+        var stopped = new List<Activity>();
+        using var listener = new ActivityListener
+        {
+            ShouldListenTo = s => s.Name == IcebergTelemetry.Name,
+            Sample = (ref ActivityCreationOptions<ActivityContext> _) => ActivitySamplingResult.AllDataAndRecorded,
+            ActivityStopped = a => { if (Equals(a.GetTagItem(IcebergTelemetry.Tags.Table), table.ToString())) lock (stopped) stopped.Add(a); },
+        };
+        ActivitySource.AddActivityListener(listener);
+        var server = new FakeServer("PT30M", Unavailable, () => throw new HttpRequestException("connection reset"), Unavailable);
+        using var catalog = await Connect(server);
+
+        await Assert.ThrowsAsync<CommitStateUnknownException>(() => catalog.CommitTableAsync(new TableCommit(table, [], [])));
+
+        // One span for the call; each resend is an event on it, numbered, with what prompted it.
+        var span = Assert.Single(stopped);
+        Assert.Equal("iceberg.catalog.commit_table", span.OperationName);
+        Assert.Equal(IcebergTelemetry.Outcomes.Unknown, span.GetTagItem(IcebergTelemetry.Tags.Outcome));
+        var resends = span.Events.Where(e => e.Name == "iceberg.catalog.resend").ToList();
+        Assert.Equal([1, 2, 3], resends.Select(e => e.Tags.Single(kv => kv.Key == "iceberg.catalog.resend").Value));
+        Assert.Contains(resends[0].Tags, kv => kv.Key == "http.response.status_code" && Equals(kv.Value, 503));
+        Assert.Contains(resends[1].Tags, kv => kv.Key == IcebergTelemetry.Tags.ErrorType && Equals(kv.Value, typeof(HttpRequestException).FullName));
     }
 }

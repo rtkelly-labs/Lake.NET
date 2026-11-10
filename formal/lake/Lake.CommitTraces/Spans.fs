@@ -59,6 +59,10 @@ module Spans =
         /// The tag on <see cref="resolution"/>.
         let resolutionTag = "iceberg.commit.resolution"
 
+        /// An event on a catalog span each time the REST client resends the request with the same idempotency key: the
+        /// model's Resend. Not yet projected (see the README).
+        let resend = "iceberg.catalog.resend"
+
     let private text (value: obj) =
         match value with
         | null -> ""
