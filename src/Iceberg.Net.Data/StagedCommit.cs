@@ -190,7 +190,10 @@ public class StagedCommit
         try
         {
             if (pending.Count == 1)
+            {
+                telemetry.Attempting(pending[0].Snapshot!.SnapshotId);
                 await pending[0].Table.CommitAsync(pending[0].Commit!.Requirements, pending[0].Commit!.Updates, ct);
+            }
             else if (!catalog.SupportsMultiTableTransactions)
                 throw new NotSupportedException($"The {catalog.Name} catalog cannot commit several tables atomically " +
                     $"({string.Join(", ", pending.Select(s => s.Table.Identifier))})");

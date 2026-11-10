@@ -10,6 +10,7 @@ open Lake.CommitTraces
 open Lake.CommitTraces.Tests.Harness
 open Iceberg.Net.Catalog
 open Iceberg.Net.Data
+open Iceberg.Net.Diagnostics
 open Iceberg.Net.Metadata
 open Xunit
 open Xunit.Abstractions
@@ -95,6 +96,9 @@ type SoakTraceTests(output: ITestOutputHelper) =
                 output.WriteLine
                     $"%d{report.Slices} commits, %d{report.Events} events, %d{projection.OrphanCatalogCommits} catalog commits outside a commit span"
                 Assert.True(report.Passed, Spans.explain report)
+                Assert.Empty(Spans.snapshots spans)
+                // Not vacuous: the library tags each catalog commit inside a commit span with its attempt.
+                Assert.Contains(spans, fun s -> s.Name = Spans.Names.commitTable && s.Tags.ContainsKey IcebergTelemetry.Tags.CommitAttempt)
 
                 // Not vacuous: the run went through every branch the injected faults and the races can reach.
                 let seen = (Spans.project spans).Events |> List.map _.Event |> Set.ofList

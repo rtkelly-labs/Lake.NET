@@ -96,6 +96,7 @@ type BrokenWriterTests(output: ITestOutputHelper) =
         task {
             let! spans = record [ { Apply = apply; Responded = responded } ] appendOne
             Assert.True((check "spans" spans).Passed)
+            Assert.Empty(Spans.snapshots spans)
             let expected =
                 match apply, responded with
                 | true, true -> [ Begin; SwapUnknown; Reload; Found; Committed ]
