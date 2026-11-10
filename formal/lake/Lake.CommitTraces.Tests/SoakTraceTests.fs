@@ -1,6 +1,6 @@
 /// The first data source: a soak run captured in process. Writers race on one table through the library's real
 /// commit paths (append, insert, upsert, delete under every strategy) while the catalog injects unknown outcomes; every
-/// logical commit in the recorded trace must parse, with today's telemetry and with the proposed attributes.
+/// logical commit in the recorded trace must parse.
 module Lake.CommitTraces.Tests.SoakTraceTests
 
 open System
@@ -90,21 +90,19 @@ type SoakTraceTests(output: ITestOutputHelper) =
                 do!
                     Task.WhenAll [ for w in 0 .. writers - 1 -> Task.Run(fun () -> writer catalog table.Identifier deadline w outcomes :> Task) ]
 
-                let today = capture.Spans
-                let proposed = enrich capture catalog
-                for label, spans in [ "today", today; "proposed", proposed ] do
-                    let report, projection = Spans.check spans
-                    output.WriteLine
-                        $"%s{label}: %d{report.Slices} commits, %d{report.Events} events, %d{projection.OrphanCatalogCommits} catalog commits outside a commit span"
-                    Assert.True(report.Passed, Spans.explain report)
+                let spans = capture.Spans
+                let report, projection = Spans.check spans
+                output.WriteLine
+                    $"%d{report.Slices} commits, %d{report.Events} events, %d{projection.OrphanCatalogCommits} catalog commits outside a commit span"
+                Assert.True(report.Passed, Spans.explain report)
 
                 // Not vacuous: the run went through every branch the injected faults and the races can reach.
-                let seen = (Spans.project proposed).Events |> List.map _.Event |> Set.ofList
+                let seen = (Spans.project spans).Events |> List.map _.Event |> Set.ofList
                 output.WriteLine $"events seen: %A{seen}"
                 output.WriteLine $"writer outcomes: %A{outcomes |> Seq.countBy id |> List.ofSeq}"
                 for e in [ SwapApplied; SwapRejected; SwapUnknown; Found; Absent; Retry; Reload; Committed; LeftUnknown ] do
                     Assert.True(seen.Contains e, $"the soak never produced %A{e}")
-                Assert.DoesNotContain(SwapFailed, seen) // every failure classified once FailedWith is in place
+                Assert.DoesNotContain(SwapFailed, seen) // commit_table classifies every failure
             finally
                 catalog.Dispose()
                 cleanUp dir

@@ -56,7 +56,8 @@ module CommitGrammar =
               "reloaded after an unknown outcome; found means committed, absent means a plain conflict"
               [ "found", [ t Found; n "Done" ]
                 "absent", [ t Absent; n "Stale" ]
-                // Without the proposed resolution event the result is only visible in what follows.
+                // A reload without a resolution event (a writer that does not record one): the result is only
+                // visible in what follows.
                 "committed", [ t Committed ]
                 "retry", [ t Retry; n "Backoff" ]
                 "gave-up", [ t GaveUp ] ]
