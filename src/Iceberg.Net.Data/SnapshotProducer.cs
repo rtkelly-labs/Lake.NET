@@ -308,6 +308,7 @@ public sealed class SnapshotProducer
                 };
                 try
                 {
+                    telemetry.Attempting(snapshot.SnapshotId);
                     await _table.CommitAsync(requirements, [new MetadataUpdate.AddSnapshot(snapshot), SetBranch(snapshot.SnapshotId)], ct);
                 }
                 catch (ArgumentException stale) when (_table.Metadata.FormatVersion > 1)
@@ -322,7 +323,9 @@ public sealed class SnapshotProducer
                 {
                     // The catalog finished the request with an error, so its outcome is now fixed: look for our
                     // snapshot (IDs are random 63-bit values). Absent means not applied, which is a plain conflict.
-                    if (!await AppliedAsync(snapshot.SnapshotId, unknown, ct))
+                    var applied = await AppliedAsync(snapshot.SnapshotId, unknown, ct);
+                    telemetry.Resolved(applied);
+                    if (!applied)
                         throw new CommitFailedException($"Commit of snapshot {snapshot.SnapshotId} was not applied ({unknown.Message})", unknown);
                 }
                 _attemptArtifacts.Clear();

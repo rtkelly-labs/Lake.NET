@@ -28,6 +28,8 @@ public static class IcebergTelemetry
         public const string Operation = "iceberg.operation";
         public const string Outcome = "iceberg.outcome";
         public const string CommitAttempts = "iceberg.commit.attempts";
+        /// <summary>On a <c>commit_table</c> span: which attempt (1-based) of the enclosing commit it is.</summary>
+        public const string CommitAttempt = "iceberg.commit.attempt";
         public const string CommitRetries = "iceberg.commit.retries";
         public const string ManifestsRead = "iceberg.scan.manifests.read";
         public const string ManifestsSkipped = "iceberg.scan.manifests.skipped";
@@ -96,6 +98,22 @@ public static class IcebergTelemetry
     /// </summary>
     public static CatalogScope StartCatalogCall(string catalogName, string catalogType, string operation, string? table = null) =>
         new(catalogName, catalogType, operation, table);
+
+    /// <summary>
+    /// The client resends the current catalog request with the same idempotency key (resend <paramref name="resend"/>,
+    /// 1-based) after <paramref name="exception"/> or HTTP <paramref name="status"/>. Recorded as an
+    /// <c>iceberg.catalog.resend</c> event on the current <c>iceberg.catalog.*</c> span, so a trace tells a resend the
+    /// server deduplicates from a new attempt. Does nothing outside a catalog span.
+    /// </summary>
+    public static void Resending(int resend, Exception? exception = null, int? status = null)
+    {
+        if (Activity.Current is not { } span || span.Source != ActivitySource
+            || !span.OperationName.StartsWith("iceberg.catalog.", StringComparison.Ordinal)) return;
+        var tags = new ActivityTagsCollection { ["iceberg.catalog.resend"] = resend };
+        if (exception is not null) tags[Tags.ErrorType] = exception.GetType().FullName;
+        if (status is { } code) tags["http.response.status_code"] = code;
+        span.AddEvent(new ActivityEvent("iceberg.catalog.resend", tags: tags));
+    }
 
     private static double Seconds(long startTimestamp) => (Stopwatch.GetTimestamp() - startTimestamp) / (double)Stopwatch.Frequency;
 
@@ -212,6 +230,8 @@ public static class IcebergTelemetry
         private int _retries;
         private string? _outcome;
         private Exception? _error;
+        private long? _attempted;
+        private bool _attemptPending;
         public Activity? Activity { get; }
 
         internal CommitScope(string table, string? operation)
@@ -239,11 +259,44 @@ public static class IcebergTelemetry
             CommitRetries.Add(1, new KeyValuePair<string, object?>(Tags.Table, _table), new KeyValuePair<string, object?>(Tags.Operation, _operation));
             var tags = new ActivityTagsCollection
             {
-                ["iceberg.commit.attempt"] = _retries,
+                [Tags.CommitAttempt] = _retries,
                 [Tags.ErrorType] = conflict.GetType().FullName,
             };
             if (backoff is { } wait) tags["iceberg.commit.backoff_ms"] = (long)wait.TotalMilliseconds;
             Activity?.AddEvent(new ActivityEvent("iceberg.commit.retry", tags: tags));
+        }
+
+        /// <summary>
+        /// An unknown outcome (<c>CommitStateUnknownException</c> after the catalog responded) was
+        /// resolved by reloading the table: the attempted snapshot was <paramref name="found"/> in it, or not, in which
+        /// case the attempt was a plain conflict. Records an <c>iceberg.commit.resolution</c> event (<c>found</c> or
+        /// <c>absent</c>), so a trace shows the writer looked before it went on. Not called when the reload failed.
+        /// </summary>
+        public void Resolved(bool found)
+        {
+            if (_outer is { } outer) { outer.Resolved(found); return; }
+            var tags = new ActivityTagsCollection { ["iceberg.commit.resolution"] = found ? "found" : "absent" };
+            if (_attempted is { } snapshotId) tags[Tags.SnapshotId] = snapshotId;
+            Activity?.AddEvent(new ActivityEvent("iceberg.commit.resolution", tags: tags));
+        }
+
+        /// <summary>
+        /// The next catalog commit of this table sends <paramref name="snapshotId"/>. Its <c>commit_table</c> span is tagged
+        /// with the attempt number (retries so far plus one) and the snapshot, and a later <see cref="Resolved"/> with
+        /// the snapshot, so a checker can match each swap, its resolution and the committed snapshot.
+        /// </summary>
+        public void Attempting(long snapshotId)
+        {
+            if (_outer is { } outer) { outer.Attempting(snapshotId); return; }
+            (_attempted, _attemptPending) = (snapshotId, true);
+        }
+
+        /// <summary>For the <c>commit_table</c> span of <paramref name="table"/>: the attempt announced by <see cref="Attempting"/>, once.</summary>
+        internal static (int Attempt, long SnapshotId)? TakeAttempt(string table)
+        {
+            if (Ambient.Value is not { } scope || scope._table != table || !scope._attemptPending || scope._attempted is not { } id) return null;
+            scope._attemptPending = false;
+            return (scope._retries + 1, id);
         }
 
         /// <summary>The snapshot was committed.</summary>
@@ -253,6 +306,13 @@ public static class IcebergTelemetry
             (_outcome, _error) = (Outcomes.Success, null);
             _operation ??= operation;
             Activity?.SetTag(Tags.SnapshotId, snapshotId);
+        }
+
+        /// <summary>A commit that adds no snapshot (ref changes, expiry, schema or spec evolution) was committed.</summary>
+        public void Committed()
+        {
+            if (_outer is { } outer) { outer.Committed(); return; }
+            (_outcome, _error) = (Outcomes.Success, null);
         }
 
         /// <summary>There was nothing to commit (e.g. a delete that matched no rows).</summary>
@@ -318,12 +378,18 @@ public static class IcebergTelemetry
             Activity.SetTag(Tags.CatalogType, type);
             Activity.SetTag(Tags.CatalogOperation, operation);
             if (table is not null) Activity.SetTag(Tags.Table, table);
+            if (operation == "commit_table" && table is not null && CommitScope.TakeAttempt(table) is { } attempt)
+            {
+                Activity.SetTag(Tags.CommitAttempt, attempt.Attempt);
+                Activity.SetTag(Tags.SnapshotId, attempt.SnapshotId);
+            }
         }
 
-        /// <summary>The call returned normally.</summary>
+        /// <summary>The call returned normally. Tags the outcome, as a failure does, so every span carries one.</summary>
         public void Succeeded()
         {
             _outcome = Outcomes.Success;
+            Activity?.SetTag(Tags.Outcome, Outcomes.Success);
             Activity?.SetStatus(ActivityStatusCode.Ok);
         }
 

@@ -433,9 +433,14 @@ public sealed class RestCatalog : ICatalog, IViewCatalog
             ["requirements"] = new JsonArray(commit.Requirements.Select(r => (JsonNode)UpdateJson.ToJson(r)).ToArray()),
             ["updates"] = new JsonArray(commit.Updates.Select(u => (JsonNode)UpdateJson.ToJson(u)).ToArray()),
         };
-        var resp = await SendAsync(HttpMethod.Post, TablePath(commit.Identifier), body, ct,
-            conflict: m => new CommitFailedException(m), commit: true);
-        return telemetry.Succeeded(MetadataJson.FromJson(resp!["metadata"]!) with { MetadataFileLocation = resp["metadata-location"]?.GetValue<string>() });
+        try
+        {
+            var resp = await SendAsync(HttpMethod.Post, TablePath(commit.Identifier), body, ct,
+                conflict: m => new CommitFailedException(m), commit: true);
+            return telemetry.Succeeded(MetadataJson.FromJson(resp!["metadata"]!) with { MetadataFileLocation = resp["metadata-location"]?.GetValue<string>() });
+        }
+        // Records conflict, unknown or error on the span, so a trace tells a lost swap from an unknown outcome.
+        catch (Exception e) when (telemetry.FailedWith(e)) { throw; }
     }
 
     public async Task CommitTransactionAsync(IReadOnlyList<TableCommit> commits, CancellationToken ct = default)
@@ -572,14 +577,21 @@ public sealed class RestCatalog : ICatalog, IViewCatalog
             }
             catch (Exception e) when (e is HttpRequestException || e is TaskCanceledException && !ct.IsCancellationRequested)
             {
-                if (canRetry) { await Task.Delay(_options.IdempotentRetryDelay * (1 << attempt), ct); continue; }
+                if (canRetry)
+                {
+                    await Task.Delay(_options.IdempotentRetryDelay * (1 << attempt), ct);
+                    IcebergTelemetry.Resending(attempt + 1, exception: e);
+                    continue;
+                }
                 if (commit) throw new CommitStateUnknownException($"Commit request to {path} failed in flight", e);
                 throw;
             }
             if (canRetry && ((int)resp.StatusCode == 429 || (int)resp.StatusCode is >= 500 and <= 504 and not 501))
             {
+                var status = (int)resp.StatusCode;
                 resp.Dispose();
                 await Task.Delay(_options.IdempotentRetryDelay * (1 << attempt), ct);
+                IcebergTelemetry.Resending(attempt + 1, status: status);
                 continue;
             }
             break;

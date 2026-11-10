@@ -155,7 +155,7 @@ public class StagedCommit
                 try
                 {
                     committing = true;
-                    await CommitOnceAsync(catalog, pending, ct);
+                    await CommitOnceAsync(catalog, pending, telemetry, ct);
                     committing = false;
                 }
                 catch (CommitFailedException conflict) when (attempt <= policy.NumRetries)
@@ -185,12 +185,15 @@ public class StagedCommit
         }
     }
 
-    private static async Task CommitOnceAsync(ICatalog catalog, List<StagedCommit> pending, CancellationToken ct)
+    private static async Task CommitOnceAsync(ICatalog catalog, List<StagedCommit> pending, IcebergTelemetry.CommitScope telemetry, CancellationToken ct)
     {
         try
         {
             if (pending.Count == 1)
+            {
+                telemetry.Attempting(pending[0].Snapshot!.SnapshotId);
                 await pending[0].Table.CommitAsync(pending[0].Commit!.Requirements, pending[0].Commit!.Updates, ct);
+            }
             else if (!catalog.SupportsMultiTableTransactions)
                 throw new NotSupportedException($"The {catalog.Name} catalog cannot commit several tables atomically " +
                     $"({string.Join(", ", pending.Select(s => s.Table.Identifier))})");
@@ -223,6 +226,8 @@ public class StagedCommit
             {
                 throw new CommitStateUnknownException($"{unknown.Message}; resolving it failed: {e.Message}", unknown);
             }
+            // A transaction is atomic, so a partial result is not a resolution: it stays unknown.
+            if (applied == pending.Count || applied == 0) telemetry.Resolved(applied > 0);
             if (applied == pending.Count) return;
             if (applied == 0) throw new CommitFailedException($"The transaction was not applied ({unknown.Message})", unknown);
             throw;

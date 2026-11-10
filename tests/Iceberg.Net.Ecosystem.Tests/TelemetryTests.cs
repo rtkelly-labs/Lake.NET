@@ -28,13 +28,21 @@ public sealed class TelemetryTests : IDisposable
 
     private static readonly Schema Schema = new(0, [NestedField.Require(1, "id", PrimitiveType.Long), NestedField.Optional(2, "name", PrimitiveType.String)], identifierFieldIds: [1]);
 
-    /// <summary>Fails the next pointer swaps on demand, as a lost race or an ambiguous error.</summary>
+    /// <summary>
+    /// Fails the next pointer swaps on demand, as a lost race or an ambiguous error: <see cref="SwapFailures"/> before
+    /// swapping, <see cref="FailuresAfterSwap"/> after (the swap applied, then the reply was lost).
+    /// </summary>
     private sealed class FaultyCatalog(string warehouse, string name) : InMemoryCatalog(warehouse, name: name)
     {
         public Queue<Exception> SwapFailures { get; } = new();
+        public Queue<Exception> FailuresAfterSwap { get; } = new();
 
-        protected override Task SwapMetadataLocationAsync(TableIdentifier id, string? expected, string newLocation, TableMetadata metadata, CancellationToken ct) =>
-            SwapFailures.TryDequeue(out var failure) ? throw failure : base.SwapMetadataLocationAsync(id, expected, newLocation, metadata, ct);
+        protected override async Task SwapMetadataLocationAsync(TableIdentifier id, string? expected, string newLocation, TableMetadata metadata, CancellationToken ct)
+        {
+            if (SwapFailures.TryDequeue(out var failure)) throw failure;
+            await base.SwapMetadataLocationAsync(id, expected, newLocation, metadata, ct);
+            if (FailuresAfterSwap.TryDequeue(out var after)) throw after;
+        }
     }
 
     public TelemetryTests()
@@ -150,13 +158,17 @@ public sealed class TelemetryTests : IDisposable
         Assert.Equal(2, catalogCommits.Count);
         Assert.All(catalogCommits, a => Assert.Equal(ActivityKind.Client, a.Kind));
         Assert.Equal([ActivityStatusCode.Error, ActivityStatusCode.Ok], catalogCommits.OrderBy(a => a.StartTimeUtc).Select(a => a.Status));
+        Assert.Equal(["conflict", "success"], catalogCommits.OrderBy(a => a.StartTimeUtc).Select(a => a.GetTagItem(T.Outcome)));
+        // Each catalog commit names its attempt; the winning one names the committed snapshot.
+        Assert.Equal([1, 2], catalogCommits.OrderBy(a => a.StartTimeUtc).Select(a => a.GetTagItem(T.CommitAttempt)));
+        Assert.Equal(t.Metadata.CurrentSnapshotId, catalogCommits.MaxBy(a => a.StartTimeUtc)!.GetTagItem(T.SnapshotId));
         Assert.Contains(Spans("iceberg.catalog.load_table"), a => a.ParentSpanId == commit.SpanId); // the refresh between attempts
 
         var table = t.Identifier.ToString();
         Assert.Equal(1, Sum("iceberg.commit.retries", table));
         Assert.Equal(2, Sum("iceberg.commit.attempts", table, (T.Outcome, IcebergTelemetry.Outcomes.Success)));
         Assert.Single(_measurements, m => m.Instrument == "iceberg.commit.duration" && Equals(m.Tags[T.Table], table) && Equals(m.Tags[T.Outcome], "success"));
-        Assert.Equal(1, _measurements.Count(m => m.Instrument == "iceberg.catalog.duration" && Equals(m.Tags[T.CatalogOperation], "commit_table") && Equals(m.Tags[T.Outcome], "error")));
+        Assert.Equal(1, _measurements.Count(m => m.Instrument == "iceberg.catalog.duration" && Equals(m.Tags[T.CatalogOperation], "commit_table") && Equals(m.Tags[T.Outcome], "conflict")));
         Assert.NotNull(result);
     }
 
@@ -208,6 +220,69 @@ public sealed class TelemetryTests : IDisposable
         var commit = Assert.Single(Spans("iceberg.commit"));
         Assert.Equal(IcebergTelemetry.Outcomes.Unknown, commit.GetTagItem(T.Outcome));
         Assert.Equal(1, commit.GetTagItem(T.CommitAttempts));
+    }
+
+    /// <summary>
+    /// After an unknown outcome the server answered, the producer reloads and looks for its snapshot. The commit span
+    /// records what it found: found ends the commit, absent makes the attempt a conflict to retry.
+    /// </summary>
+    [Theory]
+    [InlineData(true)]
+    [InlineData(false)]
+    public async Task Resolving_an_unknown_outcome_is_an_event_on_the_commit_span(bool applied)
+    {
+        var t = await CreateAsync("resolved" + applied, new Dictionary<string, string> { ["commit.retry.min-wait-ms"] = "1" });
+        var files = await TableWriter.WriteAsync(t, [[1L, "a"]]);
+        _stopped.Clear();
+        var unknown = new CommitStateUnknownException("HTTP 500 from the catalog") { ServerResponded = true };
+        (applied ? _catalog.FailuresAfterSwap : _catalog.SwapFailures).Enqueue(unknown);
+
+        var snapshot = await SnapshotProducer.Append(t).AddFiles(files).CommitAsync();
+
+        var commit = Assert.Single(Spans("iceberg.commit"));
+        Assert.Equal(IcebergTelemetry.Outcomes.Success, commit.GetTagItem(T.Outcome));
+        Assert.Equal(snapshot.SnapshotId, commit.GetTagItem(T.SnapshotId));
+        var resolution = Assert.Single(commit.Events, e => e.Name == "iceberg.commit.resolution");
+        Assert.Contains(resolution.Tags, kv => kv.Key == "iceberg.commit.resolution" && Equals(kv.Value, applied ? "found" : "absent"));
+        // The swap's own span says the outcome was unknown; found needs no retry, absent retries once.
+        var swaps = Spans("iceberg.catalog.commit_table").Where(a => a.ParentSpanId == commit.SpanId).OrderBy(a => a.StartTimeUtc).ToList();
+        Assert.Equal(IcebergTelemetry.Outcomes.Unknown, swaps[0].GetTagItem(T.Outcome));
+        Assert.Equal(applied ? 1 : 2, swaps.Count);
+        // The resolution names the snapshot the first swap attempted; found, that is the committed one.
+        Assert.Equal(1, swaps[0].GetTagItem(T.CommitAttempt));
+        Assert.Contains(resolution.Tags, kv => kv.Key == T.SnapshotId && Equals(kv.Value, swaps[0].GetTagItem(T.SnapshotId)));
+        if (applied) Assert.Equal(snapshot.SnapshotId, swaps[0].GetTagItem(T.SnapshotId));
+        else Assert.Equal(snapshot.SnapshotId, swaps[1].GetTagItem(T.SnapshotId));
+        Assert.Equal(applied ? 0 : 1, commit.Events.Count(e => e.Name == "iceberg.commit.retry"));
+    }
+
+    /// <summary>
+    /// Commits that add no snapshot (refs, expiry, schema and spec evolution) are commit spans too, with their retries,
+    /// so a trace has no catalog commit outside a commit span.
+    /// </summary>
+    [Fact]
+    public async Task Ref_expiry_schema_and_spec_commits_are_commit_spans()
+    {
+        var t = await CreateAsync("metadata", new Dictionary<string, string> { ["commit.retry.min-wait-ms"] = "1" });
+        await TableMutations.InsertAsync(t, [[1L, "a"]]);
+        await TableMutations.InsertAsync(t, [[2L, "b"]]);
+        var second = t.Metadata.Snapshots[1].SnapshotId; // tagged, so expiry drops only the first
+        _stopped.Clear();
+
+        _catalog.SwapFailures.Enqueue(new CommitFailedException("lost the race"));
+        await t.ManageSnapshots().CreateTag("v1", second).CommitAsync();
+        await t.UpdateSchemaAsync(s => s.AddColumn("region", PrimitiveType.String));
+        await t.UpdateSpecAsync(p => p.AddField("region"));
+        await Maintenance.ExpireAsync(t, new ExpireOptions { OlderThanMs = long.MaxValue, RetainLast = 1 });
+
+        var commits = Spans("iceberg.commit").OrderBy(a => a.StartTimeUtc).ToList();
+        Assert.Equal(["manage-snapshots", "update-schema", "update-spec", "expire-snapshots"], commits.Select(a => a.GetTagItem(T.Operation)));
+        Assert.All(commits, a => Assert.Equal(IcebergTelemetry.Outcomes.Success, a.GetTagItem(T.Outcome)));
+        Assert.Equal([2, 1, 1, 1], commits.Select(a => a.GetTagItem(T.CommitAttempts)));
+        Assert.Single(commits[0].Events, e => e.Name == "iceberg.commit.retry");
+        // Every catalog commit belongs to one of them.
+        var spanIds = commits.Select(a => a.SpanId).ToHashSet();
+        Assert.All(Spans("iceberg.catalog.commit_table"), a => Assert.Contains(a.ParentSpanId, spanIds));
     }
 
     [Fact]

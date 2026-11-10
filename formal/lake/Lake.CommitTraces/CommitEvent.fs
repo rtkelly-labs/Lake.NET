@@ -16,8 +16,8 @@ type CommitEvent =
     | SwapRejected
     /// The catalog may or may not have applied it (<c>CommitStateUnknownException</c>).
     | SwapUnknown
-    /// The swap failed and the trace does not say how. Today's catalog spans do not classify failures, so a
-    /// production trace has only this; the grammar then allows what either a rejection or an unknown outcome allows.
+    /// The swap failed and the trace does not say how: a catalog span with outcome "error" (any failure, in releases
+    /// before commit_table classified them). The grammar then allows what either a rejection or an unknown outcome allows.
     | SwapFailed
     /// The writer reloaded the table from the catalog.
     | Reload
@@ -28,9 +28,9 @@ type CommitEvent =
     /// The writer backs off and will try again after an outcome it never resolved: a blind retry. No rule of the
     /// protocol produces it, so any trace containing it is rejected.
     | RetryAfterUnknown
-    /// After an unknown outcome and a reload: the attempted snapshot is in the table (proposed telemetry).
+    /// After an unknown outcome and a reload: the attempted snapshot is in the table (the <c>iceberg.commit.resolution</c> event).
     | Found
-    /// After an unknown outcome and a reload: the attempted snapshot is not in the table (proposed telemetry).
+    /// After an unknown outcome and a reload: the attempted snapshot is not in the table (the <c>iceberg.commit.resolution</c> event).
     | Absent
     /// The commit ended applied.
     | Committed

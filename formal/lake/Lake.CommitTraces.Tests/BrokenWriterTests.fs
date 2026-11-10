@@ -1,6 +1,6 @@
 /// End to end on real spans: Iceberg.Net's own commit path parses under every injected outcome, and hand-written
-/// writers that break the protocol are caught, with the proposed telemetry. With today's telemetry the same broken
-/// writers pass, which is what the proposals in the README are for.
+/// writers that break the protocol are caught, on the spans as recorded: commit_table spans classify their failures,
+/// and the commit span says how each unknown outcome was resolved.
 module Lake.CommitTraces.Tests.BrokenWriterTests
 
 open System.Threading.Tasks
@@ -18,7 +18,7 @@ let private retries = [ "commit.retry.num-retries", "3"; "commit.retry.min-wait-
 
 let private row (k: int64) : obj[] = [| box k; box "v"; box (int (k % 3L)) |]
 
-/// Run <paramref name="write"/> against a table whose next swaps fail as planned; return today's and the proposed spans.
+/// Run <paramref name="write"/> against a table whose next swaps fail as planned; return the spans it recorded.
 let private record (faults: Fault list) (write: Table -> Task) =
     task {
         let! catalog, table, ns, dir = createTable 1 0.0 retries
@@ -30,7 +30,7 @@ let private record (faults: Fault list) (write: Table -> Task) =
             with
             | :? CommitStateUnknownException
             | :? CommitFailedException -> ()
-            return capture.Spans, enrich capture catalog
+            return capture.Spans
         finally
             catalog.Dispose()
             cleanUp dir
@@ -60,8 +60,9 @@ let private blindRetry (table: Table) : Task =
         scope.Committed(0L, "set-properties")
     }
 
-/// Reloads after an unknown outcome, then commits again whatever it finds.
-let private doubleApply (table: Table) : Task =
+/// Reloads after an unknown outcome, then commits again whatever it finds. With <paramref name="records"/> it also
+/// records what it found, as the library does, before ignoring it.
+let private doubleApply (records: bool) (table: Table) : Task =
     task {
         use scope = IcebergTelemetry.StartCommit(string table.Identifier, "set-properties")
         try
@@ -69,6 +70,7 @@ let private doubleApply (table: Table) : Task =
             ()
         with :? CommitStateUnknownException ->
             let! _ = table.RefreshAsync()
+            if records then scope.Resolved(table.Metadata.Properties.ContainsKey "k")
             let! _ = table.SetPropertiesAsync props
             ()
         scope.Committed(0L, "set-properties")
@@ -92,38 +94,39 @@ type BrokenWriterTests(output: ITestOutputHelper) =
     [<InlineData(false, false)>]
     member _.``The library's own commit parses whatever the catalog did``(apply: bool, responded: bool) =
         task {
-            let! today, proposed = record [ { Apply = apply; Responded = responded } ] appendOne
-            Assert.True((check "today" today).Passed)
-            Assert.True((check "proposed" proposed).Passed)
+            let! spans = record [ { Apply = apply; Responded = responded } ] appendOne
+            Assert.True((check "spans" spans).Passed)
+            Assert.Empty(Spans.snapshots spans)
             let expected =
                 match apply, responded with
                 | true, true -> [ Begin; SwapUnknown; Reload; Found; Committed ]
                 | false, true -> [ Begin; SwapUnknown; Reload; Absent; Retry; Reload; SwapApplied; Committed ]
                 | _, false -> [ Begin; SwapUnknown; LeftUnknown ]
-            Assert.Equal<CommitEvent list>(expected, eventsOf proposed)
+            Assert.Equal<CommitEvent list>(expected, eventsOf spans)
         }
 
     [<Fact>]
     member _.``A writer that retries an unknown outcome blindly is caught``() =
         task {
-            let! today, proposed = record [ { Apply = false; Responded = true } ] blindRetry
-            Assert.Equal<CommitEvent list>([ Begin; SwapUnknown; Retry; Reload; SwapApplied; Committed ], eventsOf proposed)
-            let report = check "proposed" proposed
+            let! spans = record [ { Apply = false; Responded = true } ] blindRetry
+            Assert.Equal<CommitEvent list>([ Begin; SwapUnknown; Retry; Reload; SwapApplied; Committed ], eventsOf spans)
+            let report = check "spans" spans
             let _, e = Assert.Single report.Violations
             Assert.Equal("Uncertain", e.State)
             Assert.Equal(Lookahead.Event Retry, e.Got)
             Assert.Contains("must reload and look for the snapshot", Spans.explain report)
-            // Today the failure is unclassified, so a retry after it is allowed: the gap the proposals close.
-            Assert.True((check "today" today).Passed)
         }
 
-    [<Fact>]
-    member _.``A writer that commits again after its commit was applied is caught``() =
+    /// Recording what it found, the second swap is caught as a swap after the commit was found; not recording it, as a
+    /// swap straight after the reload that followed an unknown outcome, which the protocol never allows either.
+    [<Theory>]
+    [<InlineData(true, "Done")>]
+    [<InlineData(false, "Resolving")>]
+    member _.``A writer that commits again after its commit was applied is caught``(records: bool, state: string) =
         task {
-            let! today, proposed = record [ { Apply = true; Responded = true } ] doubleApply
-            let report = check "proposed" proposed
+            let! spans = record [ { Apply = true; Responded = true } ] (doubleApply records)
+            let report = check "spans" spans
             let _, e = Assert.Single report.Violations
-            Assert.Equal("Done", e.State)
+            Assert.Equal(state, e.State)
             Assert.Equal(Lookahead.Event SwapApplied, e.Got)
-            Assert.True((check "today" today).Passed)
         }

@@ -6,7 +6,7 @@ open Lake.CommitProtocol
 ///
 /// Only the writer's own steps are visible. Apply happens inside the catalog, Resend is joined to its original request by
 /// the idempotency key, and CleanOrphans is maintenance, not a commit, so none of them appears in a slice. The attempt
-/// number is not on the spans (telemetry gap 3); it is recovered by counting swaps, since each attempt makes exactly one.
+/// number is recovered by counting swaps, since each attempt makes exactly one (Spans.snapshots checks it against the tag).
 [<RequireQualifiedAccess>]
 module Actions =
 
@@ -14,7 +14,7 @@ module Actions =
     ///
     /// An unknown outcome is a ServerError when the writer then tried to resolve it (the server answered, so the request
     /// is finished), and a Timeout when it gave up at once (no answer: the request may still land). A slice with an
-    /// unclassified catalog failure (SwapFailed, today's telemetry) has no counterpart, so the result is an Error naming
+    /// unclassified catalog failure (SwapFailed) has no counterpart, so the result is an Error naming
     /// the position. The slice is assumed to parse; use CommitGrammar.parse first.
     let ofSlice (w: Writer) (events: CommitEvent list) : Result<Action list, string> =
         let rec go (attempt: int) (acc: Action list) (events: CommitEvent list) (i: int) =

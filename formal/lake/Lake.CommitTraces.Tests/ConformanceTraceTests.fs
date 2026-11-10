@@ -48,7 +48,7 @@ let private run (cfg: Config) (actions: Action list) : Run =
                     | Action.Begin w -> windows.Add((w, t0, DateTime.UtcNow))
                     | _ -> ()
                 driver.Observe())
-        let spans = capture.Spans |> classify capture.Failures
+        let spans = capture.Spans
         let report, projection = Spans.check spans
         let writerOf (start: DateTime) =
             windows |> Seq.tryFind (fun (_, t0, t1) -> t0 <= start && start <= t1) |> Option.map (fun (w, _, _) -> w)

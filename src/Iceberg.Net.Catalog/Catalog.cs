@@ -146,23 +146,13 @@ public sealed class Table(ICatalog catalog, TableIdentifier identifier, TableMet
     /// New data is written under the new spec; existing files keep theirs. Re-applied on a concurrent change, as
     /// <see cref="UpdateSchemaAsync(Action{SchemaUpdate}, int, CancellationToken)"/>.
     /// </summary>
-    public async Task<TableMetadata> UpdateSpecAsync(Action<PartitionSpecUpdate> changes, int retries = 4, CancellationToken ct = default)
-    {
-        for (var attempt = 0; ; attempt++)
+    public Task<TableMetadata> UpdateSpecAsync(Action<PartitionSpecUpdate> changes, int retries = 4, CancellationToken ct = default) =>
+        ReapplyAsync("update-spec", () =>
         {
             var update = new PartitionSpecUpdate(Metadata);
             changes(update);
-            var (requirements, updates) = update.ToCommit();
-            try
-            {
-                return await CommitAsync(requirements, updates, ct);
-            }
-            catch (CommitFailedException) when (attempt < retries)
-            {
-                await RefreshAsync(ct);
-            }
-        }
-    }
+            return update.ToCommit();
+        }, retries, ct);
 
     /// <summary>
     /// Evolve the schema with <see cref="SchemaUpdate"/> operations, e.g.
@@ -170,22 +160,38 @@ public sealed class Table(ICatalog catalog, TableIdentifier identifier, TableMet
     /// If another writer changes the schema first, the operations are re-applied to the new schema (up to
     /// <paramref name="retries"/> times); an operation that no longer makes sense then fails with its own error.
     /// </summary>
-    public async Task<TableMetadata> UpdateSchemaAsync(Action<SchemaUpdate> changes, int retries = 4, CancellationToken ct = default)
-    {
-        for (var attempt = 0; ; attempt++)
+    public Task<TableMetadata> UpdateSchemaAsync(Action<SchemaUpdate> changes, int retries = 4, CancellationToken ct = default) =>
+        ReapplyAsync("update-schema", () =>
         {
             var update = new SchemaUpdate(Metadata);
             changes(update);
-            var (requirements, updates) = update.ToCommit();
-            try
+            return update.ToCommit();
+        }, retries, ct);
+
+    /// <summary>Commit what <paramref name="plan"/> builds, re-planning on a lost race; one <c>iceberg.commit</c> span.</summary>
+    private async Task<TableMetadata> ReapplyAsync(
+        string operation, Func<(IReadOnlyList<UpdateRequirement>, IReadOnlyList<MetadataUpdate>)> plan, int retries, CancellationToken ct)
+    {
+        using var telemetry = IcebergTelemetry.StartCommit(Identifier.ToString(), operation);
+        try
+        {
+            for (var attempt = 0; ; attempt++)
             {
-                return await CommitAsync(requirements, updates, ct);
-            }
-            catch (CommitFailedException) when (attempt < retries)
-            {
-                await RefreshAsync(ct);
+                var (requirements, updates) = plan();
+                try
+                {
+                    var committed = await CommitAsync(requirements, updates, ct);
+                    telemetry.Committed();
+                    return committed;
+                }
+                catch (CommitFailedException e) when (attempt < retries)
+                {
+                    telemetry.Retrying(attempt + 1, e);
+                    await RefreshAsync(ct);
+                }
             }
         }
+        catch (Exception e) when (telemetry.FailedWith(e)) { throw; }
     }
 }
 
@@ -278,14 +284,19 @@ public abstract partial class MetastoreCatalog(string name, IFileIO io) : ICatal
     public async Task<TableMetadata> CommitTableAsync(TableCommit commit, CancellationToken ct = default)
     {
         using var telemetry = IcebergTelemetry.StartCatalogCall(Name, GetType().Name, "commit_table", commit.Identifier.ToString());
-        var currentLocation = await CurrentMetadataLocationAsync(commit.Identifier, ct);
-        var current = currentLocation is null ? null : await ReadMetadataAsync(currentLocation, ct);
-        foreach (var req in commit.Requirements) req.Validate(current);
-        if (current is null) throw new NoSuchTableException($"Table {commit.Identifier} does not exist");
+        try
+        {
+            var currentLocation = await CurrentMetadataLocationAsync(commit.Identifier, ct);
+            var current = currentLocation is null ? null : await ReadMetadataAsync(currentLocation, ct);
+            foreach (var req in commit.Requirements) req.Validate(current);
+            if (current is null) throw new NoSuchTableException($"Table {commit.Identifier} does not exist");
 
-        var builder = TableMetadataBuilder.From(current, Clock).ApplyAll(commit.Updates);
-        if (builder.Changes.Count == 0) return telemetry.Succeeded(current);
-        return telemetry.Succeeded(await WriteAndSwapAsync(commit.Identifier, current, builder.Build, ct));
+            var builder = TableMetadataBuilder.From(current, Clock).ApplyAll(commit.Updates);
+            if (builder.Changes.Count == 0) return telemetry.Succeeded(current);
+            return telemetry.Succeeded(await WriteAndSwapAsync(commit.Identifier, current, builder.Build, ct));
+        }
+        // Records conflict, unknown or error on the span, so a trace tells a lost swap from an unknown outcome.
+        catch (Exception e) when (telemetry.FailedWith(e)) { throw; }
     }
 
     public async Task CommitTransactionAsync(IReadOnlyList<TableCommit> commits, CancellationToken ct = default)
