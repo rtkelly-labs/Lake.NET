@@ -41,12 +41,28 @@ let ``A conflict then a success projects in time order``() =
     Assert.Equal<CommitEvent list>([ Begin; SwapRejected; Retry; Reload; SwapApplied; Committed ], events spans)
 
 [<Fact>]
-let ``Today's unclassified catalog failure projects to SwapFailed``() =
+let ``An unclassified catalog failure projects to SwapFailed``() =
     let spans =
         [ commit "success" 100 []
           span Spans.Names.commitTable "s1" "c" 5 10 "Error" [ IcebergTelemetry.Tags.Outcome, "error" ]
           span Spans.Names.loadTable "l1" "c" 30 35 "Ok" [] ]
     Assert.Equal<CommitEvent list>([ Begin; SwapFailed; Reload; Committed ], events spans)
+
+/// A ref, expiry, schema or spec commit adds no snapshot, so its spans carry no attempt or snapshot tags: the grammar
+/// checks it like any other commit, and the data check has nothing to compare.
+[<Fact>]
+let ``A commit that adds no snapshot parses, and the data check skips it``() =
+    let spans =
+        [ { commit "success" 100 [ retryAt 20 "Iceberg.Net.Metadata.CommitFailedException" ] with
+              Tags = Map [ IcebergTelemetry.Tags.Table, "db.t"; IcebergTelemetry.Tags.Outcome, "success"; IcebergTelemetry.Tags.Operation, "manage-snapshots" ] }
+          span Spans.Names.commitTable "s1" "c" 5 10 "Error" [ IcebergTelemetry.Tags.Outcome, "conflict" ]
+          span Spans.Names.loadTable "l1" "c" 30 35 "Ok" [ IcebergTelemetry.Tags.Outcome, "success" ]
+          span Spans.Names.commitTable "s2" "c" 40 50 "Ok" [ IcebergTelemetry.Tags.Outcome, "success" ] ]
+    let report, projection = Spans.check spans
+    Assert.True(report.Violations.IsEmpty, Spans.explain report)
+    Assert.Equal(0, projection.OrphanCatalogCommits)
+    Assert.Equal<CommitEvent list>([ Begin; SwapRejected; Retry; Reload; SwapApplied; Committed ], events spans)
+    Assert.Empty(Spans.snapshots spans)
 
 [<Fact>]
 let ``Resolution events and unknown outcomes project``() =
