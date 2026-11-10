@@ -256,6 +256,35 @@ public sealed class TelemetryTests : IDisposable
         Assert.Equal(applied ? 0 : 1, commit.Events.Count(e => e.Name == "iceberg.commit.retry"));
     }
 
+    /// <summary>
+    /// Commits that add no snapshot (refs, expiry, schema and spec evolution) are commit spans too, with their retries,
+    /// so a trace has no catalog commit outside a commit span.
+    /// </summary>
+    [Fact]
+    public async Task Ref_expiry_schema_and_spec_commits_are_commit_spans()
+    {
+        var t = await CreateAsync("metadata", new Dictionary<string, string> { ["commit.retry.min-wait-ms"] = "1" });
+        await TableMutations.InsertAsync(t, [[1L, "a"]]);
+        await TableMutations.InsertAsync(t, [[2L, "b"]]);
+        var second = t.Metadata.Snapshots[1].SnapshotId; // tagged, so expiry drops only the first
+        _stopped.Clear();
+
+        _catalog.SwapFailures.Enqueue(new CommitFailedException("lost the race"));
+        await t.ManageSnapshots().CreateTag("v1", second).CommitAsync();
+        await t.UpdateSchemaAsync(s => s.AddColumn("region", PrimitiveType.String));
+        await t.UpdateSpecAsync(p => p.AddField("region"));
+        await Maintenance.ExpireAsync(t, new ExpireOptions { OlderThanMs = long.MaxValue, RetainLast = 1 });
+
+        var commits = Spans("iceberg.commit").OrderBy(a => a.StartTimeUtc).ToList();
+        Assert.Equal(["manage-snapshots", "update-schema", "update-spec", "expire-snapshots"], commits.Select(a => a.GetTagItem(T.Operation)));
+        Assert.All(commits, a => Assert.Equal(IcebergTelemetry.Outcomes.Success, a.GetTagItem(T.Outcome)));
+        Assert.Equal([2, 1, 1, 1], commits.Select(a => a.GetTagItem(T.CommitAttempts)));
+        Assert.Single(commits[0].Events, e => e.Name == "iceberg.commit.retry");
+        // Every catalog commit belongs to one of them.
+        var spanIds = commits.Select(a => a.SpanId).ToHashSet();
+        Assert.All(Spans("iceberg.catalog.commit_table"), a => Assert.Contains(a.ParentSpanId, spanIds));
+    }
+
     [Fact]
     public async Task Catalog_calls_are_client_spans_with_catalog_tags()
     {

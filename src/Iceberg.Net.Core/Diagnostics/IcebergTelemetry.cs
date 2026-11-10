@@ -308,6 +308,13 @@ public static class IcebergTelemetry
             Activity?.SetTag(Tags.SnapshotId, snapshotId);
         }
 
+        /// <summary>A commit that adds no snapshot (ref changes, expiry, schema or spec evolution) was committed.</summary>
+        public void Committed()
+        {
+            if (_outer is { } outer) { outer.Committed(); return; }
+            (_outcome, _error) = (Outcomes.Success, null);
+        }
+
         /// <summary>There was nothing to commit (e.g. a delete that matched no rows).</summary>
         public void NothingToCommit()
         {

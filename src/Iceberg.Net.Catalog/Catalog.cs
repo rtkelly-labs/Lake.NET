@@ -146,23 +146,13 @@ public sealed class Table(ICatalog catalog, TableIdentifier identifier, TableMet
     /// New data is written under the new spec; existing files keep theirs. Re-applied on a concurrent change, as
     /// <see cref="UpdateSchemaAsync(Action{SchemaUpdate}, int, CancellationToken)"/>.
     /// </summary>
-    public async Task<TableMetadata> UpdateSpecAsync(Action<PartitionSpecUpdate> changes, int retries = 4, CancellationToken ct = default)
-    {
-        for (var attempt = 0; ; attempt++)
+    public Task<TableMetadata> UpdateSpecAsync(Action<PartitionSpecUpdate> changes, int retries = 4, CancellationToken ct = default) =>
+        ReapplyAsync("update-spec", () =>
         {
             var update = new PartitionSpecUpdate(Metadata);
             changes(update);
-            var (requirements, updates) = update.ToCommit();
-            try
-            {
-                return await CommitAsync(requirements, updates, ct);
-            }
-            catch (CommitFailedException) when (attempt < retries)
-            {
-                await RefreshAsync(ct);
-            }
-        }
-    }
+            return update.ToCommit();
+        }, retries, ct);
 
     /// <summary>
     /// Evolve the schema with <see cref="SchemaUpdate"/> operations, e.g.
@@ -170,22 +160,38 @@ public sealed class Table(ICatalog catalog, TableIdentifier identifier, TableMet
     /// If another writer changes the schema first, the operations are re-applied to the new schema (up to
     /// <paramref name="retries"/> times); an operation that no longer makes sense then fails with its own error.
     /// </summary>
-    public async Task<TableMetadata> UpdateSchemaAsync(Action<SchemaUpdate> changes, int retries = 4, CancellationToken ct = default)
-    {
-        for (var attempt = 0; ; attempt++)
+    public Task<TableMetadata> UpdateSchemaAsync(Action<SchemaUpdate> changes, int retries = 4, CancellationToken ct = default) =>
+        ReapplyAsync("update-schema", () =>
         {
             var update = new SchemaUpdate(Metadata);
             changes(update);
-            var (requirements, updates) = update.ToCommit();
-            try
+            return update.ToCommit();
+        }, retries, ct);
+
+    /// <summary>Commit what <paramref name="plan"/> builds, re-planning on a lost race; one <c>iceberg.commit</c> span.</summary>
+    private async Task<TableMetadata> ReapplyAsync(
+        string operation, Func<(IReadOnlyList<UpdateRequirement>, IReadOnlyList<MetadataUpdate>)> plan, int retries, CancellationToken ct)
+    {
+        using var telemetry = IcebergTelemetry.StartCommit(Identifier.ToString(), operation);
+        try
+        {
+            for (var attempt = 0; ; attempt++)
             {
-                return await CommitAsync(requirements, updates, ct);
-            }
-            catch (CommitFailedException) when (attempt < retries)
-            {
-                await RefreshAsync(ct);
+                var (requirements, updates) = plan();
+                try
+                {
+                    var committed = await CommitAsync(requirements, updates, ct);
+                    telemetry.Committed();
+                    return committed;
+                }
+                catch (CommitFailedException e) when (attempt < retries)
+                {
+                    telemetry.Retrying(attempt + 1, e);
+                    await RefreshAsync(ct);
+                }
             }
         }
+        catch (Exception e) when (telemetry.FailedWith(e)) { throw; }
     }
 }
 

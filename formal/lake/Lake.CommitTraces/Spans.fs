@@ -36,7 +36,7 @@ type CommitKey =
 /// The projected events, plus what the projection saw and could not place.
 type Projection =
     { Events: Keyed<CommitKey, CommitEvent> list
-      /// Catalog commits outside any iceberg.commit span (ref and maintenance operations commit directly).
+      /// Catalog commits outside any iceberg.commit span (one-shot property, sort-order and statistics commits).
       OrphanCatalogCommits: int }
 
 /// The projection from Iceberg.Net's spans onto <see cref="CommitEvent"/>: each <c>iceberg.commit</c> span is one
