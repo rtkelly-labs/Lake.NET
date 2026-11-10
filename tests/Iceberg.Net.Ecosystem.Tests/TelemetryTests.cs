@@ -28,13 +28,21 @@ public sealed class TelemetryTests : IDisposable
 
     private static readonly Schema Schema = new(0, [NestedField.Require(1, "id", PrimitiveType.Long), NestedField.Optional(2, "name", PrimitiveType.String)], identifierFieldIds: [1]);
 
-    /// <summary>Fails the next pointer swaps on demand, as a lost race or an ambiguous error.</summary>
+    /// <summary>
+    /// Fails the next pointer swaps on demand, as a lost race or an ambiguous error: <see cref="SwapFailures"/> before
+    /// swapping, <see cref="FailuresAfterSwap"/> after (the swap applied, then the reply was lost).
+    /// </summary>
     private sealed class FaultyCatalog(string warehouse, string name) : InMemoryCatalog(warehouse, name: name)
     {
         public Queue<Exception> SwapFailures { get; } = new();
+        public Queue<Exception> FailuresAfterSwap { get; } = new();
 
-        protected override Task SwapMetadataLocationAsync(TableIdentifier id, string? expected, string newLocation, TableMetadata metadata, CancellationToken ct) =>
-            SwapFailures.TryDequeue(out var failure) ? throw failure : base.SwapMetadataLocationAsync(id, expected, newLocation, metadata, ct);
+        protected override async Task SwapMetadataLocationAsync(TableIdentifier id, string? expected, string newLocation, TableMetadata metadata, CancellationToken ct)
+        {
+            if (SwapFailures.TryDequeue(out var failure)) throw failure;
+            await base.SwapMetadataLocationAsync(id, expected, newLocation, metadata, ct);
+            if (FailuresAfterSwap.TryDequeue(out var after)) throw after;
+        }
     }
 
     public TelemetryTests()
@@ -209,6 +217,35 @@ public sealed class TelemetryTests : IDisposable
         var commit = Assert.Single(Spans("iceberg.commit"));
         Assert.Equal(IcebergTelemetry.Outcomes.Unknown, commit.GetTagItem(T.Outcome));
         Assert.Equal(1, commit.GetTagItem(T.CommitAttempts));
+    }
+
+    /// <summary>
+    /// After an unknown outcome the server answered, the producer reloads and looks for its snapshot. The commit span
+    /// records what it found: found ends the commit, absent makes the attempt a conflict to retry.
+    /// </summary>
+    [Theory]
+    [InlineData(true)]
+    [InlineData(false)]
+    public async Task Resolving_an_unknown_outcome_is_an_event_on_the_commit_span(bool applied)
+    {
+        var t = await CreateAsync("resolved" + applied, new Dictionary<string, string> { ["commit.retry.min-wait-ms"] = "1" });
+        var files = await TableWriter.WriteAsync(t, [[1L, "a"]]);
+        _stopped.Clear();
+        var unknown = new CommitStateUnknownException("HTTP 500 from the catalog") { ServerResponded = true };
+        (applied ? _catalog.FailuresAfterSwap : _catalog.SwapFailures).Enqueue(unknown);
+
+        var snapshot = await SnapshotProducer.Append(t).AddFiles(files).CommitAsync();
+
+        var commit = Assert.Single(Spans("iceberg.commit"));
+        Assert.Equal(IcebergTelemetry.Outcomes.Success, commit.GetTagItem(T.Outcome));
+        Assert.Equal(snapshot.SnapshotId, commit.GetTagItem(T.SnapshotId));
+        var resolution = Assert.Single(commit.Events, e => e.Name == "iceberg.commit.resolution");
+        Assert.Contains(resolution.Tags, kv => kv.Key == "iceberg.commit.resolution" && Equals(kv.Value, applied ? "found" : "absent"));
+        // The swap's own span says the outcome was unknown; found needs no retry, absent retries once.
+        var swaps = Spans("iceberg.catalog.commit_table").Where(a => a.ParentSpanId == commit.SpanId).OrderBy(a => a.StartTimeUtc).ToList();
+        Assert.Equal(IcebergTelemetry.Outcomes.Unknown, swaps[0].GetTagItem(T.Outcome));
+        Assert.Equal(applied ? 1 : 2, swaps.Count);
+        Assert.Equal(applied ? 0 : 1, commit.Events.Count(e => e.Name == "iceberg.commit.retry"));
     }
 
     [Fact]

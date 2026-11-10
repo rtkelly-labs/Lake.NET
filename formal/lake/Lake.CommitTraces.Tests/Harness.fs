@@ -1,10 +1,8 @@
-/// In-process trace capture: a fault-injecting catalog, an ActivityListener, and the enrichment that stands in for the
-/// proposed resolution events, so tests can check against both today's spans and the proposed ones.
+/// In-process trace capture: a fault-injecting catalog and an ActivityListener.
 module Lake.CommitTraces.Tests.Harness
 
 open System
 open System.Collections.Concurrent
-open System.Collections.Generic
 open System.Diagnostics
 open System.IO
 open System.Threading.Tasks
@@ -30,9 +28,6 @@ type FaultyCatalog(warehouse: string, seed: int, rate: float) =
     /// Faults to inject, in order, before random ones.
     member val Planned = ConcurrentQueue<Fault>()
 
-    /// commit_table span ID to whether the swap applied, for every fault the writer could resolve (server responded).
-    member val Applied = ConcurrentDictionary<string, bool>()
-
     /// Every fault injected.
     member val Injected = ConcurrentBag<Fault>()
 
@@ -51,10 +46,6 @@ type FaultyCatalog(warehouse: string, seed: int, rate: float) =
             task {
                 if f.Apply then do! this.Swap(id, expected, location, metadata, ct)
                 this.Injected.Add f
-                match Activity.Current with
-                | a when not (isNull a) && f.Responded && a.OperationName = Spans.Names.commitTable ->
-                    this.Applied[a.SpanId.ToHexString()] <- f.Apply
-                | _ -> ()
                 return raise (CommitStateUnknownException("injected: HTTP 500 from the catalog", ServerResponded = f.Responded))
             }
             :> Task
@@ -82,36 +73,6 @@ type Capture(ns: string) =
 
     interface IDisposable with
         member _.Dispose() = listener.Dispose()
-
-/// Add the proposed resolution event to each commit span: after a resolvable unknown outcome, at the end of the reload
-/// that resolved it, found or absent. A writer that never resolved the outcome gets no event.
-let resolve (applied: IReadOnlyDictionary<string, bool>) (spans: SpanRecord list) =
-    let children = spans |> List.groupBy _.ParentSpanId |> Map.ofList
-    spans
-    |> List.map (fun c ->
-        if c.Name <> Spans.Names.commit then c
-        else
-            let mine = children |> Map.tryFind c.SpanId |> Option.defaultValue [] |> List.sortBy _.Start
-            let resolutions =
-                [ for s in mine do
-                      match applied.TryGetValue s.SpanId with
-                      | true, wasApplied ->
-                          match mine |> List.tryFind (fun r -> r.Name = Spans.Names.loadTable && r.Start >= s.End) with
-                          // Only the reload that resolves (SnapshotProducer's AppliedAsync) emits it: one that follows a retry does not.
-                          | Some reload when
-                              Spans.reload reload = Reload
-                              && not (c.Events |> List.exists (fun e -> e.Name = Spans.Names.retry && e.Time >= s.End && e.Time <= reload.Start))
-                              ->
-                              { Name = Spans.Names.resolution
-                                Time = reload.End
-                                Tags = Map [ Spans.Names.resolutionTag, (if wasApplied then "found" else "absent") ] }
-                          | _ -> ()
-                      | _ -> () ]
-            { c with Events = c.Events @ resolutions })
-
-/// The proposed telemetry: resolution events.
-let enrich (capture: Capture) (catalog: FaultyCatalog) =
-    capture.Spans |> resolve catalog.Applied
 
 let schema =
     Schema(

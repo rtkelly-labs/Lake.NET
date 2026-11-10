@@ -246,6 +246,21 @@ public static class IcebergTelemetry
             Activity?.AddEvent(new ActivityEvent("iceberg.commit.retry", tags: tags));
         }
 
+        /// <summary>
+        /// An unknown outcome (<c>CommitStateUnknownException</c> after the catalog responded) was
+        /// resolved by reloading the table: the attempted snapshot was <paramref name="found"/> in it, or not, in which
+        /// case the attempt was a plain conflict. Records an <c>iceberg.commit.resolution</c> event (<c>found</c> or
+        /// <c>absent</c>), so a trace shows the writer looked before it went on. Not called when the reload failed.
+        /// </summary>
+        public void Resolved(bool found)
+        {
+            if (_outer is { } outer) { outer.Resolved(found); return; }
+            Activity?.AddEvent(new ActivityEvent("iceberg.commit.resolution", tags: new ActivityTagsCollection
+            {
+                ["iceberg.commit.resolution"] = found ? "found" : "absent",
+            }));
+        }
+
         /// <summary>The snapshot was committed.</summary>
         public void Committed(long snapshotId, string? operation)
         {

@@ -44,7 +44,7 @@ type Projection =
 [<RequireQualifiedAccess>]
 module Spans =
 
-    /// Span and event names this projection reads. The first four are emitted today.
+    /// Span and event names this projection reads.
     [<RequireQualifiedAccess>]
     module Names =
         let commit = "iceberg.commit"
@@ -52,11 +52,11 @@ module Spans =
         let loadTable = "iceberg.catalog.load_table"
         let retry = "iceberg.commit.retry"
 
-        /// Proposed: an event on the commit span when an unknown outcome is resolved, with
-        /// <see cref="resolutionTag"/> set to <c>found</c> or <c>absent</c>.
+        /// An event on the commit span when an unknown outcome is resolved, with <see cref="resolutionTag"/> set to
+        /// <c>found</c> or <c>absent</c>.
         let resolution = "iceberg.commit.resolution"
 
-        /// Proposed tag on <see cref="resolution"/>.
+        /// The tag on <see cref="resolution"/>.
         let resolutionTag = "iceberg.commit.resolution"
 
     let private text (value: obj) =
