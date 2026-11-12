@@ -223,8 +223,30 @@ public sealed class LocalTableTests : IDisposable
             var path = Path.Combine(dir, "x.bin");
             await File.WriteAllBytesAsync(path, [1, 2, 3]);
             using var io = new LocalFileIO();
-            // bare path, RFC 8089 file:///, Hadoop/Java file:/ (as Spark writes into manifests), percent-encoded
-            foreach (var location in new[] { path, $"file://{path}", $"file:{path}", $"file:{path.Replace(" ", "%20")}" })
+            // bare path, RFC 8089 file:///, Hadoop/Java file:/ (as Spark writes into manifests)
+            foreach (var location in new[] { path, $"file://{path}", $"file:{path}" })
+                Assert.Equal([1, 2, 3], await io.ReadAllAsync(location));
+        }
+        finally
+        {
+            Directory.Delete(Path.GetDirectoryName(dir)!, recursive: true);
+        }
+    }
+
+    /// <summary>Engines escape partition values in directory names (PyIceberg and Java write <c>name=a%2Fb</c>) and record
+    /// that path as it is on disk, so a location's percent escapes are part of the name, not an encoding to undo.</summary>
+    [Spec("File System Operations")]
+    [Fact]
+    public async Task Local_file_io_reads_percent_escapes_in_a_location_literally()
+    {
+        var dir = Path.Combine(Path.GetTempPath(), "iceberg-dotnet-uri", Guid.NewGuid().ToString("N"), "c0=a%2Fb%3D%C3%9F");
+        Directory.CreateDirectory(dir);
+        try
+        {
+            var path = Path.Combine(dir, "x.bin");
+            await File.WriteAllBytesAsync(path, [1, 2, 3]);
+            using var io = new LocalFileIO();
+            foreach (var location in new[] { path, $"file://{path}", $"file:{path}" })
                 Assert.Equal([1, 2, 3], await io.ReadAllAsync(location));
         }
         finally
