@@ -51,13 +51,23 @@ public sealed class LocalFileIO : IFileIO, ISupportsListing
     }
 
     /// <summary>
-    /// <c>file:///tmp/x</c> and bare paths, plus Hadoop's <c>file:/tmp/x</c> form, which Java engines write into manifests
-    /// (<see cref="Uri"/> rejects it: the empty authority is missing).
+    /// The local path of a bare path, <c>file:///tmp/x</c>, or Hadoop's <c>file:/tmp/x</c> form, which Java engines write
+    /// into manifests. The path is taken literally: a location is a string, not a URI to decode, and engines put their
+    /// own escapes in it (a partition directory <c>name=a%2Fb</c> is on disk under exactly that name).
     /// </summary>
-    private static string PathOf(string location) =>
-        !location.StartsWith("file:", StringComparison.Ordinal) ? location
-        : location.StartsWith("file://", StringComparison.Ordinal) ? new Uri(location).LocalPath
-        : Uri.UnescapeDataString(location["file:".Length..]);
+    public static string PathOf(string location)
+    {
+        if (!location.StartsWith("file:", StringComparison.Ordinal)) return location;
+        var path = location["file:".Length..];
+        if (path.StartsWith("//", StringComparison.Ordinal))
+        {
+            // file://<authority>/path: the authority is empty or this host.
+            var slash = path.IndexOf('/', 2);
+            path = slash < 0 ? "/" : path[slash..];
+        }
+        // file:///C:/x names C:/x on Windows.
+        return OperatingSystem.IsWindows() && path.Length >= 3 && path[0] == '/' && path[2] == ':' ? path[1..] : path;
+    }
 
     public Task<byte[]> ReadAllAsync(string location, CancellationToken ct = default) => File.ReadAllBytesAsync(PathOf(location), ct);
 

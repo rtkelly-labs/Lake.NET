@@ -1,3 +1,4 @@
+using Iceberg.Net.IO;
 using Iceberg.Net.Metadata;
 
 namespace Iceberg.Net.Catalog;
@@ -73,9 +74,7 @@ public static class TableLocations
     public static string Normalise(string location)
     {
         if (location.StartsWith("s3a://", StringComparison.Ordinal) || location.StartsWith("s3n://", StringComparison.Ordinal)) return "s3://" + location[6..];
-        if (location.StartsWith("file://", StringComparison.Ordinal)) return new Uri(location).LocalPath;
-        if (location.StartsWith("file:", StringComparison.Ordinal)) return Uri.UnescapeDataString(location["file:".Length..]);
-        return location;
+        return LocalFileIO.PathOf(location);
     }
 
     private static bool HasDotSegment(string normalised) => PathPart(normalised).Split('/', '\\').Any(s => s is "." or "..");
