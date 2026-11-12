@@ -29,7 +29,9 @@ namespace Iceberg.Net.Regression.Tests;
 ///   so later batches and every read meet files written under an older schema. Half of them evolve the partition spec
 ///   as well (add, remove, rename, and re-add a removed field), one change per batch boundary, so one table holds files
 ///   written under several specs and the filter is projected through each of them.</item>
-///   <item>PyIceberg writes (oracle <c>write-arrow</c>, from an Arrow IPC file of the same rows), both read.</item>
+///   <item>PyIceberg writes (oracle <c>write-arrow</c>, from Arrow IPC files of the same rows and a plan of the same
+///   partitioning, schema changes and spec changes, applied through PyIceberg's own API), both read; the filter runs
+///   here too, now pruning in .NET by the partition values and metrics PyIceberg wrote. No deletes in this direction.</item>
 /// </list>
 /// A disagreement is shrunk (drop columns, drop the delete, merge batches, drop rows) and the smallest failing table
 /// is kept under ICEBERG_DIFFERENTIAL_OUT. Off unless ICEBERG_DIFFERENTIAL_SECONDS is set (the <c>differential</c>
@@ -82,7 +84,7 @@ public sealed class GeneratedDifferentialTests(ITestOutputHelper output) : IDisp
         var (partitioned, filtered, evolved, specEvolved) = (0, 0, 0, 0);
         for (var seed = BaseSeed; budget.Elapsed < TimeSpan.FromSeconds(Seconds!.Value); seed++)
         {
-            var c = Case.Generate(seed, maxFormatVersion, partitioned: direction == "dotnet-writes");
+            var c = Case.Generate(seed, maxFormatVersion, deletes: direction == "dotnet-writes");
             if (c.Partition is { Count: > 0 }) partitioned++;
             if (c.Filter is not null) filtered++;
             if (c.Evolution is { Count: > 0 }) evolved++;
@@ -276,13 +278,51 @@ public sealed class GeneratedDifferentialTests(ITestOutputHelper output) : IDisp
     private static async Task<Outcome> PyIcebergWritesAsync(Case c, string dir)
     {
         Directory.CreateDirectory(dir);
-        var ipc = Path.Combine(dir, "rows.arrow");
+        // The same sequence WriteWithDotnetAsync runs, as a plan for the oracle: batches as Arrow IPC files (the first in
+        // the original schema, the rest in the evolved one), with the schema and spec changes between them. Partition
+        // fields get explicit names, so a later removal or rename can name them.
+        var steps = new JsonArray();
+        var names = new Dictionary<PartitionPick, string>();
+        JsonNode SpecOp(SpecChange change)
+        {
+            switch (change)
+            {
+                case SpecAdd add:
+                    names[add.Field] = add.Name;
+                    return new JsonObject { ["op"] = "add", ["column"] = add.Column, ["transform"] = add.Transform.ToString(), ["name"] = add.Name };
+                case SpecRename rename:
+                    var old = names[rename.Field];
+                    names[rename.Field] = rename.NewName;
+                    return new JsonObject { ["op"] = "rename", ["name"] = old, ["to"] = rename.NewName };
+                default:
+                    var gone = names[change.Field];
+                    names.Remove(change.Field);
+                    return new JsonObject { ["op"] = "remove", ["name"] = gone };
+            }
+        }
+        if (c.Partition is { Count: > 0 } partition)
+            steps.Add(new JsonObject { ["spec"] = new JsonArray(partition.Select((p, i) => SpecOp(new SpecAdd(p.Column, p.Transform, $"{p.Column}_p{i}"))).ToArray()) });
+        var chunks = c.Chunks();
+        var evolved = c.EvolvedSchema();
+        var first = Path.Combine(dir, "rows0.arrow");
         try
         {
-            await using var stream = File.Create(ipc);
-            using var writer = new ArrowFileWriter(stream, ArrowInterop.ToArrow(c.Schema));
-            await writer.WriteRecordBatchAsync(ArrowInterop.ToRecordBatch(c.Schema, c.Rows));
-            await writer.WriteEndAsync();
+            for (var i = 0; i < chunks.Count; i++)
+            {
+                var ipc = Path.Combine(dir, $"rows{i}.arrow");
+                var schema = i == 0 ? c.Schema : evolved;
+                await using (var stream = File.Create(ipc))
+                using (var writer = new ArrowFileWriter(stream, ArrowInterop.ToArrow(schema)))
+                {
+                    await writer.WriteRecordBatchAsync(ArrowInterop.ToRecordBatch(schema, chunks[i]));
+                    await writer.WriteEndAsync();
+                }
+                steps.Add(new JsonObject { ["append"] = ipc });
+                if (i == 0 && c.Evolution is { Count: > 0 } evolution)
+                    steps.Add(new JsonObject { ["schema"] = new JsonArray(evolution.Select(e => e.Json()).ToArray()) });
+                foreach (var change in c.SpecChangesAfter(i, chunks.Count))
+                    steps.Add(new JsonObject { ["spec"] = new JsonArray(SpecOp(change)) });
+            }
         }
         catch (Exception e)
         {
@@ -291,7 +331,9 @@ public sealed class GeneratedDifferentialTests(ITestOutputHelper output) : IDisp
         string location;
         try
         {
-            var written = await TestEnvironment.Current.OracleAsync("write-arrow", Path.Combine(dir, "warehouse"), ipc, c.FormatVersion.ToString(System.Globalization.CultureInfo.InvariantCulture));
+            var plan = Path.Combine(dir, "plan.json");
+            await File.WriteAllTextAsync(plan, new JsonObject { ["steps"] = steps }.ToJsonString());
+            var written = await TestEnvironment.Current.OracleAsync("write-arrow", Path.Combine(dir, "warehouse"), first, c.FormatVersion.ToString(System.Globalization.CultureInfo.InvariantCulture), plan);
             location = written["metadata_location"]!.GetValue<string>();
         }
         catch (Exception e)
@@ -314,7 +356,8 @@ public sealed class GeneratedDifferentialTests(ITestOutputHelper output) : IDisp
         {
             return new("dotnet-load-failed", e.GetType().Name + ": " + e.Message);
         }
-        return await CompareAsync(t, c.Rows.Count);
+        var outcome = await CompareAsync(t, c.ExpectedRows);
+        return outcome != Outcome.Agree || c.Filter is null ? outcome : await CompareFilteredAsync(t, c);
     }
 
     private static async Task<Outcome> CompareAsync(Table t, int expectedRows)
@@ -398,6 +441,12 @@ public sealed class GeneratedDifferentialTests(ITestOutputHelper output) : IDisp
 
         /// <summary>Reshape a row of the old schema (column names in <paramref name="names"/>, updated in place).</summary>
         public abstract object?[] Reshape(object?[] row, List<string> names);
+
+        /// <summary>The same change to a column list. Field IDs only need to be distinct: the oracle resolves by name.</summary>
+        public abstract void Evolve(List<NestedField> columns);
+
+        /// <summary>The change as a schema op of the oracle's write plan.</summary>
+        public abstract JsonNode Json();
     }
 
     /// <summary>An optional long, filled from the row id; reuses a dropped column's name when one precedes it, which a
@@ -413,6 +462,11 @@ public sealed class GeneratedDifferentialTests(ITestOutputHelper output) : IDisp
             return [.. row, id % 3 == 0 ? null : id * 7 - 11];
         }
 
+        public override void Evolve(List<NestedField> columns) =>
+            columns.Add(NestedField.Optional(new Schema(0, columns).HighestFieldId + 1, Column, PrimitiveType.Long));
+
+        public override JsonNode Json() => new JsonObject { ["op"] = "add", ["column"] = Column };
+
         public override string ToString() => $"add {Column} long";
     }
 
@@ -427,6 +481,10 @@ public sealed class GeneratedDifferentialTests(ITestOutputHelper output) : IDisp
             return row.Where((_, j) => j != i).ToArray();
         }
 
+        public override void Evolve(List<NestedField> columns) => columns.RemoveAt(columns.FindIndex(c => c.Name == Column));
+
+        public override JsonNode Json() => new JsonObject { ["op"] = "drop", ["column"] = Column };
+
         public override string ToString() => $"drop {Column}";
     }
 
@@ -439,6 +497,14 @@ public sealed class GeneratedDifferentialTests(ITestOutputHelper output) : IDisp
             names[names.IndexOf(Column)] = NewName;
             return row;
         }
+
+        public override void Evolve(List<NestedField> columns)
+        {
+            var i = columns.FindIndex(c => c.Name == Column);
+            columns[i] = columns[i] with { Name = NewName };
+        }
+
+        public override JsonNode Json() => new JsonObject { ["op"] = "rename", ["column"] = Column, ["to"] = NewName };
 
         public override string ToString() => $"rename {Column} to {NewName}";
     }
@@ -460,6 +526,14 @@ public sealed class GeneratedDifferentialTests(ITestOutputHelper output) : IDisp
             };
             return copy;
         }
+
+        public override void Evolve(List<NestedField> columns)
+        {
+            var i = columns.FindIndex(c => c.Name == Column);
+            columns[i] = columns[i] with { Type = To };
+        }
+
+        public override JsonNode Json() => new JsonObject { ["op"] = "promote", ["column"] = Column, ["to"] = To.TypeId == TypeId.Long ? "long" : "double" };
 
         public override string ToString() => $"promote {Column} to {To}";
     }
@@ -536,14 +610,10 @@ public sealed class GeneratedDifferentialTests(ITestOutputHelper output) : IDisp
                 spec = builder.Build();
             }
             var t = await catalog.CreateTableAsync(new CreateTableRequest(TableIdentifier.Of("gen", "t"), Schema, Spec: spec, FormatVersion: FormatVersion));
-            var size = Math.Max(1, (Rows.Count + Batches - 1) / Batches);
-            var chunks = Rows.Chunk(size).ToList();
-            var specChanges = SpecEvolution ?? [];
-            var applied = 0;
+            var chunks = Chunks();
             for (var i = 0; i < chunks.Count; i++)
             {
-                if (i == 0) await TableMutations.InsertAsync(t, chunks[0]);
-                else await TableMutations.InsertAsync(t, chunks[i].Select(Reshape).ToList());
+                await TableMutations.InsertAsync(t, chunks[i]);
                 if (i == 0 && Evolution is { Count: > 0 } evolution)
                 {
                     await t.UpdateSchemaAsync(update =>
@@ -551,15 +621,34 @@ public sealed class GeneratedDifferentialTests(ITestOutputHelper output) : IDisp
                         foreach (var change in evolution) change.Apply(update);
                     });
                 }
-                // One spec change after each batch, each its own commit; the last batch is followed by all that remain.
-                for (var until = i == chunks.Count - 1 ? specChanges.Count : Math.Min(i + 1, specChanges.Count); applied < until; applied++)
-                {
-                    var change = specChanges[applied];
-                    await t.UpdateSpecAsync(update => change.Apply(update, t));
-                }
+                foreach (var change in SpecChangesAfter(i, chunks.Count)) await t.UpdateSpecAsync(update => change.Apply(update, t));
             }
             if (Delete is { } d) await TableMutations.DeleteWhereAsync(t, r => d.Deletes((long)r[0]!), d.Strategy);
             return t;
+        }
+
+        /// <summary>The rows in batches: the first in the original schema's shape, the rest in the evolved schema's.</summary>
+        public List<IReadOnlyList<object?[]>> Chunks()
+        {
+            var size = Math.Max(1, (Rows.Count + Batches - 1) / Batches);
+            return Rows.Chunk(size).Select((chunk, i) => i == 0 ? (IReadOnlyList<object?[]>)chunk : chunk.Select(Reshape).ToList()).ToList();
+        }
+
+        /// <summary>One spec change after each batch, each its own commit; the last batch is followed by all that remain.</summary>
+        public IEnumerable<SpecChange> SpecChangesAfter(int batch, int batches)
+        {
+            var changes = SpecEvolution ?? [];
+            var from = Math.Min(batch, changes.Count);
+            var until = batch == batches - 1 ? changes.Count : Math.Min(batch + 1, changes.Count);
+            return changes.Skip(from).Take(until - from);
+        }
+
+        /// <summary>The schema after <see cref="Evolution"/>, for the Arrow files of later batches.</summary>
+        public Schema EvolvedSchema()
+        {
+            var columns = Schema.Columns.ToList();
+            foreach (var change in Evolution ?? []) change.Evolve(columns);
+            return new Schema(0, columns);
         }
 
         /// <summary>A generated row in the evolved schema's shape.</summary>
@@ -788,7 +877,8 @@ public sealed class GeneratedDifferentialTests(ITestOutputHelper output) : IDisp
             return (picks, values.Count == 0 ? null : new FilterPick(columns[index].Name, columns[index].Type, values[r.Next(values.Count)]!));
         }
 
-        public static Case Generate(int seed, int maxFormatVersion, bool partitioned = false)
+        /// <summary>Without <paramref name="deletes"/> the delete is still drawn, so the seed's other choices do not move.</summary>
+        public static Case Generate(int seed, int maxFormatVersion, bool deletes)
         {
             var g = new Gen(new Random(seed));
             var formatVersion = g.R.Next(2) == 0 ? 2 : maxFormatVersion;
@@ -810,10 +900,10 @@ public sealed class GeneratedDifferentialTests(ITestOutputHelper output) : IDisp
             DeleteSpec? delete = g.R.Next(2) == 0 ? null
                 : new DeleteSpec(2 + g.R.Next(5), 0, g.R.Next(2) == 0 ? DeleteStrategy.CopyOnWrite : DeleteStrategy.PositionDeletes);
             var batches = 1 + g.R.Next(3);
-            var (partition, filter) = partitioned ? PartitionAndFilter(seed, schema, rows) : (null, null);
-            var evolution = partitioned ? EvolutionFor(seed, schema, partition, filter) : null;
-            var (specEvolution, specFilter) = partitioned ? SpecEvolutionFor(seed, schema, rows, partition, filter, evolution) : (null, null);
-            return new Case(seed, formatVersion, schema, rows, batches, delete, partition, filter ?? specFilter, evolution, specEvolution);
+            var (partition, filter) = PartitionAndFilter(seed, schema, rows);
+            var evolution = EvolutionFor(seed, schema, partition, filter);
+            var (specEvolution, specFilter) = SpecEvolutionFor(seed, schema, rows, partition, filter, evolution);
+            return new Case(seed, formatVersion, schema, rows, batches, deletes ? delete : null, partition, filter ?? specFilter, evolution, specEvolution);
         }
     }
 
