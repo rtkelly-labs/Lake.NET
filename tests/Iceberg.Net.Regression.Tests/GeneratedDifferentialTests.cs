@@ -343,6 +343,16 @@ public sealed class GeneratedDifferentialTests(ITestOutputHelper output) : IDisp
             if (e.Message.Contains("cannot be viewed as non-nullable", StringComparison.Ordinal)
                 || e.Message.Contains("non-nullable but contains nulls", StringComparison.Ordinal))
                 return new(KnownLimitation, "");
+            // PyIceberg 0.12 cannot append to a spec with two fields on one source column (PartitionKey.partition
+            // insists on one field per source); the spec allows it, and .NET and Java write such tables.
+            if (e.Message.Contains("Cannot have redundant partitions", StringComparison.Ordinal)
+                && c.EveryPartitionField.GroupBy(p => p.Column).Any(g => g.Count() > 1))
+                return new("known-pyiceberg-two-fields-one-source", "");
+            // Nor to a bucket over a time column: its partition value conversion for time takes a datetime.time and
+            // is handed the bucket number.
+            if (e.Message.Contains("'int' object has no attribute 'hour'", StringComparison.Ordinal)
+                && c.EveryPartitionField.Any(p => p.Transform is BucketTransform && c.Schema.Columns.Any(col => col.Name == p.Column && col.Type.TypeId == TypeId.Time)))
+                return new("known-pyiceberg-bucket-over-time", "");
             return new("pyiceberg-write-failed", LastLine(e.Message));
         }
         Table t;

@@ -92,6 +92,39 @@ dotnet run --project tools/ShadowCompare -- --catalog glue --table analytics.pla
 dotnet run --project tools/ShadowCompare -- --metadata s3://bucket/path/metadata/00042-….metadata.json
 ```
 
+### Generated differential campaign
+
+`GeneratedDifferentialTests` (the `differential` workflow) draws a table from a seed, writes it with one
+implementation and compares what both read: the `TableFingerprint` of a full scan, and for most partitioned tables
+the ids one equality filter returns. It is off unless `ICEBERG_DIFFERENTIAL_SECONDS` is set;
+`ICEBERG_DIFFERENTIAL_SEED` is the first seed and `ICEBERG_DIFFERENTIAL_OUT` receives `summary.json` and the shrunk
+tables. A seed generates the same case in both directions:
+
+| Shape | Share of cases | What is drawn |
+|---|---|---|
+| Schema and rows | all | 1–8 columns after `id`: every primitive, decimal(1..38), fixed, nanosecond timestamps (v3), struct/list/map to depth 2; 1–59 rows with edge values, in 1–3 batches |
+| Delete | half, .NET-written tables only | `id % n == 0`, by copy-on-write or position deletes, after the last batch |
+| Partitioning | half | one or two fields over top-level primitives (not float, double or nanosecond timestamps): identity, bucket[1/4/7/16], truncate[1/3/10/100], year, month, day, hour |
+| Filter | when a partition source is int, long, string, date, timestamp or timestamptz | one equality on that source, with a value taken from the rows; .NET's ids and PyIceberg's must both equal the ids computed from the rows |
+| Schema evolution | half | after the first batch, 1–3 of: add an optional long, drop, rename, promote int→long or float→double, re-add a dropped name (a new field ID under an old name). Never the id, the filter column or a partition source |
+| Partition spec evolution | half | 1–3 changes, each its own commit, one per batch boundary: add a field (often a second transform on the filter column), remove one (often the filter column's), rename one, re-add a removed one. A table that had no filter gets one on an added field's source |
+
+The two directions differ in who writes:
+
+- **.NET writes, PyIceberg reads** (v2 and v3). Later batches are written under the evolved schema and spec, and the
+  delete runs last, so one table holds files of several schemas and specs.
+- **PyIceberg writes, .NET reads** (v2 only: PyIceberg 0.12 cannot write v3). The rows travel as Arrow IPC files and
+  the partitioning and changes as a plan for the oracle's `write-arrow` command, which applies them through
+  `update_spec()` and `update_schema()`. The filter then prunes in .NET by the partition values and column metrics
+  PyIceberg wrote. No deletes.
+
+Each shape draws from its own `Random`, so adding a shape leaves what a seed generated before unchanged. A
+disagreement is shrunk (fewer rows, columns, batches; no delete; a smaller spec; fewer schema or spec changes) and
+reported once per signature. Outcomes named `known-…` are upstream limitations the campaign counts but does not
+report (each is matched by the error text and the shape that causes it: for instance PyIceberg 0.12 cannot append
+under two partition fields on one source column, or under a bucket over a `time` column); `summary.json` lists them next to `partitioned_cases`, `filtered_cases`, `evolved_cases` and
+`spec_evolved_cases`.
+
 ### Fuzzing
 
 `CorruptionTests` (L0) mutates fixtures at random; `tools/fuzz.sh` adds coverage-guided fuzzing with SharpFuzz and
@@ -132,7 +165,7 @@ and its runs. So the limits that stop a decoder allocating or looping on a claim
 | Workflow | When | What |
 |---|---|---|
 | `ci.yml` | every PR, merge queue entry and push to `main` (its `ci` job is the required check, and fails unless every job below succeeds) | Three parallel jobs, one per `<CiSuite>` (`tools/test-projects.sh`): `unit` (L0, netstandard2.0, LINQ, EF Core, REST catalog behaviour, package smoke test, spec traceability matrix as an artifact; no Docker), `cross-engine` (all emulators + Spark + DuckDB: ecosystem, BDD, REST server) and `regression` (all emulators, `ICEBERG_REQUIRE_TARGET=1`: REST protocol, L1/L2) |
-| `differential.yml` | weekly (Monday 03:17 UTC, 900 s per direction, starting at a new seed each week), when dispatched, and on PRs that change the campaign, the PyIceberg oracle or `TableFingerprint` (120 s, seed 1) | Generated schemas and rows written by .NET and read by PyIceberg, and the reverse; fingerprints must match. Half the .NET-written tables are partitioned (identity, bucket, truncate, time transforms) and also run one equality filter on a partition source, whose ids must match the generated rows in both scans. Disagreements are shrunk and uploaded (`GeneratedDifferentialTests`) |
+| `differential.yml` | weekly (Monday 03:17 UTC, 900 s per direction, starting at a new seed each week), when dispatched, and on PRs that change the campaign, the PyIceberg oracle or `TableFingerprint` (120 s, seed 1) | Generated tables written by .NET and read by PyIceberg, and the reverse; fingerprints and the ids of a filtered scan must match. Tables are partitioned, schema-evolved and spec-evolved in both directions (see [Generated differential campaign](#generated-differential-campaign)). Disagreements are shrunk and uploaded |
 | `fuzz.yml` | weekly (Monday 04:17 UTC, 300 s per target) and when dispatched (900 s default) | Coverage-guided fuzzing of every decoder target, then line coverage of the corpus (see [Fuzzing](#fuzzing)) |
 | `upkeep.yml` | when dispatched | spec drift vs apache/iceberg `main` (red only for upstream changes not yet reviewed with `tools/spec_trace.py drift --acknowledge`); the regression suite against `:latest` emulator images |
 | `aws.yml` | when dispatched, **dormant until `ICEBERG_AWS_ROLE_ARN` is set** | L1–L3 against AWS; shadow comparison of `ICEBERG_SHADOW_TABLES` |
