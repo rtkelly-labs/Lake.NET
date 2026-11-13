@@ -92,7 +92,8 @@ public sealed class ConfigAndTokenOperationTests : ServerTest
         Assert.False(string.IsNullOrEmpty(body!["access_token"]!.GetValue<string>()));
         var (bad, error) = await TokenRequestAsync(new()
         {
-            ["grant_type"] = "urn:ietf:params:oauth:grant-type:token-exchange", ["subject_token"] = "not-a-token",
+            ["grant_type"] = "urn:ietf:params:oauth:grant-type:token-exchange",
+            ["subject_token"] = "not-a-token",
             ["subject_token_type"] = "urn:ietf:params:oauth:token-type:access_token",
         });
         Assert.Equal(HttpStatusCode.Unauthorized, bad);

@@ -105,9 +105,19 @@ public class AvroSpecTests
     {
         var mf = new ManifestFile
         {
-            ManifestPath = "s3://b/m0.avro", ManifestLength = 1234, PartitionSpecId = 1, Content = ManifestContent.Deletes,
-            SequenceNumber = 4, MinSequenceNumber = 2, AddedSnapshotId = 77, AddedFilesCount = 1, ExistingFilesCount = 2, DeletedFilesCount = 3,
-            AddedRowsCount = 10, ExistingRowsCount = 20, DeletedRowsCount = 30,
+            ManifestPath = "s3://b/m0.avro",
+            ManifestLength = 1234,
+            PartitionSpecId = 1,
+            Content = ManifestContent.Deletes,
+            SequenceNumber = 4,
+            MinSequenceNumber = 2,
+            AddedSnapshotId = 77,
+            AddedFilesCount = 1,
+            ExistingFilesCount = 2,
+            DeletedFilesCount = 3,
+            AddedRowsCount = 10,
+            ExistingRowsCount = 20,
+            DeletedRowsCount = 30,
             Partitions = [new FieldSummary(true, null, [1, 0, 0, 0], [9, 0, 0, 0])],
         };
         var bytes = ManifestCodec.WriteManifestList(2, 77, 66, 4, [mf]);

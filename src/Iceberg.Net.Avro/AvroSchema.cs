@@ -134,10 +134,10 @@ public static class AvroSchemaJson
             case JsonArray arr:
                 return new AvroUnion(arr.Select(b => Read(b!, named)).ToList());
             case JsonValue v:
-            {
-                var t = v.GetValue<string>();
-                return Primitive(t) ?? (named.TryGetValue(t, out var ns) ? ns : throw new FormatException($"Unknown Avro type {t}"));
-            }
+                {
+                    var t = v.GetValue<string>();
+                    return Primitive(t) ?? (named.TryGetValue(t, out var ns) ? ns : throw new FormatException($"Unknown Avro type {t}"));
+                }
         }
 
         var o = n.AsObject();

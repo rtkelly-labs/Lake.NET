@@ -18,8 +18,16 @@ public sealed class WideTypesTests : IDisposable
     }
 
     [Theory]
-    [InlineData(1, 1)] [InlineData(2, 1)] [InlineData(3, 2)] [InlineData(9, 4)] [InlineData(10, 5)] [InlineData(18, 8)]
-    [InlineData(19, 9)] [InlineData(28, 12)] [InlineData(29, 13)] [InlineData(38, 16)]
+    [InlineData(1, 1)]
+    [InlineData(2, 1)]
+    [InlineData(3, 2)]
+    [InlineData(9, 4)]
+    [InlineData(10, 5)]
+    [InlineData(18, 8)]
+    [InlineData(19, 9)]
+    [InlineData(28, 12)]
+    [InlineData(29, 13)]
+    [InlineData(38, 16)]
     public void Decimal_width_is_the_smallest_that_fits(int precision, int bytes) => Assert.Equal(bytes, ParquetFiles.DecimalBytes(precision));
 
     [Fact]

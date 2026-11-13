@@ -109,27 +109,27 @@ public sealed class MumblingBitmap
             switch (d >> 5)
             {
                 case 0: // sparse: d & 0x1f sorted offsets
-                {
-                    var n = d & 0x1F;
-                    var offsets = Take(data, ref pos, n, c);
-                    for (var i = 0; i < n; i++)
                     {
-                        if (i > 0 && offsets[i] <= offsets[i - 1]) throw new FormatException($"Mumbling sparse container {c} is not strictly ascending");
-                        result._positions.Add(key | offsets[i]);
+                        var n = d & 0x1F;
+                        var offsets = Take(data, ref pos, n, c);
+                        for (var i = 0; i < n; i++)
+                        {
+                            if (i > 0 && offsets[i] <= offsets[i - 1]) throw new FormatException($"Mumbling sparse container {c} is not strictly ascending");
+                            result._positions.Add(key | offsets[i]);
+                        }
+                        break;
                     }
-                    break;
-                }
                 case 1: // dense; the low descriptor bits must be ignored
-                {
-                    var bits = Take(data, ref pos, DenseBytes, c);
-                    var set = 0;
-                    for (var i = 0; i < DenseBytes; i++) set += BitOperations.PopCount(bits[i]);
-                    if (set < DenseBytes) throw new FormatException($"Mumbling container {c} is dense with {set} bits set; fewer than 32 must be sparse");
-                    for (var i = 0; i < DenseBytes; i++)
-                        for (var b = 0; b < 8; b++)
-                            if ((bits[i] & (0x80 >> b)) != 0) result._positions.Add(key | i << 3 | b);
-                    break;
-                }
+                    {
+                        var bits = Take(data, ref pos, DenseBytes, c);
+                        var set = 0;
+                        for (var i = 0; i < DenseBytes; i++) set += BitOperations.PopCount(bits[i]);
+                        if (set < DenseBytes) throw new FormatException($"Mumbling container {c} is dense with {set} bits set; fewer than 32 must be sparse");
+                        for (var i = 0; i < DenseBytes; i++)
+                            for (var b = 0; b < 8; b++)
+                                if ((bits[i] & (0x80 >> b)) != 0) result._positions.Add(key | i << 3 | b);
+                        break;
+                    }
                 default:
                     throw new FormatException($"Mumbling descriptor 0x{d:x2} of container {c} has an unknown container type");
             }

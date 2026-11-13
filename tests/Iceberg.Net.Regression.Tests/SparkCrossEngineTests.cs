@@ -31,15 +31,15 @@ public sealed class SparkTablesFixture : IAsyncLifetime
         await _catalog.CreateNamespaceAsync(Namespace.Of("db"));
 
         foreach (var v in new[] { 2, 3 })
-        foreach (var s in new[] { DeleteStrategy.CopyOnWrite, DeleteStrategy.PositionDeletes, DeleteStrategy.EqualityDeletes })
-            await Build($"{s}_v{v}", v, async t =>
-            {
-                await TableMutations.UpsertAsync(t, CatalogConformanceTests.Rows(25, 10).Select(r => { r[1] = $"upserted-{r[0]}"; return r; }).ToList(), ["id"], s);
-                await TableMutations.DeleteByKeysAsync(t, ["id"], [[3L], [4L], [26L]], s);
-                if (s != DeleteStrategy.EqualityDeletes) // DeleteWhere needs row positions
-                    await TableMutations.DeleteWhereAsync(t, r => (long)r[0]! % 7 == 1, s);
-                await TableMutations.UpsertAsync(t, CatalogConformanceTests.Rows(5, 1).Select(r => { r[1] = "again"; return r; }).ToList(), ["id"], s);
-            });
+            foreach (var s in new[] { DeleteStrategy.CopyOnWrite, DeleteStrategy.PositionDeletes, DeleteStrategy.EqualityDeletes })
+                await Build($"{s}_v{v}", v, async t =>
+                {
+                    await TableMutations.UpsertAsync(t, CatalogConformanceTests.Rows(25, 10).Select(r => { r[1] = $"upserted-{r[0]}"; return r; }).ToList(), ["id"], s);
+                    await TableMutations.DeleteByKeysAsync(t, ["id"], [[3L], [4L], [26L]], s);
+                    if (s != DeleteStrategy.EqualityDeletes) // DeleteWhere needs row positions
+                        await TableMutations.DeleteWhereAsync(t, r => (long)r[0]! % 7 == 1, s);
+                    await TableMutations.UpsertAsync(t, CatalogConformanceTests.Rows(5, 1).Select(r => { r[1] = "again"; return r; }).ToList(), ["id"], s);
+                });
 
         await Build("upgraded_v2_to_v3", 2, async t =>
         {

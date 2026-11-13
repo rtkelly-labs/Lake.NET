@@ -212,34 +212,34 @@ public sealed class SchemaUpdate
         switch (f.Type)
         {
             case StructType s:
-            {
-                var fields = s.Fields.ToList();
-                var i = fields.FindIndex(x => x.Name == segment);
-                if (i < 0) throw new ArgumentException($"Field '{path}' does not exist");
-                var child = Descend(fields[i], tail, change, path);
-                if (child is null) fields.RemoveAt(i); else fields[i] = child;
-                if (fields.Count == 0) throw new InvalidOperationException($"Cannot delete the last field of struct '{f.Name}'");
-                return f with { Type = new StructType(fields) };
-            }
+                {
+                    var fields = s.Fields.ToList();
+                    var i = fields.FindIndex(x => x.Name == segment);
+                    if (i < 0) throw new ArgumentException($"Field '{path}' does not exist");
+                    var child = Descend(fields[i], tail, change, path);
+                    if (child is null) fields.RemoveAt(i); else fields[i] = child;
+                    if (fields.Count == 0) throw new InvalidOperationException($"Cannot delete the last field of struct '{f.Name}'");
+                    return f with { Type = new StructType(fields) };
+                }
             case ListType l when segment == "element":
-            {
-                var e = Descend(l.ElementField, tail, change, path) ?? throw new InvalidOperationException("Cannot delete a list element");
-                if (e.Name != "element") throw new InvalidOperationException("Cannot rename a list element");
-                return f with { Type = new ListType(l.ElementId, e.Type, e.Required) };
-            }
+                {
+                    var e = Descend(l.ElementField, tail, change, path) ?? throw new InvalidOperationException("Cannot delete a list element");
+                    if (e.Name != "element") throw new InvalidOperationException("Cannot rename a list element");
+                    return f with { Type = new ListType(l.ElementId, e.Type, e.Required) };
+                }
             case MapType m when segment == "value":
-            {
-                var v = Descend(m.ValueField, tail, change, path) ?? throw new InvalidOperationException("Cannot delete a map value");
-                if (v.Name != "value") throw new InvalidOperationException("Cannot rename a map value");
-                return f with { Type = new MapType(m.KeyId, m.KeyType, m.ValueId, v.Type, v.Required) };
-            }
+                {
+                    var v = Descend(m.ValueField, tail, change, path) ?? throw new InvalidOperationException("Cannot delete a map value");
+                    if (v.Name != "value") throw new InvalidOperationException("Cannot rename a map value");
+                    return f with { Type = new MapType(m.KeyId, m.KeyType, m.ValueId, v.Type, v.Required) };
+                }
             case MapType m when segment == "key":
-            {
-                var k = Descend(m.KeyField, tail, change, path) ?? throw new InvalidOperationException("Cannot delete a map key");
-                if (k.Name != "key" || !k.Required) throw new InvalidOperationException("Map keys keep their name and stay required");
-                if (k.Type is PrimitiveType && !k.Type.Equals(m.KeyType)) throw new InvalidOperationException("Map key types cannot change");
-                return f with { Type = new MapType(m.KeyId, k.Type, m.ValueId, m.ValueType, m.ValueRequired) };
-            }
+                {
+                    var k = Descend(m.KeyField, tail, change, path) ?? throw new InvalidOperationException("Cannot delete a map key");
+                    if (k.Name != "key" || !k.Required) throw new InvalidOperationException("Map keys keep their name and stay required");
+                    if (k.Type is PrimitiveType && !k.Type.Equals(m.KeyType)) throw new InvalidOperationException("Map key types cannot change");
+                    return f with { Type = new MapType(m.KeyId, k.Type, m.ValueId, m.ValueType, m.ValueRequired) };
+                }
             default: throw new ArgumentException($"Field '{path}' does not exist");
         }
     }

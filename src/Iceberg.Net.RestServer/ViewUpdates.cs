@@ -65,53 +65,53 @@ public abstract record ViewUpdate
                     if (u.FormatVersion != ViewMetadata.FormatVersion) throw new ArgumentException($"Unsupported view format version {u.FormatVersion}");
                     break;
                 case AddSchema u:
-                {
-                    var existing = m.Schemas.FirstOrDefault(s => s.SameSchema(u.Schema));
-                    if (existing is not null) { lastSchema = existing.SchemaId; break; }
-                    var id = m.Schemas.Count == 0 ? 0 : m.Schemas.Max(s => s.SchemaId) + 1;
-                    m = m with { Schemas = [.. m.Schemas, u.Schema.WithId(id)] };
-                    lastSchema = id;
-                    break;
-                }
+                    {
+                        var existing = m.Schemas.FirstOrDefault(s => s.SameSchema(u.Schema));
+                        if (existing is not null) { lastSchema = existing.SchemaId; break; }
+                        var id = m.Schemas.Count == 0 ? 0 : m.Schemas.Max(s => s.SchemaId) + 1;
+                        m = m with { Schemas = [.. m.Schemas, u.Schema.WithId(id)] };
+                        lastSchema = id;
+                        break;
+                    }
                 case SetLocation u:
                     m = m with { Location = u.Location.TrimEnd('/') };
                     break;
                 case SetProperties u:
-                {
-                    var props = new Dictionary<string, string>(m.Properties);
-                    foreach (var (k, v) in u.Updates) props[k] = v;
-                    m = m with { Properties = props };
-                    break;
-                }
+                    {
+                        var props = new Dictionary<string, string>(m.Properties);
+                        foreach (var (k, v) in u.Updates) props[k] = v;
+                        m = m with { Properties = props };
+                        break;
+                    }
                 case RemoveProperties u:
-                {
-                    var props = new Dictionary<string, string>(m.Properties);
-                    foreach (var k in u.Removals) props.Remove(k);
-                    m = m with { Properties = props };
-                    break;
-                }
+                    {
+                        var props = new Dictionary<string, string>(m.Properties);
+                        foreach (var k in u.Removals) props.Remove(k);
+                        m = m with { Properties = props };
+                        break;
+                    }
                 case AddViewVersion u:
-                {
-                    var schemaId = u.Version.SchemaId == -1 ? lastSchema ?? throw new ArgumentException("No schema added in this commit") : u.Version.SchemaId;
-                    if (m.Schemas.All(s => s.SchemaId != schemaId)) throw new ArgumentException($"Unknown schema {schemaId}");
-                    if (u.Version.Representations.Select(r => r.Dialect.ToLowerInvariant()).Distinct().Count() != u.Version.Representations.Count)
-                        throw new ArgumentException("A view version may have one representation per dialect");
-                    var candidate = u.Version with { SchemaId = schemaId };
-                    var same = m.Versions.FirstOrDefault(v => SameVersion(v, candidate));
-                    if (same is not null) { lastVersion = same.VersionId; break; }
-                    var id = m.Versions.Count == 0 ? 1 : m.Versions.Max(v => v.VersionId) + 1;
-                    m = m with { Versions = [.. m.Versions, candidate with { VersionId = id, TimestampMs = candidate.TimestampMs > 0 ? candidate.TimestampMs : nowMs }] };
-                    lastVersion = id;
-                    break;
-                }
+                    {
+                        var schemaId = u.Version.SchemaId == -1 ? lastSchema ?? throw new ArgumentException("No schema added in this commit") : u.Version.SchemaId;
+                        if (m.Schemas.All(s => s.SchemaId != schemaId)) throw new ArgumentException($"Unknown schema {schemaId}");
+                        if (u.Version.Representations.Select(r => r.Dialect.ToLowerInvariant()).Distinct().Count() != u.Version.Representations.Count)
+                            throw new ArgumentException("A view version may have one representation per dialect");
+                        var candidate = u.Version with { SchemaId = schemaId };
+                        var same = m.Versions.FirstOrDefault(v => SameVersion(v, candidate));
+                        if (same is not null) { lastVersion = same.VersionId; break; }
+                        var id = m.Versions.Count == 0 ? 1 : m.Versions.Max(v => v.VersionId) + 1;
+                        m = m with { Versions = [.. m.Versions, candidate with { VersionId = id, TimestampMs = candidate.TimestampMs > 0 ? candidate.TimestampMs : nowMs }] };
+                        lastVersion = id;
+                        break;
+                    }
                 case SetCurrentViewVersion u:
-                {
-                    var id = u.VersionId == -1 ? lastVersion ?? throw new ArgumentException("No view version added in this commit") : u.VersionId;
-                    if (m.Versions.All(v => v.VersionId != id)) throw new ArgumentException($"Unknown view version {id}");
-                    if (id != m.CurrentVersionId) log.Add(new ViewLogEntry(nowMs, id));
-                    m = m with { CurrentVersionId = id };
-                    break;
-                }
+                    {
+                        var id = u.VersionId == -1 ? lastVersion ?? throw new ArgumentException("No view version added in this commit") : u.VersionId;
+                        if (m.Versions.All(v => v.VersionId != id)) throw new ArgumentException($"Unknown view version {id}");
+                        if (id != m.CurrentVersionId) log.Add(new ViewLogEntry(nowMs, id));
+                        m = m with { CurrentVersionId = id };
+                        break;
+                    }
             }
         }
 

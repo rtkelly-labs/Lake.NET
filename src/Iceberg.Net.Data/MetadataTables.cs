@@ -14,8 +14,12 @@ public sealed record SnapshotsRow(DateTimeOffset CommittedAt, long SnapshotId, l
 {
     public IReadOnlyDictionary<string, object?> Columns => new Dictionary<string, object?>
     {
-        ["committed_at"] = CommittedAt, ["snapshot_id"] = SnapshotId, ["parent_id"] = ParentId, ["operation"] = Operation,
-        ["manifest_list"] = ManifestList, ["summary"] = Summary,
+        ["committed_at"] = CommittedAt,
+        ["snapshot_id"] = SnapshotId,
+        ["parent_id"] = ParentId,
+        ["operation"] = Operation,
+        ["manifest_list"] = ManifestList,
+        ["summary"] = Summary,
     };
 }
 
@@ -24,7 +28,10 @@ public sealed record HistoryRow(DateTimeOffset MadeCurrentAt, long SnapshotId, l
 {
     public IReadOnlyDictionary<string, object?> Columns => new Dictionary<string, object?>
     {
-        ["made_current_at"] = MadeCurrentAt, ["snapshot_id"] = SnapshotId, ["parent_id"] = ParentId, ["is_current_ancestor"] = IsCurrentAncestor,
+        ["made_current_at"] = MadeCurrentAt,
+        ["snapshot_id"] = SnapshotId,
+        ["parent_id"] = ParentId,
+        ["is_current_ancestor"] = IsCurrentAncestor,
     };
 }
 
@@ -33,8 +40,12 @@ public sealed record RefsRow(string Name, string Type, long SnapshotId, long? Ma
 {
     public IReadOnlyDictionary<string, object?> Columns => new Dictionary<string, object?>
     {
-        ["name"] = Name, ["type"] = Type, ["snapshot_id"] = SnapshotId, ["max_reference_age_in_ms"] = MaxReferenceAgeInMs,
-        ["min_snapshots_to_keep"] = MinSnapshotsToKeep, ["max_snapshot_age_in_ms"] = MaxSnapshotAgeInMs,
+        ["name"] = Name,
+        ["type"] = Type,
+        ["snapshot_id"] = SnapshotId,
+        ["max_reference_age_in_ms"] = MaxReferenceAgeInMs,
+        ["min_snapshots_to_keep"] = MinSnapshotsToKeep,
+        ["max_snapshot_age_in_ms"] = MaxSnapshotAgeInMs,
     };
 }
 
@@ -50,9 +61,17 @@ public sealed record ManifestsRow(
 {
     public IReadOnlyDictionary<string, object?> Columns => new Dictionary<string, object?>
     {
-        ["content"] = Content, ["path"] = Path, ["length"] = Length, ["partition_spec_id"] = PartitionSpecId, ["added_snapshot_id"] = AddedSnapshotId,
-        ["added_data_files_count"] = AddedDataFilesCount, ["existing_data_files_count"] = ExistingDataFilesCount, ["deleted_data_files_count"] = DeletedDataFilesCount,
-        ["added_delete_files_count"] = AddedDeleteFilesCount, ["existing_delete_files_count"] = ExistingDeleteFilesCount, ["deleted_delete_files_count"] = DeletedDeleteFilesCount,
+        ["content"] = Content,
+        ["path"] = Path,
+        ["length"] = Length,
+        ["partition_spec_id"] = PartitionSpecId,
+        ["added_snapshot_id"] = AddedSnapshotId,
+        ["added_data_files_count"] = AddedDataFilesCount,
+        ["existing_data_files_count"] = ExistingDataFilesCount,
+        ["deleted_data_files_count"] = DeletedDataFilesCount,
+        ["added_delete_files_count"] = AddedDeleteFilesCount,
+        ["existing_delete_files_count"] = ExistingDeleteFilesCount,
+        ["deleted_delete_files_count"] = DeletedDeleteFilesCount,
         ["partition_summaries"] = PartitionSummaries,
     };
 }
@@ -73,11 +92,27 @@ public sealed record FilesRow(
 {
     public IReadOnlyDictionary<string, object?> Columns => new Dictionary<string, object?>
     {
-        ["content"] = Content, ["file_path"] = FilePath, ["file_format"] = FileFormat, ["spec_id"] = SpecId, ["partition"] = Partition,
-        ["record_count"] = RecordCount, ["file_size_in_bytes"] = FileSizeInBytes, ["column_sizes"] = ColumnSizes, ["value_counts"] = ValueCounts,
-        ["null_value_counts"] = NullValueCounts, ["nan_value_counts"] = NanValueCounts, ["lower_bounds"] = LowerBounds, ["upper_bounds"] = UpperBounds,
-        ["key_metadata"] = KeyMetadata, ["split_offsets"] = SplitOffsets, ["equality_ids"] = EqualityIds, ["sort_order_id"] = SortOrderId,
-        ["first_row_id"] = FirstRowId, ["referenced_data_file"] = ReferencedDataFile, ["content_offset"] = ContentOffset, ["content_size_in_bytes"] = ContentSizeInBytes,
+        ["content"] = Content,
+        ["file_path"] = FilePath,
+        ["file_format"] = FileFormat,
+        ["spec_id"] = SpecId,
+        ["partition"] = Partition,
+        ["record_count"] = RecordCount,
+        ["file_size_in_bytes"] = FileSizeInBytes,
+        ["column_sizes"] = ColumnSizes,
+        ["value_counts"] = ValueCounts,
+        ["null_value_counts"] = NullValueCounts,
+        ["nan_value_counts"] = NanValueCounts,
+        ["lower_bounds"] = LowerBounds,
+        ["upper_bounds"] = UpperBounds,
+        ["key_metadata"] = KeyMetadata,
+        ["split_offsets"] = SplitOffsets,
+        ["equality_ids"] = EqualityIds,
+        ["sort_order_id"] = SortOrderId,
+        ["first_row_id"] = FirstRowId,
+        ["referenced_data_file"] = ReferencedDataFile,
+        ["content_offset"] = ContentOffset,
+        ["content_size_in_bytes"] = ContentSizeInBytes,
     };
 }
 
@@ -86,7 +121,11 @@ public sealed record EntriesRow(int Status, long? SnapshotId, long? SequenceNumb
 {
     public IReadOnlyDictionary<string, object?> Columns => new Dictionary<string, object?>
     {
-        ["status"] = Status, ["snapshot_id"] = SnapshotId, ["sequence_number"] = SequenceNumber, ["file_sequence_number"] = FileSequenceNumber, ["data_file"] = DataFile,
+        ["status"] = Status,
+        ["snapshot_id"] = SnapshotId,
+        ["sequence_number"] = SequenceNumber,
+        ["file_sequence_number"] = FileSequenceNumber,
+        ["data_file"] = DataFile,
     };
 }
 
@@ -102,10 +141,18 @@ public sealed record PartitionsRow(
 {
     public IReadOnlyDictionary<string, object?> Columns => new Dictionary<string, object?>
     {
-        ["partition"] = Partition, ["spec_id"] = SpecId, ["record_count"] = RecordCount, ["file_count"] = FileCount,
-        ["total_data_file_size_in_bytes"] = TotalDataFileSizeInBytes, ["position_delete_record_count"] = PositionDeleteRecordCount,
-        ["position_delete_file_count"] = PositionDeleteFileCount, ["dv_count"] = DvCount, ["equality_delete_record_count"] = EqualityDeleteRecordCount,
-        ["equality_delete_file_count"] = EqualityDeleteFileCount, ["last_updated_at"] = LastUpdatedAt, ["last_updated_snapshot_id"] = LastUpdatedSnapshotId,
+        ["partition"] = Partition,
+        ["spec_id"] = SpecId,
+        ["record_count"] = RecordCount,
+        ["file_count"] = FileCount,
+        ["total_data_file_size_in_bytes"] = TotalDataFileSizeInBytes,
+        ["position_delete_record_count"] = PositionDeleteRecordCount,
+        ["position_delete_file_count"] = PositionDeleteFileCount,
+        ["dv_count"] = DvCount,
+        ["equality_delete_record_count"] = EqualityDeleteRecordCount,
+        ["equality_delete_file_count"] = EqualityDeleteFileCount,
+        ["last_updated_at"] = LastUpdatedAt,
+        ["last_updated_snapshot_id"] = LastUpdatedSnapshotId,
     };
 }
 

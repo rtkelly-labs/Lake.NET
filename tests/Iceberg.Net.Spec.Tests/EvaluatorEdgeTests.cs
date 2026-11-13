@@ -44,7 +44,9 @@ public sealed class EvaluatorEdgeTests
         var t = type ?? Schema.FindType(id)!;
         return new DataFile
         {
-            FilePath = "f", RecordCount = values, FileSizeInBytes = 1,
+            FilePath = "f",
+            RecordCount = values,
+            FileSizeInBytes = 1,
             ValueCounts = new Dictionary<int, long> { [id] = values },
             NullValueCounts = nulls is { } n ? new Dictionary<int, long> { [id] = n } : null,
             NanValueCounts = nans is { } a ? new Dictionary<int, long> { [id] = a } : null,
@@ -101,9 +103,13 @@ public sealed class EvaluatorEdgeTests
     {
         var f = new DataFile
         {
-            FilePath = "f", RecordCount = 1, FileSizeInBytes = 1,
-            ValueCounts = new Dictionary<int, long> { [4] = 1 }, NullValueCounts = new Dictionary<int, long> { [4] = 0 },
-            LowerBounds = new Dictionary<int, byte[]> { [4] = [1, 2] }, UpperBounds = new Dictionary<int, byte[]> { [4] = [1, 2] }, // not 4-byte ints
+            FilePath = "f",
+            RecordCount = 1,
+            FileSizeInBytes = 1,
+            ValueCounts = new Dictionary<int, long> { [4] = 1 },
+            NullValueCounts = new Dictionary<int, long> { [4] = 0 },
+            LowerBounds = new Dictionary<int, byte[]> { [4] = [1, 2] },
+            UpperBounds = new Dictionary<int, byte[]> { [4] = [1, 2] }, // not 4-byte ints
         };
         Assert.True(Might(Expr.Equal("n", 999), f));
     }

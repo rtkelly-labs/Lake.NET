@@ -32,35 +32,35 @@ public sealed class CorruptionTests(ITestOutputHelper output)
                 for (var i = rnd.Next(1, 5); i > 0; i--) b[rnd.Next(b.Length)] ^= (byte)(1 << rnd.Next(8));
                 return b;
             case 1: // overwrite a run of bytes
-            {
-                var at = rnd.Next(b.Length);
-                for (var i = at; i < Math.Min(b.Length, at + rnd.Next(1, 16)); i++) b[i] = (byte)rnd.Next(256);
-                return b;
-            }
+                {
+                    var at = rnd.Next(b.Length);
+                    for (var i = at; i < Math.Min(b.Length, at + rnd.Next(1, 16)); i++) b[i] = (byte)rnd.Next(256);
+                    return b;
+                }
             case 2: // truncate
                 return b[..rnd.Next(b.Length)];
             case 3: // insert random bytes
-            {
-                var at = rnd.Next(b.Length);
-                var extra = new byte[rnd.Next(1, 16)];
-                rnd.NextBytes(extra);
-                return [.. b[..at], .. extra, .. b[at..]];
-            }
+                {
+                    var at = rnd.Next(b.Length);
+                    var extra = new byte[rnd.Next(1, 16)];
+                    rnd.NextBytes(extra);
+                    return [.. b[..at], .. extra, .. b[at..]];
+                }
             case 4: // hostile 32-bit field (length prefixes, counts, offsets) in either byte order
-            {
-                if (b.Length < 4) return b;
-                var at = rnd.Next(b.Length - 3);
-                var v = new[] { int.MaxValue, -1, int.MinValue, 0, 0x10000000 }[rnd.Next(5)];
-                if (rnd.Next(2) == 0) System.Buffers.Binary.BinaryPrimitives.WriteInt32LittleEndian(b.AsSpan(at), v);
-                else System.Buffers.Binary.BinaryPrimitives.WriteInt32BigEndian(b.AsSpan(at), v);
-                return b;
-            }
+                {
+                    if (b.Length < 4) return b;
+                    var at = rnd.Next(b.Length - 3);
+                    var v = new[] { int.MaxValue, -1, int.MinValue, 0, 0x10000000 }[rnd.Next(5)];
+                    if (rnd.Next(2) == 0) System.Buffers.Binary.BinaryPrimitives.WriteInt32LittleEndian(b.AsSpan(at), v);
+                    else System.Buffers.Binary.BinaryPrimitives.WriteInt32BigEndian(b.AsSpan(at), v);
+                    return b;
+                }
             default: // hostile Avro varint (zig-zag 0x7f.. huge positive / negative)
-            {
-                var at = rnd.Next(b.Length);
-                byte[] varint = rnd.Next(2) == 0 ? [0xFE, 0xFF, 0xFF, 0xFF, 0x0F] : [0xFF, 0xFF, 0xFF, 0xFF, 0xFF, 0xFF, 0xFF, 0xFF, 0xFF, 0x01];
-                return [.. b[..at], .. varint, .. b[Math.Min(b.Length, at + varint.Length)..]];
-            }
+                {
+                    var at = rnd.Next(b.Length);
+                    byte[] varint = rnd.Next(2) == 0 ? [0xFE, 0xFF, 0xFF, 0xFF, 0x0F] : [0xFF, 0xFF, 0xFF, 0xFF, 0xFF, 0xFF, 0xFF, 0xFF, 0xFF, 0x01];
+                    return [.. b[..at], .. varint, .. b[Math.Min(b.Length, at + varint.Length)..]];
+                }
         }
     }
 

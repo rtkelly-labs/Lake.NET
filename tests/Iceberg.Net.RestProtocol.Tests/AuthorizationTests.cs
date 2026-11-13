@@ -61,16 +61,20 @@ public sealed class AuthorizationTests : ServerTest
             {
                 ["requirements"] = new System.Text.Json.Nodes.JsonArray(new System.Text.Json.Nodes.JsonObject { ["type"] = "assert-table-uuid", ["uuid"] = uuid }),
                 ["updates"] = new System.Text.Json.Nodes.JsonArray(new System.Text.Json.Nodes.JsonObject
-                    { ["action"] = "set-properties", ["updates"] = new System.Text.Json.Nodes.JsonObject { ["by"] = principal } }),
+                { ["action"] = "set-properties", ["updates"] = new System.Text.Json.Nodes.JsonObject { ["by"] = principal } }),
             }),
             "drop-table" => await api.DeleteAsync($"v1/namespaces/{Ns("sales")}/tables/orders"),
             "create-namespace" => await api.PostAsync("v1/namespaces", Rest.CreateNamespace($"ns_{principal}")),
             "update-properties" => await api.PostAsync($"v1/namespaces/{Ns("sales")}/properties", new System.Text.Json.Nodes.JsonObject
-                { ["updates"] = new System.Text.Json.Nodes.JsonObject { ["k"] = "v" } }),
+            { ["updates"] = new System.Text.Json.Nodes.JsonObject { ["k"] = "v" } }),
             "report-metrics" => await api.PostAsync($"v1/namespaces/{Ns("sales")}/tables/orders/metrics", new System.Text.Json.Nodes.JsonObject
             {
-                ["report-type"] = "commit-report", ["table-name"] = "sales.orders", ["snapshot-id"] = 1, ["sequence-number"] = 1,
-                ["operation"] = "append", ["metrics"] = new System.Text.Json.Nodes.JsonObject(),
+                ["report-type"] = "commit-report",
+                ["table-name"] = "sales.orders",
+                ["snapshot-id"] = 1,
+                ["sequence-number"] = 1,
+                ["operation"] = "append",
+                ["metrics"] = new System.Text.Json.Nodes.JsonObject(),
             }),
             _ => throw new ArgumentOutOfRangeException(nameof(operation)),
         };

@@ -28,7 +28,8 @@ public sealed class AthenaSqlOnTrinoTests : IAsyncLifetime
 
     private static readonly Dictionary<string, string> NoMinimumRetention = new()
     {
-        ["iceberg.expire_snapshots_min_retention"] = "0s", ["iceberg.remove_orphan_files_min_retention"] = "0s",
+        ["iceberg.expire_snapshots_min_retention"] = "0s",
+        ["iceberg.remove_orphan_files_min_retention"] = "0s",
     };
 
     private readonly Namespace _ns = Namespace.Of(TestEnvironment.Current.NewNamespace("athena_trino"));

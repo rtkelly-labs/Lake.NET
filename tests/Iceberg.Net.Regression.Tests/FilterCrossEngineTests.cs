@@ -66,9 +66,12 @@ public sealed class FilterCrossEngineTests : IDisposable
         if (op == "starts_with") lit = ((string)lit)[..Math.Min(((string)lit).Length, rnd.Next(1, 8))];
         Expression ours = op switch
         {
-            "lt" => Expr.LessThan(column, lit), "lt_eq" => Expr.LessThanOrEqual(column, lit),
-            "gt" => Expr.GreaterThan(column, lit), "gt_eq" => Expr.GreaterThanOrEqual(column, lit),
-            "eq" => Expr.Equal(column, lit), "not_eq" => Expr.NotEqual(column, lit),
+            "lt" => Expr.LessThan(column, lit),
+            "lt_eq" => Expr.LessThanOrEqual(column, lit),
+            "gt" => Expr.GreaterThan(column, lit),
+            "gt_eq" => Expr.GreaterThanOrEqual(column, lit),
+            "eq" => Expr.Equal(column, lit),
+            "not_eq" => Expr.NotEqual(column, lit),
             _ => Expr.StartsWith(column, (string)lit),
         };
         var filter = new Filter(ours, new JsonObject { ["op"] = op, ["term"] = column, ["value"] = ToJson(lit) }, ours.ToString()!);
