@@ -1,1 +1,2 @@
-global using Xunit;global using Iceberg.Net.TestSupport;
+global using Xunit;
+global using Iceberg.Net.TestSupport;

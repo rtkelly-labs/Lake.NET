@@ -106,13 +106,22 @@ public sealed class AuthenticatingMoto : IAsyncDisposable
         var moto = new AuthenticatingMoto(name, endpoint, Field("AccessKeyId"), Field("SecretAccessKey"), "signed-warehouse");
         using var io = new S3FileIO(new S3FileIOOptions
         {
-            Endpoint = endpoint, PathStyleAccess = true, Region = Region, AccessKeyId = moto.AccessKeyId, SecretAccessKey = moto.SecretAccessKey,
+            Endpoint = endpoint,
+            PathStyleAccess = true,
+            Region = Region,
+            AccessKeyId = moto.AccessKeyId,
+            SecretAccessKey = moto.SecretAccessKey,
         });
         await io.Client.PutBucketAsync(moto.Bucket);
         // Authentication is on now: a request signed with the wrong secret is refused.
         using var forged = new S3FileIO(new S3FileIOOptions
         {
-            Endpoint = endpoint, PathStyleAccess = true, Region = Region, AccessKeyId = moto.AccessKeyId, SecretAccessKey = "not-the-secret", MaxRetries = 0,
+            Endpoint = endpoint,
+            PathStyleAccess = true,
+            Region = Region,
+            AccessKeyId = moto.AccessKeyId,
+            SecretAccessKey = "not-the-secret",
+            MaxRetries = 0,
         });
         var refused = await Assert.ThrowsAsync<AmazonS3Exception>(() => forged.Client.GetObjectMetadataAsync(moto.Bucket, "probe"));
         Assert.Equal(HttpStatusCode.Forbidden, refused.StatusCode);

@@ -70,7 +70,9 @@ public sealed class ExpressionTests
 
     private static DataFile File(long? lower, long? upper, long nulls = 0, long values = 10) => new()
     {
-        FilePath = "f", RecordCount = values, FileSizeInBytes = 1,
+        FilePath = "f",
+        RecordCount = values,
+        FileSizeInBytes = 1,
         ValueCounts = new Dictionary<int, long> { [1] = values, [2] = values },
         NullValueCounts = new Dictionary<int, long> { [1] = 0, [2] = nulls },
         LowerBounds = lower is null ? null : new Dictionary<int, byte[]> { [1] = Conversions.ToBytes(PrimitiveType.Long, lower.Value) },
@@ -105,7 +107,9 @@ public sealed class ExpressionTests
     {
         var f = new DataFile
         {
-            FilePath = "f", RecordCount = 3, FileSizeInBytes = 1,
+            FilePath = "f",
+            RecordCount = 3,
+            FileSizeInBytes = 1,
             LowerBounds = new Dictionary<int, byte[]> { [2] = Conversions.ToBytes(PrimitiveType.String, "banana") },
             UpperBounds = new Dictionary<int, byte[]> { [2] = Conversions.ToBytes(PrimitiveType.String, "cherry") },
         };

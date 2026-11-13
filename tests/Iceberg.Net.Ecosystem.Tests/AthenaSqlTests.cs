@@ -46,7 +46,9 @@ public sealed class AthenaSqlTests
         var spec = PartitionSpec.BuilderFor(Schema).Day("event_ts").Bucket("id", 16).Truncate("name", 4).Build();
         var sql = AthenaSql.CreateTable(Events, Schema, "s3://lake/analytics/events", spec, new AthenaIcebergProperties
         {
-            VacuumMaxSnapshotAgeSeconds = 86400, OptimizeRewriteDeleteFileThreshold = 10, WriteCompression = "zstd",
+            VacuumMaxSnapshotAgeSeconds = 86400,
+            OptimizeRewriteDeleteFileThreshold = 10,
+            WriteCompression = "zstd",
         });
         Assert.Equal("""
             CREATE TABLE `analytics`.`events` (
@@ -163,7 +165,10 @@ public sealed class AthenaSqlTests
                 : new GetQueryResultsResponse { ResultSet = new ResultSet { ResultSetMetadata = columns, Rows = [Row("2", null)] } });
         var runner = new AthenaQueryRunner(athena, new AthenaQueryOptions
         {
-            WorkGroup = "wg", OutputLocation = "s3://results/", Database = "analytics", PollInterval = TimeSpan.FromMilliseconds(1),
+            WorkGroup = "wg",
+            OutputLocation = "s3://results/",
+            Database = "analytics",
+            PollInterval = TimeSpan.FromMilliseconds(1),
         });
 
         var result = await runner.RunAsync(AthenaSql.Select(Events, ["id", "name"]));

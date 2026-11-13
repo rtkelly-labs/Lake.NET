@@ -10,6 +10,7 @@ using Iceberg.Net.Puffin;
 using Iceberg.Net.Types;
 
 namespace Iceberg.Net.Data;
+
 public sealed record CommitRetryPolicy(int NumRetries = 4, int MinWaitMs = 100, int MaxWaitMs = 60_000)
 {
     /// <summary>From table properties <c>commit.retry.*</c>, as Java reads them.</summary>

@@ -77,26 +77,29 @@ internal sealed class PredicateTranslator
             case ConstantExpression { Value: bool b }:
                 return new(b ? IcebergExpression.True : IcebergExpression.False, true);
             case BinaryExpression { NodeType: ExpressionType.AndAlso or ExpressionType.And } a when a.Type == typeof(bool):
-            {
-                var l = Visit(a.Left);
-                var r = Visit(a.Right);
-                return new(Expr.And(l.Filter, r.Filter), l.Exact && r.Exact);
-            }
+                {
+                    var l = Visit(a.Left);
+                    var r = Visit(a.Right);
+                    return new(Expr.And(l.Filter, r.Filter), l.Exact && r.Exact);
+                }
             case BinaryExpression { NodeType: ExpressionType.OrElse or ExpressionType.Or } o when o.Type == typeof(bool):
-            {
-                // A superset of (a or b) needs a superset of both sides: one untranslatable side makes the whole OR unfilterable.
-                var l = Visit(o.Left);
-                var r = Visit(o.Right);
-                return new(Expr.Or(l.Filter, r.Filter), l.Exact && r.Exact);
-            }
+                {
+                    // A superset of (a or b) needs a superset of both sides: one untranslatable side makes the whole OR unfilterable.
+                    var l = Visit(o.Left);
+                    var r = Visit(o.Right);
+                    return new(Expr.Or(l.Filter, r.Filter), l.Exact && r.Exact);
+                }
             case UnaryExpression { NodeType: ExpressionType.Not } n when n.Type == typeof(bool):
+                {
+                    // Only an exact filter can be negated: the complement of a superset is not a superset of the complement.
+                    var inner = Visit(n.Operand);
+                    return inner.Exact ? new(Negate(inner.Filter), true) : Translation.None;
+                }
+            case BinaryExpression
             {
-                // Only an exact filter can be negated: the complement of a superset is not a superset of the complement.
-                var inner = Visit(n.Operand);
-                return inner.Exact ? new(Negate(inner.Filter), true) : Translation.None;
-            }
-            case BinaryExpression { NodeType: ExpressionType.Equal or ExpressionType.NotEqual or ExpressionType.LessThan or ExpressionType.LessThanOrEqual
-                or ExpressionType.GreaterThan or ExpressionType.GreaterThanOrEqual } c:
+                NodeType: ExpressionType.Equal or ExpressionType.NotEqual or ExpressionType.LessThan or ExpressionType.LessThanOrEqual
+                or ExpressionType.GreaterThan or ExpressionType.GreaterThanOrEqual
+            } c:
                 return Comparison(c.NodeType, c.Left, c.Right);
             case MemberExpression { Member.Name: "HasValue" } hv when hv.Expression is { } target && Nullable.GetUnderlyingType(target.Type) is not null:
                 return ColumnOf(target) is { } col ? NullCheck(col, isNull: false) : null;

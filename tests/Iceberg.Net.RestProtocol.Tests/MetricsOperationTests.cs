@@ -7,8 +7,12 @@ public sealed class MetricsOperationTests : ServerTest
 {
     private static JsonObject CommitReport() => new()
     {
-        ["report-type"] = "commit-report", ["table-name"] = "sales.orders", ["snapshot-id"] = 1, ["sequence-number"] = 1,
-        ["operation"] = "append", ["metrics"] = new JsonObject(),
+        ["report-type"] = "commit-report",
+        ["table-name"] = "sales.orders",
+        ["snapshot-id"] = 1,
+        ["sequence-number"] = 1,
+        ["operation"] = "append",
+        ["metrics"] = new JsonObject(),
     };
 
     [Spec("rest: reportMetrics")]

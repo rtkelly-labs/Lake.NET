@@ -16,29 +16,29 @@ public static class Conversions
         {
             case (TypeId.Boolean, bool b): return [(byte)(b ? 1 : 0)];
             case (TypeId.Int or TypeId.Date, int i):
-            {
-                var buf = new byte[4];
-                BinaryPrimitives.WriteInt32LittleEndian(buf, i);
-                return buf;
-            }
+                {
+                    var buf = new byte[4];
+                    BinaryPrimitives.WriteInt32LittleEndian(buf, i);
+                    return buf;
+                }
             case (TypeId.Long or TypeId.Time or TypeId.Timestamp or TypeId.TimestampTz or TypeId.TimestampNs or TypeId.TimestampTzNs, long l):
-            {
-                var buf = new byte[8];
-                BinaryPrimitives.WriteInt64LittleEndian(buf, l);
-                return buf;
-            }
+                {
+                    var buf = new byte[8];
+                    BinaryPrimitives.WriteInt64LittleEndian(buf, l);
+                    return buf;
+                }
             case (TypeId.Float, float f):
-            {
-                var buf = new byte[4];
-                Compat.WriteSingle(buf, f);
-                return buf;
-            }
+                {
+                    var buf = new byte[4];
+                    Compat.WriteSingle(buf, f);
+                    return buf;
+                }
             case (TypeId.Double, double d):
-            {
-                var buf = new byte[8];
-                Compat.WriteDouble(buf, d);
-                return buf;
-            }
+                {
+                    var buf = new byte[8];
+                    Compat.WriteDouble(buf, d);
+                    return buf;
+                }
             case (TypeId.String, string s): return Encoding.UTF8.GetBytes(s);
             case (TypeId.Uuid, Guid g): return g.ToByteArray(bigEndian: true);
             case (TypeId.Fixed or TypeId.Binary, byte[] b): return b;

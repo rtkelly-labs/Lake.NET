@@ -176,9 +176,9 @@ public sealed class LocationPolicyTests : IAsyncLifetime
     public async Task Namespace_locations_stay_in_allowed_storage_and_clear_of_other_namespaces()
     {
         await AssertRefusedAsync("/v1/namespaces", new JsonObject
-            { ["namespace"] = new JsonArray("ops"), ["properties"] = new JsonObject { ["location"] = "s3://another-bucket/ops" } });
+        { ["namespace"] = new JsonArray("ops"), ["properties"] = new JsonObject { ["location"] = "s3://another-bucket/ops" } });
         await AssertRefusedAsync("/v1/namespaces", new JsonObject
-            { ["namespace"] = new JsonArray("ops"), ["properties"] = new JsonObject { ["location"] = Wh("hr", "ops") } });
+        { ["namespace"] = new JsonArray("ops"), ["properties"] = new JsonObject { ["location"] = Wh("hr", "ops") } });
         Assert.False(await _catalog.NamespaceExistsAsync(Namespace.Of("ops")));
 
         await _catalog.CreateTableAsync(new CreateTableRequest(TableIdentifier.Of("sales", "orders"), ScanPlanningTests.Schema));

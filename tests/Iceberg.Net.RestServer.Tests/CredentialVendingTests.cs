@@ -179,7 +179,9 @@ public sealed class CredentialVendingTests
         Skip.If(env.Target != Target.Emulation, "moto STS only in emulation");
         var s3 = new Dictionary<string, string>
         {
-            ["s3.endpoint"] = env.S3Endpoint!, ["s3.path-style-access"] = "true", ["client.region"] = env.Region,
+            ["s3.endpoint"] = env.S3Endpoint!,
+            ["s3.path-style-access"] = "true",
+            ["client.region"] = env.Region,
         };
         var settings = new Dictionary<string, string>
         {
@@ -217,7 +219,9 @@ public sealed class CredentialVendingTests
     {
         using var resp = await http.PostAsync("/v1/oauth/tokens", new FormUrlEncodedContent(new Dictionary<string, string>
         {
-            ["grant_type"] = "client_credentials", ["client_id"] = id, ["client_secret"] = secret,
+            ["grant_type"] = "client_credentials",
+            ["client_id"] = id,
+            ["client_secret"] = secret,
         }));
         return JsonNode.Parse(await resp.Content.ReadAsStringAsync())!["access_token"]!.GetValue<string>();
     }

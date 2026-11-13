@@ -100,7 +100,9 @@ public sealed class RemoteSigningTests
     {
         using var resp = await http.PostAsync("/v1/oauth/tokens", new FormUrlEncodedContent(new Dictionary<string, string>
         {
-            ["grant_type"] = "client_credentials", ["client_id"] = id, ["client_secret"] = secret,
+            ["grant_type"] = "client_credentials",
+            ["client_id"] = id,
+            ["client_secret"] = secret,
         }));
         return JsonNode.Parse(await resp.Content.ReadAsStringAsync())!["access_token"]!.GetValue<string>();
     }

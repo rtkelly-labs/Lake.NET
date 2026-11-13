@@ -51,8 +51,12 @@ public sealed class ServerScanPlanningTests : IDisposable
             Calls.Add($"{request.Method} {path}");
             if (Override?.Invoke(path) is { } overridden) return overridden;
             if (path.EndsWith("/v1/config", StringComparison.Ordinal))
-                return Json(new JsonObject { ["defaults"] = new JsonObject(), ["overrides"] = new JsonObject(),
-                    ["endpoints"] = new JsonArray(advertise ? ["GET /v1/{prefix}/namespaces/{namespace}/tables/{table}", "POST /v1/{prefix}/namespaces/{namespace}/tables/{table}/plan"] : ["GET /v1/{prefix}/namespaces/{namespace}/tables/{table}"]) });
+                return Json(new JsonObject
+                {
+                    ["defaults"] = new JsonObject(),
+                    ["overrides"] = new JsonObject(),
+                    ["endpoints"] = new JsonArray(advertise ? ["GET /v1/{prefix}/namespaces/{namespace}/tables/{table}", "POST /v1/{prefix}/namespaces/{namespace}/tables/{table}/plan"] : ["GET /v1/{prefix}/namespaces/{namespace}/tables/{table}"])
+                });
             if (request.Method == HttpMethod.Get && path.EndsWith("/tables/t", StringComparison.Ordinal))
                 return Json(new JsonObject { ["metadata-location"] = metadataLocation, ["metadata"] = JsonNode.Parse(metadataJson) });
             if (request.Method == HttpMethod.Post && path.EndsWith("/tables/t/plan", StringComparison.Ordinal))

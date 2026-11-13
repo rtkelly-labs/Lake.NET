@@ -22,8 +22,12 @@ public sealed class RestClientCredentialTests
         string? token = "t", bool allowInsecure = false) =>
         RestCatalog.ConnectAsync(new RestCatalogOptions
         {
-            Uri = new Uri(uri), Token = token, Handler = new ConfigServer(overrides), AccessDelegation = null,
-            AllowServerStorageEndpoint = allowEndpoint, AllowInsecureCredentials = allowInsecure,
+            Uri = new Uri(uri),
+            Token = token,
+            Handler = new ConfigServer(overrides),
+            AccessDelegation = null,
+            AllowServerStorageEndpoint = allowEndpoint,
+            AllowInsecureCredentials = allowInsecure,
             Properties = properties ?? new Dictionary<string, string>(),
         });
 
@@ -61,7 +65,9 @@ public sealed class RestClientCredentialTests
         // Config names a non-AWS endpoint; the client asked for vended credentials, so connecting is fine.
         using var catalog = await RestCatalog.ConnectAsync(new RestCatalogOptions
         {
-            Uri = new Uri("https://catalog.example/"), Token = "t", Handler = new ConfigServer("\"s3.endpoint\":\"http://minio.example:9000\""),
+            Uri = new Uri("https://catalog.example/"),
+            Token = "t",
+            Handler = new ConfigServer("\"s3.endpoint\":\"http://minio.example:9000\""),
             AccessDelegation = "vended-credentials",
         });
         Assert.Equal("http://minio.example:9000", catalog.Properties["s3.endpoint"]);
