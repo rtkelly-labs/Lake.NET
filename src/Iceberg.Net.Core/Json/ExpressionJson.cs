@@ -17,10 +17,20 @@ public static class ExpressionJson
 {
     private static readonly Dictionary<Operation, string> Names = new()
     {
-        [Operation.IsNull] = "is-null", [Operation.NotNull] = "not-null", [Operation.IsNaN] = "is-nan", [Operation.NotNaN] = "not-nan",
-        [Operation.Lt] = "lt", [Operation.LtEq] = "lt-eq", [Operation.Gt] = "gt", [Operation.GtEq] = "gt-eq",
-        [Operation.Eq] = "eq", [Operation.NotEq] = "not-eq", [Operation.In] = "in", [Operation.NotIn] = "not-in",
-        [Operation.StartsWith] = "starts-with", [Operation.NotStartsWith] = "not-starts-with",
+        [Operation.IsNull] = "is-null",
+        [Operation.NotNull] = "not-null",
+        [Operation.IsNaN] = "is-nan",
+        [Operation.NotNaN] = "not-nan",
+        [Operation.Lt] = "lt",
+        [Operation.LtEq] = "lt-eq",
+        [Operation.Gt] = "gt",
+        [Operation.GtEq] = "gt-eq",
+        [Operation.Eq] = "eq",
+        [Operation.NotEq] = "not-eq",
+        [Operation.In] = "in",
+        [Operation.NotIn] = "not-in",
+        [Operation.StartsWith] = "starts-with",
+        [Operation.NotStartsWith] = "not-starts-with",
     };
 
     private static readonly Dictionary<string, Operation> Ops = Names.ToDictionary(kv => kv.Value, kv => kv.Key);

@@ -149,7 +149,8 @@ public static partial class TableMutations
             var producer = SnapshotProducer.RowDelta(table).WithRetries(0);
             await StageChangesAsync(table, producer, found, resolved, null, [], ct);
             return (producer, found.Sum(m => (long)m.Replacements.Count));
-        });
+        }
+        );
     }
 
     /// <summary>
@@ -272,7 +273,8 @@ public static partial class TableMutations
                 ? new Matcher(key, new KeySet(hit, hitTuples), null, Expression.True) : null;
             await StageChangesAsync(table, producer, found, resolved, equality, inserts, ct);
             return (producer, (updated, deleted, (long)inserts.Count));
-        });
+        }
+        );
     }
 
     /// <summary>

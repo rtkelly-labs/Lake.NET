@@ -125,7 +125,12 @@ public sealed class ContentStatsLayoutTests
         var statsType = ContentStatsLayout.StatsStruct(field)!;
         var stats = new ColumnStats
         {
-            FieldId = 3, Type = type, LowerBound = lower, UpperBound = upper, ValueCount = 5, NullValueCount = 1,
+            FieldId = 3,
+            Type = type,
+            LowerBound = lower,
+            UpperBound = upper,
+            ValueCount = 5,
+            NullValueCount = 1,
             NanValueCount = type.TypeId is TypeId.Float or TypeId.Double ? 0 : null,
             TightBounds = type.TypeId is TypeId.Geometry or TypeId.Geography ? null : true,
             TotalBytes = statsType.Fields.Any(f => f.Name == "total_bytes") ? 64 : null,

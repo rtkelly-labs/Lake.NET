@@ -269,7 +269,8 @@ public sealed class ScanPlanner(CatalogService catalog, ScanPlanningOptions opti
         if (groups.Count <= 1)
             return await AppendTasksAsync(table, appends, groups.FirstOrDefault() ?? [], schema, filter, statsFields?.ToHashSet(), ct);
         var tokens = groups.Select(g => (JsonNode)new PlanTaskToken(m.TableUuid, endId, g.Select(mf => mf.ManifestPath).ToList(), filter,
-            request.UseSnapshotSchema, statsFields) { Incremental = true, StartSnapshotId = request.StartSnapshotId }.Encode()).ToArray();
+            request.UseSnapshotSchema, statsFields)
+        { Incremental = true, StartSnapshotId = request.StartSnapshotId }.Encode()).ToArray();
         return new JsonObject { ["plan-tasks"] = new JsonArray(tokens) };
     }
 

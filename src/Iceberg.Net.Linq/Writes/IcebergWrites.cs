@@ -271,17 +271,17 @@ public static class IcebergWrites
             switch (value)
             {
                 case LambdaExpression { Parameters.Count: 1 } fromTarget:
-                {
-                    var f = fromTarget.Compile();
-                    assignments.Add((column, row => member.ToIceberg(f.DynamicInvoke(reader.Read(row))), null));
-                    break;
-                }
+                    {
+                        var f = fromTarget.Compile();
+                        assignments.Add((column, row => member.ToIceberg(f.DynamicInvoke(reader.Read(row))), null));
+                        break;
+                    }
                 case LambdaExpression { Parameters.Count: 2 } fromBoth when merge is not null:
-                {
-                    var f = fromBoth.Compile();
-                    assignments.Add((column, row => member.ToIceberg(f.DynamicInvoke(reader.Read(row), merge.SourceFor(row))), null));
-                    break;
-                }
+                    {
+                        var f = fromBoth.Compile();
+                        assignments.Add((column, row => member.ToIceberg(f.DynamicInvoke(reader.Read(row), merge.SourceFor(row))), null));
+                        break;
+                    }
                 case ConstantExpression c:
                     assignments.Add((column, null, member.ToIceberg(c.Value)));
                     break;

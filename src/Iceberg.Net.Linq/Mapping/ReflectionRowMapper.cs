@@ -119,58 +119,58 @@ internal sealed class StructBinding
         switch (type)
         {
             case PrimitiveType p:
-            {
-                var scalar = ValueConversions.For(clr, p)
-                    ?? throw new InvalidOperationException($"Column '{column}' is {p}; a {Describe(clr)} member cannot hold it (see docs/linq.md for the supported pairs)");
-                Func<object?, object?> read = v => v is null ? null : scalar.From(v);
-                return new(v => v is null ? null : scalar.To(v), read, t =>
                 {
-                    if (t.Equals(p)) return read;
-                    var other = t is PrimitiveType tp ? ValueConversions.For(clr, tp) : null;
-                    if (other is null) throw new InvalidOperationException($"Column '{column}' is {t} in the schema read; a {Describe(clr)} member cannot hold it");
-                    return v => v is null ? null : other.From(v);
-                }, null);
-            }
-            case StructType s:
-            {
-                if (ValueConversions.IsScalar(clr) || TypeModel.ListElement(clr) is not null || TypeModel.MapTypes(clr) is not null)
-                    throw new InvalidOperationException($"Column '{column}' is a struct; a {Describe(clr)} member cannot hold it");
-                var nested = Create(ValueConversions.Underlying(clr), s.Fields, mapped, options, column + ".");
-                Func<object?, object?> Reader(StructType st)
-                {
-                    var r = nested.CreateReader(st.Fields);
-                    return v => v is null ? null : r((object?[])v);
+                    var scalar = ValueConversions.For(clr, p)
+                        ?? throw new InvalidOperationException($"Column '{column}' is {p}; a {Describe(clr)} member cannot hold it (see docs/linq.md for the supported pairs)");
+                    Func<object?, object?> read = v => v is null ? null : scalar.From(v);
+                    return new(v => v is null ? null : scalar.To(v), read, t =>
+                    {
+                        if (t.Equals(p)) return read;
+                        var other = t is PrimitiveType tp ? ValueConversions.For(clr, tp) : null;
+                        if (other is null) throw new InvalidOperationException($"Column '{column}' is {t} in the schema read; a {Describe(clr)} member cannot hold it");
+                        return v => v is null ? null : other.From(v);
+                    }, null);
                 }
-                var read = Reader(s);
-                return new(v => v is null ? null : nested.ToRow(v), read,
-                    t => t.Equals(s) ? read : Reader(t as StructType ?? throw new InvalidOperationException($"Column '{column}' is {t} in the schema read, not a struct")),
-                    nested.Members);
-            }
+            case StructType s:
+                {
+                    if (ValueConversions.IsScalar(clr) || TypeModel.ListElement(clr) is not null || TypeModel.MapTypes(clr) is not null)
+                        throw new InvalidOperationException($"Column '{column}' is a struct; a {Describe(clr)} member cannot hold it");
+                    var nested = Create(ValueConversions.Underlying(clr), s.Fields, mapped, options, column + ".");
+                    Func<object?, object?> Reader(StructType st)
+                    {
+                        var r = nested.CreateReader(st.Fields);
+                        return v => v is null ? null : r((object?[])v);
+                    }
+                    var read = Reader(s);
+                    return new(v => v is null ? null : nested.ToRow(v), read,
+                        t => t.Equals(s) ? read : Reader(t as StructType ?? throw new InvalidOperationException($"Column '{column}' is {t} in the schema read, not a struct")),
+                        nested.Members);
+                }
             case ListType l:
-            {
-                var element = TypeModel.ListElement(clr) ?? throw new InvalidOperationException($"Column '{column}' is a list; a {Describe(clr)} member cannot hold it");
-                var e = Converters(element, l.ElementType, mapped?.FirstOrDefault(x => x.FieldId == l.ElementId)?.Fields, options, column + ".element");
-                var make = TypeModel.ListFactory(clr, element);
-                Func<object?, object?> Reader(Func<object?, object?> er) => v => v is null ? null : make(((IEnumerable)v).Cast<object?>().Select(er));
-                var read = Reader(e.Read);
-                return new(v => v is null ? null : ((IEnumerable)v).Cast<object?>().Select(e.Write).ToList(), read,
-                    t => t.Equals(l) ? read : Reader(e.ReadFor((t as ListType ?? throw new InvalidOperationException($"Column '{column}' is {t} in the schema read, not a list")).ElementType)),
-                    null);
-            }
+                {
+                    var element = TypeModel.ListElement(clr) ?? throw new InvalidOperationException($"Column '{column}' is a list; a {Describe(clr)} member cannot hold it");
+                    var e = Converters(element, l.ElementType, mapped?.FirstOrDefault(x => x.FieldId == l.ElementId)?.Fields, options, column + ".element");
+                    var make = TypeModel.ListFactory(clr, element);
+                    Func<object?, object?> Reader(Func<object?, object?> er) => v => v is null ? null : make(((IEnumerable)v).Cast<object?>().Select(er));
+                    var read = Reader(e.Read);
+                    return new(v => v is null ? null : ((IEnumerable)v).Cast<object?>().Select(e.Write).ToList(), read,
+                        t => t.Equals(l) ? read : Reader(e.ReadFor((t as ListType ?? throw new InvalidOperationException($"Column '{column}' is {t} in the schema read, not a list")).ElementType)),
+                        null);
+                }
             case MapType mt:
-            {
-                var kv = TypeModel.MapTypes(clr) ?? throw new InvalidOperationException($"Column '{column}' is a map; a {Describe(clr)} member cannot hold it");
-                var k = Converters(kv.Key, mt.KeyType, mapped?.FirstOrDefault(x => x.FieldId == mt.KeyId)?.Fields, options, column + ".key");
-                var val = Converters(kv.Value, mt.ValueType, mapped?.FirstOrDefault(x => x.FieldId == mt.ValueId)?.Fields, options, column + ".value");
-                var makeMap = TypeModel.MapFactory(kv.Key, kv.Value);
-                Func<object?, object?> Reader(Func<object?, object?> kr, Func<object?, object?> vr) =>
-                    v => v is null ? null : makeMap(Entries(v).Select(e => new KeyValuePair<object, object?>(kr(e.Key)!, vr(e.Value))));
-                var read = Reader(k.Read, val.Read);
-                return new(v => v is null ? null : Entries(v).ToDictionary(e => k.Write(e.Key)!, e => val.Write(e.Value)), read,
-                    t => t.Equals(mt) ? read : t is MapType other ? Reader(k.ReadFor(other.KeyType), val.ReadFor(other.ValueType))
-                        : throw new InvalidOperationException($"Column '{column}' is {t} in the schema read, not a map"),
-                    null);
-            }
+                {
+                    var kv = TypeModel.MapTypes(clr) ?? throw new InvalidOperationException($"Column '{column}' is a map; a {Describe(clr)} member cannot hold it");
+                    var k = Converters(kv.Key, mt.KeyType, mapped?.FirstOrDefault(x => x.FieldId == mt.KeyId)?.Fields, options, column + ".key");
+                    var val = Converters(kv.Value, mt.ValueType, mapped?.FirstOrDefault(x => x.FieldId == mt.ValueId)?.Fields, options, column + ".value");
+                    var makeMap = TypeModel.MapFactory(kv.Key, kv.Value);
+                    Func<object?, object?> Reader(Func<object?, object?> kr, Func<object?, object?> vr) =>
+                        v => v is null ? null : makeMap(Entries(v).Select(e => new KeyValuePair<object, object?>(kr(e.Key)!, vr(e.Value))));
+                    var read = Reader(k.Read, val.Read);
+                    return new(v => v is null ? null : Entries(v).ToDictionary(e => k.Write(e.Key)!, e => val.Write(e.Value)), read,
+                        t => t.Equals(mt) ? read : t is MapType other ? Reader(k.ReadFor(other.KeyType), val.ReadFor(other.ValueType))
+                            : throw new InvalidOperationException($"Column '{column}' is {t} in the schema read, not a map"),
+                        null);
+                }
             default:
                 throw new InvalidOperationException($"Column '{column}' has unsupported type {type}");
         }

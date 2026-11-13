@@ -113,7 +113,10 @@ public sealed class ManagedSparkJobTests : IAsyncLifetime
     {
         var id = (await emr.CreateApplicationAsync(new Emr.CreateApplicationRequest
         {
-            Name = "iceberg-regression-" + _env.RunId, ReleaseLabel = "emr-7.5.0", Type = "SPARK", ClientToken = Guid.NewGuid().ToString("N"),
+            Name = "iceberg-regression-" + _env.RunId,
+            ReleaseLabel = "emr-7.5.0",
+            Type = "SPARK",
+            ClientToken = Guid.NewGuid().ToString("N"),
         })).ApplicationId;
         _applications.Add(id);
         return id;
@@ -131,8 +134,13 @@ public sealed class ManagedSparkJobTests : IAsyncLifetime
         var stager = new SparkScriptStager(_io!, _staging);
         var runner = new EmrServerlessSqlJobRunner(emr, stager, new EmrServerlessJobOptions
         {
-            ApplicationId = applicationId, ExecutionRoleArn = "arn:aws:iam::123456789012:role/emr-iceberg", StagingPrefix = _staging, Spark = Catalog(),
-            ExtraSparkSubmitParameters = "--conf spark.executor.cores=1", ExecutionTimeoutMinutes = 30, LogUri = _staging + "logs/",
+            ApplicationId = applicationId,
+            ExecutionRoleArn = "arn:aws:iam::123456789012:role/emr-iceberg",
+            StagingPrefix = _staging,
+            Spark = Catalog(),
+            ExtraSparkSubmitParameters = "--conf spark.executor.cores=1",
+            ExecutionTimeoutMinutes = 30,
+            LogUri = _staging + "logs/",
             Tags = new() { ["purpose"] = "iceberg-regression" },
         });
         var script = Maintenance(spark);
@@ -167,7 +175,10 @@ public sealed class ManagedSparkJobTests : IAsyncLifetime
         var applicationId = await CreateEmrApplicationAsync(emr);
         var runner = new EmrServerlessSqlJobRunner(emr, new SparkScriptStager(_io!, _staging), new EmrServerlessJobOptions
         {
-            ApplicationId = applicationId, ExecutionRoleArn = "arn:aws:iam::123456789012:role/emr-iceberg", StagingPrefix = _staging, Spark = Catalog(),
+            ApplicationId = applicationId,
+            ExecutionRoleArn = "arn:aws:iam::123456789012:role/emr-iceberg",
+            StagingPrefix = _staging,
+            Spark = Catalog(),
         });
 
         var run = await runner.SubmitAsync(new SparkSqlScript().Add("SELECT 1"));
@@ -187,7 +198,10 @@ public sealed class ManagedSparkJobTests : IAsyncLifetime
         var applicationId = await CreateEmrApplicationAsync(emr);
         var runner = new EmrServerlessSqlJobRunner(emr, new SparkScriptStager(_io!, _staging), new EmrServerlessJobOptions
         {
-            ApplicationId = applicationId, ExecutionRoleArn = "arn:aws:iam::123456789012:role/emr-iceberg", StagingPrefix = _staging, Spark = Catalog(),
+            ApplicationId = applicationId,
+            ExecutionRoleArn = "arn:aws:iam::123456789012:role/emr-iceberg",
+            StagingPrefix = _staging,
+            Spark = Catalog(),
         });
         var missing = new SparkTable(SparkCatalog, _ns.ToString(), "missing");
 

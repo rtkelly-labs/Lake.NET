@@ -82,44 +82,44 @@ public sealed class TableMetadataBuilder
                 return this; // AddSchema records its own (possibly re-numbered) change
 
             case MetadataUpdate.SetCurrentSchema u:
-            {
-                var id = u.SchemaId == MetadataUpdate.LastAdded ? _lastAddedSchemaId ?? throw new ArgumentException("No schema added in this commit") : u.SchemaId;
-                _m.SchemaById(id);
-                _m = _m with { CurrentSchemaId = id };
-                break;
-            }
+                {
+                    var id = u.SchemaId == MetadataUpdate.LastAdded ? _lastAddedSchemaId ?? throw new ArgumentException("No schema added in this commit") : u.SchemaId;
+                    _m.SchemaById(id);
+                    _m = _m with { CurrentSchemaId = id };
+                    break;
+                }
 
             case MetadataUpdate.AddPartitionSpec u:
                 AddSpec(u.Spec);
                 return this;
 
             case MetadataUpdate.SetDefaultPartitionSpec u:
-            {
-                var id = u.SpecId == MetadataUpdate.LastAdded ? _lastAddedSpecId ?? throw new ArgumentException("No spec added in this commit") : u.SpecId;
-                _m.SpecById(id);
-                _m = _m with { DefaultSpecId = id };
-                break;
-            }
+                {
+                    var id = u.SpecId == MetadataUpdate.LastAdded ? _lastAddedSpecId ?? throw new ArgumentException("No spec added in this commit") : u.SpecId;
+                    _m.SpecById(id);
+                    _m = _m with { DefaultSpecId = id };
+                    break;
+                }
 
             case MetadataUpdate.AddSortOrder u:
-            {
-                var existing = _m.SortOrders.FirstOrDefault(o => o.SameOrder(u.SortOrder));
-                if (existing is not null) { _lastAddedOrderId = existing.OrderId; return this; }
-                var id = u.SortOrder.IsUnsorted ? 0 : Math.Max(1, _m.SortOrders.Max(o => o.OrderId) + 1);
-                var order = new SortOrder(id, u.SortOrder.Fields);
-                _m = _m with { SortOrders = [.. _m.SortOrders, order] };
-                _lastAddedOrderId = id;
-                _changes.Add(new MetadataUpdate.AddSortOrder(order));
-                return this;
-            }
+                {
+                    var existing = _m.SortOrders.FirstOrDefault(o => o.SameOrder(u.SortOrder));
+                    if (existing is not null) { _lastAddedOrderId = existing.OrderId; return this; }
+                    var id = u.SortOrder.IsUnsorted ? 0 : Math.Max(1, _m.SortOrders.Max(o => o.OrderId) + 1);
+                    var order = new SortOrder(id, u.SortOrder.Fields);
+                    _m = _m with { SortOrders = [.. _m.SortOrders, order] };
+                    _lastAddedOrderId = id;
+                    _changes.Add(new MetadataUpdate.AddSortOrder(order));
+                    return this;
+                }
 
             case MetadataUpdate.SetDefaultSortOrder u:
-            {
-                var id = u.SortOrderId == MetadataUpdate.LastAdded ? _lastAddedOrderId ?? throw new ArgumentException("No sort order added in this commit") : u.SortOrderId;
-                if (_m.SortOrders.All(o => o.OrderId != id)) throw new ArgumentException($"Unknown sort order {id}");
-                _m = _m with { DefaultSortOrderId = id };
-                break;
-            }
+                {
+                    var id = u.SortOrderId == MetadataUpdate.LastAdded ? _lastAddedOrderId ?? throw new ArgumentException("No sort order added in this commit") : u.SortOrderId;
+                    if (_m.SortOrders.All(o => o.OrderId != id)) throw new ArgumentException($"Unknown sort order {id}");
+                    _m = _m with { DefaultSortOrderId = id };
+                    break;
+                }
 
             case MetadataUpdate.AddSnapshot u:
                 AddSnapshot(u.Snapshot);
@@ -145,20 +145,20 @@ public sealed class TableMetadataBuilder
                 break;
 
             case MetadataUpdate.SetProperties u:
-            {
-                var props = Compat.Copy(_m.Properties);
-                foreach (var (k, v) in u.Updates) props[k] = v;
-                _m = _m with { Properties = props };
-                break;
-            }
+                {
+                    var props = Compat.Copy(_m.Properties);
+                    foreach (var (k, v) in u.Updates) props[k] = v;
+                    _m = _m with { Properties = props };
+                    break;
+                }
 
             case MetadataUpdate.RemoveProperties u:
-            {
-                var props = Compat.Copy(_m.Properties);
-                foreach (var k in u.Removals) props.Remove(k);
-                _m = _m with { Properties = props };
-                break;
-            }
+                {
+                    var props = Compat.Copy(_m.Properties);
+                    foreach (var k in u.Removals) props.Remove(k);
+                    _m = _m with { Properties = props };
+                    break;
+                }
 
             case MetadataUpdate.SetStatistics u:
                 _m = _m with { Statistics = [.. _m.Statistics.Where(s => s.SnapshotId != u.Statistics.SnapshotId), u.Statistics] };

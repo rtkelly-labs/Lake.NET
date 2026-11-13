@@ -199,8 +199,11 @@ public sealed class ScanPlanningTests
         // stats-fields keeps just those metrics; the filter comes back as each task's residual.
         var filter = ExpressionJson.ToJson(Expr.LessThan("id", 10L));
         var (_, withStats) = await ProtocolTests.SendAsync(http, HttpMethod.Post, $"{path}/tasks",
-            new JsonObject { ["plan-task"] = (await ProtocolTests.SendAsync(http, HttpMethod.Post, $"{path}/plan",
-                new JsonObject { ["filter"] = filter.DeepClone(), ["stats-fields"] = new JsonArray("id") })).Body!["plan-tasks"]![0]!.GetValue<string>() });
+            new JsonObject
+            {
+                ["plan-task"] = (await ProtocolTests.SendAsync(http, HttpMethod.Post, $"{path}/plan",
+                new JsonObject { ["filter"] = filter.DeepClone(), ["stats-fields"] = new JsonArray("id") })).Body!["plan-tasks"]![0]!.GetValue<string>()
+            });
         foreach (var task in withStats!["file-scan-tasks"]!.AsArray())
         {
             Assert.Equal([1], task!["data-file"]!["lower-bounds"]!["keys"]!.AsArray().Select(k => k!.GetValue<int>()));

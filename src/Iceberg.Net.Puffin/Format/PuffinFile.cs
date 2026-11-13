@@ -164,11 +164,11 @@ public static class PuffinFile
         {
             case null: return data.ToArray();
             case "zstd":
-            {
-                using var input = new MemoryStream(data.ToArray(), writable: false);
-                using var zstd = new ZstdSharp.DecompressionStream(input);
-                return Corruption.ReadAtMost(zstd, MaxDecompressedBlobBytes, "Puffin zstd blob");
-            }
+                {
+                    using var input = new MemoryStream(data.ToArray(), writable: false);
+                    using var zstd = new ZstdSharp.DecompressionStream(input);
+                    return Corruption.ReadAtMost(zstd, MaxDecompressedBlobBytes, "Puffin zstd blob");
+                }
             default: throw new NotSupportedException($"Puffin codec '{codec}' (supported: none, zstd)");
         }
     }

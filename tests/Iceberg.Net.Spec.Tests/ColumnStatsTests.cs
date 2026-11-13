@@ -49,7 +49,9 @@ public sealed class ColumnStatsTests
 
     private static DataFile FileWith(int id, byte[]? lower, byte[]? upper) => new()
     {
-        FilePath = "f", RecordCount = 10, FileSizeInBytes = 100,
+        FilePath = "f",
+        RecordCount = 10,
+        FileSizeInBytes = 100,
         ColumnSizes = new Dictionary<int, long> { [id] = 42 },
         ValueCounts = new Dictionary<int, long> { [id] = 10 },
         NullValueCounts = new Dictionary<int, long> { [id] = 1 },
@@ -84,8 +86,14 @@ public sealed class ColumnStatsTests
         var s = Assert.Single(stats.Fields.Values);
         Assert.Equal(new ColumnStats
         {
-            FieldId = 7, Type = type, LowerBound = lower, UpperBound = upper,
-            ValueCount = 10, NullValueCount = 1, NanValueCount = 2, ColumnSize = 42,
+            FieldId = 7,
+            Type = type,
+            LowerBound = lower,
+            UpperBound = upper,
+            ValueCount = 10,
+            NullValueCount = 1,
+            NanValueCount = 2,
+            ColumnSize = 42,
         }, s);
         Assert.Null(s.TightBounds); // v1-v3 cannot say
         Assert.Null(s.RawLowerBound); // canonical bytes: nothing kept aside
@@ -118,8 +126,13 @@ public sealed class ColumnStatsTests
     {
         IcebergType type = typeName switch
         {
-            "long" => PrimitiveType.Long, "double" => PrimitiveType.Double, "decimal" => new DecimalType(9, 2),
-            "boolean" => PrimitiveType.Boolean, "string" => PrimitiveType.String, "int" => PrimitiveType.Int, _ => new GeometryType(),
+            "long" => PrimitiveType.Long,
+            "double" => PrimitiveType.Double,
+            "decimal" => new DecimalType(9, 2),
+            "boolean" => PrimitiveType.Boolean,
+            "string" => PrimitiveType.String,
+            "int" => PrimitiveType.Int,
+            _ => new GeometryType(),
         };
         var file = FileWith(1, Hex(hex), Hex(hex));
         var stats = ContentStats.FromDataFile(file, _ => type);
@@ -152,7 +165,9 @@ public sealed class ColumnStatsTests
         ]);
         var file = new DataFile
         {
-            FilePath = "f", RecordCount = 3, FileSizeInBytes = 1,
+            FilePath = "f",
+            RecordCount = 3,
+            FileSizeInBytes = 1,
             ValueCounts = new Dictionary<int, long> { [1] = 3, [2] = 3, [3] = 3 },
             NullValueCounts = new Dictionary<int, long> { [2] = 1 },
             LowerBounds = new Dictionary<int, byte[]> { [1] = Conversions.ToBytes(PrimitiveType.Long, 1L), [3] = "a"u8.ToArray() },
@@ -207,7 +222,9 @@ public sealed class ColumnStatsTests
             {
                 var file = new DataFile
                 {
-                    FilePath = "f", RecordCount = 4, FileSizeInBytes = 1,
+                    FilePath = "f",
+                    RecordCount = 4,
+                    FileSizeInBytes = 1,
                     ValueCounts = new Dictionary<int, long> { [field.Id] = 4 },
                     NullValueCounts = nulls is { } n ? new Dictionary<int, long> { [field.Id] = n } : null,
                     LowerBounds = nulls == 4 ? null : new Dictionary<int, byte[]> { [field.Id] = Conversions.ToBytes(field.Type, lo) },

@@ -117,7 +117,13 @@ public static class IcebergSchema
             var node = TypeNode(m.Type, info, attr?.Type, options, ctx, visiting, attr?.Name ?? options.NameConverter?.Invoke(m.Name) ?? m.Name, $"{type.Name}.{m.Name}", required);
             nodes.Add(new Node
             {
-                Name = node.Name, Member = m.Name, Id = attr?.Id ?? 0, Required = required, IsKey = m.IsKey, Doc = attr?.Doc, Type = node.Type,
+                Name = node.Name,
+                Member = m.Name,
+                Id = attr?.Id ?? 0,
+                Required = required,
+                IsKey = m.IsKey,
+                Doc = attr?.Doc,
+                Type = node.Type,
             });
             nodes[^1].Children.AddRange(node.Children);
         }
@@ -149,7 +155,9 @@ public static class IcebergSchema
             var value = TypeNode(kv.Value, args?.ElementAtOrDefault(1), null, options, ctx, visiting, "value", where + "[value]", valueRequired);
             var node = new Node
             {
-                Name = name, Member = where, Required = required,
+                Name = name,
+                Member = where,
+                Required = required,
                 Type = n => new MapType(n.Children[0].Id, Build(n.Children[0]), n.Children[1].Id, Build(n.Children[1]), n.Children[1].Required),
             };
             node.Children.Add(key);
@@ -163,7 +171,9 @@ public static class IcebergSchema
             var e = TypeNode(element, elementInfo, null, options, ctx, visiting, "element", where + "[]", elementRequired);
             var node = new Node
             {
-                Name = name, Member = where, Required = required,
+                Name = name,
+                Member = where,
+                Required = required,
                 Type = n => new ListType(n.Children[0].Id, Build(n.Children[0]), n.Children[0].Required),
             };
             node.Children.Add(e);

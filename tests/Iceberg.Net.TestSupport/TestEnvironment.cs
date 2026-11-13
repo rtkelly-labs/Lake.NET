@@ -146,10 +146,14 @@ public sealed class TestEnvironment
             props => new S3FileIO(S3FileIOOptions.FromProperties(props))),
         // Bootstrapped by emulation/polaris_setup.py. No credential vending (no STS): clients bring S3 credentials.
         "polaris" => await RestCatalog.ConnectAsync(new RestCatalogOptions
-            {
-                Uri = PolarisUri, Warehouse = "regression", Credential = "root:s3cr3t", Scope = "PRINCIPAL_ROLE:ALL",
-                AccessDelegation = null, Properties = S3Properties,
-            },
+        {
+            Uri = PolarisUri,
+            Warehouse = "regression",
+            Credential = "root:s3cr3t",
+            Scope = "PRINCIPAL_ROLE:ALL",
+            AccessDelegation = null,
+            Properties = S3Properties,
+        },
             props => new S3FileIO(S3FileIOOptions.FromProperties(props)), "polaris"),
         // Nessie's Iceberg REST API (prefix "main" from its config); no request signing, clients bring S3 credentials.
         "nessie" => await RestCatalog.ConnectAsync(new RestCatalogOptions { Uri = NessieUri, AccessDelegation = null, Properties = S3Properties },

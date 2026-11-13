@@ -77,7 +77,9 @@ internal sealed class Rest(HttpClient http, string? token = null)
         ["schema"] = Schema(),
         ["view-version"] = new JsonObject
         {
-            ["version-id"] = 1, ["timestamp-ms"] = 1_700_000_000_000, ["schema-id"] = 0,
+            ["version-id"] = 1,
+            ["timestamp-ms"] = 1_700_000_000_000,
+            ["schema-id"] = 0,
             ["summary"] = new JsonObject { ["engine-name"] = "tests" },
             ["representations"] = new JsonArray(new JsonObject { ["type"] = "sql", ["sql"] = "SELECT 1 AS id, 'a' AS name", ["dialect"] = "spark" }),
             ["default-namespace"] = new JsonArray(),
@@ -104,7 +106,10 @@ internal sealed class Rest(HttpClient http, string? token = null)
     {
         var resp = await host.Http().PostAsync("v1/oauth/tokens", new FormUrlEncodedContent(new Dictionary<string, string>
         {
-            ["grant_type"] = "client_credentials", ["client_id"] = client, ["client_secret"] = secret, ["scope"] = "catalog",
+            ["grant_type"] = "client_credentials",
+            ["client_id"] = client,
+            ["client_secret"] = secret,
+            ["scope"] = "catalog",
         }));
         resp.EnsureSuccessStatusCode();
         return JsonNode.Parse(await resp.Content.ReadAsStringAsync())!["access_token"]!.GetValue<string>();

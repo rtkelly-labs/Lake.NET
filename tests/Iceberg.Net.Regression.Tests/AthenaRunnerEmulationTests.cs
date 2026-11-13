@@ -41,8 +41,13 @@ public sealed class AthenaRunnerEmulationTests
 
     private AthenaQueryRunner Runner(IAmazonAthena athena) => new(athena, new AthenaQueryOptions
     {
-        WorkGroup = "primary", OutputLocation = _output, Catalog = "AwsDataCatalog", Database = "analytics",
-        PollInterval = TimeSpan.FromMilliseconds(10), MaxPollInterval = TimeSpan.FromMilliseconds(40), Timeout = TimeSpan.FromMinutes(1),
+        WorkGroup = "primary",
+        OutputLocation = _output,
+        Catalog = "AwsDataCatalog",
+        Database = "analytics",
+        PollInterval = TimeSpan.FromMilliseconds(10),
+        MaxPollInterval = TimeSpan.FromMilliseconds(40),
+        Timeout = TimeSpan.FromMinutes(1),
     });
 
     [SkippableFact]

@@ -110,7 +110,9 @@ public sealed class AuthTests
         using var issuerHttp = issuer.Http();
         using var resp = await issuerHttp.PostAsync("/v1/oauth/tokens", new FormUrlEncodedContent(new Dictionary<string, string>
         {
-            ["grant_type"] = "client_credentials", ["client_id"] = "alice", ["client_secret"] = "alice-secret",
+            ["grant_type"] = "client_credentials",
+            ["client_id"] = "alice",
+            ["client_secret"] = "alice-secret",
         }));
         var foreign = JsonNode.Parse(await resp.Content.ReadAsStringAsync())!["access_token"]!.GetValue<string>();
         await Assert.ThrowsAsync<UnauthorizedAccessException>(() => host.ConnectAsync(token: foreign));

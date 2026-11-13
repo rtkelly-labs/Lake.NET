@@ -244,12 +244,12 @@ public static class AvroDataFiles
                 SkipBytes(s, f.Size);
                 return;
             case AvroUnion u:
-            {
-                var branch = AvroBinary.ReadLong(s);
-                if (branch < 0 || branch >= u.Branches.Count) throw new InvalidDataException($"Avro union branch {branch} out of range");
-                Skip(s, u.Branches[(int)branch]);
-                return;
-            }
+                {
+                    var branch = AvroBinary.ReadLong(s);
+                    if (branch < 0 || branch >= u.Branches.Count) throw new InvalidDataException($"Avro union branch {branch} out of range");
+                    Skip(s, u.Branches[(int)branch]);
+                    return;
+                }
             case AvroArray or AvroMap:
                 while (true)
                 {
@@ -346,15 +346,15 @@ public static class AvroDataFiles
             case MapType { KeyType.TypeId: TypeId.String } mt:
                 return ((System.Collections.IDictionary)v).Keys.Cast<object>().ToDictionary(k => (string)k, k => ToAvro(mt.ValueType, ((System.Collections.IDictionary)v)[k], mt.ValueRequired, "value"));
             case MapType mt:
-            {
-                var d = (System.Collections.IDictionary)v;
-                return d.Keys.Cast<object>().Select(k => (object?)new[] { ToAvro(mt.KeyType, k, true, "key"), ToAvro(mt.ValueType, d[k], mt.ValueRequired, "value") }).ToList();
-            }
+                {
+                    var d = (System.Collections.IDictionary)v;
+                    return d.Keys.Cast<object>().Select(k => (object?)new[] { ToAvro(mt.KeyType, k, true, "key"), ToAvro(mt.ValueType, d[k], mt.ValueRequired, "value") }).ToList();
+                }
             case DecimalType dt:
-            {
-                var unscaled = v is IcebergDecimal m ? m.Scale == dt.Scale ? m.Unscaled : throw new ArgumentException($"{name}: decimal scale {m.Scale} != {dt.Scale}") : throw new ArgumentException($"{name}: expected a decimal");
-                return ParquetFiles.FixedDecimal(unscaled, ManifestCodec.DecimalRequiredBytes(dt.Precision));
-            }
+                {
+                    var unscaled = v is IcebergDecimal m ? m.Scale == dt.Scale ? m.Unscaled : throw new ArgumentException($"{name}: decimal scale {m.Scale} != {dt.Scale}") : throw new ArgumentException($"{name}: expected a decimal");
+                    return ParquetFiles.FixedDecimal(unscaled, ManifestCodec.DecimalRequiredBytes(dt.Precision));
+                }
             case PrimitiveType { TypeId: TypeId.Uuid }:
                 return ((Guid)v).ToByteArray(bigEndian: true);
             default:
@@ -369,35 +369,35 @@ public static class AvroDataFiles
         switch (type)
         {
             case StructType st:
-            {
-                var rec = (AvroRecord)s;
-                var values = (object?[])raw;
-                return st.Fields.Select(f =>
                 {
-                    var i = rec.Fields.ToList().FindIndex(a => a.FieldId == f.Id);
-                    if (i < 0) i = rec.IndexOf(f.Name);
-                    return i < 0 ? Defaults.ToValue(f.Type, f.InitialDefault) : Convert(f.Type, rec.Fields[i].Schema, values[i]);
-                }).ToArray();
-            }
+                    var rec = (AvroRecord)s;
+                    var values = (object?[])raw;
+                    return st.Fields.Select(f =>
+                    {
+                        var i = rec.Fields.ToList().FindIndex(a => a.FieldId == f.Id);
+                        if (i < 0) i = rec.IndexOf(f.Name);
+                        return i < 0 ? Defaults.ToValue(f.Type, f.InitialDefault) : Convert(f.Type, rec.Fields[i].Schema, values[i]);
+                    }).ToArray();
+                }
             case ListType lt:
                 return ((List<object?>)raw).Select(e => Convert(lt.ElementType, ((AvroArray)s).Items, e)).ToList();
             case MapType mt when s is AvroMap am:
-            {
-                var map = new Dictionary<object, object?>();
-                foreach (var (k, v) in (Dictionary<string, object?>)raw) map[k] = Convert(mt.ValueType, am.Values, v);
-                return map;
-            }
-            case MapType mt:
-            {
-                var entry = (AvroRecord)((AvroArray)s).Items.NonNull;
-                var map = new Dictionary<object, object?>();
-                foreach (var kv in (List<object?>)raw)
                 {
-                    var pair = (object?[])kv!;
-                    map[Convert(mt.KeyType, entry.Fields[0].Schema, pair[0])!] = Convert(mt.ValueType, entry.Fields[1].Schema, pair[1]);
+                    var map = new Dictionary<object, object?>();
+                    foreach (var (k, v) in (Dictionary<string, object?>)raw) map[k] = Convert(mt.ValueType, am.Values, v);
+                    return map;
                 }
-                return map;
-            }
+            case MapType mt:
+                {
+                    var entry = (AvroRecord)((AvroArray)s).Items.NonNull;
+                    var map = new Dictionary<object, object?>();
+                    foreach (var kv in (List<object?>)raw)
+                    {
+                        var pair = (object?[])kv!;
+                        map[Convert(mt.KeyType, entry.Fields[0].Schema, pair[0])!] = Convert(mt.ValueType, entry.Fields[1].Schema, pair[1]);
+                    }
+                    return map;
+                }
             case DecimalType d:
                 return new IcebergDecimal(new BigInteger((byte[])raw, isUnsigned: false, isBigEndian: true), d.Scale);
             case PrimitiveType { TypeId: TypeId.Uuid }:
