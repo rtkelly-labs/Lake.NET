@@ -5,10 +5,13 @@ filing is a decision for the team. Each page has a title, the target repository,
 
 | Proposed ticket | Target | Type | Page |
 |---|---|---|---|
-| Parquet field IDs on group fields (struct, list, map) | [aloneguid/parquet-dotnet](https://github.com/aloneguid/parquet-dotnet/issues/new) | Feature request with a verified minimal patch | [parquet-net-group-field-ids.md](parquet-net-group-field-ids.md) (body under "Issue") |
+| ~~Parquet field IDs on group fields (struct, list, map)~~ | aloneguid/parquet-dotnet, **deleted**: [Parquet.Net is retired](parquet-net-retired.md) | Moot; a change in our fork if still wanted | [parquet-net-group-field-ids.md](parquet-net-group-field-ids.md) (body under "Issue") |
 | A null `list<struct>` reads as an empty list | [apache/iceberg-python](https://github.com/apache/iceberg-python/issues/new) | Bug, one-line fix | [pyiceberg-null-list-of-struct.md](pyiceberg-null-list-of-struct.md) |
 | Scan planning sends deletion vectors to the wrong data files | [apache/gravitino](https://github.com/apache/gravitino/issues/new) | Bug (fixed by Iceberg 1.12; ask for the upgrade) | [gravitino-dv-references.md](gravitino-dv-references.md) |
 | Iceberg-ready columns: field IDs, local timestamps, INT32 dates | Parquet.SourceGenerator (our own) | Patch, `git am`-ready | [parquet-sourcegenerator-iceberg-columns.patch](parquet-sourcegenerator-iceberg-columns.patch) |
+
+Parquet.Net itself is retired: its repository is gone and it will see no more releases.
+[parquet-net-retired.md](parquet-net-retired.md) keeps the author's statement and what our fork preserved.
 
 ## Filing one
 
@@ -19,7 +22,7 @@ filing is a decision for the team. Each page has a title, the target repository,
 
 ## What depends on them
 
-- **Parquet.Net:** nested Iceberg columns through Parquet.SourceGenerator. ParquetSharp, which the library itself
+- **Parquet.Net (retired):** nested Iceberg columns through Parquet.SourceGenerator. ParquetSharp, which the library itself
   writes with, is not affected.
 - **PyIceberg:** only our PyIceberg cross-check, which avoids null `list<struct>` values; Spark checks them instead.
 - **Gravitino:** nothing in our code. `RestCatalog` matches deletion vectors by `referenced-data-file`, so it reads
