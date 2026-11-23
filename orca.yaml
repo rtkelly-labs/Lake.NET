@@ -1,0 +1,9 @@
+# Orca runs this in each new worktree. Declared in rtkelly13/rig config/orca.json.
+scripts:
+  setup: |
+    set -e
+    mkdir -p temp
+    [ -e TODO.md ] || printf '# TODO: %s\n\n- [ ] Local tasks and notes (gitignored)\n' "$(git branch --show-current)" > TODO.md
+    git submodule update --init
+    dotnet restore Iceberg.Net.slnx
+    uv sync --project interop
