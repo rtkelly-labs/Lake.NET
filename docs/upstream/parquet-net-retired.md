@@ -3,8 +3,8 @@
 **Status:** [aloneguid/parquet-dotnet](https://github.com/aloneguid/parquet-dotnet) no longer exists, and neither does
 the `aloneguid` GitHub account. Parquet.Net will get no further releases. The NuGet package stays published.
 **Recorded:** 2026-11-23.
-**Our copy:** [rtkelly-labs/parquet-dotnet](https://github.com/rtkelly-labs/parquet-dotnet), the Lake.Parquet fork,
-holds the full upstream history. See [What the fork holds](#what-the-fork-holds).
+**Our copy:** [rtkelly-labs/Lake.Parquet](https://github.com/rtkelly-labs/Lake.Parquet) (renamed from
+`parquet-dotnet` on 2026-11-23) holds the full upstream history. See [What the fork holds](#what-the-fork-holds).
 
 ## The author's statement
 
