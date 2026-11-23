@@ -67,9 +67,13 @@ Checked on 2026-11-23:
 
 ## What changes for us
 
-- **Nothing to sync from.** The fork's sync assumed a live upstream. That source is gone, so the fork's `master` is
-  now the line that is developed. The `aloneguid/parquet-dotnet` upstream recorded in rig and oxbow stays as a
-  record of where the code came from; nothing can be fetched from it.
+- **Nothing to sync from, but the stack stays.** Oxbow was set up to keep the fork as upstream plus a short stack of
+  recorded changes so it could follow upstream. There is no upstream to follow now, so that purpose is gone.
+  The structure is still worth keeping. `658e1caf` becomes a fixed base, and oxbow can still rebuild the
+  `lake(NNNN)` stack on top of it from its record, in the same way every time: reordering, folding in `fixup!`
+  commits, splitting or dropping a change. That keeps each change separate and easy to review. The
+  `aloneguid/parquet-dotnet` upstream recorded in rig and oxbow stays as a record of where the code came from;
+  nothing can be fetched from it.
 - **The fork's parent on GitHub is wrong.** With the original repository deleted, GitHub re-rooted the fork network
   at `TikiBill/parquet-dotnet`, an unrelated copy last pushed in 2020. GitHub Support can detach the fork if that
   matters.
