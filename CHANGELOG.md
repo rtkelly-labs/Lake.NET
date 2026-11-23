@@ -118,6 +118,12 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 - `DependencyDirectionTests`: every `src` project has a layer and a role, and references may only point down, stay in
   the shared layers, and never cross formats.
 
+### Changed
+
+- The project is relicensed from MIT to the Apache License 2.0, ahead of the rename to Lake.NET (`VISION.md`). A
+  `NOTICE` file credits Apache Iceberg and ships in every package. Packages already published (`0.0.1-alpha.1`)
+  stay under MIT.
+
 ## [0.0.1-alpha.1] - 2026-10-25
 
 The first published build: an early alpha of `Iceberg.Net.Core`, `Avro`, `Puffin`, `IO`, `Catalog`, `Data` and `Linq`,

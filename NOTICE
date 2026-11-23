@@ -1,0 +1,8 @@
+Lake.NET (formerly Iceberg.NET)
+Copyright 2026 rtkelly-labs
+
+This product includes software derived from Apache Iceberg
+(https://iceberg.apache.org/), developed at The Apache Software Foundation
+(http://www.apache.org/). Apache Iceberg is licensed under the Apache License,
+Version 2.0. Parts of the table metadata, expression and scan-planning code
+follow the Apache Iceberg Java implementation.
