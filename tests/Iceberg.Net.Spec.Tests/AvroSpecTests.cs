@@ -38,6 +38,23 @@ public class AvroSpecTests
     }
 
     [Spec("Avro")]
+    [Spec("Partition Transforms")]
+    [Fact]
+    public void Partition_fields_of_the_same_fixed_type_each_define_their_own_avro_name()
+    {
+        // Found by the differential campaign: two identity(uuid) fields shared "uuid_fixed", and PyIceberg's Avro
+        // reader does not resolve the second field's reference to it.
+        var partition = new StructType(
+            NestedField.Optional(1000, "a", PrimitiveType.Uuid), NestedField.Optional(1001, "b", PrimitiveType.Uuid),
+            NestedField.Optional(1002, "c", new FixedType(4)), NestedField.Optional(1003, "d", new FixedType(4)),
+            NestedField.Optional(1004, "e", new DecimalType(9, 2)), NestedField.Optional(1005, "f", new DecimalType(9, 2)));
+        var json = AvroSchemaJson.ToJson(ManifestCodec.PartitionSchema(partition)).ToJsonString();
+        foreach (var name in new[] { "uuid_fixed_1000", "uuid_fixed_1001", "fixed_4_1002", "fixed_4_1003", "decimal_9_2_1004", "decimal_9_2_1005" })
+            Assert.Contains($"\"name\":\"{name}\"", json, StringComparison.Ordinal);
+        Assert.Equal(json, AvroSchemaJson.ToJson(AvroSchemaJson.Parse(json)).ToJsonString());
+    }
+
+    [Spec("Avro")]
     [Spec("Primitive Types")]
     [Theory]
     [InlineData(1, 1)]
