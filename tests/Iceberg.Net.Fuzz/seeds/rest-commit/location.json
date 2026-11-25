@@ -1,0 +1,8 @@
+{
+ "updates": [
+  {
+   "action": "set-location",
+   "location": "../../escape"
+  }
+ ]
+}

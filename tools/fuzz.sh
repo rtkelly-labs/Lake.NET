@@ -3,6 +3,7 @@
 #
 #   tools/fuzz.sh <target> [seconds]     targets: metadata view-metadata manifest-list manifest puffin
 #                                                 deletion-vector roaring mumbling theta
+#                                                 rest-commit rest-transaction (REST server request bodies)
 #
 # Needs clang with the libFuzzer runtime (Ubuntu: apt-get install clang libclang-rt-18-dev). Builds
 # libfuzzer-dotnet from a pinned source file, instruments the decoder assemblies, seeds from every committed fixture
@@ -61,6 +62,8 @@ case $target in
                    done < <(fixtures_matching '\.puffin$') ;;
   roaring) printf '\x01\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x3a\x30\x00\x00\x01\x00\x00\x00\x00\x00\x02\x00\x10\x00\x00\x00\x01\x00\x02\x00\x03\x00' > "$seeds/one-container" ;;
   mumbling) printf '\x01\x03\x00\x00\x01\x00\x00\x00\x03\x00\x22\xff' > "$seeds/sparse" ;;
+  # Request bodies, hand-written (tests/Iceberg.Net.Fuzz/seeds/<target>), for tables the target creates.
+  rest-commit|rest-transaction) for f in tests/Iceberg.Net.Fuzz/seeds/"$target"/*.json; do seed "$f"; done ;;
   theta) while IFS= read -r f; do seed "$f"; done < <(fixtures_matching '/theta-[^/]*\.bin$') ;;
   *) echo "unknown target $target" >&2; exit 2 ;;
 esac
@@ -70,7 +73,9 @@ dict_arg=()
 if [[ -f $dict ]]; then dict_arg=(-dict="$dict"); fi
 
 # Instrument after seeding: instrumented code only runs under the driver.
-for asm in Iceberg.Net.Core Iceberg.Net.Avro Iceberg.Net.Puffin; do
+instrumented=(Iceberg.Net.Core Iceberg.Net.Avro Iceberg.Net.Puffin)
+[[ $target == rest-* ]] && instrumented+=(Iceberg.Net.Catalog Iceberg.Net.RestServer)
+for asm in "${instrumented[@]}"; do
   dotnet sharpfuzz "$out/$asm.dll" >/dev/null
 done
 

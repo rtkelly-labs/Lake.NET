@@ -1,0 +1,22 @@
+{
+ "table-changes": [
+  {
+   "identifier": {
+    "namespace": [
+     "fuzz"
+    ],
+    "name": "t"
+   },
+   "updates": []
+  },
+  {
+   "identifier": {
+    "namespace": [
+     "fuzz"
+    ],
+    "name": "t"
+   },
+   "updates": []
+  }
+ ]
+}
