@@ -92,7 +92,10 @@ public sealed class SparkSqlTests
             "equal_schemes => map('s3a', 's3', 's3n', 's3'), prefix_mismatch_mode => 'IGNORE')",
             Procs.RemoveOrphanFiles(Events, new RemoveOrphanFilesOptions
             {
-                OlderThan = cutoff, DryRun = true, EqualSchemes = { ["s3n"] = "s3", ["s3a"] = "s3" }, PrefixMismatchMode = "IGNORE",
+                OlderThan = cutoff,
+                DryRun = true,
+                EqualSchemes = { ["s3n"] = "s3", ["s3a"] = "s3" },
+                PrefixMismatchMode = "IGNORE",
             }).ToSql());
         Assert.Equal("CALL `glue`.system.`rewrite_manifests`(table => '`analytics`.`events`', use_caching => false)", Procs.RewriteManifests(Events, useCaching: false).ToSql());
         Assert.Equal("CALL `glue`.system.`rewrite_position_delete_files`(table => '`analytics`.`events`', options => map('rewrite-all', 'true'))",
@@ -114,7 +117,11 @@ public sealed class SparkSqlTests
             "options => map('end-snapshot-id', '9', 'start-snapshot-id', '3'), compute_updates => true, identifier_columns => array('id'))",
             Procs.CreateChangelogView(Events, new ChangelogViewOptions
             {
-                ViewName = "events_changes", StartSnapshotId = 3, EndSnapshotId = 9, ComputeUpdates = true, IdentifierColumns = ["id"],
+                ViewName = "events_changes",
+                StartSnapshotId = 3,
+                EndSnapshotId = 9,
+                ComputeUpdates = true,
+                IdentifierColumns = ["id"],
             }).ToSql());
         Assert.Equal("CALL `glue`.system.`ancestors_of`(table => '`analytics`.`events`')", Procs.AncestorsOf(Events).ToSql());
         Assert.Equal("CALL `glue`.system.`register_table`(table => '`analytics`.`events`', metadata_file => 's3://b/m/v1.metadata.json')",

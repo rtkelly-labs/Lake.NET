@@ -87,7 +87,9 @@ public sealed class StsCredentialVendor : IStorageCredentialVendor, IDisposable
                 new JsonObject { ["Effect"] = "Allow", ["Action"] = objects, ["Resource"] = $"arn:aws:s3:::{bucket}/{keyPrefix}*" },
                 new JsonObject
                 {
-                    ["Effect"] = "Allow", ["Action"] = "s3:ListBucket", ["Resource"] = $"arn:aws:s3:::{bucket}",
+                    ["Effect"] = "Allow",
+                    ["Action"] = "s3:ListBucket",
+                    ["Resource"] = $"arn:aws:s3:::{bucket}",
                     ["Condition"] = new JsonObject { ["StringLike"] = new JsonObject { ["s3:prefix"] = $"{keyPrefix}*" } },
                 },
                 new JsonObject { ["Effect"] = "Allow", ["Action"] = "s3:GetBucketLocation", ["Resource"] = $"arn:aws:s3:::{bucket}" }),

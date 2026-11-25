@@ -210,33 +210,33 @@ public static class AvroBinary
                 for (var i = 0; i < values.Length; i++) values[i] = Read(s, r.Fields[i].Schema);
                 return values;
             case AvroArray a:
-            {
-                var list = new List<object?>();
-                for (var count = ReadBlockCount(s); count != 0; count = ReadBlockCount(s))
-                    for (var i = 0; i < count; i++) list.Add(Read(s, a.Items));
-                return list;
-            }
+                {
+                    var list = new List<object?>();
+                    for (var count = ReadBlockCount(s); count != 0; count = ReadBlockCount(s))
+                        for (var i = 0; i < count; i++) list.Add(Read(s, a.Items));
+                    return list;
+                }
             case AvroMap m:
-            {
-                var map = new Dictionary<string, object?>();
-                for (var count = ReadBlockCount(s); count != 0; count = ReadBlockCount(s))
-                    for (var i = 0; i < count; i++) map[ReadString(s)] = Read(s, m.Values);
-                return map;
-            }
+                {
+                    var map = new Dictionary<string, object?>();
+                    for (var count = ReadBlockCount(s); count != 0; count = ReadBlockCount(s))
+                        for (var i = 0; i < count; i++) map[ReadString(s)] = Read(s, m.Values);
+                    return map;
+                }
             case AvroFixed f:
-            {
-                if (f.Size < 0 || f.Size > MaxBlockBytes || (s.CanSeek && f.Size > s.Length - s.Position))
-                    throw new InvalidDataException($"Avro fixed of {f.Size} bytes exceeds the remaining {(s.CanSeek ? s.Length - s.Position : 0)}");
-                var b = new byte[f.Size];
-                s.ReadExactly(b);
-                return b;
-            }
+                {
+                    if (f.Size < 0 || f.Size > MaxBlockBytes || (s.CanSeek && f.Size > s.Length - s.Position))
+                        throw new InvalidDataException($"Avro fixed of {f.Size} bytes exceeds the remaining {(s.CanSeek ? s.Length - s.Position : 0)}");
+                    var b = new byte[f.Size];
+                    s.ReadExactly(b);
+                    return b;
+                }
             case AvroUnion u:
-            {
-                var branch = ReadLong(s);
-                if (branch < 0 || branch >= u.Branches.Count) throw new InvalidDataException($"Avro union branch {branch} out of range");
-                return Read(s, u.Branches[(int)branch]);
-            }
+                {
+                    var branch = ReadLong(s);
+                    if (branch < 0 || branch >= u.Branches.Count) throw new InvalidDataException($"Avro union branch {branch} out of range");
+                    return Read(s, u.Branches[(int)branch]);
+                }
             default:
                 throw new NotSupportedException(schema.GetType().Name);
         }
@@ -265,10 +265,10 @@ public static class AvroBinary
             case AvroKind.Null: return null;
             case AvroKind.Boolean: return s.ReadByte() != 0;
             case AvroKind.Int:
-            {
-                var v = ReadLong(s);
-                return v is < int.MinValue or > int.MaxValue ? throw new InvalidDataException($"Avro int {v} out of range") : (int)v;
-            }
+                {
+                    var v = ReadLong(s);
+                    return v is < int.MinValue or > int.MaxValue ? throw new InvalidDataException($"Avro int {v} out of range") : (int)v;
+                }
             case AvroKind.Long: return ReadLong(s);
             case AvroKind.Float:
                 s.ReadExactly(buf[..4]);

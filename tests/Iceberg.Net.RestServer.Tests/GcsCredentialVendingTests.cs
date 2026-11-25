@@ -293,11 +293,13 @@ public sealed class GcsCredentialVendingTests
         // An Azure table on the same server gets a SAS from the Azure vendor and no GCS token.
         await SendAsync(http, HttpMethod.Post, "/v1/namespaces", writer, new JsonObject
         {
-            ["namespace"] = new JsonArray("db", "az"), ["properties"] = new JsonObject { ["location"] = "abfss://c@acct.dfs.core.windows.net/wh/db/az" },
+            ["namespace"] = new JsonArray("db", "az"),
+            ["properties"] = new JsonObject { ["location"] = "abfss://c@acct.dfs.core.windows.net/wh/db/az" },
         });
         var (azCreated, _) = await SendAsync(http, HttpMethod.Post, "/v1/namespaces/db%1Faz/tables", writer, new JsonObject
         {
-            ["name"] = "az", ["schema"] = Json.TypeJson.SchemaToJson(ScanPlanningTests.Schema),
+            ["name"] = "az",
+            ["schema"] = Json.TypeJson.SchemaToJson(ScanPlanningTests.Schema),
         });
         Assert.Equal(HttpStatusCode.OK, azCreated);
         var (_, azure) = await SendAsync(http, HttpMethod.Get, "/v1/namespaces/db%1Faz/tables/az", reader, delegation: "vended-credentials");
@@ -401,7 +403,9 @@ public sealed class GcsCredentialVendingTests
     {
         using var resp = await http.PostAsync("/v1/oauth/tokens", new FormUrlEncodedContent(new Dictionary<string, string>
         {
-            ["grant_type"] = "client_credentials", ["client_id"] = id, ["client_secret"] = secret,
+            ["grant_type"] = "client_credentials",
+            ["client_id"] = id,
+            ["client_secret"] = secret,
         }));
         return JsonNode.Parse(await resp.Content.ReadAsStringAsync())!["access_token"]!.GetValue<string>();
     }

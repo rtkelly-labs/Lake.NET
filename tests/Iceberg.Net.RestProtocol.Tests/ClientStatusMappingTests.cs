@@ -42,7 +42,10 @@ public sealed class ClientStatusMappingTests
 
     private static Task<Catalog.RestCatalog> Connect(ScriptedServer server) => Catalog.RestCatalog.ConnectAsync(new RestCatalogOptions
     {
-        Uri = new Uri("https://catalog.example/"), Handler = server, AccessDelegation = null, IdempotentRetryDelay = TimeSpan.FromMilliseconds(1),
+        Uri = new Uri("https://catalog.example/"),
+        Handler = server,
+        AccessDelegation = null,
+        IdempotentRetryDelay = TimeSpan.FromMilliseconds(1),
     });
 
     private static readonly TableIdentifier Orders = TableIdentifier.Of("sales", "orders");

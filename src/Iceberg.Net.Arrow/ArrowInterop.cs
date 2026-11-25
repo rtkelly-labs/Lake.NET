@@ -94,58 +94,58 @@ public static class ArrowInterop
         switch (f.Type.TypeId)
         {
             case TypeId.Boolean:
-            {
-                var b = new BooleanArray.Builder();
-                foreach (var v in values) if (v is bool x) b.Append(x); else b.AppendNull();
-                return b.Build();
-            }
+                {
+                    var b = new BooleanArray.Builder();
+                    foreach (var v in values) if (v is bool x) b.Append(x); else b.AppendNull();
+                    return b.Build();
+                }
             case TypeId.String:
-            {
-                var b = new StringArray.Builder();
-                foreach (var v in values) if (v is string x) b.Append(x); else b.AppendNull();
-                return b.Build();
-            }
+                {
+                    var b = new StringArray.Builder();
+                    foreach (var v in values) if (v is string x) b.Append(x); else b.AppendNull();
+                    return b.Build();
+                }
             case TypeId.Binary:
-            {
-                var b = new BinaryArray.Builder();
-                foreach (var v in values) if (v is byte[] x) b.Append(x.AsSpan()); else b.AppendNull();
-                return b.Build();
-            }
+                {
+                    var b = new BinaryArray.Builder();
+                    foreach (var v in values) if (v is byte[] x) b.Append(x.AsSpan()); else b.AppendNull();
+                    return b.Build();
+                }
             case TypeId.Int or TypeId.Date: return Fixed(type, values, v => (int)v);
             case TypeId.Long or TypeId.Time or TypeId.Timestamp or TypeId.TimestampTz or TypeId.TimestampNs or TypeId.TimestampTzNs: return Fixed(type, values, v => (long)v);
             case TypeId.Float: return Fixed(type, values, v => (float)v);
             case TypeId.Double: return Fixed(type, values, v => (double)v);
             case TypeId.Decimal:
-            {
-                var scale = ((DecimalType)f.Type).Scale;
-                return Bytes(type, 16, values, v => Int128Le(((IcebergDecimal)v).Scale == scale ? ((IcebergDecimal)v).Unscaled : throw new ArgumentException($"Column {f.Name}: decimal scale mismatch")));
-            }
+                {
+                    var scale = ((DecimalType)f.Type).Scale;
+                    return Bytes(type, 16, values, v => Int128Le(((IcebergDecimal)v).Scale == scale ? ((IcebergDecimal)v).Unscaled : throw new ArgumentException($"Column {f.Name}: decimal scale mismatch")));
+                }
             case TypeId.Uuid: return Bytes(type, 16, values, v => ((Guid)v).ToByteArray(bigEndian: true));
             case TypeId.Fixed: return Bytes(type, ((FixedType)f.Type).Length, values, v => (byte[])v);
             case TypeId.Struct:
-            {
-                var st = (Types.StructType)f.Type;
-                var children = st.Fields.Select((child, i) => Build(child, values.Select(v => v is null ? null : ((object?[])v)[i]).ToArray())).ToList();
-                var (bitmap, nulls) = Validity(values);
-                return new StructArray(type, values.Length, children, bitmap, nulls);
-            }
+                {
+                    var st = (Types.StructType)f.Type;
+                    var children = st.Fields.Select((child, i) => Build(child, values.Select(v => v is null ? null : ((object?[])v)[i]).ToArray())).ToList();
+                    var (bitmap, nulls) = Validity(values);
+                    return new StructArray(type, values.Length, children, bitmap, nulls);
+                }
             case TypeId.List:
-            {
-                var lt = (Types.ListType)f.Type;
-                var (offsets, flat) = Flatten(values, v => ((System.Collections.IEnumerable)v).Cast<object?>());
-                var (bitmap, nulls) = Validity(values);
-                return new ListArray(type, values.Length, offsets, Build(lt.ElementField, flat), bitmap, nulls);
-            }
+                {
+                    var lt = (Types.ListType)f.Type;
+                    var (offsets, flat) = Flatten(values, v => ((System.Collections.IEnumerable)v).Cast<object?>());
+                    var (bitmap, nulls) = Validity(values);
+                    return new ListArray(type, values.Length, offsets, Build(lt.ElementField, flat), bitmap, nulls);
+                }
             case TypeId.Map:
-            {
-                var mt = (Types.MapType)f.Type;
-                var (offsets, flat) = Flatten(values, v => Entries(v).Select(e => (object?)e));
-                var keys = Build(mt.KeyField, flat.Select(e => ((KeyValuePair<object?, object?>)e!).Key).ToArray());
-                var vals = Build(mt.ValueField, flat.Select(e => ((KeyValuePair<object?, object?>)e!).Value).ToArray());
-                var entries = new StructArray(((Apache.Arrow.Types.MapType)type).KeyValueType, flat.Length, [keys, vals], ArrowBuffer.Empty, 0);
-                var (bitmap, nulls) = Validity(values);
-                return new MapArray(type, values.Length, offsets, entries, bitmap, nulls);
-            }
+                {
+                    var mt = (Types.MapType)f.Type;
+                    var (offsets, flat) = Flatten(values, v => Entries(v).Select(e => (object?)e));
+                    var keys = Build(mt.KeyField, flat.Select(e => ((KeyValuePair<object?, object?>)e!).Key).ToArray());
+                    var vals = Build(mt.ValueField, flat.Select(e => ((KeyValuePair<object?, object?>)e!).Value).ToArray());
+                    var entries = new StructArray(((Apache.Arrow.Types.MapType)type).KeyValueType, flat.Length, [keys, vals], ArrowBuffer.Empty, 0);
+                    var (bitmap, nulls) = Validity(values);
+                    return new MapArray(type, values.Length, offsets, entries, bitmap, nulls);
+                }
             default: throw new NotSupportedException(f.Type.ToString());
         }
     }
@@ -225,25 +225,25 @@ public static class ArrowInterop
     {
         if (array.IsNull(i)) return null;
         return (f.Type.TypeId, array) switch
-            {
-                (TypeId.Struct, StructArray a) => ReadStruct((Types.StructType)f.Type, a, i),
-                (TypeId.List, ListArray a) => Enumerable.Range(a.ValueOffsets[i], a.ValueOffsets[i + 1] - a.ValueOffsets[i])
-                    .Select(k => ReadValue(((Types.ListType)f.Type).ElementField, a.Values, k)).ToList(),
-                (TypeId.Map, MapArray a) => ReadMap((Types.MapType)f.Type, a, i),
-                (TypeId.Boolean, BooleanArray a) => a.GetValue(i),
-                (TypeId.String, StringArray a) => a.GetString(i),
-                (TypeId.Binary, BinaryArray a) => a.GetBytes(i).ToArray(),
-                (TypeId.Int or TypeId.Date, _) => Value<int>(array, i),
-                (TypeId.Long, Int32Array a) => (long)a.GetValue(i)!.Value, // promoted column
-                (TypeId.Long or TypeId.Time or TypeId.Timestamp or TypeId.TimestampTz or TypeId.TimestampNs or TypeId.TimestampTzNs, _) => Value<long>(array, i),
-                (TypeId.Float, _) => Value<float>(array, i),
-                (TypeId.Double, FloatArray a) => (double)a.GetValue(i)!.Value,
-                (TypeId.Double, _) => Value<double>(array, i),
-                (TypeId.Decimal, _) => new IcebergDecimal(new BigInteger(Slice(array, i, 16), isUnsigned: false, isBigEndian: false), ((DecimalType)f.Type).Scale),
-                (TypeId.Uuid, _) => new Guid(Slice(array, i, 16), bigEndian: true),
-                (TypeId.Fixed, _) => Slice(array, i, ((FixedType)f.Type).Length).ToArray(),
-                _ => throw new NotSupportedException($"Reading {f.Type} from {array.GetType().Name}"),
-            };
+        {
+            (TypeId.Struct, StructArray a) => ReadStruct((Types.StructType)f.Type, a, i),
+            (TypeId.List, ListArray a) => Enumerable.Range(a.ValueOffsets[i], a.ValueOffsets[i + 1] - a.ValueOffsets[i])
+                .Select(k => ReadValue(((Types.ListType)f.Type).ElementField, a.Values, k)).ToList(),
+            (TypeId.Map, MapArray a) => ReadMap((Types.MapType)f.Type, a, i),
+            (TypeId.Boolean, BooleanArray a) => a.GetValue(i),
+            (TypeId.String, StringArray a) => a.GetString(i),
+            (TypeId.Binary, BinaryArray a) => a.GetBytes(i).ToArray(),
+            (TypeId.Int or TypeId.Date, _) => Value<int>(array, i),
+            (TypeId.Long, Int32Array a) => (long)a.GetValue(i)!.Value, // promoted column
+            (TypeId.Long or TypeId.Time or TypeId.Timestamp or TypeId.TimestampTz or TypeId.TimestampNs or TypeId.TimestampTzNs, _) => Value<long>(array, i),
+            (TypeId.Float, _) => Value<float>(array, i),
+            (TypeId.Double, FloatArray a) => (double)a.GetValue(i)!.Value,
+            (TypeId.Double, _) => Value<double>(array, i),
+            (TypeId.Decimal, _) => new IcebergDecimal(new BigInteger(Slice(array, i, 16), isUnsigned: false, isBigEndian: false), ((DecimalType)f.Type).Scale),
+            (TypeId.Uuid, _) => new Guid(Slice(array, i, 16), bigEndian: true),
+            (TypeId.Fixed, _) => Slice(array, i, ((FixedType)f.Type).Length).ToArray(),
+            _ => throw new NotSupportedException($"Reading {f.Type} from {array.GetType().Name}"),
+        };
     }
 
     /// <summary>Struct children are matched by field ID metadata when present, else by name.</summary>

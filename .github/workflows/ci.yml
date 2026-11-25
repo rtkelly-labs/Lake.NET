@@ -38,6 +38,9 @@ jobs:
         with:
           global-json-file: global.json
 
+      - name: Verify code formatting
+        run: dotnet format whitespace Iceberg.Net.slnx --verify-no-changes
+
       # The SDK comes from global.json (setup-dotnet above).
       - name: CHANGELOG.md is well formed (the release reads its version from it)
         run: dotnet run scripts/ParseChangelog.cs
@@ -81,6 +84,9 @@ jobs:
       - uses: actions/setup-dotnet@a98b56852c35b8e3190ac28c8c2271da59106c68 # v6
         with:
           global-json-file: global.json
+
+      - name: Verify code formatting
+        run: dotnet format whitespace Iceberg.Net.slnx --verify-no-changes
       - uses: astral-sh/setup-uv@e58605a9b6da7c637471fab8847a5e5a6b8df081 # v5
         with:
           enable-cache: true
@@ -119,6 +125,9 @@ jobs:
       - uses: actions/setup-dotnet@a98b56852c35b8e3190ac28c8c2271da59106c68 # v6
         with:
           global-json-file: global.json
+
+      - name: Verify code formatting
+        run: dotnet format whitespace Iceberg.Net.slnx --verify-no-changes
       - uses: astral-sh/setup-uv@e58605a9b6da7c637471fab8847a5e5a6b8df081 # v5
         with:
           enable-cache: true

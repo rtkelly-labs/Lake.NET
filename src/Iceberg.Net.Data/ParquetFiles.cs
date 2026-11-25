@@ -363,12 +363,12 @@ public static class ParquetFiles
                         for (var r = 0; r < n; r++) rows[r][c] = m.Default;
                         break;
                     case ColumnSource.Leaf l:
-                    {
-                        using var col = group.Column(l.Column);
-                        var values = ReadColumn(col, f.Type, n);
-                        for (var r = 0; r < n; r++) rows[r][c] = values[r];
-                        break;
-                    }
+                        {
+                            using var col = group.Column(l.Column);
+                            var values = ReadColumn(col, f.Type, n);
+                            for (var r = 0; r < n; r++) rows[r][c] = values[r];
+                            break;
+                        }
                     case ColumnSource.Nested nested:
                         NestedColumns.Load(group, nested.Tree);
                         for (var r = 0; r < n; r++) rows[r][c] = NestedColumns.Project(NestedColumns.Assemble(nested.Tree), nested.Tree, f.Type, FromPhysical);
@@ -585,48 +585,48 @@ internal static class RowGroupStatistics
         {
             case Statistics<bool> b: return min ? b.Min : b.Max;
             case Statistics<int> i:
-            {
-                var v = min ? i.Min : i.Max;
-                return type switch
                 {
-                    DecimalType d => new IcebergDecimal(v, d.Scale),
-                    PrimitiveType { TypeId: TypeId.Long } => (long)v,
-                    _ => v,
-                };
-            }
+                    var v = min ? i.Min : i.Max;
+                    return type switch
+                    {
+                        DecimalType d => new IcebergDecimal(v, d.Scale),
+                        PrimitiveType { TypeId: TypeId.Long } => (long)v,
+                        _ => v,
+                    };
+                }
             case Statistics<long> l:
-            {
-                var v = min ? l.Min : l.Max;
-                return type is DecimalType d ? new IcebergDecimal(v, d.Scale) : v;
-            }
+                {
+                    var v = min ? l.Min : l.Max;
+                    return type is DecimalType d ? new IcebergDecimal(v, d.Scale) : v;
+                }
             case Statistics<float> f:
-            {
-                var v = min ? f.Min : f.Max;
-                return type.TypeId == TypeId.Double ? (double)v : v;
-            }
+                {
+                    var v = min ? f.Min : f.Max;
+                    return type.TypeId == TypeId.Double ? (double)v : v;
+                }
             case Statistics<double> d: return min ? d.Min : d.Max;
             case Statistics<ByteArray> ba:
-            {
-                var v = min ? ba.Min : ba.Max;
-                var bytes = new byte[v.Length];
-                if (v.Length > 0) System.Runtime.InteropServices.Marshal.Copy(v.Pointer, bytes, 0, v.Length);
-                if (type.TypeId != TypeId.String) return bytes;
-                try
                 {
-                    return StrictUtf8.GetString(bytes);
+                    var v = min ? ba.Min : ba.Max;
+                    var bytes = new byte[v.Length];
+                    if (v.Length > 0) System.Runtime.InteropServices.Marshal.Copy(v.Pointer, bytes, 0, v.Length);
+                    if (type.TypeId != TypeId.String) return bytes;
+                    try
+                    {
+                        return StrictUtf8.GetString(bytes);
+                    }
+                    catch (System.Text.DecoderFallbackException)
+                    {
+                        return null; // e.g. a max truncated inside a multi-byte character: no bound
+                    }
                 }
-                catch (System.Text.DecoderFallbackException)
-                {
-                    return null; // e.g. a max truncated inside a multi-byte character: no bound
-                }
-            }
             case Statistics<FixedLenByteArray> fl:
-            {
-                var v = min ? fl.Min : fl.Max;
-                var bytes = new byte[descr.TypeLength];
-                System.Runtime.InteropServices.Marshal.Copy(v.Pointer, bytes, 0, bytes.Length);
-                return bytes;
-            }
+                {
+                    var v = min ? fl.Min : fl.Max;
+                    var bytes = new byte[descr.TypeLength];
+                    System.Runtime.InteropServices.Marshal.Copy(v.Pointer, bytes, 0, bytes.Length);
+                    return bytes;
+                }
             default: return null;
         }
     }

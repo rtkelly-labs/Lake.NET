@@ -32,7 +32,10 @@ public sealed class IdempotencyTests
 
     private static Task<RestCatalog> Connect(FakeServer server) => RestCatalog.ConnectAsync(new RestCatalogOptions
     {
-        Uri = new Uri("http://catalog.test"), Handler = server, AccessDelegation = null, IdempotentRetryDelay = TimeSpan.FromMilliseconds(1),
+        Uri = new Uri("http://catalog.test"),
+        Handler = server,
+        AccessDelegation = null,
+        IdempotentRetryDelay = TimeSpan.FromMilliseconds(1),
     });
 
     [Fact]

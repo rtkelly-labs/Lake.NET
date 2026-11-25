@@ -100,7 +100,13 @@ public sealed class SchemaFromTypeTests : CatalogTest
         Assert.True(table.Schema.SameSchema(IcebergSchema.FromType<Nested>()));
         var item = new Nested
         {
-            Id = 1, Name = "n", Where = new Point(1, 2), Tags = ["a", null], Places = new() { ["p"] = new Point(3, 4) }, Price = 1.5m, Forced = 3,
+            Id = 1,
+            Name = "n",
+            Where = new Point(1, 2),
+            Tags = ["a", null],
+            Places = new() { ["p"] = new Point(3, 4) },
+            Price = 1.5m,
+            Forced = 3,
         };
         await table.InsertAsync([item]);
         var read = Assert.Single(await table.AsQueryable<Nested>().ToListAsync());

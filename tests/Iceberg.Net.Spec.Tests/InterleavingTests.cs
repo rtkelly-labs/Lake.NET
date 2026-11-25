@@ -84,13 +84,15 @@ public sealed class InterleavingTests : IDisposable
         {
             await other.RefreshAsync();
             await Maintenance.ExpireAsync(other, DateTimeOffset.UtcNow.ToUnixTimeMilliseconds() + 1, retainLast: 1);
-        },
+        }
+        ,
         // At the default age, files this writer has just written are not orphans yet and must survive.
         "orphan-cleanup" => async () =>
         {
             await other.RefreshAsync();
             await Maintenance.DeleteOrphanFilesAsync(other);
-        },
+        }
+        ,
         _ => throw new ArgumentOutOfRangeException(nameof(kind)),
     };
 
@@ -123,17 +125,17 @@ public sealed class InterleavingTests : IDisposable
     public async Task Upsert_of_a_key_is_the_last_word_whatever_lands_first(string kind)
     {
         foreach (var v in new[] { 2, 3 })
-        foreach (var strategy in new[] { DeleteStrategy.PositionDeletes, DeleteStrategy.CopyOnWrite, DeleteStrategy.EqualityDeletes })
-        {
-            var (subject, other) = await SetupAsync(v);
-            _catalog.BeforeNextSwap = Interferer(kind, other);
-            await TableMutations.UpsertAsync(subject, [[2L, "mine"]], strategy: strategy);
+            foreach (var strategy in new[] { DeleteStrategy.PositionDeletes, DeleteStrategy.CopyOnWrite, DeleteStrategy.EqualityDeletes })
+            {
+                var (subject, other) = await SetupAsync(v);
+                _catalog.BeforeNextSwap = Interferer(kind, other);
+                await TableMutations.UpsertAsync(subject, [[2L, "mine"]], strategy: strategy);
 
-            var state = await StateAsync(subject);
-            Assert.Equal("mine", state[2]); // re-planned on the winner's state: one row, ours
-            AssertInterfererKept(kind, state);
-            foreach (var id in new long[] { 1, 3, 4, 5, 6 }) Assert.Equal("base", state[id]);
-        }
+                var state = await StateAsync(subject);
+                Assert.Equal("mine", state[2]); // re-planned on the winner's state: one row, ours
+                AssertInterfererKept(kind, state);
+                foreach (var id in new long[] { 1, 3, 4, 5, 6 }) Assert.Equal("base", state[id]);
+            }
     }
 
     [Theory]
@@ -141,17 +143,17 @@ public sealed class InterleavingTests : IDisposable
     public async Task Delete_removes_the_key_even_if_it_was_rewritten_meanwhile(string kind)
     {
         foreach (var v in new[] { 2, 3 })
-        foreach (var strategy in new[] { DeleteStrategy.PositionDeletes, DeleteStrategy.CopyOnWrite })
-        {
-            var (subject, other) = await SetupAsync(v);
-            _catalog.BeforeNextSwap = Interferer(kind, other);
-            await TableMutations.DeleteWhereAsync(subject, Id2, strategy);
+            foreach (var strategy in new[] { DeleteStrategy.PositionDeletes, DeleteStrategy.CopyOnWrite })
+            {
+                var (subject, other) = await SetupAsync(v);
+                _catalog.BeforeNextSwap = Interferer(kind, other);
+                await TableMutations.DeleteWhereAsync(subject, Id2, strategy);
 
-            var state = await StateAsync(subject);
-            Assert.False(state.ContainsKey(2));
-            AssertInterfererKept(kind, state);
-            foreach (var id in new long[] { 1, 3, 4, 5, 6 }) Assert.Equal("base", state[id]);
-        }
+                var state = await StateAsync(subject);
+                Assert.False(state.ContainsKey(2));
+                AssertInterfererKept(kind, state);
+                foreach (var id in new long[] { 1, 3, 4, 5, 6 }) Assert.Equal("base", state[id]);
+            }
     }
 
     [Theory]
@@ -220,26 +222,26 @@ public sealed class InterleavingTests : IDisposable
     public async Task Update_re_plans_against_the_winners_rows(string kind)
     {
         foreach (var v in new[] { 2, 3 })
-        foreach (var strategy in new[] { DeleteStrategy.PositionDeletes, DeleteStrategy.CopyOnWrite })
-        {
-            var (subject, other) = await SetupAsync(v);
-            _catalog.BeforeNextSwap = Interferer(kind, other);
-            var result = await TableMutations.UpdateAsync(subject, Id2, u => u.Set("v", row => $"{row[1]}+mine"), strategy);
-
-            Assert.Equal(kind == "orphan-cleanup" ? 1 : 2, result.Attempts); // the race really happened (orphan cleanup commits nothing)
-            var state = await StateAsync(subject);
-            AssertInterfererKept(kind, state);
-            foreach (var id in new long[] { 1, 3, 4, 5, 6 }) Assert.Equal("base", state[id]);
-            switch (kind)
+            foreach (var strategy in new[] { DeleteStrategy.PositionDeletes, DeleteStrategy.CopyOnWrite })
             {
-                case "delete-2": // the row is gone in the winner's state: nothing to update, nothing committed
-                    Assert.False(state.ContainsKey(2));
-                    Assert.Null(result.Snapshot);
-                    break;
-                case "upsert-2": Assert.Equal("other+mine", state[2]); break; // computed from the winner's value
-                default: Assert.Equal("base+mine", state[2]); break;
+                var (subject, other) = await SetupAsync(v);
+                _catalog.BeforeNextSwap = Interferer(kind, other);
+                var result = await TableMutations.UpdateAsync(subject, Id2, u => u.Set("v", row => $"{row[1]}+mine"), strategy);
+
+                Assert.Equal(kind == "orphan-cleanup" ? 1 : 2, result.Attempts); // the race really happened (orphan cleanup commits nothing)
+                var state = await StateAsync(subject);
+                AssertInterfererKept(kind, state);
+                foreach (var id in new long[] { 1, 3, 4, 5, 6 }) Assert.Equal("base", state[id]);
+                switch (kind)
+                {
+                    case "delete-2": // the row is gone in the winner's state: nothing to update, nothing committed
+                        Assert.False(state.ContainsKey(2));
+                        Assert.Null(result.Snapshot);
+                        break;
+                    case "upsert-2": Assert.Equal("other+mine", state[2]); break; // computed from the winner's value
+                    default: Assert.Equal("base+mine", state[2]); break;
+                }
             }
-        }
     }
 
     [Theory]
@@ -247,30 +249,30 @@ public sealed class InterleavingTests : IDisposable
     public async Task Merge_re_plans_against_the_winners_rows(string kind)
     {
         foreach (var v in new[] { 2, 3 })
-        foreach (var strategy in new[] { DeleteStrategy.PositionDeletes, DeleteStrategy.CopyOnWrite, DeleteStrategy.EqualityDeletes })
-        {
-            var (subject, other) = await SetupAsync(v);
-            _catalog.BeforeNextSwap = Interferer(kind, other);
-            var bySource = strategy != DeleteStrategy.EqualityDeletes; // equality deletes cannot express "not matched by source"
-            var result = await TableMutations.MergeAsync(subject, [[2L, "mine"], [20L, "new"]], ["id"], m =>
+            foreach (var strategy in new[] { DeleteStrategy.PositionDeletes, DeleteStrategy.CopyOnWrite, DeleteStrategy.EqualityDeletes })
             {
-                m.WhenMatchedUpdate(u => u.Set("v", row => $"{row[1]}+mine")).WhenNotMatchedInsert();
-                if (bySource) m.WhenNotMatchedBySourceDelete(Expr.GreaterThanOrEqual("id", 10L));
-            }, strategy);
+                var (subject, other) = await SetupAsync(v);
+                _catalog.BeforeNextSwap = Interferer(kind, other);
+                var bySource = strategy != DeleteStrategy.EqualityDeletes; // equality deletes cannot express "not matched by source"
+                var result = await TableMutations.MergeAsync(subject, [[2L, "mine"], [20L, "new"]], ["id"], m =>
+                {
+                    m.WhenMatchedUpdate(u => u.Set("v", row => $"{row[1]}+mine")).WhenNotMatchedInsert();
+                    if (bySource) m.WhenNotMatchedBySourceDelete(Expr.GreaterThanOrEqual("id", 10L));
+                }, strategy);
 
-            Assert.Equal(kind == "orphan-cleanup" ? 1 : 2, result.Attempts);
-            var state = await StateAsync(subject);
-            Assert.Equal("new", state[20]);
-            foreach (var id in new long[] { 1, 3, 4, 5, 6 }) Assert.Equal("base", state[id]);
-            if (bySource) Assert.False(state.ContainsKey(10)); // the appended row is seen by the re-plan and deleted
-            else AssertInterfererKept(kind, state);
-            Assert.Equal(kind switch
-            {
-                "delete-2" => "mine", // not matched any more: the source row is inserted
-                "upsert-2" => "other+mine",
-                _ => "base+mine",
-            }, state[2]);
-        }
+                Assert.Equal(kind == "orphan-cleanup" ? 1 : 2, result.Attempts);
+                var state = await StateAsync(subject);
+                Assert.Equal("new", state[20]);
+                foreach (var id in new long[] { 1, 3, 4, 5, 6 }) Assert.Equal("base", state[id]);
+                if (bySource) Assert.False(state.ContainsKey(10)); // the appended row is seen by the re-plan and deleted
+                else AssertInterfererKept(kind, state);
+                Assert.Equal(kind switch
+                {
+                    "delete-2" => "mine", // not matched any more: the source row is inserted
+                    "upsert-2" => "other+mine",
+                    _ => "base+mine",
+                }, state[2]);
+            }
     }
 
     // Ref changes (ManageSnapshots): an operation that moves a ref to a fixed place fails cleanly when that ref moved,

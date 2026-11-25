@@ -23,8 +23,15 @@ public sealed class SigV4CrossCheckTests
         var when = new DateTime(2026, 10, 23, 8, 0, 0, DateTimeKind.Utc);
         var py = await TestEnvironment.Current.OracleAsync("sigv4", new JsonObject
         {
-            ["access_key"] = "AKIDEXAMPLE", ["secret_key"] = "secret", ["token"] = "tok", ["service"] = "glue", ["region"] = "eu-west-1",
-            ["method"] = method, ["url"] = url, ["body"] = body, ["timestamp"] = "20261023T080000Z",
+            ["access_key"] = "AKIDEXAMPLE",
+            ["secret_key"] = "secret",
+            ["token"] = "tok",
+            ["service"] = "glue",
+            ["region"] = "eu-west-1",
+            ["method"] = method,
+            ["url"] = url,
+            ["body"] = body,
+            ["timestamp"] = "20261023T080000Z",
             ["headers"] = new JsonObject { ["Content-Type"] = "application/json" },
         }.ToJsonString());
 

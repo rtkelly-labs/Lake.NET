@@ -121,7 +121,9 @@ public sealed class AuthorizationTests
         using var http = host.Http();
         using var tokenResp = await http.PostAsync("/v1/oauth/tokens", new FormUrlEncodedContent(new Dictionary<string, string>
         {
-            ["grant_type"] = "client_credentials", ["client_id"] = "nobody", ["client_secret"] = "nobody-secret",
+            ["grant_type"] = "client_credentials",
+            ["client_id"] = "nobody",
+            ["client_secret"] = "nobody-secret",
         }));
         var token = JsonNode.Parse(await tokenResp.Content.ReadAsStringAsync())!["access_token"]!.GetValue<string>();
         async Task<(HttpStatusCode, JsonNode?)> Send(HttpMethod method, string path, JsonNode? body = null)

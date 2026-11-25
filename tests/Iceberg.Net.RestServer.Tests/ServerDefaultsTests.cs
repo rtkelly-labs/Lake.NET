@@ -69,7 +69,8 @@ public sealed class ServerDefaultsTests
         using var afterHttp = after.Http();
         var exchange = new Dictionary<string, string>
         {
-            ["grant_type"] = "urn:ietf:params:oauth:grant-type:token-exchange", ["subject_token"] = token,
+            ["grant_type"] = "urn:ietf:params:oauth:grant-type:token-exchange",
+            ["subject_token"] = token,
             ["subject_token_type"] = "urn:ietf:params:oauth:token-type:access_token",
         };
         Assert.Equal(HttpStatusCode.OK, (await TokenAsync(http, exchange)).Status);
@@ -87,7 +88,8 @@ public sealed class ServerDefaultsTests
         Assert.True(first["expires_in"]!.GetValue<int>() <= 30);
         var refreshed = (await TokenAsync(http, new()
         {
-            ["grant_type"] = "urn:ietf:params:oauth:grant-type:token-exchange", ["subject_token"] = first["access_token"]!.GetValue<string>(),
+            ["grant_type"] = "urn:ietf:params:oauth:grant-type:token-exchange",
+            ["subject_token"] = first["access_token"]!.GetValue<string>(),
             ["subject_token_type"] = "urn:ietf:params:oauth:token-type:access_token",
         })).Body!;
         Assert.True(refreshed["expires_in"]!.GetValue<int>() <= 30, "a refreshed token outlives the session");

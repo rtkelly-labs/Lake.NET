@@ -35,3 +35,24 @@ dist/
 *.feature.cs
 # python3 tools/spec_trace.py matrix (CI uploads it as the spec-traceability artifact)
 docs/spec-traceability.md
+
+# Bespoke agent instruction files. AGENTS.md is the single source of truth, and a per-tool copy shadows it.
+.github/copilot-instructions.md
+.github/instructions/
+.cursorrules
+.cursor/rules/
+.windsurfrules
+.windsurf/rules/
+.clinerules
+GEMINI.md
+codex.md
+.aider.conf.yml
+.aiderignore
+.continuerules
+.continue/rules/
+.roorules
+.roo/rules/
+.kiro/steering/
+.amazonq/rules/
+.junie/guidelines.md
+AGENT.md

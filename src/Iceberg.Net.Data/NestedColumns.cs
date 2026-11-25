@@ -69,20 +69,20 @@ internal static class NestedColumns
             case StructType s:
                 return new GroupNode(name, rep, s.Fields.Select(ToNode).ToArray(), null, id);
             case ListType l:
-            {
-                using var element = ToNode("element", l.ElementType, l.ElementRequired, l.ElementId);
-                using var list = new GroupNode("list", Repetition.Repeated, [element]);
-                using var logical = LogicalType.List();
-                return new GroupNode(name, rep, [list], logical, id);
-            }
+                {
+                    using var element = ToNode("element", l.ElementType, l.ElementRequired, l.ElementId);
+                    using var list = new GroupNode("list", Repetition.Repeated, [element]);
+                    using var logical = LogicalType.List();
+                    return new GroupNode(name, rep, [list], logical, id);
+                }
             case MapType m:
-            {
-                using var key = ToNode("key", m.KeyType, true, m.KeyId);
-                using var value = ToNode("value", m.ValueType, m.ValueRequired, m.ValueId);
-                using var kv = new GroupNode("key_value", Repetition.Repeated, [key, value]);
-                using var logical = LogicalType.Map();
-                return new GroupNode(name, rep, [kv], logical, id);
-            }
+                {
+                    using var key = ToNode("key", m.KeyType, true, m.KeyId);
+                    using var value = ToNode("value", m.ValueType, m.ValueRequired, m.ValueId);
+                    using var kv = new GroupNode("key_value", Repetition.Repeated, [key, value]);
+                    using var logical = LogicalType.Map();
+                    return new GroupNode(name, rep, [kv], logical, id);
+                }
             default:
                 return ParquetFiles.ToNode(new NestedField(id, name, type, required));
         }
@@ -102,32 +102,32 @@ internal static class NestedColumns
         switch (type)
         {
             case StructType s:
-            {
-                var children = new List<PNode>();
-                foreach (var c in s.Fields) children.Add(Build(c.Type, !c.Required, def, parentRep, c.Id, c.Name, ref column));
-                node = new Struct { Optional = optional, Def = def, FieldId = id, Name = name, Children = children };
-                break;
-            }
+                {
+                    var children = new List<PNode>();
+                    foreach (var c in s.Fields) children.Add(Build(c.Type, !c.Required, def, parentRep, c.Id, c.Name, ref column));
+                    node = new Struct { Optional = optional, Def = def, FieldId = id, Name = name, Children = children };
+                    break;
+                }
             case ListType l:
-            {
-                var element = Build(l.ElementType, !l.ElementRequired, def + 1, parentRep + 1, l.ElementId, "element", ref column);
-                node = new Repeated { Optional = optional, Def = def, FieldId = id, Name = name, ElementDef = def + 1, Rep = parentRep + 1, Element = element };
-                break;
-            }
+                {
+                    var element = Build(l.ElementType, !l.ElementRequired, def + 1, parentRep + 1, l.ElementId, "element", ref column);
+                    node = new Repeated { Optional = optional, Def = def, FieldId = id, Name = name, ElementDef = def + 1, Rep = parentRep + 1, Element = element };
+                    break;
+                }
             case MapType m:
-            {
-                var key = Build(m.KeyType, false, def + 1, parentRep + 1, m.KeyId, "key", ref column);
-                var value = Build(m.ValueType, !m.ValueRequired, def + 1, parentRep + 1, m.ValueId, "value", ref column);
-                node = new Repeated { Optional = optional, Def = def, FieldId = id, Name = name, ElementDef = def + 1, Rep = parentRep + 1, Element = key, Value = value };
-                break;
-            }
+                {
+                    var key = Build(m.KeyType, false, def + 1, parentRep + 1, m.KeyId, "key", ref column);
+                    var value = Build(m.ValueType, !m.ValueRequired, def + 1, parentRep + 1, m.ValueId, "value", ref column);
+                    node = new Repeated { Optional = optional, Def = def, FieldId = id, Name = name, ElementDef = def + 1, Rep = parentRep + 1, Element = key, Value = value };
+                    break;
+                }
             default:
-            {
-                using var p = (PrimitiveNode)ParquetFiles.ToNode(new NestedField(id, name, type, !optional));
-                var leaf = new Leaf { Optional = optional, Def = def, FieldId = id, Name = name, Column = column++, Physical = p.PhysicalType, TypeLength = p.TypeLength, Type = type };
-                leaf.Leaves.Add(leaf);
-                return leaf;
-            }
+                {
+                    using var p = (PrimitiveNode)ParquetFiles.ToNode(new NestedField(id, name, type, !optional));
+                    var leaf = new Leaf { Optional = optional, Def = def, FieldId = id, Name = name, Column = column++, Physical = p.PhysicalType, TypeLength = p.TypeLength, Type = type };
+                    leaf.Leaves.Add(leaf);
+                    return leaf;
+                }
         }
         CollectLeaves(node);
         return node;
@@ -237,37 +237,37 @@ internal static class NestedColumns
                 leaf.Values.Add(ToPhysical(leaf, v));
                 break;
             case Struct s:
-            {
-                var fields = v as object?[] ?? throw new ArgumentException($"Struct {n.Name} expects object?[] values, got {v.GetType().Name}");
-                if (fields.Length != s.Children.Count) throw new ArgumentException($"Struct {n.Name} has {s.Children.Count} fields, value has {fields.Length}");
-                for (var i = 0; i < fields.Length; i++) Shred(s.Children[i], fields[i], s.Def, rep);
-                break;
-            }
+                {
+                    var fields = v as object?[] ?? throw new ArgumentException($"Struct {n.Name} expects object?[] values, got {v.GetType().Name}");
+                    if (fields.Length != s.Children.Count) throw new ArgumentException($"Struct {n.Name} has {s.Children.Count} fields, value has {fields.Length}");
+                    for (var i = 0; i < fields.Length; i++) Shred(s.Children[i], fields[i], s.Def, rep);
+                    break;
+                }
             case Repeated r when r.Value is null:
-            {
-                if (v is string or byte[] || v is not IEnumerable items) throw new ArgumentException($"List {n.Name} expects a collection, got {v.GetType().Name}");
-                var first = true;
-                foreach (var item in items)
                 {
-                    Shred(r.Element, item, r.ElementDef, first ? rep : r.Rep);
-                    first = false;
+                    if (v is string or byte[] || v is not IEnumerable items) throw new ArgumentException($"List {n.Name} expects a collection, got {v.GetType().Name}");
+                    var first = true;
+                    foreach (var item in items)
+                    {
+                        Shred(r.Element, item, r.ElementDef, first ? rep : r.Rep);
+                        first = false;
+                    }
+                    if (first) foreach (var leaf in n.Leaves) { leaf.Defs.Add((short)r.Def); leaf.Reps.Add((short)rep); } // empty list
+                    break;
                 }
-                if (first) foreach (var leaf in n.Leaves) { leaf.Defs.Add((short)r.Def); leaf.Reps.Add((short)rep); } // empty list
-                break;
-            }
             case Repeated r:
-            {
-                var first = true;
-                foreach (var (key, value) in Entries(n.Name, v))
                 {
-                    if (key is null) throw new ArgumentException($"Map {n.Name} has a null key");
-                    Shred(r.Element, key, r.ElementDef, first ? rep : r.Rep);
-                    Shred(r.Value!, value, r.ElementDef, first ? rep : r.Rep);
-                    first = false;
+                    var first = true;
+                    foreach (var (key, value) in Entries(n.Name, v))
+                    {
+                        if (key is null) throw new ArgumentException($"Map {n.Name} has a null key");
+                        Shred(r.Element, key, r.ElementDef, first ? rep : r.Rep);
+                        Shred(r.Value!, value, r.ElementDef, first ? rep : r.Rep);
+                        first = false;
+                    }
+                    if (first) foreach (var leaf in n.Leaves) { leaf.Defs.Add((short)r.Def); leaf.Reps.Add((short)rep); } // empty map
+                    break;
                 }
-                if (first) foreach (var leaf in n.Leaves) { leaf.Defs.Add((short)r.Def); leaf.Reps.Add((short)rep); } // empty map
-                break;
-            }
         }
     }
 
@@ -327,28 +327,28 @@ internal static class NestedColumns
             case PhysicalType.Float: ((ColumnWriter<float>)col).WriteBatch(defs.Length, defs, reps, leaf.Values.Cast<float>().ToArray()); break;
             case PhysicalType.Double: ((ColumnWriter<double>)col).WriteBatch(defs.Length, defs, reps, leaf.Values.Cast<double>().ToArray()); break;
             case PhysicalType.ByteArray or PhysicalType.FixedLenByteArray:
-            {
-                var bytes = leaf.Values.Cast<byte[]>().ToList();
-                if (leaf.Physical == PhysicalType.FixedLenByteArray && bytes.Any(b => b.Length != leaf.TypeLength))
-                    throw new ArgumentException($"Field {leaf.Name} expects {leaf.TypeLength}-byte values");
-                var buffer = new byte[Math.Max(1, bytes.Sum(b => b.Length))];
-                var offsets = new int[bytes.Count];
-                for (int i = 0, at = 0; i < bytes.Count; at += bytes[i].Length, i++) { offsets[i] = at; bytes[i].CopyTo(buffer, at); }
-                var handle = GCHandle.Alloc(buffer, GCHandleType.Pinned);
-                try
                 {
-                    var start = handle.AddrOfPinnedObject();
-                    if (leaf.Physical == PhysicalType.ByteArray)
-                        ((ColumnWriter<ByteArray>)col).WriteBatch(defs.Length, defs, reps, bytes.Select((b, i) => new ByteArray(start + offsets[i], b.Length)).ToArray());
-                    else
-                        ((ColumnWriter<FixedLenByteArray>)col).WriteBatch(defs.Length, defs, reps, bytes.Select((_, i) => new FixedLenByteArray(start + offsets[i])).ToArray());
+                    var bytes = leaf.Values.Cast<byte[]>().ToList();
+                    if (leaf.Physical == PhysicalType.FixedLenByteArray && bytes.Any(b => b.Length != leaf.TypeLength))
+                        throw new ArgumentException($"Field {leaf.Name} expects {leaf.TypeLength}-byte values");
+                    var buffer = new byte[Math.Max(1, bytes.Sum(b => b.Length))];
+                    var offsets = new int[bytes.Count];
+                    for (int i = 0, at = 0; i < bytes.Count; at += bytes[i].Length, i++) { offsets[i] = at; bytes[i].CopyTo(buffer, at); }
+                    var handle = GCHandle.Alloc(buffer, GCHandleType.Pinned);
+                    try
+                    {
+                        var start = handle.AddrOfPinnedObject();
+                        if (leaf.Physical == PhysicalType.ByteArray)
+                            ((ColumnWriter<ByteArray>)col).WriteBatch(defs.Length, defs, reps, bytes.Select((b, i) => new ByteArray(start + offsets[i], b.Length)).ToArray());
+                        else
+                            ((ColumnWriter<FixedLenByteArray>)col).WriteBatch(defs.Length, defs, reps, bytes.Select((_, i) => new FixedLenByteArray(start + offsets[i])).ToArray());
+                    }
+                    finally
+                    {
+                        handle.Free();
+                    }
+                    break;
                 }
-                finally
-                {
-                    handle.Free();
-                }
-                break;
-            }
             default: throw new NotSupportedException(leaf.Physical.ToString());
         }
     }
@@ -430,20 +430,20 @@ internal static class NestedColumns
             case Struct s:
                 return s.Children.Select(Assemble).ToArray();
             case Repeated r:
-            {
-                var items = new List<object?>();
-                if (first.PeekDef < r.ElementDef)
                 {
-                    Skip(n); // empty
+                    var items = new List<object?>();
+                    if (first.PeekDef < r.ElementDef)
+                    {
+                        Skip(n); // empty
+                        return items;
+                    }
+                    do
+                    {
+                        items.Add(r.Value is null ? Assemble(r.Element) : new KeyValuePair<object?, object?>(Assemble(r.Element), Assemble(r.Value)));
+                    }
+                    while (first.HasMore && first.PeekRep == r.Rep);
                     return items;
                 }
-                do
-                {
-                    items.Add(r.Value is null ? Assemble(r.Element) : new KeyValuePair<object?, object?>(Assemble(r.Element), Assemble(r.Value)));
-                }
-                while (first.HasMore && first.PeekRep == r.Rep);
-                return items;
-            }
             default: throw new InvalidOperationException();
         }
     }
@@ -464,25 +464,25 @@ internal static class NestedColumns
         switch (target)
         {
             case StructType st:
-            {
-                var s = (Struct)file;
-                var fields = (object?[])v;
-                return st.Fields.Select(tf =>
                 {
-                    var i = s.Children.FindIndex(c => c.FieldId >= 0 ? c.FieldId == tf.Id : c.Name == tf.Name);
-                    return i < 0 ? Defaults.ToValue(tf.Type, tf.InitialDefault) : Project(fields[i], s.Children[i], tf.Type, primitive);
-                }).ToArray();
-            }
+                    var s = (Struct)file;
+                    var fields = (object?[])v;
+                    return st.Fields.Select(tf =>
+                    {
+                        var i = s.Children.FindIndex(c => c.FieldId >= 0 ? c.FieldId == tf.Id : c.Name == tf.Name);
+                        return i < 0 ? Defaults.ToValue(tf.Type, tf.InitialDefault) : Project(fields[i], s.Children[i], tf.Type, primitive);
+                    }).ToArray();
+                }
             case ListType lt:
                 return ((List<object?>)v).Select(e => Project(e, ((Repeated)file).Element, lt.ElementType, primitive)).ToList();
             case MapType mt:
-            {
-                var r = (Repeated)file;
-                var map = new Dictionary<object, object?>();
-                foreach (var kv in ((List<object?>)v).Cast<KeyValuePair<object?, object?>>())
-                    map[Project(kv.Key, r.Element, mt.KeyType, primitive)!] = Project(kv.Value, r.Value!, mt.ValueType, primitive);
-                return map;
-            }
+                {
+                    var r = (Repeated)file;
+                    var map = new Dictionary<object, object?>();
+                    foreach (var kv in ((List<object?>)v).Cast<KeyValuePair<object?, object?>>())
+                        map[Project(kv.Key, r.Element, mt.KeyType, primitive)!] = Project(kv.Value, r.Value!, mt.ValueType, primitive);
+                    return map;
+                }
             default:
                 var leaf = (Leaf)file;
                 return primitive(target, leaf.Physical, leaf.TypeLength, v);

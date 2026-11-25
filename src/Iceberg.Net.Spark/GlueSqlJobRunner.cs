@@ -86,7 +86,10 @@ public sealed class GlueSqlJobRunner(IAmazonGlue glue, SparkScriptStager stager,
         ExecutionProperty = existing.ExecutionProperty,
         Command = new JobCommand
         {
-            Name = existing.Command?.Name ?? "glueetl", PythonVersion = existing.Command?.PythonVersion ?? "3", Runtime = existing.Command?.Runtime, ScriptLocation = driver,
+            Name = existing.Command?.Name ?? "glueetl",
+            PythonVersion = existing.Command?.PythonVersion ?? "3",
+            Runtime = existing.Command?.Runtime,
+            ScriptLocation = driver,
         },
         DefaultArguments = arguments,
         NonOverridableArguments = existing.NonOverridableArguments,

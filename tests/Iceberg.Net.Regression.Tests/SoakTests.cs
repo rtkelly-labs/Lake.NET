@@ -72,43 +72,43 @@ public sealed class SoakTests
                     var strategy = (DeleteStrategy)rnd.Next(1, 4);
                     try
                     {
-                    long Key(int n) => 1_000 + w * 100_000L + n;
-                    object?[] Row(long k, string v) => [k, v, (int)(k % 3)];
-                    switch (rnd.Next(5))
-                    {
-                        case 0: // insert new own keys
+                        long Key(int n) => 1_000 + w * 100_000L + n;
+                        object?[] Row(long k, string v) => [k, v, (int)(k % 3)];
+                        switch (rnd.Next(5))
                         {
-                            var keys = Enumerable.Range(0, rnd.Next(1, 4)).Select(_ => Key(next++)).ToList();
-                            await TableMutations.InsertAsync(table, keys.Select(k => Row(k, "i")).ToList());
-                            foreach (var k in keys) mine[k] = "i";
-                            operations.Add("insert");
-                            break;
+                            case 0: // insert new own keys
+                                {
+                                    var keys = Enumerable.Range(0, rnd.Next(1, 4)).Select(_ => Key(next++)).ToList();
+                                    await TableMutations.InsertAsync(table, keys.Select(k => Row(k, "i")).ToList());
+                                    foreach (var k in keys) mine[k] = "i";
+                                    operations.Add("insert");
+                                    break;
+                                }
+                            case 1 when mine.Count > 0: // upsert own keys with a new version
+                                {
+                                    var keys = mine.Keys.OrderBy(_ => rnd.Next()).Take(rnd.Next(1, 3)).ToList();
+                                    var v = $"w{w}-{rnd.Next()}";
+                                    await TableMutations.UpsertAsync(table, keys.Select(k => Row(k, v)).ToList(), strategy: strategy);
+                                    foreach (var k in keys) mine[k] = v;
+                                    operations.Add($"upsert/{strategy}");
+                                    break;
+                                }
+                            case 2 when mine.Count > 0: // delete own keys
+                                {
+                                    var keys = mine.Keys.OrderBy(_ => rnd.Next()).Take(rnd.Next(1, 3)).ToList();
+                                    await TableMutations.DeleteByKeysAsync(table, ["id", "bucket"], keys.Select(k => new object?[] { k, (int)(k % 3) }), strategy);
+                                    foreach (var k in keys) mine.Remove(k);
+                                    operations.Add($"delete/{strategy}");
+                                    break;
+                                }
+                            default: // contend on shared hot keys
+                                {
+                                    var k = (long)rnd.Next(0, (int)HotKeys);
+                                    await TableMutations.UpsertAsync(table, [Row(k, $"hot-w{w}")], strategy: strategy);
+                                    operations.Add($"hot/{strategy}");
+                                    break;
+                                }
                         }
-                        case 1 when mine.Count > 0: // upsert own keys with a new version
-                        {
-                            var keys = mine.Keys.OrderBy(_ => rnd.Next()).Take(rnd.Next(1, 3)).ToList();
-                            var v = $"w{w}-{rnd.Next()}";
-                            await TableMutations.UpsertAsync(table, keys.Select(k => Row(k, v)).ToList(), strategy: strategy);
-                            foreach (var k in keys) mine[k] = v;
-                            operations.Add($"upsert/{strategy}");
-                            break;
-                        }
-                        case 2 when mine.Count > 0: // delete own keys
-                        {
-                            var keys = mine.Keys.OrderBy(_ => rnd.Next()).Take(rnd.Next(1, 3)).ToList();
-                            await TableMutations.DeleteByKeysAsync(table, ["id", "bucket"], keys.Select(k => new object?[] { k, (int)(k % 3) }), strategy);
-                            foreach (var k in keys) mine.Remove(k);
-                            operations.Add($"delete/{strategy}");
-                            break;
-                        }
-                        default: // contend on shared hot keys
-                        {
-                            var k = (long)rnd.Next(0, (int)HotKeys);
-                            await TableMutations.UpsertAsync(table, [Row(k, $"hot-w{w}")], strategy: strategy);
-                            operations.Add($"hot/{strategy}");
-                            break;
-                        }
-                    }
                     }
                     catch (Iceberg.Net.Metadata.CommitFailedException)
                     {

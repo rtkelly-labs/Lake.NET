@@ -36,8 +36,12 @@ public sealed class SparkJobRunnerTests : IDisposable
             .On<Emr.GetJobRunRequest, Emr.GetJobRunResponse>(_ => new Emr.GetJobRunResponse { JobRun = new Emr.JobRun { State = new Amazon.EMRServerless.JobRunState(states.Dequeue()) } });
         var runner = new EmrServerlessSqlJobRunner(client, _stager, new EmrServerlessJobOptions
         {
-            ApplicationId = "app", ExecutionRoleArn = "arn:aws:iam::1:role/r", StagingPrefix = _staging,
-            Spark = SparkCatalogConfig.Glue("glue", "s3://lake/wh"), ExtraSparkSubmitParameters = "--conf spark.executor.cores=2", LogUri = "s3://logs/",
+            ApplicationId = "app",
+            ExecutionRoleArn = "arn:aws:iam::1:role/r",
+            StagingPrefix = _staging,
+            Spark = SparkCatalogConfig.Glue("glue", "s3://lake/wh"),
+            ExtraSparkSubmitParameters = "--conf spark.executor.cores=2",
+            LogUri = "s3://logs/",
         });
 
         var run = await runner.RunAsync(Script, "compact-db-t", pollInterval: TimeSpan.FromMilliseconds(1));
@@ -64,7 +68,10 @@ public sealed class SparkJobRunnerTests : IDisposable
             .On<Emr.GetJobRunRequest, Emr.GetJobRunResponse>(_ => new Emr.GetJobRunResponse { JobRun = new Emr.JobRun { State = Amazon.EMRServerless.JobRunState.FAILED, StateDetails = "Table not found" } });
         var runner = new EmrServerlessSqlJobRunner(client, _stager, new EmrServerlessJobOptions
         {
-            ApplicationId = "app", ExecutionRoleArn = "r", StagingPrefix = _staging, Spark = SparkCatalogConfig.Glue("glue", "s3://lake/wh"),
+            ApplicationId = "app",
+            ExecutionRoleArn = "r",
+            StagingPrefix = _staging,
+            Spark = SparkCatalogConfig.Glue("glue", "s3://lake/wh"),
         });
         var e = await Assert.ThrowsAsync<SparkJobFailedException>(() => runner.RunAsync(Script, pollInterval: TimeSpan.FromMilliseconds(1)));
         Assert.Equal(SparkJobState.Failed, e.Run.State);
@@ -84,7 +91,10 @@ public sealed class SparkJobRunnerTests : IDisposable
         fake.On<Emr.GetJobRunRequest, Emr.GetJobRunResponse>(_ => new Emr.GetJobRunResponse { JobRun = new Emr.JobRun { State = new Amazon.EMRServerless.JobRunState(state) } });
         var runner = new EmrServerlessSqlJobRunner(client, _stager, new EmrServerlessJobOptions
         {
-            ApplicationId = "app", ExecutionRoleArn = "r", StagingPrefix = _staging, Spark = SparkCatalogConfig.Glue("glue", "s3://lake/wh"),
+            ApplicationId = "app",
+            ExecutionRoleArn = "r",
+            StagingPrefix = _staging,
+            Spark = SparkCatalogConfig.Glue("glue", "s3://lake/wh"),
         });
         Assert.Equal(expected, (await runner.GetAsync("x")).State);
     }
@@ -104,7 +114,10 @@ public sealed class SparkJobRunnerTests : IDisposable
             .On<Glue.GetJobRunRequest, Glue.GetJobRunResponse>(_ => new Glue.GetJobRunResponse { JobRun = new Glue.JobRun { JobRunState = Amazon.Glue.JobRunState.SUCCEEDED } });
         var runner = new GlueSqlJobRunner(client, _stager, new GlueJobOptions
         {
-            JobName = "iceberg-sql", StagingPrefix = _staging, Spark = SparkCatalogConfig.Glue("glue", "s3://lake/wh"), RoleArn = "arn:aws:iam::1:role/glue",
+            JobName = "iceberg-sql",
+            StagingPrefix = _staging,
+            Spark = SparkCatalogConfig.Glue("glue", "s3://lake/wh"),
+            RoleArn = "arn:aws:iam::1:role/glue",
         });
 
         await runner.EnsureJobAsync();
@@ -132,8 +145,17 @@ public sealed class SparkJobRunnerTests : IDisposable
         var runner = new GlueSqlJobRunner(client, _stager, options);
         var job = new Glue.Job
         {
-            Name = "iceberg-sql", Role = "arn:aws:iam::1:role/glue", GlueVersion = "4.0", WorkerType = "G.2X", NumberOfWorkers = 5, MaxCapacity = 10,
-            Timeout = 60, MaxRetries = 2, Description = "nightly", SecurityConfiguration = "kms", ExecutionClass = "FLEX",
+            Name = "iceberg-sql",
+            Role = "arn:aws:iam::1:role/glue",
+            GlueVersion = "4.0",
+            WorkerType = "G.2X",
+            NumberOfWorkers = 5,
+            MaxCapacity = 10,
+            Timeout = 60,
+            MaxRetries = 2,
+            Description = "nightly",
+            SecurityConfiguration = "kms",
+            ExecutionClass = "FLEX",
             Connections = new Glue.ConnectionsList { Connections = ["vpc"] },
             NonOverridableArguments = new() { ["--enable-metrics"] = "true" },
             Command = new Glue.JobCommand { Name = "glueetl", PythonVersion = "3", ScriptLocation = "s3://old/iceberg_sql_driver-000000000000.py" },
