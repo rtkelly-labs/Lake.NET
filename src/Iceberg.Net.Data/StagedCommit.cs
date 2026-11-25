@@ -20,10 +20,13 @@ public class StagedCommit
 {
     private readonly Func<CancellationToken, Task<(SnapshotProducer? Producer, object? Outcome)>> _plan;
     private IReadOnlyList<string> _artifacts = [];
+    private CommitStateUnknownException? _unknownOutcome;
+    private readonly WritePlanGuard _planGuard;
 
     internal StagedCommit(Table table, Func<CancellationToken, Task<(SnapshotProducer? Producer, object? Outcome)>> plan)
     {
         Table = table;
+        _planGuard = new WritePlanGuard(table.Metadata);
         _plan = plan;
     }
 
@@ -63,11 +66,14 @@ public class StagedCommit
     /// Plan against the table's current metadata and write this attempt's files. A base file removed by compaction and
     /// expiry while planning counts as a lost race when the table has moved (as in every mutation): plan again.
     /// </summary>
-    internal async Task PlanAsync(CancellationToken ct)
+    internal async Task PlanAsync(CancellationToken ct, CommitRetryBudget? sharedBudget = null)
     {
         var policy = CommitRetryPolicy.From(Table.Metadata);
+        var budget = sharedBudget ?? new CommitRetryBudget(policy);
         for (var retry = 0; ; retry++)
         {
+            budget.CheckAttempt();
+            _planGuard.Validate(Table.Metadata);
             Attempts++;
             SnapshotProducer? producer;
             try
@@ -79,6 +85,7 @@ public class StagedCommit
                 var before = Table.Metadata.CurrentSnapshotId;
                 await Table.RefreshAsync(ct);
                 if (Table.Metadata.CurrentSnapshotId == before) throw;
+                if (await budget.RetryAsync(e, ct) is null) throw;
                 continue;
             }
             if (producer is null)
@@ -86,6 +93,8 @@ public class StagedCommit
                 (Commit, Snapshot, _artifacts) = (null, null, []);
                 return;
             }
+            budget.CheckAttempt();
+            _planGuard.Validate(Table.Metadata);
             (Commit, Snapshot, _artifacts) = await producer.StageWithArtifactsAsync(ct);
             return;
         }
@@ -98,7 +107,7 @@ public class StagedCommit
     /// </summary>
     public async Task DiscardAsync(CancellationToken ct = default)
     {
-        if (IsCommitted) return;
+        if (IsCommitted || _unknownOutcome is not null) return;
         var artifacts = _artifacts;
         _artifacts = [];
         Commit = null;
@@ -124,6 +133,8 @@ public class StagedCommit
     {
         ArgumentNullException.ThrowIfNull(staged);
         if (staged.Count == 0) return;
+        if (staged.FirstOrDefault(s => s._unknownOutcome is not null) is { } unresolved)
+            throw new CommitStateUnknownException("Cannot replay a staged transaction whose outcome is unresolved", unresolved._unknownOutcome);
         if (staged.Any(s => s.IsCommitted)) throw new InvalidOperationException("A staged commit was already committed");
         if (staged.Select(s => s.Table.Identifier).Distinct().Count() != staged.Count)
             throw new ArgumentException("A transaction may change each table once: stage one change per table");
@@ -132,18 +143,24 @@ public class StagedCommit
             throw new ArgumentException("Every staged change must belong to a table of the same catalog instance");
 
         var policies = staged.Select(s => CommitRetryPolicy.From(s.Table.Metadata)).ToList();
-        var policy = new CommitRetryPolicy(policies.Max(p => p.NumRetries), policies.Max(p => p.MinWaitMs), policies.Max(p => p.MaxWaitMs));
+        var policy = new CommitRetryPolicy(policies.Max(p => p.NumRetries), policies.Max(p => p.MinWaitMs), policies.Max(p => p.MaxWaitMs))
+        {
+            TotalTimeoutMs = policies.Min(p => p.TotalTimeoutMs),
+        };
+        var budget = new CommitRetryBudget(policy);
         using var telemetry = IcebergTelemetry.StartCommit(string.Join(", ", staged.Select(s => s.Table.Identifier)), "transaction");
         var committing = false;
         try
         {
+            foreach (var s in staged) s._planGuard.Validate(s.Table.Metadata);
             for (var attempt = 1; ; attempt++)
             {
                 if (attempt > 1)
                     foreach (var s in staged)
                     {
                         await s.Table.RefreshAsync(ct);
-                        await s.PlanAsync(ct);
+                        budget.CheckAttempt();
+                        await s.PlanAsync(ct, budget);
                     }
                 var pending = staged.Where(s => s.Commit is not null).ToList();
                 if (pending.Count == 0)
@@ -154,6 +171,7 @@ public class StagedCommit
                 }
                 try
                 {
+                    budget.CheckAttempt();
                     committing = true;
                     await CommitOnceAsync(catalog, pending, ct);
                     committing = false;
@@ -163,9 +181,9 @@ public class StagedCommit
                     committing = false;
                     // Definitely not applied: this attempt's files are unreferenced, and the re-plan writes new ones.
                     foreach (var s in pending) await s.DiscardAsync(ct);
-                    var wait = Math.Min(policy.MaxWaitMs, policy.MinWaitMs * (1 << Math.Min(attempt - 1, 20)));
-                    telemetry.Retrying(attempt, conflict, TimeSpan.FromMilliseconds(wait));
-                    await Task.Delay(wait + Random.Shared.Next(wait / 10 + 1), ct);
+                    var wait = await budget.RetryAsync(conflict, ct);
+                    if (wait is null) throw;
+                    telemetry.Retrying(attempt, conflict, wait);
                     continue;
                 }
                 foreach (var s in staged) s.IsCommitted = true;
@@ -175,6 +193,12 @@ public class StagedCommit
                 telemetry.Committed(pending[0].Snapshot!.SnapshotId, "transaction");
                 return;
             }
+        }
+        catch (CommitStateUnknownException unknown)
+        {
+            foreach (var s in staged) s._unknownOutcome = unknown;
+            telemetry.FailedWith(unknown);
+            throw;
         }
         catch (Exception e) when (telemetry.FailedWith(e) || !committing || e is CommitFailedException or NotSupportedException)
         {
@@ -206,26 +230,14 @@ public class StagedCommit
             if (taken is null) throw;
             throw new CommitFailedException($"Sequence number {taken.Snapshot!.SequenceNumber} of the snapshot staged for {taken.Table.Identifier} is stale: {stale.Message}", stale);
         }
-        catch (CommitStateUnknownException unknown) when (unknown.ServerResponded)
+        catch (OperationCanceledException cancelled)
         {
-            // The catalog finished the request with an error, so its outcome is fixed: look for the staged snapshots
-            // (IDs are random 63-bit values). All present: applied. None: not applied, a plain conflict.
-            var applied = 0;
-            try
-            {
-                foreach (var s in pending)
-                {
-                    await s.Table.RefreshAsync(ct);
-                    if (s.Table.Metadata.SnapshotById(s.Snapshot!.SnapshotId) is not null) applied++;
-                }
-            }
-            catch (Exception e) when (e is not OperationCanceledException)
-            {
-                throw new CommitStateUnknownException($"{unknown.Message}; resolving it failed: {e.Message}", unknown);
-            }
-            if (applied == pending.Count) return;
-            if (applied == 0) throw new CommitFailedException($"The transaction was not applied ({unknown.Message})", unknown);
-            throw;
+            var unknown = new CommitStateUnknownException("Cancellation during catalog commit does not establish whether the transaction applied", cancelled);
+            if (!await CommitRecovery.ConfirmAsync(pending.Select(s => (s.Table, s.Snapshot!.SnapshotId)).ToList(), unknown, ct)) throw unknown;
+        }
+        catch (CommitStateUnknownException unknown)
+        {
+            if (!await CommitRecovery.ConfirmAsync(pending.Select(s => (s.Table, s.Snapshot!.SnapshotId)).ToList(), unknown, ct)) throw;
         }
     }
 }

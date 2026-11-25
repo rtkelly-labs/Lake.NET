@@ -293,6 +293,7 @@ public abstract partial class MetastoreCatalog(string name, IFileIO io) : ICatal
         using var telemetry = IcebergTelemetry.StartCatalogCall(Name, GetType().Name, "commit_transaction");
         if (commits.Select(c => c.Identifier).Distinct().Count() != commits.Count) throw new ArgumentException("A transaction may change each table once");
         var swaps = new List<MetadataSwap>();
+        var swapping = false;
         try
         {
             foreach (var commit in commits)
@@ -308,8 +309,22 @@ public abstract partial class MetastoreCatalog(string name, IFileIO io) : ICatal
                 await FileIO.WriteAsync(newLocation, Encoding.UTF8.GetBytes(MetadataJson.Write(updated)), overwrite: false, ct);
                 swaps.Add(new MetadataSwap(commit.Identifier, current.MetadataFileLocation!, newLocation, updated));
             }
-            if (swaps.Count > 0) await SwapMetadataLocationsAsync(swaps, ct);
+            if (swaps.Count > 0)
+            {
+                swapping = true;
+                await SwapMetadataLocationsAsync(swaps, ct);
+            }
             telemetry.Succeeded();
+        }
+        catch (Exception e) when (swapping && e is not CommitFailedException and not NotSupportedException)
+        {
+            if (e is CommitStateUnknownException) { telemetry.FailedWith(e); throw; }
+            var unknown = new CommitStateUnknownException("Catalog transaction may have applied; preserve its metadata and resolve its status", e)
+            {
+                ServerResponded = e is Amazon.Runtime.AmazonServiceException,
+            };
+            telemetry.FailedWith(unknown);
+            throw unknown;
         }
         catch (Exception e) when (telemetry.FailedWith(e) || e is CommitFailedException or NoSuchTableException or NotSupportedException or ArgumentException)
         {
@@ -354,12 +369,12 @@ public abstract partial class MetastoreCatalog(string name, IFileIO io) : ICatal
         {
             throw;
         }
-        catch (Exception e) when (e is not OperationCanceledException)
+        catch (Exception e)
         {
             // We may have won. Never delete the file: a reader may already be following the pointer.
             throw new CommitStateUnknownException($"Commit to {id} failed with an unknown outcome; check {newLocation}", e)
             {
-                // A service error response (as opposed to a timeout) means the call has finished.
+                // Diagnostic only: a response does not establish whether the commit applied.
                 ServerResponded = e is Amazon.Runtime.AmazonServiceException,
             };
         }

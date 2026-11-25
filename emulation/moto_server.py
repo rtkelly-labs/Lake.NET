@@ -49,7 +49,7 @@ def _update_table_with_version_check(self: GlueResponse) -> Any:
             database = self.parameters.get("DatabaseName")
             name = self.parameters["TableInput"]["Name"]
             table = self.glue_backend.get_table(database, name)
-            current = str(table._current_version)  # noqa: SLF001 - moto keeps no public accessor
+            current = str(table._current_version)  # moto keeps no public accessor
             if expected != current:
                 raise ConcurrentModificationError(
                     f"Update table failed: version {expected} is not current ({current})"
@@ -94,12 +94,49 @@ def _get_query_results_paged(self: AthenaResponse) -> Any:
 
 AthenaResponse.get_query_results = _get_query_results_paged  # type: ignore[method-assign]
 
+# Shim 4: StartQueryExecution tokens identify one submission, including across client restarts.
+# moto 5.2.4 ignores ClientRequestToken and creates another execution on every replay.
+_athena_start_lock = threading.Lock()
+_original_start_query = AthenaResponse.start_query_execution
+
+
+def _start_query_idempotent(self: AthenaResponse) -> Any:
+    token = self._get_param("ClientRequestToken")
+    if not isinstance(token, str) or not 32 <= len(token) <= 128:
+        return self.error("ClientRequestToken must contain 32 to 128 characters", 400)
+    parameters = json.loads(self.body)
+    parameters.pop("ClientRequestToken", None)
+    fingerprint = json.dumps(parameters, sort_keys=True, separators=(",", ":"))
+    # Attach the cache to the account/region backend so moto resets also discard the tokens.
+    backend = self.athena_backend
+    with _athena_start_lock:
+        cache = getattr(backend, "_iceberg_submission_tokens", None)
+        if cache is None:
+            cache = {}
+            backend._iceberg_submission_tokens = cache
+        if token in cache:
+            previous, response = cache[token]
+            if previous != fingerprint:
+                raise JsonRESTError(
+                    "InvalidRequestException",
+                    "ClientRequestToken was already used with different parameters",
+                )
+            return response
+        response = _original_start_query(self)
+        if isinstance(response, str) and "QueryExecutionId" in json.loads(response):
+            cache[token] = (fingerprint, response)
+        return response
+
+
+AthenaResponse.start_query_execution = _start_query_idempotent  # type: ignore[method-assign]
+
 # Which shims this process applies, served at /__shims so tests can tell a stale emulator (started before a shim
 # was added) from a missing AWS guarantee.
 SHIMS = [
     "glue-update-table-version-id",
     "glue-create-table-atomic",
     "athena-get-query-results-paging",
+    "athena-start-query-idempotency",
 ]
 
 
@@ -115,8 +152,10 @@ def with_shim_listing(app: Any) -> Any:
 
 def main() -> None:
     parser = argparse.ArgumentParser()
-    parser.add_argument("--host", default="0.0.0.0")  # noqa: S104 - emulator, local/CI only
-    parser.add_argument("--port", type=int, default=int(os.environ.get("MOTO_PORT", "5000")))
+    parser.add_argument("--host", default="0.0.0.0")  # emulator, local/CI only
+    parser.add_argument(
+        "--port", type=int, default=int(os.environ.get("MOTO_PORT", "5000"))
+    )
     args = parser.parse_args()
     app = DomainDispatcherApplication(create_backend_app)
     run_simple(

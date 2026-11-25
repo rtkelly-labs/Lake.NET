@@ -55,6 +55,12 @@ says whether it was resolved.
 A commit scope opened while another is open for the same table on the same async flow reports into the outer one,
 so a mutation is one `iceberg.commit` span however its retries are layered.
 
+An uncertain commit's read-only recovery emits `iceberg.commit.status-check` events with `iceberg.table`,
+`iceberg.snapshot.id`, `iceberg.commit.status-check.attempt`, `iceberg.commit.status-check.result` (`success` or
+`unknown`) and `error.type` for failed reads. These checks do not count as write attempts or conflict retries.
+`CommitStateUnknownException.ResolutionFailure` preserves a failed recovery separately from the original commit
+exception. The [retry design](stability-and-retries.md) defines the budgets and uncertainty rules.
+
 **Not traced yet**: maintenance (`ExpireSnapshotsAsync`, orphan cleanup) and ref operations commit through
 `Table.CommitAsync` and so appear as `iceberg.catalog.commit_table` spans, not `iceberg.commit`; `IFileIO` reads and
 writes (use the HTTP/AWS instrumentation above); namespace and view calls.
@@ -81,6 +87,10 @@ writes (use the HTTP/AWS instrumentation above); namespace and view calls.
 meter is the process-wide view.
 
 ## Adding instrumentation
+
+[Chaos experiments](chaos-engineering.md) connect injected faults to their catalog/commit spans, retry decisions,
+caller exceptions and independently verified table state. The in-process pilot writes JSON reports for CI; its
+injection events are test-only instrumentation.
 
 Keep call sites to one line, add the tag or instrument to `IcebergTelemetry`, document it in the tables above, and
 cover it in `TelemetryTests` with a listener (filter on your test's table: tests in the process run in parallel).

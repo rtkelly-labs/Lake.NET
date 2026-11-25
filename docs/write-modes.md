@@ -51,6 +51,12 @@ serializable semantics:
 
 Inserted data files are written once and reused across attempts, because they don't depend on table state.
 
+`commit.retry.total-timeout-ms` bounds additional attempts using a shared monotonic budget. Nested producers and
+staged replans do not restart it. A schema-ID change rejects the old command before retained keys, predicates or
+input arrays can be reinterpreted; rebuild them from the refreshed schema. A changed table UUID also rejects the
+command. Prepared append files may retain an archived partition spec after the default changes. See
+[stability and retries](stability-and-retries.md) for the exact boundaries and conservative schema policy.
+
 ## Choosing
 
 | Situation | Choose |
