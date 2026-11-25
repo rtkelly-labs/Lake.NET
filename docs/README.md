@@ -17,7 +17,7 @@
 | [linq.md](linq.md) | The typed layer: mapping rules, what LINQ pushes down vs evaluates in memory, strict mode, typed writes |
 | [efcore.md](efcore.md) | The EF Core provider: model mapping, query delegation to the LINQ layer, `SaveChanges` as one MERGE per table, concurrency, atomicity across tables |
 | [write-modes.md](write-modes.md) | Insert, upsert by key, group key replacement, deletes — and the copy-on-write / position / equality delete mechanisms |
-| [upstream/README.md](upstream/README.md) | Proposed upstream tickets (Parquet.Net, PyIceberg, Gravitino) and the Parquet.SourceGenerator patch, ready to file; none filed |
+| [upstream/README.md](upstream/README.md) | Proposed upstream tickets (PyIceberg, Gravitino) and the Parquet.SourceGenerator patch, ready to file; none filed. Also why Parquet.Net is retired upstream |
 | [puffin.md](puffin.md) | Puffin files, deletion vectors, Theta sketches, the v2→v3 position-delete converter, NDV statistics |
 | [parquet-sourcegenerator.md](parquet-sourcegenerator.md) | Using Parquet.SourceGenerator as a typed Iceberg write path: measured gaps and where to fix each |
 | [libraries.md](libraries.md) | Libraries under the hood (Avro, Parquet, ORC, compression, Roaring/DVs, Puffin, sketches, Arrow, SigV4) and CLR type pitfalls |

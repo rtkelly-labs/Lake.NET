@@ -1,7 +1,8 @@
 # Upstream proposal: Parquet field IDs on group fields (Parquet.Net)
 
 **Target:** [aloneguid/parquet-dotnet](https://github.com/aloneguid/parquet-dotnet) · **Against:** `master` @ `6cdd7de` (2026-08-25), package 6.1.0
-**Status here:** drafted and prototyped locally; **not filed**. The text under [Issue](#issue) is ready to paste.
+**Status here:** drafted and prototyped locally; **never filed, and now cannot be**: upstream was deleted
+(see [Parquet.Net is retired](parquet-net-retired.md)). If still wanted, it becomes a change in our fork.
 **Why we care:** Iceberg resolves every column by field ID, including struct, list and map columns. Without IDs on
 group nodes, nothing built on Parquet.Net (including [Parquet.SourceGenerator](../parquet-sourcegenerator.md)) can
 write nested Iceberg columns. This is the one gap in that table that is blocked upstream rather than in the generator.
