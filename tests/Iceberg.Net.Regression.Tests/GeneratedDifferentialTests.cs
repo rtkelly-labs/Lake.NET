@@ -216,8 +216,11 @@ public sealed class GeneratedDifferentialTests(ITestOutputHelper output) : IDisp
         {
             // pyarrow rejects a required child that holds nulls under a null parent struct (Arrow allows the child
             // values; pyarrow's non-nullable check does not look at the parent). Known, see compare-arrow in the oracle.
-            if (e.Message.Contains("cannot be viewed as non-nullable", StringComparison.Ordinal)
-                || e.Message.Contains("non-nullable but contains nulls", StringComparison.Ordinal))
+            // Counted as known only when the rows really hold such a struct; the same message on any other table is a
+            // finding.
+            if ((e.Message.Contains("cannot be viewed as non-nullable", StringComparison.Ordinal)
+                    || e.Message.Contains("non-nullable but contains nulls", StringComparison.Ordinal))
+                && HasNullStructOverRequired(c))
                 return new(KnownLimitation, "");
             return new("pyiceberg-write-failed", LastLine(e.Message));
         }
@@ -234,6 +237,23 @@ public sealed class GeneratedDifferentialTests(ITestOutputHelper output) : IDisp
         }
         return await CompareAsync(t, c.Rows.Count);
     }
+
+    /// <summary>Whether some row holds a null struct (at any depth) with a required field beneath it.</summary>
+    private static bool HasNullStructOverRequired(Case c) =>
+        c.Rows.Any(row => c.Schema.Columns.Select((f, i) => NullStructOverRequired(f.Type, row[i])).Any(x => x));
+
+    private static bool NullStructOverRequired(IcebergType type, object? value) => (type, value) switch
+    {
+        (StructType s, null) => HoldsRequired(s),
+        (_, null) => false,
+        (StructType s, object?[] fields) => s.Fields.Select((f, i) => NullStructOverRequired(f.Type, fields[i])).Any(x => x),
+        (ListType l, System.Collections.IEnumerable items) => items.Cast<object?>().Any(v => NullStructOverRequired(l.ElementType, v)),
+        (MapType m, System.Collections.IDictionary map) => map.Values.Cast<object?>().Any(v => NullStructOverRequired(m.ValueType, v)),
+        _ => false,
+    };
+
+    private static bool HoldsRequired(StructType s) =>
+        s.Fields.Any(f => f.Required || (f.Type is StructType inner && HoldsRequired(inner)));
 
     private static async Task<Outcome> CompareAsync(Table t, int expectedRows)
     {
