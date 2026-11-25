@@ -5,14 +5,20 @@ code and its tooling follow it.
 
 ## The stack
 
-1. **Upstream's history is kept exactly as upstream wrote it, and the fork is a stack on top.** `master` is upstream,
+1. **Upstream's history is kept exactly as upstream wrote it, and the fork is a stack on top.** `main` is upstream,
    then `lake(0001)` (packaging, tooling) and one commit per change, `lake(NNNN): title`, each with its record in the
-   same commit. No merge commits above upstream. `git log upstream/master..master` is the whole of what the fork adds.
+   same commit. No merge commits above upstream. `git log upstream/master..main` is the whole of what the fork adds.
+   The fork's branch is `main`, as in Oxbow's ref layout; upstream's keeps its own name, `upstream/master`. (It was
+   `master` until 25 November 2026; GitHub redirects the old name.)
 2. **The stack is immutable once published.** It moves onto a newer upstream only when the maintainer decides to
-   (`rebaseline`), through a `staging/<name>` branch that CI builds and verifies, and only then replaces `master`.
+   (`rebaseline`), through a `staging/<name>` branch that CI builds and verifies, and only then replaces `main`.
    Nothing published is lost: every replaced head is tagged `lake/stack/<date>-<sha>`, and every published version of
    the stack and of each change branch is recorded in the append-only `lake/history/*` refs, which only fast-forward.
-   Between rebaselines `master` only moves forward.
+   Between rebaselines `main` only moves forward. One exception, made once on 25 November 2026: every published ref
+   (`main`, `staging/*`, `lake/change/*`, `lake/history/*` and work branches) was rewritten to re-author the commits
+   written as "Claude" (decision 14). Upstream's commits and tags kept their hashes; the fork's commits got new
+   ones, unsigned, with the same trees, dates and messages. The previous refs are kept in an offline mirror and
+   bundle, not on GitHub, so commits pinned before that date (Lake.NET's submodule was re-pinned) may stop resolving.
 3. **Change branches are generated, never edited.** `lake/change/NNNN-name` is upstream plus one change and what it
    depends on: the diff an upstream pull request would contain.
 
@@ -100,3 +106,10 @@ code and its tooling follow it.
 13. **Decisions live in Lake.NET, detail lives with the change.** This folder is the fork's design and process; the
     fork carries its code, its tooling, a short `README.md` and `AGENTS.md`, and the per-change records, which are
     written in the change's own pull request.
+
+## Authorship
+
+14. **Commits are authored by the person responsible for them; an agent that helped is credited with a trailer.**
+    The author and committer are the maintainer, never an agent, and work an agent wrote carries
+    `Co-authored-by: Claude <noreply@anthropic.com>` (or the agent's own name and address). A pull request with an
+    agent as a commit's author or committer is refused by CI.

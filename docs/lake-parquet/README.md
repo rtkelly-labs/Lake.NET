@@ -4,7 +4,7 @@ Lake.Parquet is [rtkelly-labs/parquet-dotnet](https://github.com/rtkelly-labs/pa
 [aloneguid/parquet-dotnet](https://github.com/aloneguid/parquet-dotnet) that Lake.NET reads and writes Parquet
 through (the `external/parquet-dotnet` submodule, and the Lake.Parquet package). Parquet.SourceGenerator can use it
 too. This folder holds the fork's decisions; the fork holds the code, and one record per change in
-[`docs/changes/`](https://github.com/rtkelly-labs/parquet-dotnet/tree/master/docs/changes), which goes with that change's pull request.
+[`docs/changes/`](https://github.com/rtkelly-labs/parquet-dotnet/tree/main/docs/changes), which goes with that change's pull request.
 
 | Page | What it decides |
 |---|---|

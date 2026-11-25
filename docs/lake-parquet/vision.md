@@ -33,7 +33,7 @@ fork is where a fix can be made, measured and shipped, while it is offered upstr
 
 - **Upstream, plus a short stack of recorded changes.** Upstream's history is kept exactly as upstream
   wrote it. On top of it, every line that differs from upstream belongs to one commit, which is one
-  change in [`changes/`](https://github.com/rtkelly-labs/parquet-dotnet/tree/master/docs/changes), with what it does, why, how it was evaluated against upstream, and
+  change in [`changes/`](https://github.com/rtkelly-labs/parquet-dotnet/tree/main/docs/changes), with what it does, why, how it was evaluated against upstream, and
   its upstream status.
 - **Moved onto newer upstreams deliberately.** The maintainer rebaselines the stack onto upstream
   when there is a reason to (a release, a fix), and looks at what broke before publishing it; a change
