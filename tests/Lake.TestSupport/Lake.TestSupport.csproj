@@ -1,0 +1,16 @@
+<Project Sdk="Microsoft.NET.Sdk">
+  <!--
+    The format-neutral test harness (docs/lake/goal.md W7; docs/lake/verification/bdd.md "Steps call adapters, not
+    formats"): the IFormatDriver contract and the scenarios every format must pass. It references no format project;
+    DependencyDirectionTests enforces that. Each format's test project supplies a driver.
+  -->
+  <PropertyGroup>
+    <IsPackable>false</IsPackable>
+    <IsTestProject>false</IsTestProject>
+    <RootNamespace>Lake.TestSupport</RootNamespace>
+  </PropertyGroup>
+  <ItemGroup>
+    <PackageReference Include="xunit" />
+    <PackageReference Include="Xunit.SkippableFact" />
+  </ItemGroup>
+</Project>

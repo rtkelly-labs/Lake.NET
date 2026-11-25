@@ -90,6 +90,23 @@ public static class Endpoints
         // Create the store's tables before the first request.
         app.Services.GetRequiredService<ICatalogStore>().InitializeAsync().GetAwaiter().GetResult();
 
+        // Requests are JSON documents of kilobytes; nothing a client sends needs more than this. First of all, so no
+        // middleware (idempotency hashes the body) reads more than the limit; a body over it is a 413.
+        app.Use(async (ctx, next) =>
+        {
+            if (ctx.Features.Get<Microsoft.AspNetCore.Http.Features.IHttpMaxRequestBodySizeFeature>() is { IsReadOnly: false } limit)
+                limit.MaxRequestBodySize = MaxRequestBodyBytes;
+            try
+            {
+                await next(ctx);
+            }
+            catch (Microsoft.AspNetCore.Http.BadHttpRequestException e) when (!ctx.Response.HasStarted)
+            {
+                var (status, type) = ErrorModel.Classify(e);
+                await ErrorModel.WriteAsync(ctx, status, type, e.Message);
+            }
+        });
+
         // Outside the error handler, so the response it keeps is the final one (errors included).
         if (options.Idempotency.Enabled)
         {
@@ -116,14 +133,6 @@ public static class Endpoints
                 }
                 else await ErrorModel.WriteAsync(ctx, status, type, e.Message);
             }
-        });
-
-        // Requests are JSON documents of kilobytes; nothing a client sends needs more than this.
-        app.Use((ctx, next) =>
-        {
-            if (ctx.Features.Get<Microsoft.AspNetCore.Http.Features.IHttpMaxRequestBodySizeFeature>() is { IsReadOnly: false } limit)
-                limit.MaxRequestBodySize = MaxRequestBodyBytes;
-            return next(ctx);
         });
 
         app.MapPost("/v1/oauth/tokens", AuthSetup.TokenAsync).AllowAnonymous();
@@ -302,15 +311,15 @@ public static class Endpoints
             {
                 var id = await AuthorizedAsync(req.HttpContext, CatalogPrivilege.Read, @namespace, table);
                 var body = await BodyAsync(req, ct);
-                return Json(await planner.PlanAsync(id, Parse(() => PlanRequest.Parse(body)), ct));
+                return Json(await planner.PlanAsync(id, Parse(() => PlanRequest.Parse(body)), Principals.Name(req.HttpContext.User), ct));
             });
 
             v1.MapGet(Tbl + "/plan/{plan-id}", async (string @namespace, string table, [FromRoute(Name = "plan-id")] string planId, HttpContext http, ScanPlanner planner, CancellationToken ct) =>
-                Json(await planner.FetchAsync(await AuthorizedAsync(http, CatalogPrivilege.Read, @namespace, table), planId, ct)));
+                Json(await planner.FetchAsync(await AuthorizedAsync(http, CatalogPrivilege.Read, @namespace, table), planId, Principals.Name(http.User), ct)));
 
             v1.MapDelete(Tbl + "/plan/{plan-id}", async (string @namespace, string table, [FromRoute(Name = "plan-id")] string planId, HttpContext http, ScanPlanner planner, CancellationToken ct) =>
             {
-                await planner.CancelAsync(await AuthorizedAsync(http, CatalogPrivilege.Read, @namespace, table), planId, ct);
+                await planner.CancelAsync(await AuthorizedAsync(http, CatalogPrivilege.Read, @namespace, table), planId, Principals.Name(http.User), ct);
                 return Results.NoContent();
             });
 
@@ -329,7 +338,7 @@ public static class Endpoints
                 var id = await AuthorizedAsync(http, CatalogPrivilege.Read, @namespace, table);
                 var loaded = await svc.LoadTableAsync(id, ct);
                 var write = await http.AllowsAsync(CatalogPrivilege.Write, id.Namespace, id.Name);
-                var credentials = await vendor.VendAsync(id, loaded.Metadata.Location, write, ct);
+                var credentials = await vendor.VendAsync(id, VendableLocation(id, loaded.Metadata), write, ct);
                 return Json(new JsonObject { ["storage-credentials"] = new JsonArray(credentials.Select(c => (JsonNode)c.ToJson()).ToArray()) });
             });
         }
@@ -494,11 +503,16 @@ public static class Endpoints
     private static JsonArray Levels(Namespace ns) => new(ns.Levels.Select(l => (JsonNode)l).ToArray());
     private static JsonArray Strings(IEnumerable<string> items) => new(items.Select(i => (JsonNode)i).ToArray());
 
+    /// <summary>The deepest nesting a request body may have: the deepest the spec's documents need is far less.</summary>
+    public const int MaxJsonDepth = 64;
+
+    private static readonly System.Text.Json.JsonDocumentOptions JsonLimits = new() { MaxDepth = MaxJsonDepth };
+
     private static async Task<JsonNode> BodyAsync(HttpRequest req, CancellationToken ct)
     {
         try
         {
-            return await JsonNode.ParseAsync(req.Body, cancellationToken: ct) ?? throw new BadRequestException("Request body must be a JSON object");
+            return await JsonNode.ParseAsync(req.Body, documentOptions: JsonLimits, cancellationToken: ct) ?? throw new BadRequestException("Request body must be a JSON object");
         }
         catch (System.Text.Json.JsonException e)
         {
@@ -546,7 +560,7 @@ public static class Endpoints
             if (vendor is not NoCredentialVendor && Wants(req, "vended-credentials"))
             {
                 var write = await req.HttpContext.AllowsAsync(CatalogPrivilege.Write, t.Id.Namespace, t.Id.Name);
-                var credentials = await vendor.VendAsync(t.Id, t.Metadata.Location, write, req.HttpContext.RequestAborted);
+                var credentials = await vendor.VendAsync(t.Id, VendableLocation(t.Id, t.Metadata), write, req.HttpContext.RequestAborted);
                 if (credentials.Count > 0)
                 {
                     vended = true;
@@ -564,6 +578,17 @@ public static class Endpoints
         if (etag is not null) req.HttpContext.Response.Headers.ETag = etag;
         return Json(body);
     }
+
+    /// <summary>
+    /// The location credentials are vended for. Locations have been refused <c>*</c>, <c>?</c> and <c>$</c> since they
+    /// were found to widen IAM policies, but a table stored before then (or written to the store directly) can still
+    /// hold one: it loads, and its credentials are refused here with a 422 that says why, before any vendor is asked.
+    /// </summary>
+    private static string VendableLocation(TableIdentifier id, TableMetadata metadata) =>
+        metadata.Location.AsSpan().IndexOfAny(CatalogService.PolicyMetacharacters) < 0
+            ? metadata.Location
+            : throw new UnprocessableEntityException(
+                $"Credentials are not vended for {id}: its location contains '*', '?' or '$', which storage policies read as a wildcard. An admin can move the table to a literal location (register its metadata under one).");
 
     private static IResult ViewResult(LoadedView v, RestServerOptions options) => Json(new JsonObject
     {

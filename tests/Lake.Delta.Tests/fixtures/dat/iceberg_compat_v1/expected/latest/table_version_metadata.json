@@ -1,0 +1,10 @@
+{
+  "version": 2,
+  "properties": {
+    "delta.columnMapping.mode": "name",
+    "delta.enableIcebergCompatV1": "true",
+    "delta.columnMapping.maxColumnId": "3"
+  },
+  "min_reader_version": 3,
+  "min_writer_version": 7
+}

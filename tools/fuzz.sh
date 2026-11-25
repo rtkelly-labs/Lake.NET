@@ -47,6 +47,7 @@ case $target in
   roaring) printf '\x01\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x3a\x30\x00\x00\x01\x00\x00\x00\x00\x00\x02\x00\x10\x00\x00\x00\x01\x00\x02\x00\x03\x00' > "$corpus/one-container" ;;
   mumbling) printf '\x01\x03\x00\x00\x01\x00\x00\x00\x03\x00\x22\xff' > "$corpus/sparse" ;;
   theta) for f in "$fixtures"/puffin/theta-*.bin; do seed "$f"; done ;;
+  avro) for f in "$fixtures"/spark/ref/*/data/*.avro "$fixtures"/spark/ref/mor_v3/metadata/*.avro; do seed "$f"; done ;;
   *) echo "unknown target $target" >&2; exit 2 ;;
 esac
 

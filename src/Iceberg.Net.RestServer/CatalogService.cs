@@ -44,9 +44,7 @@ public sealed partial class CatalogService(ICatalogStore store, IFileIO io, Rest
 
     public async Task CreateNamespaceAsync(Namespace ns, IReadOnlyDictionary<string, string> properties, CancellationToken ct)
     {
-        if (ns.Levels.Count == 0 || ns.Levels.Any(l => l.Length == 0)) throw new BadRequestException("Namespace must have at least one non-empty level");
-        foreach (var level in ns.Levels)
-            if (level is "." or ".." || level.Any(c => c is '/' or '\\' || char.IsControl(c))) throw new BadRequestException($"Namespace level '{level}' cannot be used in a storage path");
+        RequireNamespaceLevels(ns);
         if (await Store.LoadNamespaceAsync(ns, ct) is null)
             await RequireNamespaceRootAsync(ns, NamespaceRoot(ns, properties), properties.ContainsKey("location"), ct);
         await Store.CreateNamespaceAsync(ns, properties, ct);
@@ -177,6 +175,7 @@ public sealed partial class CatalogService(ICatalogStore store, IFileIO io, Rest
             throw new BadRequestException($"Cannot read table metadata at {metadataLocation} ({e.GetType().Name})");
         }
         await RequireTableLocationsAsync(id, metadata, ct);
+        RequireOwnFiles(id, null, metadata);
         await Store.SwapAsync([new PointerSwap(id, current, metadataLocation)], CatalogEntryKind.Table, ct);
         return new LoadedTable(id, metadataLocation, metadata);
     }
@@ -194,25 +193,17 @@ public sealed partial class CatalogService(ICatalogStore store, IFileIO io, Rest
         if (!await Store.DeleteAsync(id, CatalogEntryKind.Table, ct)) throw new NoSuchTableException($"Table does not exist: {id}");
         if (!purge) return;
         // Entry first, files second: a crash in between leaves orphans, never a table pointing at missing files.
-        var m = table.Metadata;
-        try
-        {
-            // Only the table's own directories, and data files only when the table owns them (gc.enabled), as the catalogs do.
-            var files = await TableFiles.ReachableAsync(m, FileIO, m.Snapshots, ct, dataFiles: TableLocations.IsGcEnabled(m));
-            files.UnionWith(m.MetadataLog.Select(l => l.MetadataFile).Append(table.MetadataLocation!));
-            var (inside, outside) = TableLocations.Partition(m, files);
-            if (outside.Count > 0) Logger?.LogWarning("Purging {Table}: skipped {Count} files outside its location", id, outside.Count);
-            await TableFiles.DeleteAllAsync(FileIO, inside, ct);
-        }
-        catch (Exception e) when (e is not OperationCanceledException)
-        {
-            // The table is dropped; what could not be found or deleted is left to orphan-file cleanup (as Java does).
-            Logger?.LogWarning(e, "Dropped {Table}, but purging its files failed", id);
-        }
+        // Best effort (TableFiles.PurgeAsync never throws but for cancellation): what is left goes to orphan-file cleanup, as in Java.
+        var result = await TableFiles.PurgeAsync(table.Metadata, table.MetadataLocation!, FileIO, ct);
+        if (result.SkippedFiles.Count > 0) Logger?.LogWarning("Purging {Table}: skipped {Count} files outside its location", id, result.SkippedFiles.Count);
+        if (result.Error is not null) Logger?.LogWarning(result.Error, "Dropped {Table}, but listing its files to purge failed", id);
+        if (result.FailedDeletes.Count > 0) Logger?.LogWarning("Dropped {Table}, but {Count} of its files could not be deleted", id, result.FailedDeletes.Count);
     }
 
     public async Task RenameAsync(TableIdentifier from, TableIdentifier to, CatalogEntryKind kind, CancellationToken ct)
     {
+        RequireNamespaceLevels(to.Namespace);
+        RequireEntryName(to.Name, kind == CatalogEntryKind.View ? "View" : "Table");
         if (await Store.GetAsync(from, kind, ct) is null) throw await NotFoundAsync(from, kind.ToString(), ct);
         await Store.RenameAsync(from, to, kind, ct);
     }
@@ -248,6 +239,8 @@ public sealed partial class CatalogService(ICatalogStore store, IFileIO io, Rest
                 bool changed;
                 if (current is null)
                 {
+                    // A staged create through the commit endpoint names the table as the create endpoint does.
+                    RequireEntryName(id.Name, "Table");
                     await LoadNamespaceAsync(id.Namespace, ct);
                     if (await Store.KindAsync(id, ct) is not null) throw new CommitFailedException($"Requirement failed: {id} already exists");
                     updated = await BuildCreatedAsync(id, commit.Updates, ct);
@@ -270,6 +263,7 @@ public sealed partial class CatalogService(ICatalogStore store, IFileIO io, Rest
                     results.Add(new LoadedTable(id, currentLocation, current!));
                     continue;
                 }
+                RequireOwnFiles(id, current, updated);
                 var newLocation = updated.MetadataFileLocation ?? MetastoreCatalog.NewMetadataLocation(updated, currentLocation);
                 updated = updated with { MetadataFileLocation = newLocation };
                 await WriteMetadataAsync(newLocation, updated, ct);
@@ -349,18 +343,8 @@ public sealed partial class CatalogService(ICatalogStore store, IFileIO io, Rest
     private Task WriteMetadataAsync(string location, TableMetadata m, CancellationToken ct) =>
         FileIO.WriteAsync(location, Encoding.UTF8.GetBytes(MetadataJson.Write(m)), overwrite: false, ct);
 
-    public async Task<TableMetadata> ReadMetadataAsync(string location, CancellationToken ct)
-    {
-        var bytes = await FileIO.ReadAllAsync(location, ct);
-        if (location.EndsWith(".gz", StringComparison.Ordinal))
-        {
-            using var gz = new System.IO.Compression.GZipStream(new MemoryStream(bytes), System.IO.Compression.CompressionMode.Decompress);
-            using var ms = new MemoryStream();
-            await gz.CopyToAsync(ms, ct);
-            bytes = ms.ToArray();
-        }
-        return MetadataJson.Read(Encoding.UTF8.GetString(bytes), location);
-    }
+    public async Task<TableMetadata> ReadMetadataAsync(string location, CancellationToken ct) =>
+        MetastoreCatalog.DecodeMetadata(await FileIO.ReadAllAsync(location, ct), location);
 
     // ---------- views ----------
 

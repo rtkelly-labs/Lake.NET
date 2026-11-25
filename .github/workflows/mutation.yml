@@ -4,6 +4,9 @@ name: mutation
 # PR CI. Each job uploads the HTML/JSON report; record notable score changes in the roadmap's mutation table.
 # The break threshold in each config is 0, so a run fails only if Stryker itself fails.
 on:
+  # Weekly (docs/lake/goal.md, G10).
+  schedule:
+    - cron: "41 1 * * 6"
   workflow_dispatch:
 
 permissions:

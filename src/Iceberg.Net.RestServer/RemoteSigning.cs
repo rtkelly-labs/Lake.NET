@@ -120,20 +120,51 @@ public sealed partial class S3RequestSigner
     private static readonly HashSet<string> ListQuery = new(StringComparer.Ordinal)
         { "prefix", "list-type", "delimiter", "continuation-token", "max-keys", "start-after", "encoding-type", "fetch-owner", "x-id" };
 
-    /// <summary>Headers that change who may read an object or how long it must be kept: never signed.</summary>
-    private static bool PrivilegedHeader(string name) =>
-        name.Equals("x-amz-acl", StringComparison.OrdinalIgnoreCase)
-        || name.StartsWith("x-amz-grant-", StringComparison.OrdinalIgnoreCase)
-        || name.StartsWith("x-amz-object-lock-", StringComparison.OrdinalIgnoreCase)
-        || name.Equals("x-amz-bypass-governance-retention", StringComparison.OrdinalIgnoreCase)
-        || name.Equals("x-amz-website-redirect-location", StringComparison.OrdinalIgnoreCase);
+    /// <summary>The methods S3 object and bucket requests of a table use; anything else (PATCH, OPTIONS, …) is not signed.</summary>
+    private static readonly HashSet<string> Methods = new(StringComparer.Ordinal) { "GET", "HEAD", "PUT", "POST", "DELETE" };
+
+    /// <summary>
+    /// The headers a request to be signed may carry: what S3 clients send to read, write, copy, list and delete a
+    /// table's objects (transport, SDK and tracing headers, content and conditional headers, checksums, user metadata,
+    /// storage class, SSE-S3 and SSE-C). Any other header is refused, and with it everything that changes who may read
+    /// an object or how long it is kept (<c>x-amz-acl</c>, <c>x-amz-grant-*</c>, <c>x-amz-object-lock-*</c>), tags it
+    /// (<c>x-amz-tagging</c>) or encrypts it with a KMS key the client picks (<c>x-amz-server-side-encryption-aws-kms-key-id</c>,
+    /// <c>-context</c>), and every header S3 adds in future until it is listed here.
+    /// </summary>
+    private static readonly HashSet<string> AllowedHeaders = new(StringComparer.OrdinalIgnoreCase)
+    {
+        "host", "authorization", "range", "expect", "connection", "transfer-encoding", "content-length", "user-agent", "accept", "accept-encoding",
+        "x-amz-user-agent", "amz-sdk-invocation-id", "amz-sdk-retry", "amz-sdk-request", "traceparent", "tracestate", "x-amzn-trace-id",
+        "content-type", "content-md5", "content-encoding", "content-language", "content-disposition", "cache-control", "expires",
+        "if-match", "if-none-match", "if-modified-since", "if-unmodified-since",
+        "x-amz-date", "x-amz-content-sha256", "x-amz-security-token", "x-amz-decoded-content-length", "x-amz-trailer", "x-amz-te",
+        "x-amz-sdk-checksum-algorithm", "x-amz-checksum-mode", "x-amz-checksum-type",
+        "x-amz-copy-source", "x-amz-copy-source-range", "x-amz-copy-source-if-match", "x-amz-copy-source-if-none-match",
+        "x-amz-copy-source-if-modified-since", "x-amz-copy-source-if-unmodified-since", "x-amz-metadata-directive",
+        "x-amz-storage-class", "x-amz-server-side-encryption",
+        "x-amz-server-side-encryption-customer-algorithm", "x-amz-server-side-encryption-customer-key", "x-amz-server-side-encryption-customer-key-md5",
+        "x-amz-copy-source-server-side-encryption-customer-algorithm", "x-amz-copy-source-server-side-encryption-customer-key",
+        "x-amz-copy-source-server-side-encryption-customer-key-md5",
+        "x-amz-request-payer", "x-amz-expected-bucket-owner", "x-amz-source-expected-bucket-owner", "x-amz-mp-object-size",
+    };
+
+    private static bool AllowedHeader(string name) =>
+        AllowedHeaders.Contains(name)
+        || name.StartsWith("x-amz-checksum-", StringComparison.OrdinalIgnoreCase)
+        || name.StartsWith("x-amz-meta-", StringComparison.OrdinalIgnoreCase);
+
+    /// <summary>SSE-S3 or SSE-KMS under the bucket's own key: a key the client names is refused with its header.</summary>
+    private static readonly HashSet<string> Encryption = new(StringComparer.Ordinal) { "AES256", "aws:kms", "aws:kms:dsse" };
 
     private void Authorize(RemoteSignRequest request, IReadOnlyList<(string Bucket, string Prefix)> prefixes)
     {
         var (bucket, key) = Address(request.Uri);
         bool Allowed(string b, string k) => prefixes.Any(p => p.Bucket == b && k.StartsWith(p.Prefix, StringComparison.Ordinal)) && !HasDotSegment(k);
-        if (request.Headers.Keys.FirstOrDefault(PrivilegedHeader) is { } privileged)
-            throw new ForbiddenException($"Requests setting {privileged} are not signed");
+        if (!Methods.Contains(request.Method)) throw new ForbiddenException($"{request.Method} requests are not signed");
+        if (request.Headers.Keys.FirstOrDefault(h => !AllowedHeader(h)) is { } unknown)
+            throw new ForbiddenException($"Requests with the {unknown} header are not signed");
+        if (request.Headers.TryGetValue("x-amz-server-side-encryption", out var sse) && sse.FirstOrDefault(v => !Encryption.Contains(v.Trim())) is { } mode)
+            throw new ForbiddenException($"Requests encrypting with {mode} are not signed");
         var query = ParseQuery(request.Uri.Query);
         if (key is not null)
         {

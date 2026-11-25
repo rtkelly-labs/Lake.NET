@@ -5,6 +5,7 @@ using Microsoft.Extensions.Logging;
 using Iceberg.Net.Catalog;
 using Iceberg.Net.Data;
 using Iceberg.Net.Expressions;
+using Iceberg.Net.IO;
 using Iceberg.Net.Json;
 using Iceberg.Net.Manifests;
 using Iceberg.Net.Metadata;
@@ -72,23 +73,25 @@ public sealed class ScanPlanner(CatalogService catalog, ScanPlanningOptions opti
     /// <c>planTableScan</c>: a completed plan with its plan ID, or (with <see cref="ScanPlanningOptions.Async"/>) a
     /// submitted one. Either is recorded in the <see cref="IServerStateStore"/>, so any instance answers its plan ID.
     /// </summary>
-    public async Task<JsonObject> PlanAsync(TableIdentifier id, PlanRequest request, CancellationToken ct)
+    /// <param name="principal">Who plans (<see cref="Principals.Name"/>): only they can fetch or cancel the plan by its ID.</param>
+    public async Task<JsonObject> PlanAsync(TableIdentifier id, PlanRequest request, string principal, CancellationToken ct)
     {
         await ExpireAsync();
         var loaded = await catalog.LoadTableAsync(id, ct);
         Interlocked.Increment(ref _plansStarted);
         var planId = Guid.NewGuid().ToString();
+        var key = StateKey(principal, planId);
         if (options.Async)
         {
             var cancel = new CancellationTokenSource();
-            _running[planId] = cancel;
-            await state.AddPlanAsync(new PlanRecord(planId, id, "submitted", null, null, Now(), null), ct);
+            _running[key] = cancel;
+            await state.AddPlanAsync(new PlanRecord(key, id, "submitted", null, null, Now(), null), ct);
             _ = Task.Run(async () =>
             {
                 try
                 {
                     var result = await PlanCoreAsync(loaded, request, cancel.Token);
-                    await state.FinishPlanAsync(planId, "completed", result.ToJsonString(), null, Now());
+                    await state.FinishPlanAsync(key, "completed", result.ToJsonString(), null, Now());
                 }
                 catch (OperationCanceledException) when (cancel.IsCancellationRequested)
                 {
@@ -97,11 +100,11 @@ public sealed class ScanPlanner(CatalogService catalog, ScanPlanningOptions opti
                 catch (Exception e)
                 {
                     logger?.LogWarning(e, "Scan planning {PlanId} for {Table} failed", planId, id);
-                    await state.FinishPlanAsync(planId, "failed", null, e.Message, Now());
+                    await state.FinishPlanAsync(key, "failed", null, e.Message, Now());
                 }
                 finally
                 {
-                    _running.TryRemove(planId, out _);
+                    _running.TryRemove(key, out _);
                     cancel.Dispose();
                 }
             }, CancellationToken.None);
@@ -110,17 +113,17 @@ public sealed class ScanPlanner(CatalogService catalog, ScanPlanningOptions opti
 
         var completed = await PlanCoreAsync(loaded, request, ct);
         var now = Now();
-        await state.AddPlanAsync(new PlanRecord(planId, id, "completed", completed.ToJsonString(), null, now, now), ct);
+        await state.AddPlanAsync(new PlanRecord(key, id, "completed", completed.ToJsonString(), null, now, now), ct);
         var response = new JsonObject { ["status"] = "completed", ["plan-id"] = planId };
         foreach (var (k, v) in completed) response[k] = v?.DeepClone();
         return response;
     }
 
     /// <summary><c>fetchPlanningResult</c>.</summary>
-    public async Task<JsonObject> FetchAsync(TableIdentifier id, string planId, CancellationToken ct = default)
+    public async Task<JsonObject> FetchAsync(TableIdentifier id, string planId, string principal, CancellationToken ct = default)
     {
         await ExpireAsync();
-        var plan = await FindAsync(id, planId, ct);
+        var plan = await FindAsync(id, planId, principal, ct);
         switch (plan.Status)
         {
             case "completed":
@@ -144,19 +147,26 @@ public sealed class ScanPlanner(CatalogService catalog, ScanPlanningOptions opti
     }
 
     /// <summary><c>cancelPlanning</c>: stops a plan running here and forgets the plan either way.</summary>
-    public async Task CancelAsync(TableIdentifier id, string planId, CancellationToken ct = default)
+    public async Task CancelAsync(TableIdentifier id, string planId, string principal, CancellationToken ct = default)
     {
-        await FindAsync(id, planId, ct);
-        await state.DeletePlanAsync(planId, ct);
-        if (_running.TryGetValue(planId, out var cancel))
+        var key = (await FindAsync(id, planId, principal, ct)).PlanId;
+        await state.DeletePlanAsync(key, ct);
+        if (_running.TryGetValue(key, out var cancel))
         {
             try { cancel.Cancel(); }
             catch (ObjectDisposedException) { /* it just finished */ }
         }
     }
 
-    private async Task<PlanRecord> FindAsync(TableIdentifier id, string planId, CancellationToken ct) =>
-        await state.LoadPlanAsync(planId, ct) is { } plan && plan.Table.Equals(id)
+    /// <summary>
+    /// Where a plan is kept: its ID hashed with the principal that made it, so another principal's fetch or cancel of
+    /// the same ID finds nothing (404), on every instance, without a column for the owner.
+    /// </summary>
+    private static string StateKey(string principal, string planId) =>
+        Convert.ToHexString(System.Security.Cryptography.SHA256.HashData(Encoding.UTF8.GetBytes($"{principal}\n{planId}"))).ToLowerInvariant();
+
+    private async Task<PlanRecord> FindAsync(TableIdentifier id, string planId, string principal, CancellationToken ct) =>
+        await state.LoadPlanAsync(StateKey(principal, planId), ct) is { } plan && plan.Table.Equals(id)
         && (plan.Finished is not { } done || Now() - done <= options.PlanLifetime)
             ? plan
             : throw new NoSuchPlanIdException($"No plan {planId} for {id}");
@@ -344,8 +354,30 @@ public sealed class ScanPlanner(CatalogService catalog, ScanPlanningOptions opti
     }
 
     // Planning only reads: the table never commits, so it needs no catalog.
+    /// <summary>
+    /// The table as the planner sees it: its FileIO reads only files inside the table's own directories and writes
+    /// nothing. Commits already refuse manifest lists outside the table, but a manifest list inside it can still name
+    /// another table's manifests; the planner reads those with the server's access, so it must refuse them itself.
+    /// </summary>
     private Table TableOf(LoadedTable loaded) =>
-        new(null!, loaded.Id, loaded.Metadata with { MetadataFileLocation = loaded.MetadataLocation }, catalog.FileIO);
+        new(null!, loaded.Id, loaded.Metadata with { MetadataFileLocation = loaded.MetadataLocation },
+            new TableConfinedFileIO(catalog.FileIO, loaded.Id, PlanningPrefixes(loaded.Metadata)));
+
+    /// <summary>
+    /// The table's directories now, plus the directory of every snapshot's manifest list. Commits refuse a manifest list
+    /// outside the table's directories at the time (<c>RequireOwnFiles</c>), so these were the table's own when written;
+    /// keeping them lets a table whose location or <c>write.metadata.path</c> later moved still plan its older snapshots,
+    /// while a manifest list inside the table still can't name another table's manifests.
+    /// </summary>
+    internal static IReadOnlyList<string> PlanningPrefixes(TableMetadata m)
+    {
+        var prefixes = TableLocations.Prefixes(m).ToList();
+        foreach (var s in m.Snapshots)
+            if (s.ManifestList is { } list && list.LastIndexOf('/') is var slash and > 0
+                && TableLocations.Normalise(list[..slash]).TrimEnd('/') + "/" is var dir && !prefixes.Contains(dir, StringComparer.Ordinal))
+                prefixes.Add(dir);
+        return prefixes;
+    }
 
     /// <summary>Field names of a request, resolved exactly or (with <c>case-sensitive: false</c>) ignoring case.</summary>
     private sealed class NameResolver(Schema schema, bool caseSensitive)
@@ -431,4 +463,24 @@ internal sealed record PlanTaskToken(Guid TableUuid, long SnapshotId, IReadOnlyL
             throw new NoSuchPlanTaskException("Unknown or malformed plan task");
         }
     }
+}
+
+/// <summary>A read-only view of a FileIO that refuses any location outside one table's directories.</summary>
+internal sealed class TableConfinedFileIO(IFileIO inner, TableIdentifier table, IReadOnlyList<string> prefixes) : IFileIO
+{
+    private string Check(string location) => CatalogService.IsOwnFile(location, prefixes)
+        ? location
+        // The location is not echoed: it names another table's file.
+        : throw new BadRequestException($"Table {table} references a file outside the table's directories");
+
+    public Task<byte[]> ReadAllAsync(string location, CancellationToken ct = default) => inner.ReadAllAsync(Check(location), ct);
+    public Task<Stream> OpenReadAsync(string location, CancellationToken ct = default) => inner.OpenReadAsync(Check(location), ct);
+    public Task<byte[]> ReadRangeAsync(string location, long offset, int length, CancellationToken ct = default) => inner.ReadRangeAsync(Check(location), offset, length, ct);
+    public Task<long> LengthAsync(string location, CancellationToken ct = default) => inner.LengthAsync(Check(location), ct);
+    public Task<bool> ExistsAsync(string location, CancellationToken ct = default) => inner.ExistsAsync(Check(location), ct);
+    public Task WriteAsync(string location, ReadOnlyMemory<byte> content, bool overwrite = false, CancellationToken ct = default) =>
+        throw new InvalidOperationException("Scan planning never writes");
+    public Task DeleteAsync(string location, CancellationToken ct = default) =>
+        throw new InvalidOperationException("Scan planning never deletes");
+    public void Dispose() { } // the catalog owns the inner FileIO
 }

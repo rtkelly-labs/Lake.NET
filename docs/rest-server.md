@@ -68,7 +68,8 @@ a namespace is created or its `location` changes, when a table or view is create
 commit that changes a table's `location`, `write.data.path`, `write.metadata.path` or `write.object-storage.path`:
 
 1. **Allowed storage.** Strictly below `Warehouse` or one of `Locations:Allowed`, with no `.` or `..` segments
-   and no empty ones (a local file system reads `a//b` as `a/b`). Another bucket, `s3://*`, a bucket root or a local path elsewhere is refused.
+   and no empty ones (a local file system reads `a//b` as `a/b`), and no `*`, `?` or `$` (IAM reads them as wildcards
+   and policy variables in a vended session policy). Another bucket, `s3://*`, a bucket root or a local path elsewhere is refused.
 2. **Its namespace.** A namespace's root is its `location` property, else `{Warehouse}/{levels}`. A table's or view's
    locations must be below its namespace's root, so each namespace has one storage root; put tables on other storage in
    a namespace rooted there. Namespace roots may nest only along the namespace hierarchy, and a namespace that holds
@@ -80,11 +81,19 @@ commit that changes a table's `location`, `write.data.path`, `write.metadata.pat
    the catalog grows.
 
 Register checks the metadata location against rules 1 and 2 before reading anything. Table, view and namespace names
-that would reshape a path (`..`, `/`, `\`, empty, control characters) are refused. Every refusal is a 400.
+that would reshape a path or a credential policy (`..`, `/`, `\`, `*`, `?`, `$`, empty, control characters) are refused,
+on create and on rename. The S3 vendor refuses to build a session policy for a bucket or key holding `*`, `?` or `$`.
+
+The server also reads the files a table's metadata names with its own access (scan planning reads manifest lists,
+manifests and statistics). So every manifest list (and v1 embedded manifest), statistics file and partition statistics
+file that a commit, staged create or register adds must lie strictly below one of the table's own directories, in the
+same single spelling as rule 1 (no `.`, `..` or percent-encoded dot segments); files the table already referenced are
+not re-checked. Every refusal is a 400. A clash names only the caller's own location: the other table, view or namespace may be one the caller cannot read, so its name and location go to the server log (Information), not the response.
 
 The S3 signer applies the same scoping to requests: a table's own objects only, with no sub-resource beyond what clients
-send (multipart, versions, the Java SDK's `x-id`) and no header that changes access or retention (`x-amz-acl`,
-`x-amz-grant-*`, `x-amz-object-lock-*`); bucket requests only for the table's buckets, with each operation's own
+send (multipart, versions, the Java SDK's `x-id`) and only the headers on its allow-list, so none that changes access,
+retention, tags or the KMS key (`x-amz-acl`, `x-amz-grant-*`, `x-amz-object-lock-*`, `x-amz-tagging`,
+`x-amz-server-side-encryption-aws-kms-key-id`); bucket requests only for the table's buckets, with each operation's own
 parameters.
 
 ## Storage
@@ -116,8 +125,9 @@ PyIceberg ignore; `InMemoryCatalogStore` keeps them in memory. So every server i
 others' idempotency keys and answers their plan IDs (`SharedStateTests`, over one SQLite file and over one shared
 in-memory store). A store of your own that does not implement `IServerStateStore` gets process-local state.
 
-Metadata and data files go through `IFileIO`. The default is `ResolvingFileIO`, which sends `s3://` locations to
-`S3FileIO` and everything else to the local file system.
+Metadata and data files go through `IFileIO`. The default is `ResolvingFileIO`, which sends `s3://`, `s3a://` and
+`s3n://` locations to `S3FileIO`, plain paths and `file:` URIs to the local file system, and refuses every other scheme
+(`gs`, `abfss`, `hdfs`, …).
 
 ## Authentication
 
@@ -126,11 +136,11 @@ endpoint except the token endpoint:
 
 | Key | Meaning |
 |---|---|
-| `Auth:Tokens:0`, `:1`, … | Static bearer tokens (the client's `token` property) |
+| `Auth:Tokens:0`, `:1`, … | Static bearer tokens (the client's `token` property), compared in constant time |
 | `Auth:Clients:{id}` = secret | OAuth2 clients for `POST /v1/oauth/tokens` (`credential = id:secret`) |
 | `Auth:SigningKey` | HMAC-SHA256 key, at least 32 bytes, for the tokens the server issues. If unset, the key is random per process, so tokens do not survive a restart and are not shared between instances |
 | `Auth:TokenLifetime` | Default `01:00:00` |
-| `Auth:Authority`, `Auth:Audience` | Also accept JWTs from an external OpenID Connect issuer (its keys come from discovery). An authority needs an audience, or the server refuses to start (`Auth:AllowAnyAudience=true` accepts tokens for any audience knowingly). `Auth:RequireHttpsMetadata=false` allows an `http://` authority |
+| `Auth:Authority`, `Auth:Audience` | Also accept JWTs from an external OpenID Connect issuer (its keys come from discovery). An authority needs an audience, or the server refuses to start (`Auth:AllowAnyAudience=true` accepts tokens for any audience knowingly); the server's own tokens carry none and are not asked for it. External tokens need a signature from a published key, an unexpired `exp`, the authority's issuer and the audience, or they get a 401. `Auth:RequireHttpsMetadata=false` allows an `http://` authority |
 | `Auth:MaxSessionLifetime` | Default `12:00:00`. Token exchange refreshes a session up to this long after its client-credentials grant, and never for a client that has since been removed |
 
 `/v1/oauth/tokens` is deprecated in the spec, but Spark, PyIceberg and this library still use it by default:
@@ -158,8 +168,11 @@ Iceberg__Authorization__Grants__root__0=admin:*
 Iceberg__Authorization__Grants__*__0=read:public        # every principal
 ```
 
-- A **principal** is the token's `sub`: the OAuth2 client ID for tokens from `/v1/oauth/tokens`, the external IdP's
-  subject, `static-token` for a static token, and `anonymous` when authentication is off.
+- A **principal** is keyed by the token's issuer and `sub`: the OAuth2 client ID for tokens from `/v1/oauth/tokens`,
+  `external/{sub}` for the external IdP's tokens (so the IdP's user `root` is never the server's client `root`),
+  `static-token` for a static token, and `anonymous` when authentication is off. A token signed by the IdP may not
+  carry the server's own issuer, nor one signed with the server's key the IdP's, and a principal claim inside a token
+  is ignored.
 - A **grant** is `{level}:{scope}`. The scope is `*` or a dotted namespace or table path, and covers everything beneath
   it (`sales` covers `sales.orders` and `sales.staging.events`).
 - The **levels** nest, `read` < `write` < `admin`:
@@ -212,7 +225,10 @@ the filter in the spec's expression JSON (`ExpressionJson`).
 - **Plan IDs:** every plan gets a `plan-id`. `GET …/plan/{id}` returns its result and `DELETE` cancels and forgets
   it. Plans are kept in the store (see [Storage](#storage)) for `ScanPlanning:PlanLifetime` (10 minutes) after they
   finish, so any instance over the same database answers any plan ID; an unknown or expired ID is
-  `404 NoSuchPlanIdException`. A cancel on another instance forgets the plan, and the instance planning it discards its
+  `404 NoSuchPlanIdException`. A plan ID belongs to the principal that planned it (it is stored hashed with the
+  principal's name): anyone else's fetch or cancel of it is a 404, even with `read` on the table. Plan tasks are not
+  bound to a principal: a task names only manifests of its table and is checked on use, so anyone who may read the
+  table may use it, as they could have planned it themselves. A cancel on another instance forgets the plan, and the instance planning it discards its
   result when it finishes. A plan still `submitted` after `PlanLifetime` (its server went away) is reported `failed`.
 - **Asynchronous mode:** with `ScanPlanning:Async=true` the server plans in the background and answers `submitted`;
   clients poll. It mainly exists to test clients' polling. Synchronous is the default.
@@ -230,7 +246,10 @@ location, and the same keys in `config` for clients that predate `storage-creden
 (loadCredentials) returns them on their own and is advertised only when vending is on. Commit responses carry no
 `config`, so no credentials. Clients must refresh before the credentials expire
 (`s3.session-token-expires-at-ms`, `adls.sas-token-expires-at-ms.*`, `gcs.oauth2.token-expires-at`). This library's client does not refresh yet
-([catalogs.md](catalogs.md)), so long writers should reload the table.
+([catalogs.md](catalogs.md)), so long writers should reload the table. A table whose stored location contains `*`, `?`
+or `$` (accepted before locations were checked for them) still loads, but asking for its credentials is a
+`422 UnprocessableEntityException` that says why, for every vendor; register its metadata at a literal location to
+vend again. A namespace stored with such a location refuses new tables with a 400.
 
 The S3 vendor (`StsCredentialVendor`) calls STS `AssumeRole` (the Query API over HTTP, signed with the library's
 `SigV4Handler`):
@@ -370,7 +389,11 @@ reads and `no-cache` for writes.
   AWS S3 over HTTPS when none is set. Object requests must name a key under the table's location, `write.data.path` or
   `write.metadata.path` (no `.` or `..` segments), and so must a copy's `x-amz-copy-source`. Bucket requests are limited
   to listing with such a `prefix`, `DeleteObjects` whose body names only such keys, `GetBucketLocation` and
-  `HeadBucket`. Anything else is a 403, as is a write from a principal without `write` on the table.
+  `HeadBucket`. Only `GET`, `HEAD`, `PUT`, `POST` and `DELETE` are signed. Headers are an allow-list
+  (`S3RequestSigner.AllowedHeaders`): transport, SDK and tracing headers, content and conditional headers, checksums,
+  `x-amz-meta-*`, storage class, copy sources, SSE-S3 (`x-amz-server-side-encryption` of `AES256`, `aws:kms` or
+  `aws:kms:dsse`, never with a key ID or context) and SSE-C; a header S3 adds later is refused until it is listed.
+  Anything else is a 403, as is a write from a principal without `write` on the table.
 - **How it is checked:** the S3 signer matches AWS's documented "GET Object" SigV4 example, and the authorization rules
   have their own tests (`RemoteSigningTests`). End to end, against a moto that checks signatures (a one-off
   `motoserver/moto` container with authentication on, bootstrapped with an IAM user: `AuthenticatingMoto`; the shared
@@ -410,7 +433,15 @@ after `Idempotency:PendingTimeout` (5 minutes): the next request with the key ru
 
 ## Limits and errors
 
-- Request bodies are capped at 16 MiB (`Endpoints.MaxRequestBodyBytes`).
+- Request bodies are capped at 16 MiB (`Endpoints.MaxRequestBodyBytes`) before any middleware reads them, so a larger
+  body is a `413` whether or not it carries an `Idempotency-Key` (the idempotency check hashes the body). Kestrel
+  enforces the cap; a host without that feature (TestServer, some proxies' own servers) does not, so limit the body in
+  front of it too. `LimitsTests` check it on real Kestrel.
+- JSON bodies nest at most 64 levels deep (`Endpoints.MaxJsonDepth`); deeper is a `400`.
+- `POST /v1/oauth/tokens` takes `Auth:TokenRequestsPerMinute` (default 60) requests per client address per minute and
+  answers more with `429` and `Retry-After`, which bounds how fast client secrets can be guessed. Behind a proxy every
+  client shares its address: raise the limit, forward the client address (`UseForwardedHeaders`), or set it to `0` and
+  limit at the proxy.
 - A list returns at most 1,000 entries per page (`Endpoints.MaxPageSize`), also when no `pageSize` is asked for, with a
   `next-page-token` for the rest.
 - A 500 answers `Internal server error (trace …)`; the cause is logged with that trace ID, never sent to the client.
@@ -484,7 +515,7 @@ an entry whose difference has gone away fails the test too. When the pinned ref 
 
 | Where | What |
 |---|---|
-| `tests/Iceberg.Net.RestServer.Tests` | `CatalogContractTests` run the catalog contract (namespaces, round trip, concurrent writers, stale requirements, time travel, rename/register/purge, v3, multi-table transactions, views) through `RestCatalog` against the server under `WebApplicationFactory`, over both stores. `ProtocolTests` cover status codes, the ErrorModel, paging, ETag, staged creates and registration. `ConcurrencyTests` cover two racing commits (exactly one 409), a lost compare-and-swap (409, its file removed) and two servers over one database. `AuthTests` and `SqlStoreTests` cover the rest. `ScanPlanningTests` read server plans with our client and compare them with local scans (v2/v3, position deletes, DVs, equality deletes, filters, time travel, plan tasks, async), plus the protocol (plan IDs, plan-task tokens, `stats-fields`, case-insensitivity, 400/404). `IncrementalScanPlanningTests` check incremental plans against the change feed. `AuthorizationTests`, `CredentialVendingTests` (fake vendor, scripted STS, and moto's STS when the emulators run: the vended keys are then used for S3), `AzureCredentialVendingTests` (Azure SDK vectors; Azurite when its image is present), `GcsCredentialVendingTests` (the token exchange against a scripted STS, the source tokens, the combined vendors in the server), `RemoteSigningTests` (AWS's example, the authorization rules, and our client against `AuthenticatingMoto`), `IdempotencyTests` (replays, 422, concurrent duplicates, a lost commit response) and `SharedStateTests` (two servers sharing keys and plan IDs; the state store contract) cover the rest |
+| `tests/Iceberg.Net.RestServer.Tests` | `CatalogContractTests` run the catalog contract (namespaces, round trip, concurrent writers, stale requirements, time travel, rename/register/purge, v3, multi-table transactions, views) through `RestCatalog` against the server under `WebApplicationFactory`, over both stores. `ProtocolTests` cover status codes, the ErrorModel, paging, ETag, staged creates and registration. `ConcurrencyTests` cover two racing commits (exactly one 409), a lost compare-and-swap (409, its file removed) and two servers over one database. `AuthTests`, `JwtTests` (a stub OpenID Connect issuer) and `SqlStoreTests` cover the rest. `AuthorizationMatrixTests` is the authorization matrix: principal × operation × resource → status for every route the server maps (a new route fails it until it gets a row), plus an `Idempotency-Key` reused by another principal. `ScanPlanningTests` read server plans with our client and compare them with local scans (v2/v3, position deletes, DVs, equality deletes, filters, time travel, plan tasks, async), plus the protocol (plan IDs, plan-task tokens, `stats-fields`, case-insensitivity, 400/404). `IncrementalScanPlanningTests` check incremental plans against the change feed. `AuthorizationTests`, `CredentialVendingTests` (fake vendor, scripted STS, and moto's STS when the emulators run: the vended keys are then used for S3), `AzureCredentialVendingTests` (Azure SDK vectors; Azurite when its image is present), `GcsCredentialVendingTests` (the token exchange against a scripted STS, the source tokens, the combined vendors in the server), `RemoteSigningTests` (AWS's example, the authorization rules, and our client against `AuthenticatingMoto`), `IdempotencyTests` (replays, 422, concurrent duplicates, a lost commit response) and `SharedStateTests` (two servers sharing keys and plan IDs; the state store contract) cover the rest |
 | `CrossEngineTests` (same project) | The server on a Kestrel port. **PyIceberg 0.12** (OAuth2 client credentials) creates, appends, evolves and reads tables interleaved with our client, including a staged create transaction, reads through server-side scan planning (`scan-planning-mode=server`, split into plan tasks, with position deletes), and appends and reads through remote signing. **Spark 4.0.1 / Iceberg 1.12** (apache/spark image on the host network) creates, inserts, deletes with merge-on-read position deletes, reads our appends, alters and inserts into a table we created, and (told `scan-planning-mode=server` by the table config) reads tables with v2 position deletes and v3 DVs through server-side planning and plan tasks, matches our incremental plans with its incremental reads, and reads and writes S3 through remote signing (with `iceberg-aws-bundle-1.12.0.jar` next to the runtime jar). They need `ICEBERG_PYTHON` and the Spark oracle (`emulation/up.sh --spark`, or `ICEBERG_SPARK_JAR`), and skip without them; the signing tests also need Docker and the `motoserver/moto:5.2.4` image. `ICEBERG_SPARK_LOG=<file>` keeps the full Spark output of a failed run |
 | `GcsCrossEngineTests` (same project) | PyIceberg 0.12 and Iceberg Java 1.11 (`GCSFileIO`, from the `apache/gravitino-iceberg-rest:1.3.1` image's jars, `docker run --network host`) load a `gs://` table with vended credentials and send the token to a recording GCS endpoint. Need `ICEBERG_PYTHON` and that image respectively; skip without them |
 | `tests/Iceberg.Net.RestProtocol.Tests` | Operation by operation against the OpenAPI: each operation's success response and its documented errors (status, error model, type), the authorization matrix, the client's status mapping against a scripted server, and the error contract across every REST server the suite can reach |

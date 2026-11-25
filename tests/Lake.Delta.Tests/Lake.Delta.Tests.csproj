@@ -1,0 +1,27 @@
+<Project Sdk="Microsoft.NET.Sdk">
+  <PropertyGroup>
+    <IsPackable>false</IsPackable>
+    <IsTestProject>true</IsTestProject>
+    <!-- The CI job that runs this project (tools/test-projects.sh; registry: Iceberg.Net.slnx) -->
+    <CiSuite>unit</CiSuite>
+    <RootNamespace>Lake.Delta.Tests</RootNamespace>
+  </PropertyGroup>
+  <ItemGroup>
+    <PackageReference Include="Microsoft.NET.Test.Sdk" />
+    <PackageReference Include="xunit" />
+    <PackageReference Include="xunit.runner.visualstudio" PrivateAssets="all" />
+  </ItemGroup>
+  <ItemGroup>
+    <!-- Direct references to every library the tests exercise (Stryker.NET mutates only directly referenced projects). -->
+    <ProjectReference Include="../../src/Lake.Delta/Lake.Delta.csproj" />
+    <ProjectReference Include="../../src/Iceberg.Net.IO/Iceberg.Net.IO.csproj" />
+    <ProjectReference Include="../../src/Iceberg.Net.Puffin/Iceberg.Net.Puffin.csproj" />
+  </ItemGroup>
+  <ItemGroup>
+    <Using Include="Xunit" />
+    <!--
+      fixtures/ is read in place from the source tree (Fixtures.Root), not copied to the output: DAT's partition
+      directories are named with percent escapes (letter=%2F%2520%25f), which MSBuild would unescape on copy.
+    -->
+  </ItemGroup>
+</Project>

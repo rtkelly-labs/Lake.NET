@@ -22,7 +22,10 @@ Self-contained C# port of Apache Iceberg. Keep it that way: no references to cod
 | Traces and metrics (OpenTelemetry) | [docs/telemetry.md](docs/telemetry.md) — instrumentation goes through `IcebergTelemetry`, one line per call site |
 | Spark procedures, EMR Serverless / Glue jobs, Athena SQL, DuckDB oracle | [docs/spark-and-athena.md](docs/spark-and-athena.md) |
 | Following Iceberg v4 | [docs/iceberg-v4.md](docs/iceberg-v4.md) |
+| What "done" means for Lake.NET (Iceberg, DuckLake, Delta) and what is open | [docs/lake/goal.md](docs/lake/goal.md), [docs/lake/verification/gap-review-2026-10.md](docs/lake/verification/gap-review-2026-10.md) |
+| .NET libraries we use, adopt or fork; DuckDB and the 2.0 tracker; fork policy | [docs/lake/reference/](docs/lake/reference/README.md) |
 | Deletes, deletion vectors, Puffin, statistics | [docs/puffin.md](docs/puffin.md) |
+| Delta Lake (`src/Lake.Delta`, reader only) | [docs/lake/reference/specs/delta.md](docs/lake/reference/specs/delta.md) §11; tests and DAT fixtures in `tests/Lake.Delta.Tests` (fixtures/README.md) |
 | Adopting files from other Parquet writers (Parquet.SourceGenerator) | [docs/parquet-sourcegenerator.md](docs/parquet-sourcegenerator.md) |
 
 ## Commands
@@ -34,6 +37,7 @@ Self-contained C# port of Apache Iceberg. Keep it that way: no references to cod
 | One CI suite (`unit`, `cross-engine`, `regression`), or list its projects | `tools/test-projects.sh test <suite>` / `tools/test-projects.sh list [suite]` |
 | Add a test project | `dotnet sln Iceberg.Net.slnx add <csproj>` and set `<CiSuite>` in the csproj: the solution is the one list CI runs, and a test project without a suite fails CI |
 | L0 spec tests | `dotnet test tests/Iceberg.Net.Spec.Tests` |
+| DuckDB in-process Parquet reader (no Python or Docker) | `dotnet test tests/Iceberg.Net.DuckDbNet.Tests` |
 | Typed layer (LINQ) | `dotnet test tests/Iceberg.Net.Linq.Tests` |
 | EF Core provider | `dotnet test tests/Iceberg.Net.EntityFrameworkCore.Tests` |
 | Ecosystem (telemetry, Spark/Athena helpers, Spark + DuckDB oracles) | `ICEBERG_DUCKDB_PYTHON=<python with the interop duckdb group> dotnet test tests/Iceberg.Net.Ecosystem.Tests` |
@@ -44,6 +48,7 @@ Self-contained C# port of Apache Iceberg. Keep it that way: no references to cod
 | Regression (emulation) | `ICEBERG_PYTHON=<python with interop deps> dotnet test tests/Iceberg.Net.Regression.Tests` |
 | Regenerate PyIceberg fixtures | `uv run --project interop python -I interop/pyiceberg_oracle.py fixtures tests/Iceberg.Net.Spec.Tests/fixtures/pyiceberg` |
 | Regenerate Puffin/DataSketches/Roaring fixtures | `uv run --project interop python -I interop/pyiceberg_oracle.py puffin-fixtures tests/Iceberg.Net.Spec.Tests/fixtures/puffin` |
+| Regenerate Delta checkpoint-shape fixtures (from DAT) | `uv run --project interop python -I tools/delta_checkpoint_fixtures.py` |
 | Regenerate Spark fixtures | see `interop/spark_oracle.py` docstring (`docker run apache/spark … spark_oracle.py fixtures`) |
 | Spec traceability matrix / upstream drift | `python3 tools/spec_trace.py matrix` (writes the gitignored `docs/spec-traceability.md`) / `python3 tools/spec_trace.py drift` |
 | Refresh the reference REST OpenAPI (after moving the pinned ref) | `uv run --with pyyaml --no-project python -I tools/openapi_reference.py` (OpenApiConformanceTests diff the server's `/openapi/v1.json` against it) |
