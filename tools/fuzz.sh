@@ -5,8 +5,9 @@
 #                                                 deletion-vector roaring mumbling theta
 #
 # Needs clang with the libFuzzer runtime (Ubuntu: apt-get install clang libclang-rt-18-dev). Builds
-# libfuzzer-dotnet from a pinned source file, instruments the decoder assemblies, seeds the corpus from the committed
-# fixtures and runs until [seconds] (default 300) or the first finding. Findings land in fuzz/<target>/findings as
+# libfuzzer-dotnet from a pinned source file, instruments the decoder assemblies, seeds from every committed fixture
+# of the target's format (fuzz/<target>/seeds; new inputs go to fuzz/<target>/corpus, which a previous run may have
+# left), adds tests/Iceberg.Net.Fuzz/dicts/<target>.dict when there is one, and runs until [seconds] (default 300) or the first finding. Findings land in fuzz/<target>/findings as
 # crash-*/timeout-*/oom-* files: reproduce one with `FUZZ_TARGET=<target> dotnet <dll> < file` or by passing it to
 # libfuzzer-dotnet. FUZZ_STRICT=1 also reports low-level exceptions that a Corruption.Guard had to convert.
 set -euo pipefail
@@ -15,6 +16,8 @@ target=${1:?usage: tools/fuzz.sh <target> [seconds]}
 seconds=${2:-300}
 work=${FUZZ_WORK:-fuzz}
 fixtures=tests/Iceberg.Net.Spec.Tests/fixtures
+# Every committed fixture of other engines, newline-separated (no fixture path holds a newline).
+all_fixtures=$(find tests -path '*/fixtures/*' -type f | sort)
 
 # libfuzzer-dotnet: the driver that runs the .NET target in a child process and feeds it libFuzzer inputs.
 LFD_COMMIT=master
@@ -33,22 +36,38 @@ dotnet tool restore >/dev/null
 dotnet publish tests/Iceberg.Net.Fuzz -c Release -o "$out" --nologo -v quiet
 
 corpus=$work/$target/corpus
-mkdir -p "$corpus" "$work/$target/findings"
-seed() { [[ -f $1 ]] && cp "$1" "$corpus/"; return 0; }
+seeds=$work/$target/seeds
+rm -rf "$seeds"
+mkdir -p "$corpus" "$seeds" "$work/$target/findings"
+# Seeds are named by content hash: fixtures from different tables share file names (v1.metadata.json, ...).
+seed() { [[ -f $1 ]] && cp "$1" "$seeds/$(sha256sum < "$1" | cut -c1-16)"; return 0; }
+fixtures_matching() { grep -E "$1" <<< "$all_fixtures" || true; } # <pattern on the path>
 meta=$(ls "$fixtures"/spark/ref/mor_v3/metadata/v*.metadata.json | sort -V | tail -1)
 case $target in
-  metadata) for f in "$fixtures"/metadata/*.json "$meta"; do seed "$f"; done ;;
-  view-metadata) seed "$fixtures"/metadata/view-example.metadata.json ;;
-  manifest-list) for f in "$fixtures"/spark/ref/mor_v3/metadata/snap-*.avro; do seed "$f"; done ;;
-  manifest) for f in "$fixtures"/spark/ref/mor_v3/metadata/*-m*.avro; do seed "$f"; done
+  # Table metadata: every metadata.json and spec example that is not a view.
+  metadata) while IFS= read -r f; do
+              grep -q '"view-uuid"' "$f" || seed "$f"
+            done < <(fixtures_matching '(\.metadata\.json|/metadata/[^/]*\.json)$') ;;
+  view-metadata) while IFS= read -r f; do
+                   if grep -q '"view-uuid"' "$f"; then seed "$f"; fi
+                 done < <(fixtures_matching '\.json$') ;;
+  manifest-list) while IFS= read -r f; do seed "$f"; done < <(fixtures_matching '/snap-[^/]*\.avro$') ;;
+  # Manifests from every table, decoded against one table's spec and schema.
+  manifest) while IFS= read -r f; do seed "$f"; done < <(fixtures_matching '/metadata/[^/]*-m[0-9]+\.avro$')
             export FUZZ_TABLE_METADATA=$meta ;;
-  puffin) seed "$fixtures"/puffin/dv.puffin ;;
-  deletion-vector) dotnet "$out/Iceberg.Net.Fuzz.dll" extract-blob "$fixtures"/puffin/dv.puffin "$corpus/dv.bin" ;;
-  roaring) printf '\x01\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x3a\x30\x00\x00\x01\x00\x00\x00\x00\x00\x02\x00\x10\x00\x00\x00\x01\x00\x02\x00\x03\x00' > "$corpus/one-container" ;;
-  mumbling) printf '\x01\x03\x00\x00\x01\x00\x00\x00\x03\x00\x22\xff' > "$corpus/sparse" ;;
-  theta) for f in "$fixtures"/puffin/theta-*.bin; do seed "$f"; done ;;
+  puffin) while IFS= read -r f; do seed "$f"; done < <(fixtures_matching '\.puffin$') ;;
+  deletion-vector) while IFS= read -r f; do
+                     dotnet "$out/Iceberg.Net.Fuzz.dll" extract-blob "$f" "$seeds/$(basename "$f").bin" || true
+                   done < <(fixtures_matching '\.puffin$') ;;
+  roaring) printf '\x01\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x3a\x30\x00\x00\x01\x00\x00\x00\x00\x00\x02\x00\x10\x00\x00\x00\x01\x00\x02\x00\x03\x00' > "$seeds/one-container" ;;
+  mumbling) printf '\x01\x03\x00\x00\x01\x00\x00\x00\x03\x00\x22\xff' > "$seeds/sparse" ;;
+  theta) while IFS= read -r f; do seed "$f"; done < <(fixtures_matching '/theta-[^/]*\.bin$') ;;
   *) echo "unknown target $target" >&2; exit 2 ;;
 esac
+echo "$target: $(ls "$seeds" | wc -l) seeds, $(ls "$corpus" | wc -l) inputs from earlier runs"
+dict=tests/Iceberg.Net.Fuzz/dicts/$target.dict
+dict_arg=()
+if [[ -f $dict ]]; then dict_arg=(-dict="$dict"); fi
 
 # Instrument after seeding: instrumented code only runs under the driver.
 for asm in Iceberg.Net.Core Iceberg.Net.Avro Iceberg.Net.Puffin; do
@@ -57,4 +76,5 @@ done
 
 export FUZZ_TARGET=$target
 exec "$driver" --target_path=dotnet --target_arg="$out/Iceberg.Net.Fuzz.dll" \
-  -max_total_time="$seconds" -timeout=10 -rss_limit_mb=4096 -artifact_prefix="$work/$target/findings/" "$corpus"
+  -max_total_time="$seconds" -timeout=10 -rss_limit_mb=4096 -artifact_prefix="$work/$target/findings/" \
+  "${dict_arg[@]}" "$corpus" "$seeds"
