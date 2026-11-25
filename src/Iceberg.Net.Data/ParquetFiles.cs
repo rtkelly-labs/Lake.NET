@@ -29,6 +29,22 @@ public sealed record ParquetWriteOptions
     /// annotations, so no option is needed to read.
     /// </summary>
     public IReadOnlyDictionary<int, ParquetAnnotation>? Annotations { get; init; }
+    /// <summary>
+    /// Parquet modular encryption: an AES key (16, 24 or 32 bytes) that encrypts every column and the footer
+    /// (AES-GCM, encrypted-footer mode). Readers need the same key (<see cref="DataFileReadOptions.DecryptionKey"/>).
+    /// </summary>
+    public byte[]? EncryptionKey { get; init; }
+    /// <summary>Dictionary-encode columns where it pays (Parquet's default); off writes every page plain.</summary>
+    public bool Dictionary { get; init; } = true;
+
+    internal static ReaderProperties ReaderProperties(byte[]? key)
+    {
+        var props = ParquetSharp.ReaderProperties.GetDefaultReaderProperties();
+        if (key is null) return props;
+        using var builder = new FileDecryptionPropertiesBuilder();
+        props.FileDecryptionProperties = builder.FooterKey(key).Build();
+        return props;
+    }
 }
 
 /// <summary>
@@ -211,6 +227,15 @@ public static class ParquetFiles
         using var root = new GroupNode("table", Repetition.Required, columns.Select(c => ToNode(c, options.Annotations)).ToArray());
         using var builder = new WriterPropertiesBuilder().Compression(Compression.Zstd);
         if (!options.Statistics) builder.DisableStatistics();
+        if (!options.Dictionary) builder.DisableDictionary();
+        FileEncryptionProperties? encryption = null;
+        if (options.EncryptionKey is { } key)
+        {
+            using var encryptionBuilder = new FileEncryptionPropertiesBuilder(key);
+            encryption = encryptionBuilder.Build();
+            builder.Encryption(encryption);
+        }
+        using var encryptionScope = encryption;
         using var props = builder.Build();
         var groupRows = options.RowGroupRows is > 0 and var g ? g : int.MaxValue;
         var leafIds = new List<int>(); // field ID of each Parquet leaf column, in file order
@@ -257,7 +282,8 @@ public static class ParquetFiles
         long[] chunkSizes;
         int rowGroups;
         using (var input = new ManagedRandomAccessFile(new MemoryStream(bytes)))
-        using (var check = new ParquetFileReader(input))
+        using (var readerProps = ParquetWriteOptions.ReaderProperties(options.EncryptionKey))
+        using (var check = new ParquetFileReader(input, readerProps))
         {
             chunkSizes = new long[leafIds.Count];
             using var meta = check.FileMetaData;
@@ -452,7 +478,8 @@ public static class ParquetFiles
         }
         else source = new MemoryStream(await io.ReadAllAsync(location, ct));
         using var input = new ManagedRandomAccessFile(source);
-        using var reader = new ParquetFileReader(input);
+        using var readerProps = ParquetWriteOptions.ReaderProperties(options?.DecryptionKey);
+        using var reader = new ParquetFileReader(input, readerProps);
         using var meta = reader.FileMetaData;
         var layout = FileLayout.Of(meta, projection, mapping, options?.MatchByName ?? false);
         var evaluator = options?.Filter is { } filter && filter is not AlwaysTrue ? new MetricsEvaluator(filter) : null;

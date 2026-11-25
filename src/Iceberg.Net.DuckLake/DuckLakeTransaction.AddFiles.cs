@@ -29,6 +29,7 @@ public sealed partial class DuckLakeTransaction
         options ??= new DuckLakeAddFileOptions();
         PendingTable t;
         await using (var db = await BeginAsync(ct)) t = await TableAsync(db, schema, table, ct);
+        if (_catalog.Encrypted) throw new NotSupportedException("The lake is encrypted: files written elsewhere have no key in it to be added with");
         if (t.PartitionKeys.Count > 0) throw new NotSupportedException($"{schema}.{table} is partitioned: existing files can only be added to unpartitioned tables");
         var columns = t.Columns;
         var projection = DuckLakeTypes.ToIceberg(columns.Where(c => c.Type is not DuckLakePrimitive { Name: "null" }).ToList());
@@ -66,6 +67,10 @@ public sealed partial class DuckLakeTransaction
                 stats.Add(new DuckLakeColumnStats(c.Id, (s.ValueCount ?? 0) - nulls, nulls, min is null || max is null ? null : min, min is null || max is null ? null : max, null)
                     { ColumnSizeBytes = s.ColumnSize });
             }
+            // Format 1.1 (DuckDB 2.0): each leaf column the file lacks gets an all-null statistics row.
+            if (_catalog.Is11)
+                foreach (var c in missing.Where(c => c.Type is DuckLakePrimitive))
+                    stats.Add(new DuckLakeColumnStats(c.Id, 0, facts.RecordCount, null, null, null));
             foreach (var c in fromPath)
             {
                 var text = partition[c.Name];

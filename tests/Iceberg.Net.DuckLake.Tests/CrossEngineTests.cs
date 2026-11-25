@@ -431,14 +431,14 @@ public abstract class CrossEngineTests : IAsyncLifetime
             JOIN ducklake_column c ON c.column_id = n.target_field_id AND c.table_id = f.table_id
             JOIN ducklake_table t ON t.table_id = f.table_id WHERE t.table_name = '{table}'
             """)).Select(r => string.Join("|", r.Select(v => v is bool b ? (b ? 1 : 0) : v))).Order(StringComparer.Ordinal).ToList();
-        Assert.Equal(await Mapping("theirs"), await Mapping("ours"));
+        LakeJson.AssertSameRows(await Mapping("theirs"), await Mapping("ours"));
         async Task<List<string>> Stats(string table) => (await _lake.SqlAsync($"""
             SELECT f.path, c.column_name, s.value_count, s.null_count, s.min_value, s.max_value
             FROM ducklake_file_column_stats s JOIN ducklake_data_file f ON f.data_file_id = s.data_file_id
             JOIN ducklake_column c ON c.column_id = s.column_id AND c.table_id = s.table_id
             JOIN ducklake_table t ON t.table_id = s.table_id WHERE t.table_name = '{table}'
             """)).Select(r => string.Join("|", r)).Order(StringComparer.Ordinal).ToList();
-        Assert.Equal(await Stats("theirs"), await Stats("ours"));
+        LakeJson.AssertSameRows(await Stats("theirs"), await Stats("ours")); // reports the first differing row in full
 
         // Each engine reads both tables, with the same rows.
         foreach (var name in new[] { "theirs", "ours" })
@@ -490,6 +490,99 @@ public abstract class CrossEngineTests : IAsyncLifetime
             await tx.CommitAsync();
         }
         foreach (var name in new[] { "theirs", "ours" }) await AssertSameHistoryAsync(catalog, name);
+    }
+
+    [SkippableFact]
+    [Spec("ducklake: ducklake_metadata")]
+    [Spec("ducklake: ducklake_data_file")]
+    public async Task DuckDB_reads_an_encrypted_lake_written_here_and_writes_to_it_what_this_library_reads()
+    {
+        Oracle.Require();
+        var catalog = await _lake.CreateAsync(new DuckLakeOptions { Encrypted = true });
+        await using (var tx = catalog.BeginTransaction())
+        {
+            await tx.CreateTableAsync("main", "t", [new("id", DuckLakeType.Int64), new("v", DuckLakeType.Varchar)]);
+            await tx.InsertAsync("main", "t", Enumerable.Range(0, 20).Select(i => new object?[] { (long)i, $"v{i}" }));
+            await tx.CreateTableAsync("main", "fresh", [new("id", DuckLakeType.Int64)]);
+            await tx.InsertAsync("main", "fresh", Enumerable.Range(0, 5).Select(i => new object?[] { (long)i }));
+            await tx.CommitAsync();
+        }
+        await using (var tx = catalog.BeginTransaction())
+        {
+            await tx.DeleteAsync("main", "t", Expr.LessThan("id", 3L));
+            await tx.CommitAsync();
+        }
+        await AssertSameHistoryAsync(catalog);
+        var plain = await _lake.OpenAsync(new DuckLakeOptions { Parquet = new DuckLakeOptions().Parquet with { Dictionary = false } });
+        await using (var tx = plain.BeginTransaction())
+        {
+            await tx.CreateTableAsync("main", "nodict", [new("id", DuckLakeType.Int64)]);
+            await tx.InsertAsync("main", "nodict", Enumerable.Range(0, 5).Select(i => new object?[] { (long)i }));
+            await tx.CommitAsync();
+        }
+
+        // DuckDB writes encrypted files only with a secure random generator, from its httpfs extension (downloaded),
+        // which also makes it verify GCM tags on read. Each probe runs on its own connection, so all are reported.
+        var install = await Oracle.TryRunAsync(_lake, "INSTALL httpfs", "LOAD httpfs");
+        if (install.FirstOrDefault(r => r["error"] is not null) is { } noHttpfs)
+        {
+            Assert.False(Environment.GetEnvironmentVariable("CI") == "true", $"httpfs: {noHttpfs["error"]}");
+            Skip.If(true, $"DuckDB cannot write encrypted files here (no httpfs): {noHttpfs["error"]}");
+        }
+        async Task<string?> Probe(string sql) =>
+            (await Oracle.TryRunAsync(_lake, "LOAD httpfs", sql)).Select(r => r["error"]?.ToString()).FirstOrDefault(e => e is not null);
+        var probes = new List<(string What, string? Error)>
+        {
+            ("DuckDB reads every row this library wrote", await Probe("SELECT sum(id) FROM lake.t")),
+            ("DuckDB writes its own encrypted table", await Probe("CREATE TABLE lake.d AS SELECT range AS x FROM range(5)")),
+            ("DuckDB inserts into this library's table", await Probe("INSERT INTO lake.t VALUES (100, 'duckdb')")),
+            ("DuckDB filters this library's file", await Probe("SELECT * FROM lake.fresh WHERE id = 1")),
+            ("DuckDB reads row IDs of this library's file", await Probe("SELECT rowid, id FROM lake.fresh")),
+            ("DuckDB deletes from this library's file written without dictionaries", await Probe("DELETE FROM lake.nodict WHERE id = 1")),
+            ("DuckDB deletes from this library's file that has no delete file", await Probe("DELETE FROM lake.fresh WHERE id = 1")),
+            ("DuckDB deletes twice from its own file", await Probe("DELETE FROM lake.d WHERE x = 1") ?? await Probe("DELETE FROM lake.d WHERE x = 2")),
+            ("DuckDB deletes from this library's file that has this library's delete file", await Probe("DELETE FROM lake.t WHERE id = 10")),
+        };
+        string? ours;
+        try
+        {
+            var reopened = await _lake.OpenAsync();
+            await reopened.ReadAsync(await reopened.LoadTableAsync("main", "d"));
+            await reopened.ReadAsync(await reopened.LoadTableAsync("main", "t"));
+            ours = null;
+        }
+        catch (Exception e) { ours = $"{e.GetType().Name}: {e.Message}"; }
+        probes.Add(("This library reads DuckDB's encrypted files", ours));
+        // DuckDB (1.5.5 and 2.0) fails any filtered read of a Parquet file encrypted by parquet-cpp (ParquetSharp), with
+        // or without DuckLake: unfiltered scans work, a WHERE clause fails the GCM tag check (docs/ducklake.md). Those
+        // probes must fail with exactly that error, so this test flags the day DuckDB fixes it; everything else must work.
+        static bool DuckDbFilters(string what) => what.StartsWith("DuckDB filters", StringComparison.Ordinal) || what.StartsWith("DuckDB deletes from this library's", StringComparison.Ordinal);
+        var report = string.Join("\n", probes.Select(p => $"{(p.Error is null ? "ok  " : "FAIL")} {p.What}{(p.Error is null ? "" : ": " + p.Error)}"));
+        Assert.True(probes.All(p => DuckDbFilters(p.What)
+            ? p.Error?.Contains("Computed AES tag differs from read AES tag", StringComparison.Ordinal) == true
+            : p.Error is null), report);
+        await AssertSameHistoryAsync(await _lake.OpenAsync());
+    }
+
+    /// <summary>
+    /// The DuckDB limitation behind the encrypted-lake test, without DuckLake: a file encrypted by parquet-cpp
+    /// (footer key, AES-GCM) reads in DuckDB until a filter is applied. Needs no httpfs (reading only).
+    /// </summary>
+    [SkippableFact]
+    public async Task DuckDB_reads_encrypted_parquet_written_here_but_not_with_a_filter()
+    {
+        Oracle.Require();
+        await _lake.CreateAsync();
+        var key = new byte[32];
+        new Random(7).NextBytes(key);
+        var path = Path.Combine(_lake.Root, "encrypted.parquet");
+        await Data.ParquetFiles.WriteAsync(_lake.IO, path, new Types.Schema(0, [Types.NestedField.Optional(1, "id", Types.PrimitiveType.Long)]), 0, [],
+            Enumerable.Range(0, 5).Select(i => new object?[] { (long)i }).ToList(), Data.ParquetWriteOptions.Default with { EncryptionKey = key });
+        var source = $"read_parquet('{path}', encryption_config = {{footer_key: 'k'}})";
+        string?[] errors = (await Task.WhenAll(new[] { $"SELECT sum(id) FROM {source}", $"SELECT id FROM {source} WHERE id = 1" }.Select(async q =>
+            (await Oracle.TryRunAsync(_lake, $"PRAGMA add_parquet_key('k', '{Convert.ToBase64String(key)}')", q)).Select(r => r["error"]?.ToString()).FirstOrDefault(e => e is not null))));
+        Assert.Null(errors[0]);
+        Assert.Contains("Computed AES tag differs from read AES tag", errors[1]); // flips when DuckDB fixes its filtered path
     }
 
     [SkippableFact]

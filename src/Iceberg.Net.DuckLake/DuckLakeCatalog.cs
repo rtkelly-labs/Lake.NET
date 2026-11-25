@@ -42,6 +42,13 @@ public sealed record DuckLakeOptions
     /// </summary>
     public bool WriteDeletionVectors { get; init; }
 
+    /// <summary>
+    /// For <see cref="DuckLakeCatalog.CreateAsync"/>: an encrypted lake (DuckDB's <c>ENCRYPTED</c>). Every Parquet data
+    /// and delete file is written with Parquet modular encryption under a fresh 256-bit key per write, kept Base64 in
+    /// the catalog's <c>encryption_key</c>. An existing lake's mode is its own (<c>ducklake_metadata.encrypted</c>).
+    /// </summary>
+    public bool Encrypted { get; init; }
+
     public const int DefaultRowGroupRows = 122_880;
 }
 
@@ -99,6 +106,9 @@ public sealed record DuckLakeFileTask(long DataFileId, string Location, long Rec
     public long? RowGroupCount { get; init; }
     /// <summary>The file's name mapping, for files registered without (or with other) field IDs.</summary>
     internal DuckLakeNameMap? Mapping { get; init; }
+    /// <summary>Keys of the data file and its delete file, in an encrypted lake.</summary>
+    internal byte[]? Key { get; init; }
+    internal byte[]? DeleteKey { get; init; }
 }
 
 /// <summary>Which files a scan reads and how many the file statistics ruled out.</summary>
@@ -164,13 +174,13 @@ public sealed partial class DuckLakeCatalog
             new MetadataEntity { Key = "version", Value = version },
             new MetadataEntity { Key = "created_by", Value = options.CreatedBy },
             new MetadataEntity { Key = "data_path", Value = dataPath },
-            new MetadataEntity { Key = "encrypted", Value = "false" });
+            new MetadataEntity { Key = "encrypted", Value = options.Encrypted ? "true" : "false" });
         db.Snapshots.Add(new SnapshotEntity { SnapshotId = 0, SnapshotTime = DateTimeOffset.UtcNow, SchemaVersion = 0, NextCatalogId = 1, NextFileId = 0 });
         db.SnapshotChanges.Add(new SnapshotChangesEntity { SnapshotId = 0, ChangesMade = $"{DuckLakeChange.CreatedSchema}:{DuckLakeChange.QuoteName("main")}" });
         db.Schemas.Add(new SchemaEntity { SchemaId = 0, SchemaUuid = Guid.NewGuid(), BeginSnapshot = 0, SchemaName = "main", Path = "main/", PathIsRelative = true });
         await db.SaveChangesAsync(ct);
         await tx.CommitAsync(ct);
-        return new DuckLakeCatalog(store, io, options, dataPath, version);
+        return new DuckLakeCatalog(store, io, options, dataPath, version) { Encrypted = options.Encrypted };
     }
 
     /// <summary>Attach to an existing catalog. <paramref name="dataPathOverride"/> replaces the stored <c>data_path</c> (e.g. a mounted copy).</summary>
@@ -184,11 +194,28 @@ public sealed partial class DuckLakeCatalog
         var version = settings.GetValueOrDefault("version") ?? throw new InvalidDataException("ducklake_metadata has no version");
         if (!SupportedVersions.Contains(version))
             throw new NotSupportedException($"DuckLake format version {version}; Iceberg.Net.DuckLake reads and writes {string.Join(" and ", SupportedVersions)}");
-        if (settings.GetValueOrDefault("encrypted") == "true")
-            throw new NotSupportedException("Encrypted DuckLake catalogs are not supported");
         var dataPath = dataPathOverride ?? settings.GetValueOrDefault("data_path") ?? throw new InvalidDataException("ducklake_metadata has no data_path");
         if (!dataPath.EndsWith('/')) dataPath += "/";
-        return new DuckLakeCatalog(store, io, options, dataPath, version);
+        return new DuckLakeCatalog(store, io, options, dataPath, version) { Encrypted = settings.GetValueOrDefault("encrypted") == "true" };
+    }
+
+    /// <summary>Whether the lake's Parquet files are encrypted (<c>ducklake_metadata.encrypted</c>).</summary>
+    public bool Encrypted { get; private init; }
+
+    /// <summary>A fresh 256-bit key for one write, and its catalog form (Base64), or nulls in an unencrypted lake.</summary>
+    internal (byte[]? Key, string? Text) NewKey()
+    {
+        if (!Encrypted) return (null, null);
+        var key = System.Security.Cryptography.RandomNumberGenerator.GetBytes(32);
+        return (key, Convert.ToBase64String(key));
+    }
+
+    /// <summary>The key of an encrypted file from its <c>encryption_key</c> (Base64, as DuckDB stores it).</summary>
+    internal byte[]? Key(string? text, string what)
+    {
+        if (text is null) return null;
+        try { return Convert.FromBase64String(text); }
+        catch (FormatException e) { throw new InvalidDataException($"{what}: encryption_key is not Base64", e); }
     }
 
     internal DuckLakeDbContext Context(DuckLakeTelemetry.Scope? scope = null) => Store.Context(Version, scope);
@@ -455,7 +482,6 @@ public sealed partial class DuckLakeCatalog
         var pruned = 0;
         foreach (var f in files)
         {
-            if (f.EncryptionKey is not null) throw new NotSupportedException($"Data file {f.DataFileId} is encrypted");
             if (!string.Equals(f.FileFormat ?? "parquet", "parquet", StringComparison.OrdinalIgnoreCase))
                 throw new NotSupportedException($"Data file {f.DataFileId} has format {f.FileFormat}");
             if (evaluator is not null && !evaluator.MightMatch(f.RecordCount, (fieldId, type) => Stats(stats!, f.DataFileId, fieldId, type, types)))
@@ -467,12 +493,15 @@ public sealed partial class DuckLakeCatalog
             string? deleteLocation = null;
             if (deletes.TryGetValue(f.DataFileId, out var d))
             {
-                if (d.EncryptionKey is not null) throw new NotSupportedException($"Delete file {d.DeleteFileId} is encrypted");
                 if (d.Format is { } format && !format.Equals("parquet", StringComparison.OrdinalIgnoreCase) && !format.Equals("puffin", StringComparison.OrdinalIgnoreCase))
                     throw new NotSupportedException($"Delete file {d.DeleteFileId} has format {d.Format}");
                 deleteLocation = Resolve(table.Location, d.Path ?? throw new InvalidDataException($"Delete file {d.DeleteFileId} has no path"), d.PathIsRelative ?? true);
             }
-            tasks.Add(new DuckLakeFileTask(f.DataFileId, location, f.RecordCount, f.FileSizeBytes, deleteLocation, f.RowIdStart) { RowGroupCount = f.RowGroupCount });
+            tasks.Add(new DuckLakeFileTask(f.DataFileId, location, f.RecordCount, f.FileSizeBytes, deleteLocation, f.RowIdStart)
+            {
+                RowGroupCount = f.RowGroupCount, Key = Key(f.EncryptionKey, $"data file {f.DataFileId}"),
+                DeleteKey = deleteLocation is null ? null : Key(d!.EncryptionKey, $"delete file {d.DeleteFileId}"),
+            });
             if (f.MappingId is { } m) mapped.Add((tasks.Count - 1, m));
         }
         if (mapped.Count > 0)
@@ -514,7 +543,7 @@ public sealed partial class DuckLakeCatalog
     /// </summary>
     internal async Task<HashSet<long>?> DeletedPositionsAsync(DuckLakeScanPlan plan, DuckLakeFileTask file, long snapshot, CancellationToken ct)
     {
-        var deleted = file.DeleteFileLocation is { } location ? await DuckLakeDeleteFiles.ReadPositionsAsync(IO, location, snapshot, ct) : null;
+        var deleted = file.DeleteFileLocation is { } location ? await DuckLakeDeleteFiles.ReadPositionsAsync(IO, location, snapshot, ct, file.DeleteKey) : null;
         if (plan.InlinedDeletions.TryGetValue(file.DataFileId, out var inlined)) (deleted ??= []).UnionWith(inlined);
         return deleted;
     }
@@ -659,7 +688,7 @@ public sealed partial class DuckLakeCatalog
         {
             try
             {
-                var options = new DataFileReadOptions { FileSize = file.FileSizeBytes, Filter = bound };
+                var options = new DataFileReadOptions { FileSize = file.FileSizeBytes, Filter = bound, DecryptionKey = file.Key };
                 await foreach (var batch in ReadDataFileAsync(table, file.Location, file.Mapping, projection, options, ct))
                     await queue.Writer.WriteAsync(batch, ct);
             }

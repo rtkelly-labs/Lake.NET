@@ -24,6 +24,7 @@ Self-contained C# port of Apache Iceberg. Keep it that way: no references to cod
 | Deletes, deletion vectors, Puffin, statistics | [docs/puffin.md](docs/puffin.md) |
 | Adopting files from other Parquet writers (Parquet.SourceGenerator) | [docs/parquet-sourcegenerator.md](docs/parquet-sourcegenerator.md) |
 | DuckLake tables (`Iceberg.Net.DuckLake`), and where DuckDB and the DuckLake spec differ | [docs/ducklake.md](docs/ducklake.md) — behaviour DuckDB can observe needs a case in `CrossEngineTests` (oracle: DuckDB's `ducklake` extension); tag tests `[Spec("ducklake: …")]` |
+| Why Parquet goes through ParquetSharp, and what Parquet.Net lacks (upstream candidates) | [docs/parquet-net-gaps.md](docs/parquet-net-gaps.md) — upstream Parquet.Net refuses LLM-written issues and PRs; changes go to the fork or are written by hand |
 
 ## Commands
 

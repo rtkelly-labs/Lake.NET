@@ -111,6 +111,8 @@ public sealed partial class DuckLakeTransaction : IAsyncDisposable
     private sealed record WrittenFile(string RelativePath, long RecordCount, long Size, long FooterSize, long RowGroups, IReadOnlyList<DuckLakeColumnStats> Stats,
         IReadOnlyList<string?> PartitionValues)
     {
+        /// <summary>Its <c>encryption_key</c> (Base64), in an encrypted lake.</summary>
+        public string? Key { get; init; }
         /// <summary>A registered existing file: <see cref="RelativePath"/> is its absolute location.</summary>
         public bool Absolute { get; init; }
         /// <summary>A registered file's name mapping rows (without <c>mapping_id</c>), in DuckDB's order.</summary>
@@ -134,6 +136,8 @@ public sealed partial class DuckLakeTransaction : IAsyncDisposable
     private sealed record WrittenDelete(string RelativePath, long Count, long Size, long FooterSize)
     {
         public string Format { get; init; } = "parquet";
+        /// <summary>Its <c>encryption_key</c> (Base64), in an encrypted lake.</summary>
+        public string? Key { get; init; }
     }
 
     private async Task<DuckLakeDbContext> BeginAsync(CancellationToken ct)
@@ -470,7 +474,9 @@ public sealed partial class DuckLakeTransaction : IAsyncDisposable
         }
         var storedColumns = stored.Where(x => x.c is not null).Select(x => x.c).ToList();
         var toFile = DuckLakeValues.FileRowConverter(storedColumns, toFile: true);
-        var parquet = _catalog.Options.Parquet with { Metrics = false, Annotations = DuckLakeTypes.Annotations(storedColumns) };
+        // One key per write (DuckDB: "files produced by the same write can share a key").
+        var (key, keyText) = _catalog.NewKey();
+        var parquet = _catalog.Options.Parquet with { Metrics = false, Annotations = DuckLakeTypes.Annotations(storedColumns), EncryptionKey = key };
         var groups = t.PartitionKeys.Count == 0
             ? [(Values: (IReadOnlyList<string?>)[], Rows: normalized)]
             : DuckLakePartitioning.Split(columns, t.PartitionKeys, normalized);
@@ -487,7 +493,7 @@ public sealed partial class DuckLakeTransaction : IAsyncDisposable
             var stats = new StatsCollector(columns);
             foreach (var row in part) stats.Add(row);
             _ops.Add(new InsertOp(t, new WrittenFile(relative, part.Count, written.File.FileSizeInBytes, written.FooterSize, written.RowGroups,
-                stats.Result(written.File.ColumnSizes), partitionValues)));
+                stats.Result(written.File.ColumnSizes), partitionValues) { Key = keyText }));
         }
         t.Inserted = true;
     }
@@ -529,7 +535,7 @@ public sealed partial class DuckLakeTransaction : IAsyncDisposable
             // deletion inlining stay in ducklake_inlined_delete_{table} and out of the file: readers apply both, and
             // DuckDB counts rows (record_count - delete_count - inlined deletions) assuming the two never overlap.
             var all = new HashSet<long>(positions);
-            if (task.DeleteFileLocation is { } previous) all.UnionWith(await DuckLakeDeleteFiles.ReadPositionsAsync(_catalog.IO, previous, loaded.SnapshotId, ct));
+            if (task.DeleteFileLocation is { } previous) all.UnionWith(await DuckLakeDeleteFiles.ReadPositionsAsync(_catalog.IO, previous, loaded.SnapshotId, ct, task.DeleteKey));
             var inlinedDeleted = plan.InlinedDeletions.TryGetValue(fileId, out var inl) ? inl.Count : 0;
             var oldDeleteFile = deleteRows.TryGetValue(fileId, out var old) ? old.DeleteFileId : (long?)null;
             // Deletion inlining: a few positions of a file that keeps rows go to ducklake_inlined_delete_{table}, and its
@@ -559,8 +565,9 @@ public sealed partial class DuckLakeTransaction : IAsyncDisposable
                     var relative = $"ducklake-{Guid.CreateVersion7()}-delete.parquet";
                     var location = t.Location + relative;
                     _written.Add(location);
-                    var (size, footer) = await DuckLakeDeleteFiles.WriteAsync(_catalog.IO, location, task.Location, all, ct);
-                    written = new WrittenDelete(relative, all.Count, size, footer);
+                    var (key, keyText) = _catalog.NewKey();
+                    var (size, footer) = await DuckLakeDeleteFiles.WriteAsync(_catalog.IO, location, task.Location, all, ct, key);
+                    written = new WrittenDelete(relative, all.Count, size, footer) { Key = keyText };
                 }
             }
             files.Add(new FileDelete(fileId, oldDeleteFile, positions.Count, task.RecordCount, written));
@@ -985,6 +992,7 @@ public sealed partial class DuckLakeTransaction : IAsyncDisposable
             rows.DataFiles.Add(new DataFileEntity
             {
                 DataFileId = fileId, TableId = tableId, BeginSnapshot = snapshotId, FileOrder = fileId, Path = f.RelativePath, PathIsRelative = !f.Absolute, MappingId = mappingId,
+                EncryptionKey = f.Key,
                 FileFormat = "parquet", RecordCount = f.RecordCount, FileSizeBytes = f.Size, FooterSize = f.FooterSize, RowIdStart = rowIdStart,
                 PartitionId = t.PartitionKeys.Count == 0 ? null : _partitionIds.GetValueOrDefault(t), RowGroupCount = v11 ? f.RowGroups : null,
             });
@@ -1183,7 +1191,7 @@ public sealed partial class DuckLakeTransaction : IAsyncDisposable
                     rows.DeleteFiles.Add(new DeleteFileEntity
                     {
                         DeleteFileId = fileId++, TableId = tableId, BeginSnapshot = snapshotId, DataFileId = f.DataFileId, Path = f.NewFile.RelativePath,
-                        PathIsRelative = true, Format = f.NewFile.Format, DeleteCount = f.NewFile.Count, FileSizeBytes = f.NewFile.Size, FooterSize = f.NewFile.FooterSize,
+                        PathIsRelative = true, Format = f.NewFile.Format, EncryptionKey = f.NewFile.Key, DeleteCount = f.NewFile.Count, FileSizeBytes = f.NewFile.Size, FooterSize = f.NewFile.FooterSize,
                         RowGroupCount = v11 && f.NewFile.Format == "parquet" ? 1 : null,
                     });
                 }
@@ -1322,7 +1330,7 @@ public sealed partial class DuckLakeTransaction : IAsyncDisposable
         DeleteFileEntity DeleteRow(long tableId, long deleteFileId, long dataFileId, WrittenDelete d, long begin, long? partialMax) => new()
         {
             DeleteFileId = deleteFileId, TableId = tableId, BeginSnapshot = begin, DataFileId = dataFileId, Path = d.RelativePath, PathIsRelative = true,
-            Format = "parquet", DeleteCount = d.Count, FileSizeBytes = d.Size, FooterSize = d.FooterSize, PartialMax = partialMax, RowGroupCount = v11 ? 1 : null,
+            Format = "parquet", EncryptionKey = d.Key, DeleteCount = d.Count, FileSizeBytes = d.Size, FooterSize = d.FooterSize, PartialMax = partialMax, RowGroupCount = v11 ? 1 : null,
         };
 
         void AddFile(PendingTable t, long fileId, WrittenFile f, long begin, long? partialMax, long? rowIdStart, long? partitionId)
@@ -1332,7 +1340,7 @@ public sealed partial class DuckLakeTransaction : IAsyncDisposable
             {
                 DataFileId = fileId, TableId = tableId, BeginSnapshot = begin, FileOrder = fileId, Path = f.RelativePath, PathIsRelative = true,
                 FileFormat = "parquet", RecordCount = f.RecordCount, FileSizeBytes = f.Size, FooterSize = f.FooterSize, RowIdStart = rowIdStart,
-                PartitionId = partitionId, PartialMax = partialMax, RowGroupCount = v11 ? f.RowGroups : null,
+                PartitionId = partitionId, PartialMax = partialMax, RowGroupCount = v11 ? f.RowGroups : null, EncryptionKey = f.Key,
             });
             foreach (var s in f.Stats)
             {

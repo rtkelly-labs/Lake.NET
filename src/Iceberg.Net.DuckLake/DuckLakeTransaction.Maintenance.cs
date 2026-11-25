@@ -68,7 +68,7 @@ public sealed partial class DuckLakeTransaction
         }
         var maxSize = options.MaxFileSize ?? options.TargetFileSize;
         var groups = files
-            .Where(f => !withDeletes.Contains(f.DataFileId) && f.EncryptionKey is null && f.MappingId is null && f.BeginSnapshot >= schemaSince
+            .Where(f => !withDeletes.Contains(f.DataFileId) && f.MappingId is null && f.BeginSnapshot >= schemaSince
                         && string.Equals(f.FileFormat ?? "parquet", "parquet", StringComparison.OrdinalIgnoreCase)
                         && f.FileSizeBytes < Math.Min(maxSize, options.TargetFileSize) && f.FileSizeBytes >= (options.MinFileSize ?? 0))
             .GroupBy(f => (f.PartitionId, Key: string.Join("\u0001", partitionValues.GetValueOrDefault(f.DataFileId, []).Select(v => v ?? "\u0000"))))
@@ -173,7 +173,7 @@ public sealed partial class DuckLakeTransaction
     {
         var location = DuckLakeCatalog.Resolve(table.Location, file.Path ?? throw new InvalidDataException($"Data file {file.DataFileId} has no path"), file.PathIsRelative ?? true);
         var width = table.Columns.Count;
-        var options = new DataFileReadOptions { FileSize = file.FileSizeBytes };
+        var options = new DataFileReadOptions { FileSize = file.FileSizeBytes, DecryptionKey = _catalog.Key(file.EncryptionKey, $"data file {file.DataFileId}") };
         var fromFile = DuckLakeValues.FileRowConverter(table.Columns, toFile: false);
         DuckLakeNameMap? mapping = null;
         if (file.MappingId is { } mappingId)
@@ -218,10 +218,12 @@ public sealed partial class DuckLakeTransaction
         var relative = $"{directory}ducklake-{Guid.CreateVersion7()}.parquet";
         var location = t.Location + relative;
         _written.Add(location);
+        var (key, keyText) = _catalog.NewKey();
         var written = await ParquetFiles.WriteFileAsync(_catalog.IO, location, new Schema(0, fields), 0, [], fileRows,
-            _catalog.Options.Parquet with { Metrics = false, Annotations = DuckLakeTypes.Annotations(storedColumns) }, ct);
+            _catalog.Options.Parquet with { Metrics = false, Annotations = DuckLakeTypes.Annotations(storedColumns), EncryptionKey = key }, ct);
         var stats = new StatsCollector(columns);
         foreach (var r in rows) stats.Add(r.Values);
-        return new WrittenFile(relative, rows.Count, written.File.FileSizeInBytes, written.FooterSize, written.RowGroups, stats.Result(written.File.ColumnSizes), partitionValues);
+        return new WrittenFile(relative, rows.Count, written.File.FileSizeInBytes, written.FooterSize, written.RowGroups, stats.Result(written.File.ColumnSizes), partitionValues)
+            { Key = keyText };
     }
 }

@@ -235,6 +235,7 @@ dotnet run --project examples/DuckLake.Quickstart [directory] [postgres connecti
 | Maintenance | Merging adjacent small files into partial files, rewriting files with many deleted rows, expiring snapshots, deleting scheduled and orphaned files; DuckDB reads the results and cleans up after them, and the reverse (see [Maintenance](#maintenance)) |
 | Existing files | `AddDataFilesAsync` registers Parquet files written elsewhere, in place, under a `map_by_name` column mapping with footer statistics, as `ducklake_add_data_files` does (Hive partition columns, missing and extra columns); files DuckDB added are read through their mapping (see [Adding existing files](#adding-existing-files)) |
 | Deletion vectors (1.1) | Puffin delete files read (bare `deletion-vector-v1` blobs, and containers of cumulative vectors keyed by `ducklake-snapshot-id`, the latest not after the scanned snapshot); written as bare vectors when `write_deletion_vectors` is set in the lake or `DuckLakeOptions.WriteDeletionVectors` is on |
+| Encryption | Encrypted lakes (`DuckLakeOptions.Encrypted`, or an existing lake's `encrypted` setting): every Parquet data and delete file written with Parquet modular encryption (AES-GCM, encrypted footer) under a fresh 256-bit key per write, kept Base64 in `encryption_key` as DuckDB keeps it; DuckDB reads these lakes and writes to them, and this library reads DuckDB's. DuckDB cannot yet filter, delete from or update files encrypted here (a DuckDB bug with parquet-cpp's encryption; see the differences table). Existing files cannot be added to an encrypted lake |
 | Validation | `DuckLakeValidator` checks a whole lake (any writer's) and reports problems; `Deep` also reads every live file |
 
 ## The same constraints
@@ -275,11 +276,12 @@ below was observed with DuckDB 1.5.5 (`ducklake` extension `d8a1881e`) and is wh
 | `changes_made` kinds | 11 kinds | Also `inlined_insert`, `inlined_delete`, `inline_flush` | Treated as insert, delete and compaction for conflict checks; unknown kinds conflict only with tables this transaction touches |
 | `timetz` and `interval` in Parquet | "Data Types" lists them; their Parquet form is not described | `timetz` as a UTC-adjusted TIME (the offset is lost, the time wraps into one day); `interval` as Parquet INTERVAL (milliseconds; negative intervals refused); no statistics for either | The same, so a file round trip loses what DuckDB's does; inlined rows keep offsets and microseconds |
 | Inlined structs holding `timetz` | Not specified | Stored as `{'t': CAST('…' AS TIME WITH TIME ZONE)}`, which DuckDB 1.5.5 cannot read back | Written as quoted text, which both read |
+| Encrypted Parquet | "Parquet encryption" (the Parquet modular encryption spec) | DuckDB 1.5.5 and 2.0 read a parquet-cpp-encrypted file (footer key, AES-GCM, as ParquetSharp writes it) until a filter is applied: any `WHERE` fails with "Computed AES tag differs from read AES tag", in plain `read_parquet` as in DuckLake, so its `DELETE`/`UPDATE` on such files fail too. No writer setting changes it (statistics, dictionaries, compression, page index, CTR mode, plaintext footer all tried) | DuckDB reads, inserts into and writes encrypted lakes created here, and this library reads DuckDB's; DuckDB's filtered reads, deletes and updates of files written here wait on a DuckDB fix. `DuckDB_reads_encrypted_parquet_written_here_but_not_with_a_filter` reproduces it without DuckLake and flips when DuckDB fixes it |
 | Statistics encodings | `boolean` as `0`/`1`, `blob` as hex | Inlined rows' table statistics hold `true`, `nan`, `\x00\xFF` | Write the spec's encodings (no bounds for blobs); parse all of these, and treat anything unparseable as "no bound" |
 
 ## What is not implemented
 
-Encryption, `variant` and `geometry`, `int128`/`uint128` (DuckDB writes them to Parquet as DOUBLE and cannot read
+`variant` and `geometry`, `int128`/`uint128` (DuckDB writes them to Parquet as DOUBLE and cannot read
 them back), `time_ns` (DuckDB cannot write it to Parquet), inlining into partitioned tables (their small inserts go to files), and
 catalog migration (1.0 → 1.1 is DuckDB's). Each fails with `NotSupportedException` when met in a catalog
 or file rather than reading wrong values. The same list is in `tools/spec_trace.py` (`NOT_IMPLEMENTED`).
@@ -291,7 +293,7 @@ cannot be altered in it (define its columns at creation).
 
 | Suite | Needs | Command |
 |---|---|---|
-| `Iceberg.Net.DuckLake.Tests`: `EncodingTests`, `TypeTests`, `TemporalPropertyTests`, `AddFilesTests`, `ClrTests`, `DeletionVectorTests`, `ConflictRuleTests`, `CatalogTests`, `FormatVersionTests`, `ValidatorTests`, `ModelBasedTests`, and the inlining, maintenance, catalog object and performance tests | nothing (PostgreSQL variants skip without a server) | `dotnet test tests/Iceberg.Net.DuckLake.Tests --filter "FullyQualifiedName!~CrossEngine"` |
+| `Iceberg.Net.DuckLake.Tests`: `EncodingTests`, `TypeTests`, `TemporalPropertyTests`, `AddFilesTests`, `ClrTests`, `DeletionVectorTests`, `EncryptionTests`, `ConflictRuleTests`, `CatalogTests`, `FormatVersionTests`, `ValidatorTests`, `ModelBasedTests`, and the inlining, maintenance, catalog object and performance tests | nothing (PostgreSQL variants skip without a server) | `dotnet test tests/Iceberg.Net.DuckLake.Tests --filter "FullyQualifiedName!~CrossEngine"` |
 | `CrossEngineTests` | a Python with the interop `duckdb` group (1.0); DuckDB 2.0 (1.1) | `ICEBERG_DUCKDB_PYTHON=<python> dotnet test tests/Iceberg.Net.DuckLake.Tests` |
 | `Iceberg.Net.DuckLake.Behaviour.Tests` (BDD) | as above for the DuckDB scenarios (`CrossEngine.feature` and the 1.1 ones in `FormatVersions.feature`) | `ICEBERG_DUCKDB_PYTHON=<python> dotnet test tests/Iceberg.Net.DuckLake.Behaviour.Tests` |
 
@@ -307,8 +309,8 @@ dropped afterwards, and validates the lake when the test ends. Environment:
 | `ICEBERG_DUCKLAKE11_PYTHON` / `ICEBERG_DUCKLAKE11_REQUIRED=1` | The 1.1 oracle: a Python with `duckdb==2.0.0` (downloads the extension) |
 | `ICEBERG_PBT_RUNS` / `ICEBERG_PBT_SEED` | Model-based test: number of cases, and a replay seed printed by a failure |
 
-In CI (both databases, both oracles): 572 of the 574 tests (the two format-1.0 runs of the deletion-vector cross-engine test skip by design) and all 111 BDD scenarios pass. Locally without
-the 1.1 oracle: 530 and 95 pass, the 44 and 16 others skip. The projects are in the `cross-engine` CI suite, which starts the emulation stack's
+In CI (both databases, both oracles): 592 of the 594 tests (the two format-1.0 runs of the deletion-vector cross-engine test skip by design) and all 111 BDD scenarios pass. Locally without
+the 1.1 oracle: 544 and 95 pass, the 50 and 16 others skip (DuckDB 2.0 cases, and the encrypted-lake test because DuckDB cannot download httpfs here). The projects are in the `cross-engine` CI suite, which starts the emulation stack's
 PostgreSQL, installs both oracles and requires all three. The oracle is `interop/ducklake_oracle.py`: it attaches the
 test's catalog (SQLite or PostgreSQL) in DuckDB and runs SQL against it.
 
@@ -448,16 +450,18 @@ string>"]`) on a 4-core container, local disk, a 5-column table (bigint, varchar
 | Delete 10% of 500,000 rows across 20 files | 0.55 s | 0.70 s |
 | 4 writers, 25 one-row commits each, at once | 100 commits in 1.1 s, none lost | 100 commits in 1.1 s, none lost |
 
-Features added later, SQLite catalog, same container:
+Features added later, same container:
 
-| Scenario | Result |
-|---|---|
-| Full scan of 1,000,000 rows as records (`ReadAsync<T>`) | 1.86 s (537,000 rows/s; 765,000 rows/s as physical values) |
-| Delete 10% of 500,000 rows across 20 files as deletion vectors (1.1) | 0.65 s (0.56 s as Parquet delete files); reading what is left 0.54 s |
-| Register 100 existing files of 1,000,000 rows (`AddDataFilesAsync`) | 0.22 s (footers only); reading them through the name mapping 0.63 s |
-| Insert 500,000 rows of `uint64`, `timestamp_ms`, `timetz`, `interval` | 2.05 s (244,000 rows/s); reading them 0.53 s |
+| Scenario | SQLite catalog | PostgreSQL catalog (local) |
+|---|---|---|
+| Full scan of 1,000,000 rows as records (`ReadAsync<T>`) | 1.86 s (537,000 rows/s; 765,000 rows/s as physical values) | 2.01 s (497,000 rows/s; 1.36 s as physical values) |
+| Encrypted lake: insert 1,000,000 rows in 10 files, full scan, delete 3.3% | 3.61 s; scan 1.20 s (834,000 rows/s); delete 1.28 s | 3.65 s; scan 1.22 s; delete 1.32 s |
+| Delete 10% of 500,000 rows across 20 files as deletion vectors (1.1) | 0.65 s (0.56 s as Parquet delete files); reading what is left 0.54 s | 0.75 s (1.01 s as Parquet delete files); reading 1.10 s |
+| Register 100 existing files of 1,000,000 rows (`AddDataFilesAsync`) | 0.22 s (footers only); reading them through the name mapping 0.63 s | 0.15 s; reading 1.16 s |
+| Insert 500,000 rows of `uint64`, `timestamp_ms`, `timetz`, `interval` | 2.05 s (244,000 rows/s); reading them 0.53 s | 2.37 s; reading 0.57 s |
 
-`ReadAsync<T>` compiles its binder once per read (a constructor and property setters as an expression tree, each
+Encryption costs nothing measurable: AES-GCM runs in hardware (the encrypted lake inserts 10 files at the same rate
+an unencrypted one does, and scans as fast). `ReadAsync<T>` compiles its binder once per read (a constructor and property setters as an expression tree, each
 column's conversion chosen once); binding by reflection per row ran at 336,000 rows/s. Name-mapped files are read
 by the same reader, matching by name instead of field ID, so they cost what other files do; registering a file
 reads only its footer (ranged reads for the last 64 KiB).

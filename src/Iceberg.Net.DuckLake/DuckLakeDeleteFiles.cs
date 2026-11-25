@@ -31,10 +31,10 @@ public static class DuckLakeDeleteFiles
 
     /// <summary>Write the deleted positions of one data file, sorted. Returns (size in bytes, footer size).</summary>
     public static async Task<(long Size, long FooterSize)> WriteAsync(IFileIO io, string location, string dataFileLocation, IEnumerable<long> positions,
-        CancellationToken ct = default)
+        CancellationToken ct = default, byte[]? key = null)
     {
         var rows = positions.Distinct().Order().Select(p => new object?[] { dataFileLocation, p }).ToList();
-        var written = await ParquetFiles.WriteFileAsync(io, location, WriteSchema, 0, [], rows, ParquetWriteOptions.Default with { Metrics = false }, ct);
+        var written = await ParquetFiles.WriteFileAsync(io, location, WriteSchema, 0, [], rows, ParquetWriteOptions.Default with { Metrics = false, EncryptionKey = key }, ct);
         return (written.File.FileSizeInBytes, written.FooterSize);
     }
 
@@ -48,16 +48,16 @@ public static class DuckLakeDeleteFiles
     /// an earlier snapshot ignores later deletions. Returns (size in bytes, footer size).
     /// </summary>
     public static async Task<(long Size, long FooterSize)> WritePartialAsync(IFileIO io, string location, string dataFileLocation,
-        IEnumerable<(long Position, long Snapshot)> entries, CancellationToken ct = default)
+        IEnumerable<(long Position, long Snapshot)> entries, CancellationToken ct = default, byte[]? key = null)
     {
         var rows = entries.GroupBy(e => e.Position).Select(g => (Position: g.Key, Snapshot: g.Min(x => x.Snapshot))).OrderBy(e => e.Position)
             .Select(e => new object?[] { dataFileLocation, e.Position, e.Snapshot }).ToList();
-        var written = await ParquetFiles.WriteFileAsync(io, location, PartialWriteSchema, 0, [], rows, ParquetWriteOptions.Default with { Metrics = false }, ct);
+        var written = await ParquetFiles.WriteFileAsync(io, location, PartialWriteSchema, 0, [], rows, ParquetWriteOptions.Default with { Metrics = false, EncryptionKey = key }, ct);
         return (written.File.FileSizeInBytes, written.FooterSize);
     }
 
     /// <summary>Every deleted position of a delete file, with the snapshot that deleted it when the file records one (partial delete files, Puffin vectors).</summary>
-    public static async Task<List<(long Position, long? Snapshot)>> ReadEntriesAsync(IFileIO io, string location, CancellationToken ct = default)
+    public static async Task<List<(long Position, long? Snapshot)>> ReadEntriesAsync(IFileIO io, string location, CancellationToken ct = default, byte[]? key = null)
     {
         var result = new List<(long, long?)>();
         if (await VectorsAsync(io, location, ct) is { } vectors)
@@ -69,7 +69,7 @@ public static class DuckLakeDeleteFiles
                     if (seen.Add(pos)) result.Add((pos, snapshot));
             return result;
         }
-        foreach (var row in await ParquetFiles.ReadAsync(io, location, ReadSchema, ct))
+        foreach (var row in await RowsAsync(io, location, key, ct))
         {
             var pos = row[1] ?? row[3] ?? throw new InvalidDataException($"Delete file {location} has a row without a position");
             result.Add(((long)pos, row[4] as long?));
@@ -82,7 +82,7 @@ public static class DuckLakeDeleteFiles
     /// records the snapshot of each deletion in <c>_ducklake_internal_snapshot_id</c>; later ones are not yet in effect.
     /// A Puffin file's vector is the one with the greatest <c>ducklake-snapshot-id</c> not after the snapshot.
     /// </summary>
-    public static async Task<HashSet<long>> ReadPositionsAsync(IFileIO io, string location, long snapshot = long.MaxValue, CancellationToken ct = default)
+    public static async Task<HashSet<long>> ReadPositionsAsync(IFileIO io, string location, long snapshot = long.MaxValue, CancellationToken ct = default, byte[]? key = null)
     {
         var positions = new HashSet<long>();
         if (await VectorsAsync(io, location, ct) is { } vectors)
@@ -91,13 +91,20 @@ public static class DuckLakeDeleteFiles
             if (current.Positions is not null) positions.UnionWith(current.Positions.Positions());
             return positions;
         }
-        foreach (var row in await ParquetFiles.ReadAsync(io, location, ReadSchema, ct))
+        foreach (var row in await RowsAsync(io, location, key, ct))
         {
             var pos = row[1] ?? row[3] ?? throw new InvalidDataException($"Delete file {location} has a row without a position");
             if (row[4] is long deletedIn && deletedIn > snapshot) continue;
             positions.Add((long)pos);
         }
         return positions;
+    }
+
+    private static async Task<List<object?[]>> RowsAsync(IFileIO io, string location, byte[]? key, CancellationToken ct)
+    {
+        var rows = new List<object?[]>();
+        await foreach (var batch in ParquetFiles.ReadBatchesAsync(io, location, ReadSchema, null, new DataFileReadOptions { DecryptionKey = key }, ct)) rows.AddRange(batch.Rows);
+        return rows;
     }
 
     /// <summary>The Iceberg <c>deletion-vector-v1</c> blob type, and DuckLake's per-vector snapshot property (format 1.1).</summary>
@@ -112,7 +119,7 @@ public static class DuckLakeDeleteFiles
     internal static async Task<List<(long? Snapshot, Puffin.RoaringPositionBitmap Positions)>?> VectorsAsync(IFileIO io, string location, CancellationToken ct)
     {
         var head = await io.ReadRangeAsync(location, 0, 4, ct);
-        if (head.AsSpan().SequenceEqual("PAR1"u8)) return null;
+        if (head.AsSpan().SequenceEqual("PAR1"u8) || head.AsSpan().SequenceEqual("PARE"u8)) return null; // Parquet, plain or with an encrypted footer
         var bytes = await io.ReadAllAsync(location, ct);
         try
         {
