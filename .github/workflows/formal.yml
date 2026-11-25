@@ -13,6 +13,10 @@ on:
       - src/Iceberg.Net.RestServer/**
       - src/Iceberg.Net.Data/SnapshotProducer.cs
       - src/Iceberg.Net.Core/Metadata/MetadataUpdate.cs
+      # The span and tag names the commit traces read, and the code that emits them.
+      - src/Iceberg.Net.Core/Diagnostics/**
+      - src/Iceberg.Net.Data/TableMutations.cs
+      - src/Iceberg.Net.Data/StagedCommit.cs
   push:
     branches: [main]
     paths:
@@ -24,6 +28,10 @@ on:
       - src/Iceberg.Net.RestServer/**
       - src/Iceberg.Net.Data/SnapshotProducer.cs
       - src/Iceberg.Net.Core/Metadata/MetadataUpdate.cs
+      # The span and tag names the commit traces read, and the code that emits them.
+      - src/Iceberg.Net.Core/Diagnostics/**
+      - src/Iceberg.Net.Data/TableMutations.cs
+      - src/Iceberg.Net.Data/StagedCommit.cs
   workflow_dispatch:
 
 concurrency:
