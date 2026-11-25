@@ -1,0 +1,11 @@
+<Project Sdk="Microsoft.NET.Sdk">
+  <PropertyGroup>
+    <OutputType>Exe</OutputType>
+    <IsPackable>false</IsPackable>
+    <RootNamespace>Iceberg.Net.Tools.DuckLakeBench</RootNamespace>
+    <Description>Wall-clock benchmarks of Iceberg.Net.DuckLake on a SQLite or PostgreSQL catalog (docs/ducklake.md, Performance).</Description>
+  </PropertyGroup>
+  <ItemGroup>
+    <ProjectReference Include="../../src/Iceberg.Net.DuckLake/Iceberg.Net.DuckLake.csproj" />
+  </ItemGroup>
+</Project>

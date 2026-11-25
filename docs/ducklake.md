@@ -210,6 +210,7 @@ dotnet run --project examples/DuckLake.Quickstart [directory] [postgres connecti
 | `DuckLakeNestedText.cs` | DuckDB's text form of nested inlined values |
 | `DuckLakePartitioning.cs` | Partitioned writes (`identity`, `year`/`month`/`day`/`hour`, 1.1's `epoch_*`, `bucket(N)`) |
 | `DuckLakeValidator.cs` | Whole-lake consistency check: snapshot and ID counters, versioned ranges, delete files, row IDs, files in storage |
+| `DuckLakeTelemetry.cs` | Spans and metrics (`Iceberg.Net.DuckLake`), with the catalog commands each operation ran |
 
 ## What works
 
@@ -218,7 +219,7 @@ dotnet run --project examples/DuckLake.Quickstart [directory] [postgres connecti
 | Catalog | Creates the catalog (matching DuckDB's schema for SQLite and PostgreSQL exactly, per format version) with snapshot 0 and schema `main`, or opens an existing 1.0 or 1.1 catalog. EF Core over SQLite or PostgreSQL |
 | Reads | Snapshot-scoped catalog queries (spec "Queries"), relative/absolute path chains, nested schemas (1.1), delete files, inlined rows (primitive and nested), inlined deletions, DuckDB's partial (merged/flushed) data and delete files with per-row snapshots, row IDs, time travel by snapshot or timestamp |
 | Pruning | File statistics through the Iceberg metrics evaluator; Parquet row groups through footer statistics; exact residual filter |
-| Writes | CREATE/DROP SCHEMA (nested in 1.1), CREATE/DROP TABLE, INSERT (file, file and table statistics, row IDs), DELETE (merge-on-read; a replacement delete file per data file, emptied files removed), UPDATE (delete + insert, new row IDs), ADD/DROP/RENAME COLUMN, type widening (and `null` promotion), partitioned inserts, author/message/extra info |
+| Writes | CREATE/DROP SCHEMA (nested in 1.1), CREATE/DROP TABLE, INSERT (file, file and table statistics, row IDs), DELETE (merge-on-read; a replacement delete file per data file, emptied files removed), UPDATE (delete + insert in one snapshot; the new versions keep their row IDs in `_ducklake_internal_row_id`, as the spec allows and DuckDB does), ADD/DROP/RENAME COLUMN, type widening (and `null` promotion), partitioned inserts, author/message/extra info |
 | Types | `boolean`, `int8`–`int64`, `float32/64`, `decimal(p,s)`, `date`, `time`, `timestamp`, `timestamptz`, `timestamp_ns`, `varchar`, `json`, `blob`, `uuid`, `list`, `struct`, `map`, and 1.1's `null` |
 | Concurrency | Optimistic commits: on a lost race for the snapshot ID, the `changes_made` of every snapshot since the base are checked against the spec's logical conflicts, then the metadata is retried without rewriting files; delete-vs-delete is decided per data file. Tested with concurrent writers on both databases, and with DuckDB writing in between |
 | Validation | `DuckLakeValidator` checks a whole lake (any writer's) and reports problems; `Deep` also reads every live file |
@@ -295,6 +296,47 @@ Shared pieces changed for this: `SpecAttribute` accepts the `ducklake:` prefix; 
 checks the DuckLake spec (`snapshot --ducklake`, `drift --ducklake`, a DuckLake line in the matrix);
 `tests/Iceberg.Net.Fuzz` and `tools/fuzz.sh` gained two targets; the interop `duckdb` dependency group gained the
 extension wheels (including `postgres_scanner`) and `pytz` (DuckDB's client needs it for `timestamptz` values); the emulation stack gained a PostgreSQL.
+
+## Performance
+
+Measured with `tools/DuckLakeBench` (`dotnet run -c Release --project tools/DuckLakeBench [--postgres "<connection
+string>"]`) on a 4-core container, local disk, a 5-column table (bigint, varchar, decimal, timestamptz, int):
+
+| Scenario | SQLite catalog | PostgreSQL catalog (local) |
+|---|---|---|
+| Insert 1,000,000 rows in one commit | 5.9 s (170,000 rows/s) | 5.6 s (179,000 rows/s) |
+| Insert 500,000 rows into 30 partitions | 3.1 s | 3.3 s |
+| One-row commit | p50 10.5 ms, p95 15.6 ms | p50 16.7 ms, p95 27.9 ms |
+| Scan planning over 1,000 live files | p50 5.1 ms; point lookup (statistics pruning) p50 10.8 ms | p50 6.2 ms; point lookup p50 14.8 ms |
+| Full scan of 1,000,000 rows (10 files) | 1.26 s (790,000 rows/s) | 1.74 s |
+| Delete 10% of 500,000 rows across 20 files | 0.55 s | 0.70 s |
+| 4 writers, 25 one-row commits each, at once | 100 commits in 1.1 s, none lost | 100 commits in 1.1 s, none lost |
+
+What decides these numbers, and what was changed for them:
+
+- **Catalog round trips are constant.** A commit sends the same number of statements to the catalog database (14
+  for an insert, 9 for a delete) whether it writes 2 files or 80, of 3 columns or 12; a scan plan sends 4. Per-table
+  state is read with one set-based query per catalog table and merged in memory; rows go in as multi-row `INSERT`s
+  built from the EF model's mapping (`BulkInsert`; EF Core's SQLite provider would send one statement per row). Before
+  this, an 80-file commit took 1,658 statements on SQLite and 1,124 on PostgreSQL, and a delete 247.
+  `PerformanceTests` hold the counts, read from the telemetry spans ([telemetry.md](telemetry.md#ducklake)).
+- **The snapshot row is written first.** It is the row concurrent committers race for; a loser now learns it lost
+  before writing anything else (PostgreSQL makes it wait for the winner, then fail at once), and retries after a
+  jittered exponential backoff (`DuckLakeOptions.RetryWait`, `MaxRetryWait`). With it last, four PostgreSQL writers
+  collided on `ducklake_data_file`'s key after doing all their work and ran out of retries.
+- **Planning reads only the statistics it needs**: those of the columns the filter names, joined to the live files.
+- **Writes skip work DuckLake does not use**: Iceberg's per-file metrics pass (`ParquetWriteOptions.Metrics`), a
+  re-read of each file's footer (`ParquetFiles.WriteFileAsync` returns the footer size and row-group count), and a
+  type switch per value for values already in their physical form (`DuckLakeValues.Normalizer`).
+- **Row groups of 122,880 rows** (DuckDB's size, `DuckLakeOptions.Parquet`): Parquet statistics prune row groups
+  inside a file, and a scan holds at most a few row groups per file in memory.
+- **Scans read ahead** up to `DuckLakeOptions.MaxParallelFileReads` files (default 4), each into a queue of two row
+  groups; rows still come out in file order. Locally this changes little (decoding into `object?[]` rows is bound by
+  allocation, about one microsecond per row); against object storage it overlaps the request latency.
+
+Remaining costs: decoding allocates a boxed array per row (shared with the Iceberg read path; a columnar or typed
+reader is the way past it), and each one-row commit writes a Parquet file (DuckDB inlines small inserts into the
+catalog instead; see [What is not implemented](#what-is-not-implemented)).
 
 ## Next steps
 

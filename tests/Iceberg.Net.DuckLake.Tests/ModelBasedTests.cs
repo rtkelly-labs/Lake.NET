@@ -121,6 +121,9 @@ public abstract class DuckLakeModelBasedTests(CatalogBackend backend, int defaul
                 if (rowIds.TryGetValue(r.RowId, out var before) && before != row && !touched(before))
                     throw new InvalidOperationException($"step {step} ({op}): row ID {r.RowId} moved from {before} to {row}");
             }
+            // An UPDATE keeps the row IDs of the rows it rewrites (spec "Row Lineage"): no ID appears or disappears.
+            if (op is Rename && !rows.Select(r => r.RowId).ToHashSet().SetEquals(rowIds.Keys))
+                throw new InvalidOperationException($"step {step} ({op}): the update changed the set of row IDs");
             rowIds = rows.ToDictionary(r => r.RowId, r => Row.From(r.Values));
             history[table.SnapshotId] = Canon(model);
         }

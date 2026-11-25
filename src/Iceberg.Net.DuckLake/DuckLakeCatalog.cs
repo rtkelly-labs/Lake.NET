@@ -1,4 +1,5 @@
 using System.Runtime.CompilerServices;
+using System.Threading.Channels;
 using Iceberg.Net.Data;
 using Iceberg.Net.Expressions;
 using Iceberg.Net.IO;
@@ -12,9 +13,23 @@ public sealed record DuckLakeOptions
 {
     /// <summary>How many times a commit that lost the race for the next snapshot ID is retried (when nothing conflicts).</summary>
     public int MaxCommitAttempts { get; init; } = 10;
+    /// <summary>The wait before the first retry; later ones grow by half each time (with jitter), up to <see cref="MaxRetryWait"/>.</summary>
+    public TimeSpan RetryWait { get; init; } = TimeSpan.FromMilliseconds(10);
+    public TimeSpan MaxRetryWait { get; init; } = TimeSpan.FromSeconds(1);
     /// <summary>Written to <c>ducklake_metadata.created_by</c> when this library creates a catalog.</summary>
     public string CreatedBy { get; init; } = "Iceberg.NET";
-    public ParquetWriteOptions Parquet { get; init; } = ParquetWriteOptions.Default;
+    /// <summary>
+    /// Parquet layout of written files. Row groups of 122,880 rows by default (DuckDB's size): readers skip row groups
+    /// by their statistics, and a scan holds at most a few row groups per file in memory.
+    /// </summary>
+    public ParquetWriteOptions Parquet { get; init; } = ParquetWriteOptions.Default with { RowGroupRows = DefaultRowGroupRows };
+    /// <summary>
+    /// How many data files a scan reads ahead concurrently (decoding is CPU-bound; object storage reads are
+    /// latency-bound). Rows still come out in file order. 1 reads one file at a time.
+    /// </summary>
+    public int MaxParallelFileReads { get; init; } = 4;
+
+    public const int DefaultRowGroupRows = 122_880;
 }
 
 /// <summary>A row of <c>ducklake_snapshot</c>, with its <c>ducklake_snapshot_changes</c>.</summary>
@@ -150,7 +165,7 @@ public sealed class DuckLakeCatalog
         return new DuckLakeCatalog(store, io, options, dataPath, version);
     }
 
-    internal DuckLakeDbContext Context() => Store.Context(Version);
+    internal DuckLakeDbContext Context(DuckLakeTelemetry.Scope? scope = null) => Store.Context(Version, scope);
 
     /// <summary>
     /// Catalog reads under the <see cref="Corruption"/> contract: a row the provider cannot materialise (a NULL in a
@@ -348,8 +363,20 @@ public sealed class DuckLakeCatalog
     /// <summary>Plan a scan: the live data files of the table's snapshot, minus those whose file statistics rule out <paramref name="filter"/>.</summary>
     public async Task<DuckLakeScanPlan> PlanScanAsync(DuckLakeTable table, Expression? filter = null, CancellationToken ct = default)
     {
-        await using var db = Context();
-        return await PlanScanAsync(db, table, filter, ct);
+        using var scope = DuckLakeTelemetry.Start("ducklake.scan.plan", this, table.ToString());
+        scope.Snapshot(table.SnapshotId);
+        try
+        {
+            await using var db = Context(scope);
+            var plan = await PlanScanAsync(db, table, filter, ct);
+            scope.Succeeded();
+            return plan;
+        }
+        catch (Exception e)
+        {
+            scope.Failed(e);
+            throw;
+        }
     }
 
     internal static async Task<Dictionary<long, DeleteFileEntity>> DeleteFilesAsync(DuckLakeDbContext db, long tableId, long snapshot, CancellationToken ct)
@@ -374,8 +401,14 @@ public sealed class DuckLakeCatalog
         Dictionary<long, Dictionary<long, FileColumnStatsEntity>>? stats = null;
         if (bound is not null)
         {
-            var fileIds = files.Select(f => f.DataFileId).ToList();
-            stats = (await Guarded("ducklake_file_column_stats", () => db.FileColumnStats.Where(s => s.TableId == table.TableId && fileIds.Contains(s.DataFileId)).ToListAsync(ct)))
+            // Only the statistics of the columns the filter names, of the live files: by table, not by an IN list of
+            // every file (whose size would grow with the table).
+            var columnIds = FieldIds(bound).Select(id => (long)id).ToList();
+            var snapshot = table.SnapshotId;
+            stats = (await Guarded("ducklake_file_column_stats", () => db.FileColumnStats
+                    .Where(s => s.TableId == table.TableId && columnIds.Contains(s.ColumnId))
+                    .Join(db.DataFiles.LiveAt(snapshot), s => s.DataFileId, f => f.DataFileId, (s, f) => s)
+                    .ToListAsync(ct)))
                 .GroupBy(s => s.DataFileId).ToDictionary(g => g.Key, g => g.GroupBy(s => s.ColumnId).ToDictionary(x => x.Key, x => x.First()));
         }
         var types = table.Columns.SelectMany(col => col.SelfAndDescendants()).Where(col => col.Type is DuckLakePrimitive)
@@ -406,6 +439,7 @@ public sealed class DuckLakeCatalog
             tasks.Add(new DuckLakeFileTask(f.DataFileId, location, f.RecordCount, f.FileSizeBytes, deleteLocation, f.RowIdStart) { RowGroupCount = f.RowGroupCount });
         }
         var inlined = await db.InlinedDataTables.Where(i => i.TableId == table.TableId).OrderBy(i => i.SchemaVersion).Select(i => i.TableName).ToListAsync(ct);
+        db.Scope?.Planned(tasks.Count, pruned);
         return new DuckLakeScanPlan(tasks, pruned, inlined) { InlinedDeletions = await InlinedDeletionsAsync(db, table.TableId, table.SnapshotId, ct) };
     }
 
@@ -441,6 +475,24 @@ public sealed class DuckLakeCatalog
         var deleted = file.DeleteFileLocation is { } location ? await DuckLakeDeleteFiles.ReadPositionsAsync(IO, location, snapshot, ct) : null;
         if (plan.InlinedDeletions.TryGetValue(file.DataFileId, out var inlined)) (deleted ??= []).UnionWith(inlined);
         return deleted;
+    }
+
+    private static HashSet<int> FieldIds(Expression e)
+    {
+        var ids = new HashSet<int>();
+        Visit(e);
+        return ids;
+
+        void Visit(Expression x)
+        {
+            switch (x)
+            {
+                case BoundPredicate p: ids.Add(p.FieldId); break;
+                case And a: Visit(a.Left); Visit(a.Right); break;
+                case Or o: Visit(o.Left); Visit(o.Right); break;
+                case Not n: Visit(n.Child); break;
+            }
+        }
     }
 
     /// <summary>
@@ -516,41 +568,124 @@ public sealed class DuckLakeCatalog
         new(0, table.Schema.Columns.Select((f, i) => f.Type.TypeId == TypeId.Unknown ? f with { Id = NullColumnFieldId - i, Type = PrimitiveType.Int } : f)
             .Concat(InternalColumns));
 
+    /// <summary>A data file being read ahead: its deleted positions and its row groups, decoded on the thread pool into a bounded queue.</summary>
+    private sealed record FileRead(DuckLakeFileTask File, Task<HashSet<long>?> Deleted, ChannelReader<DataFileBatch> Batches, Task Producer);
+
+    private FileRead StartRead(DuckLakeScanPlan plan, DuckLakeFileTask file, DuckLakeTable table, Schema projection, Expression? bound, CancellationToken ct)
+    {
+        var queue = Channel.CreateBounded<DataFileBatch>(new BoundedChannelOptions(2) { SingleReader = true, SingleWriter = true });
+        var deleted = DeletedPositionsAsync(plan, file, table.SnapshotId, ct);
+        var producer = Task.Run(async () =>
+        {
+            try
+            {
+                var options = new DataFileReadOptions { FileSize = file.FileSizeBytes, Filter = bound };
+                await foreach (var batch in ParquetFiles.ReadBatchesAsync(IO, file.Location, projection, null, options, ct))
+                    await queue.Writer.WriteAsync(batch, ct);
+            }
+            finally
+            {
+                queue.Writer.TryComplete();
+            }
+        }, ct);
+        return new FileRead(file, deleted, queue.Reader, producer);
+    }
+
     internal async IAsyncEnumerable<ScannedRow> ScanAsync(DuckLakeTable table, Expression? filter, [EnumeratorCancellation] CancellationToken ct)
     {
+        // Disposed when the rows are read or the caller stops early (the iterator's finally runs on DisposeAsync).
+        using var scope = DuckLakeTelemetry.Start("ducklake.scan", this, table.ToString());
+        scope.Snapshot(table.SnapshotId);
+        long returned = 0;
+        var failed = false;
+        await using var rows = ScanRowsAsync(table, filter, scope, ct).GetAsyncEnumerator(ct);
+        try
+        {
+            while (true)
+            {
+                bool more;
+                try
+                {
+                    more = await rows.MoveNextAsync();
+                }
+                catch (Exception e)
+                {
+                    failed = true;
+                    scope.Failed(e);
+                    throw;
+                }
+                if (!more) break;
+                returned++;
+                yield return rows.Current;
+            }
+        }
+        finally
+        {
+            // A caller that stops early has not failed.
+            if (!failed) scope.Succeeded();
+            scope.Rows(returned);
+        }
+    }
+
+    private async IAsyncEnumerable<ScannedRow> ScanRowsAsync(DuckLakeTable table, Expression? filter, DuckLakeTelemetry.Scope scope,
+        [EnumeratorCancellation] CancellationToken ct)
+    {
         DuckLakeScanPlan plan;
-        await using (var db = Context()) plan = await PlanScanAsync(db, table, filter, ct);
+        await using (var db = Context(scope)) plan = await PlanScanAsync(db, table, filter, ct);
         var bound = filter is null or AlwaysTrue ? null : Binder.Bind(table.Schema, filter);
         var residual = bound is null ? null : RowEvaluator.Compile(bound);
         var width = table.Columns.Count;
         var projection = FileProjection(table);
-        foreach (var file in plan.Files)
+        // Up to MaxParallelFileReads files are read ahead, each into a queue of two batches (row groups): decoding
+        // overlaps, memory stays bounded, and rows come out in file order.
+        var parallelism = Math.Max(1, Options.MaxParallelFileReads);
+        using var stop = CancellationTokenSource.CreateLinkedTokenSource(ct);
+        var inFlight = new Queue<FileRead>();
+        var next = 0;
+        try
         {
-            var deleted = await DeletedPositionsAsync(plan, file, table.SnapshotId, ct);
-            var options = new DataFileReadOptions { FileSize = file.FileSizeBytes, Filter = bound };
-            await foreach (var batch in ParquetFiles.ReadBatchesAsync(IO, file.Location, projection, null, options, ct))
+            while (true)
             {
-                for (var i = 0; i < batch.Rows.Count; i++)
+                while (inFlight.Count < parallelism && next < plan.Files.Count) inFlight.Enqueue(StartRead(plan, plan.Files[next++], table, projection, bound, stop.Token));
+                if (inFlight.Count == 0) break;
+                var read = inFlight.Dequeue();
+                var file = read.File;
+                var deleted = await read.Deleted;
+                await foreach (var batch in read.Batches.ReadAllAsync(stop.Token))
                 {
-                    var pos = batch.FirstPosition + i;
-                    if (deleted is not null && deleted.Contains(pos)) continue;
-                    var full = batch.Rows[i];
-                    // Partial files (merged by DuckDB) carry each row's snapshot: rows committed after the scanned one are not visible.
-                    if (full[width + 1] is long rowSnapshot && rowSnapshot > table.SnapshotId) continue;
-                    var row = full[..width];
-                    if (residual is not null && !residual(row)) continue;
-                    // Stored row IDs take precedence; without a row_id_start (1.1) they are required.
-                    var rowId = full[width] is long stored ? stored
-                        : file.RowIdStart is { } start ? start + pos
-                        : throw new InvalidDataException($"Data file {file.DataFileId} has no row_id_start and no stored row IDs");
-                    yield return new ScannedRow(rowId, row, file.DataFileId, pos, null);
+                    for (var i = 0; i < batch.Rows.Count; i++)
+                    {
+                        var pos = batch.FirstPosition + i;
+                        if (deleted is not null && deleted.Contains(pos)) continue;
+                        var full = batch.Rows[i];
+                        // Partial files (merged by DuckDB) carry each row's snapshot: rows committed after the scanned one are not visible.
+                        if (full[width + 1] is long rowSnapshot && rowSnapshot > table.SnapshotId) continue;
+                        var row = full[..width];
+                        if (residual is not null && !residual(row)) continue;
+                        // Stored row IDs take precedence; without a row_id_start (1.1) they are required.
+                        var rowId = full[width] is long stored ? stored
+                            : file.RowIdStart is { } start ? start + pos
+                            : throw new InvalidDataException($"Data file {file.DataFileId} has no row_id_start and no stored row IDs");
+                        yield return new ScannedRow(rowId, row, file.DataFileId, pos, null);
+                    }
                 }
+                await read.Producer; // rethrows a read failure (the queue only ends early)
+            }
+        }
+        finally
+        {
+            // The caller stopped (or a read failed): stop the reads still in flight and wait for them to let go of their files.
+            await stop.CancelAsync();
+            foreach (var read in inFlight)
+            {
+                try { await read.Producer; } catch { /* stopped on purpose */ }
+                try { await read.Deleted; } catch { /* stopped on purpose */ }
             }
         }
         foreach (var name in plan.InlinedTables)
         {
             List<(long RowId, object?[] Values)> rows;
-            await using (var db = Context()) rows = await DuckLakeInlinedData.ReadAsync(db, table, name, ct);
+            await using (var db = Context(scope)) rows = await DuckLakeInlinedData.ReadAsync(db, table, name, ct);
             foreach (var (rowId, values) in rows)
             {
                 if (residual is not null && !residual(values)) continue;

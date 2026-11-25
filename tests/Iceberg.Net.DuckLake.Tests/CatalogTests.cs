@@ -135,7 +135,9 @@ public abstract class CatalogTests : IAsyncLifetime
         Assert.Equal([1L, 3L, 1L, 3L, 1L, "parquet"], files[1][..6]);
         var location = _lake.DataPath + "main/t/" + (string)files[0][6]!;
         Assert.Equal(new FileInfo(location).Length, files[0][7]);
-        Assert.True((long)files[0][8]! > 0 && (long)files[0][8]! < (long)files[0][7]!);
+        // footer_size is the footer length the file itself ends with (4 bytes before "PAR1").
+        var bytes = await File.ReadAllBytesAsync(location);
+        Assert.Equal((long)BitConverter.ToUInt32(bytes, bytes.Length - 8), files[0][8]);
 
         // value_count counts non-null values, as DuckDB writes it.
         Assert.Equal([[0L, 1L, 3L, 0L, "1", "9", null], [0L, 2L, 2L, 1L, "a", "b", null]],
@@ -253,6 +255,29 @@ public abstract class CatalogTests : IAsyncLifetime
         Assert.Equal("inserted_into_table:1,deleted_from_table:1", string.Join(",", s.Changes));
         var rows = await catalog.ReadAsync(await catalog.LoadTableAsync("main", "t"));
         Assert.Equal(["n0", "n1", "n2", "changed", "changed"], rows.OrderBy(r => (long)r[0]!).Select(r => (string)r[1]!));
+    }
+
+    [SkippableFact]
+    [Spec("ducklake: UPDATE")]
+    [Spec("ducklake: ducklake_data_file")]
+    public async Task Updated_rows_keep_their_row_ids()
+    {
+        // Spec ducklake_data_file: a file with a row_id_start "can also contain [_ducklake_internal_row_id], e.g., for
+        // rows written by an UPDATE, and the stored row ids then take precedence".
+        var catalog = await WithTableAsync(rows: 5);
+        var before = new Dictionary<long, long>();
+        await foreach (var r in catalog.ReadRowsAsync(await catalog.LoadTableAsync("main", "t"))) before[(long)r.Values[0]!] = r.RowId;
+        await using (var tx = catalog.BeginTransaction())
+        {
+            await tx.UpdateAsync("main", "t", Expr.GreaterThan("id", 2L), r => [r[0], "changed"]);
+            await tx.CommitAsync();
+        }
+        var after = new Dictionary<long, long>();
+        await foreach (var r in catalog.ReadRowsAsync(await catalog.LoadTableAsync("main", "t"))) after[(long)r.Values[0]!] = r.RowId;
+        Assert.Equal(before, after);
+        // The new file still gets a row_id_start of its own, past every row ID handed out (as DuckDB does).
+        Assert.Equal([[5L, 2L]], await SqlAsync("SELECT row_id_start, record_count FROM ducklake_data_file WHERE begin_snapshot = 2"));
+        Assert.Equal([[7L]], await SqlAsync("SELECT next_row_id FROM ducklake_table_stats"));
     }
 
     [SkippableFact]

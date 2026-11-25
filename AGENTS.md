@@ -39,6 +39,7 @@ Self-contained C# port of Apache Iceberg. Keep it that way: no references to cod
 | DuckLake (unit; plus the DuckDB `ducklake` oracle when the Python is set, PostgreSQL catalogs when the server is) | `ICEBERG_DUCKDB_PYTHON=<python with the interop duckdb group> ICEBERG_DUCKLAKE_POSTGRES=<npgsql connection string> dotnet test tests/Iceberg.Net.DuckLake.Tests` |
 | DuckLake BDD specification | same variables, `dotnet test tests/Iceberg.Net.DuckLake.Behaviour.Tests` |
 | DuckLake walk-through | `dotnet run --project examples/DuckLake.Quickstart [directory]` |
+| DuckLake benchmarks (wall clock; SQLite, or PostgreSQL with `--postgres`) | `dotnet run -c Release --project tools/DuckLakeBench [--postgres "<npgsql connection string>"]` |
 | Ecosystem (telemetry, Spark/Athena helpers, Spark + DuckDB oracles) | `ICEBERG_DUCKDB_PYTHON=<python with the interop duckdb group> dotnet test tests/Iceberg.Net.Ecosystem.Tests` |
 | BDD specification (Reqnroll) | `ICEBERG_PYTHON=<python with interop deps> dotnet test tests/Iceberg.Net.Behaviour.Tests` |
 | REST protocol (every operation; cross-server contract with `ICEBERG_TEST_TARGET=emulation`) | `dotnet test tests/Iceberg.Net.RestProtocol.Tests` |
