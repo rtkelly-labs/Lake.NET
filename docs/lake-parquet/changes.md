@@ -5,7 +5,7 @@
 
 Lake.Parquet is [aloneguid/parquet-dotnet](https://github.com/aloneguid/parquet-dotnet)'s `master`,
 unchanged, with a stack of commits on top: one per change, each with a record in this directory.
-This page is the rules for that stack; the tool that keeps it is [`eng/lake/Lake.Stack`](https://github.com/rtkelly-labs/parquet-dotnet/tree/master/eng/lake/Lake.Stack)
+This page is the rules for that stack; the tool that keeps it is [`eng/lake/Lake.Stack`](https://github.com/rtkelly-labs/parquet-dotnet/tree/main/eng/lake/Lake.Stack)
 (`lake-stack` below; [`../maintaining.md`](maintaining.md) has how to run it).
 
 The point is to know at any moment exactly what Lake.Parquet adds to upstream, and to drop each
@@ -14,13 +14,13 @@ addition once upstream has it.
 ## The stack
 
 ```text
-upstream/master ── 0001 ── 0002 ── 0003 ── ... ── 0025      = master
+upstream/master ── 0001 ── 0002 ── 0003 ── ... ── 0025      = main
                    │       └ one commit per change, with its record
                    └ packaging, CI and these docs
 ```
 
-- **Upstream's commits are never rewritten.** They are in `master` with upstream's hashes, and
-  `git merge-base master upstream/master` is always the upstream commit Lake.Parquet is built on.
+- **Upstream's commits are never rewritten.** They are in `main` with upstream's hashes, and
+  `git merge-base main upstream/master` is always the upstream commit Lake.Parquet is built on.
 - **Each change is exactly one commit**, `lake(NNNN): title`, which adds or edits its record
   `NNNN-name.md` together with the code. `git show` of that commit is the whole change.
 - **No merge commits above upstream.** The stack is linear, so it can always be rebased.
@@ -68,7 +68,7 @@ editing, retiring and recovering changes. In short:
 - **A new change**: one commit `lake(NNNN): title` with its record, squash-merged through a PR.
 - **A fix to a change**: `fixup! lake(NNNN): title`, squash-merged; the next rebaseline folds it in.
 - **Upstream moves**: nothing happens until the maintainer runs `lake-stack rebaseline`, which rebases,
-  checks and tests the stack locally, stages it on `staging/<name>` for CI, and promotes it to `master`
+  checks and tests the stack locally, stages it on `staging/<name>` for CI, and promotes it to `main`
   with `--push` only once that build is green, tagging the old head `lake/stack/<date>-<sha>` first.
 - **Upstream takes a change**: the next rebaseline drops it, or reports it when only its record is left.
 - **Change branches** `lake/change/NNNN-name` are upstream plus one change and its `depends_on`
