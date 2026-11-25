@@ -327,6 +327,63 @@ public abstract class CrossEngineTests : IAsyncLifetime
     }
 
     [SkippableFact]
+    [Spec("ducklake: Data Types")]
+    [Spec("ducklake: Data Inlining")]
+    [Spec("ducklake: Flushing Inlined Data")]
+    public async Task DuckDB_reads_the_unsigned_timestamp_timetz_and_interval_values_written_here()
+    {
+        Oracle.Require();
+        var catalog = await _lake.CreateAsync(new DuckLakeOptions { DataInliningRowLimit = 10 });
+        await using (var tx = catalog.BeginTransaction())
+        {
+            await tx.CreateTableAsync("main", "t", WideTypes.Columns);
+            await tx.CommitAsync();
+        }
+        static object?[] WithId(object?[] row, long id) => [id, .. row[1..]];
+        var inlined = WideTypes.Rows().ToList();
+        var filed = Enumerable.Range(0, 20).Select(i => WithId(WideTypes.Row(i % 4), 100 + i)).ToList();
+        foreach (var rows in new[] { inlined, filed })
+        {
+            await using var tx = catalog.BeginTransaction();
+            await tx.InsertAsync("main", "t", rows);
+            await tx.CommitAsync();
+        }
+        Assert.Single(_lake.Files());
+        var expected = inlined.Select(r => WideTypes.Expected(r, fromFile: false)).Concat(filed.Select(r => WideTypes.Expected(r, fromFile: true))).ToList();
+        LakeJson.AssertSameRows(WideTypes.Json(expected), await Oracle.RowsAsync(_lake, WideTypes.Select));
+
+        await catalog.FlushInlinedDataAsync();
+        LakeJson.AssertSameRows(WideTypes.Json(expected.Select(r => WideTypes.Expected(r, fromFile: true))), await Oracle.RowsAsync(_lake, WideTypes.Select));
+    }
+
+    [SkippableFact]
+    [Spec("ducklake: Data Types")]
+    [Spec("ducklake: Data Inlining")]
+    public async Task This_library_reads_the_unsigned_timestamp_timetz_and_interval_values_DuckDB_writes()
+    {
+        Oracle.Require();
+        // Ids 10..13, inlined. DuckDB 1.5.5 inlines a struct holding a timetz as "{'t': CAST(... AS TIME WITH TIME ZONE)}",
+        // which it cannot read back itself, so those rows have no struct.
+        var shifted = WideTypes.Values.Select(v => "(1" + System.Text.RegularExpressions.Regex.Replace(v[1..], @"\{'t'.*\}\)$", "NULL)")).ToArray();
+        await Oracle.RunAsync(_lake,
+            WideTypes.Create,
+            "CALL lake.set_option('data_inlining_row_limit', 0)",
+            "INSERT INTO lake.t VALUES " + string.Join(", ", WideTypes.Values),
+            "CALL lake.set_option('data_inlining_row_limit', 10)",
+            "INSERT INTO lake.t VALUES " + string.Join(", ", shifted));
+        Assert.Single(_lake.Files());
+        var catalog = await _lake.OpenAsync();
+        var table = await catalog.LoadTableAsync("main", "t");
+        var ours = await catalog.ReadAsync(table);
+        LakeJson.AssertSameRows(await Oracle.RowsAsync(_lake, WideTypes.Select), WideTypes.Json(ours));
+        // Inlined by DuckDB: exact (offsets and microseconds kept); from its file: the UTC instant and milliseconds.
+        Assert.Equal(new DuckLakeTimeTz(3_723_456_789, 19_800), ours.Single(r => (long)r[0]! == 11)[9]);
+        Assert.Equal(new DuckLakeTimeTz(70_323_456_789, 0), ours.Single(r => (long)r[0]! == 1)[9]);
+        Assert.Equal(new DuckLakeInterval(1, 2, 3_004_005), ours.Single(r => (long)r[0]! == 11)[10]);
+        Assert.Equal(new DuckLakeInterval(1, 2, 3_004_000), ours.Single(r => (long)r[0]! == 1)[10]);
+    }
+
+    [SkippableFact]
     [Spec("ducklake: Flushing Inlined Data")]
     public async Task Each_engine_flushes_what_the_other_inlined()
     {
@@ -359,6 +416,93 @@ public abstract class CrossEngineTests : IAsyncLifetime
         Assert.Single(await catalog.FlushInlinedDataAsync());
         Assert.Empty(await _lake.SqlAsync($"SELECT * FROM {(await _lake.SqlAsync("SELECT table_name FROM ducklake_inlined_data_tables")).Single()[0]}"));
         await AssertSameHistoryAsync(catalog);
+    }
+
+    [SkippableFact]
+    [Spec("ducklake: ducklake_tag")]
+    [Spec("ducklake: ducklake_column_tag")]
+    [Spec("ducklake: ducklake_view")]
+    [Spec("ducklake: ducklake_macro")]
+    [Spec("ducklake: ducklake_sort_info")]
+    public async Task DuckDB_uses_the_comments_views_macros_and_sort_orders_written_here()
+    {
+        Oracle.Require();
+        var catalog = await _lake.CreateAsync();
+        await using (var tx = catalog.BeginTransaction())
+        {
+            await tx.CreateTableAsync("main", "t0", [new("id", DuckLakeType.Int64), new("name", DuckLakeType.Varchar)]);
+            await tx.InsertAsync("main", "t0", [[1L, "a"], [2L, "b"], [3L, "c"]]);
+            await tx.CommitAsync();
+        }
+        await using (var tx = catalog.BeginTransaction())
+        {
+            await tx.RenameTableAsync("main", "t0", "t");
+            await tx.CommitAsync();
+        }
+        await using (var tx = catalog.BeginTransaction())
+        {
+            await tx.SetCommentAsync("main", "t", "the table");
+            await tx.SetColumnCommentAsync("main", "t", "name", "a name");
+            await tx.SetSortOrderAsync("main", "t", [new("id", Descending: true)]);
+            await tx.CreateViewAsync("main", "v", "SELECT id, \"name\" AS n FROM {DUCKLAKE_CATALOG}.t WHERE (id > 1)");
+            await tx.CreateViewAsync("main", "v2", "SELECT id, \"name\" FROM {DUCKLAKE_CATALOG}.t", ["a", "b"]);
+            await tx.CreateMacroAsync("main", "add2", [new("(a + b)", [new("a"), new("b", Default: "1", DefaultType: "int32")])]);
+            // DuckDB resolves {DUCKLAKE_CATALOG} in views only; a macro body names the catalog as attached (as DuckDB stores its own).
+            await tx.CreateMacroAsync("main", "tm", [new("SELECT * FROM lake.t WHERE (id = x)", [new("x")], IsTableMacro: true)]);
+            await tx.CommitAsync();
+        }
+        Assert.Equal(["[\"the table\"]"], await Oracle.RowsAsync(_lake, "SELECT comment FROM duckdb_tables() WHERE database_name = 'lake' AND table_name = 't'"));
+        Assert.Equal(["[\"a name\"]"], await Oracle.RowsAsync(_lake, "SELECT comment FROM duckdb_columns() WHERE database_name = 'lake' AND table_name = 't' AND column_name = 'name'"));
+        Assert.Equal(["[2,\"b\"]", "[3,\"c\"]"], await Oracle.RowsAsync(_lake, "SELECT * FROM lake.v"));
+        Assert.Equal(["[1,\"a\"]"], await Oracle.RowsAsync(_lake, "SELECT a, b FROM lake.v2 WHERE a = 1"));
+        Assert.Equal(["[3]"], await Oracle.RowsAsync(_lake, "SELECT lake.main.add2(2)"));
+        Assert.Equal(["[2,\"b\"]"], await Oracle.RowsAsync(_lake, "SELECT * FROM lake.main.tm(2)"));
+        // DuckDB writes its own inserts in the sort order recorded here.
+        await Oracle.RunAsync(_lake, "CALL lake.set_option('data_inlining_row_limit', 0)", "INSERT INTO lake.t VALUES (10, 'x'), (30, 'z'), (20, 'y')");
+        var table = await catalog.LoadTableAsync("main", "t");
+        var last = (await catalog.PlanScanAsync(table)).Files.MaxBy(f => f.DataFileId)!;
+        Assert.Equal([30L, 20L, 10L], (await Iceberg.Net.Data.ParquetFiles.ReadAsync(catalog.IO, last.Location, table.Schema)).Select(r => (long)r[0]!));
+    }
+
+    [SkippableFact]
+    [Spec("ducklake: ducklake_tag")]
+    [Spec("ducklake: ducklake_view")]
+    [Spec("ducklake: ducklake_macro")]
+    [Spec("ducklake: ducklake_sort_expression")]
+    public async Task This_library_reads_DuckDBs_comments_views_macros_and_sort_orders()
+    {
+        Oracle.Require();
+        await Oracle.RunAsync(_lake,
+            "CREATE TABLE lake.t(id INT, name VARCHAR)",
+            "COMMENT ON TABLE lake.t IS 'the table'",
+            "COMMENT ON COLUMN lake.t.name IS 'a name'",
+            "CREATE VIEW lake.v2(a, b) AS SELECT id, name FROM lake.t",
+            "COMMENT ON VIEW lake.v2 IS 'a view'",
+            "CREATE MACRO lake.add2(a, b := 1) AS a + b",
+            "CREATE MACRO lake.tm(x) AS TABLE SELECT * FROM lake.t WHERE id = x",
+            "ALTER TABLE lake.t SET SORTED BY (id ASC, lower(name) DESC NULLS LAST)",
+            "ALTER TABLE lake.t RENAME TO t2");
+        var catalog = await _lake.OpenAsync();
+        var t = await catalog.LoadTableAsync("main", "t2");
+        Assert.Equal(("the table", "a name"), (t.Comment, t.ColumnComment("name")));
+        Assert.Equal([new DuckLakeSortKey("id"), new DuckLakeSortKey("lower(\"name\")", Descending: true)], t.SortKeys);
+        var v = await catalog.LoadViewAsync("main", "v2");
+        Assert.Equal(["a", "b"], v.ColumnAliases);
+        Assert.Equal("a view", v.Comment);
+        // DuckDB 1.5.5 (1.0) qualifies names with the placeholder; DuckDB 2.0 (1.1) stores them unqualified.
+        Assert.Contains(Oracle.Version == DuckLakeCatalog.FormatVersion10 ? "{DUCKLAKE_CATALOG}" : "FROM t", v.Sql);
+        var add2 = await catalog.LoadMacroAsync("main", "add2");
+        Assert.Equal(["a", "b"], add2.Implementations[0].Parameters.Select(p => p.Name));
+        Assert.Equal("1", add2.Implementations[0].Parameters[1].Default);
+        Assert.True((await catalog.LoadMacroAsync("main", "tm")).IsTableMacro);
+        // And the reverse round trip: DuckDB still uses them after this library's own change to the table.
+        await using (var tx = catalog.BeginTransaction())
+        {
+            await tx.SetCommentAsync("main", "t2", "changed here");
+            await tx.CommitAsync();
+        }
+        Assert.Equal(["[\"changed here\"]"], await Oracle.RowsAsync(_lake, "SELECT comment FROM duckdb_tables() WHERE database_name = 'lake' AND table_name = 't2'"));
+        Assert.Equal(["[3]"], await Oracle.RowsAsync(_lake, "SELECT lake.main.add2(2)"));
     }
 
     [SkippableFact]

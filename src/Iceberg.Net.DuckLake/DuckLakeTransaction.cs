@@ -89,6 +89,7 @@ public sealed partial class DuckLakeTransaction : IAsyncDisposable
         public required List<DuckLakeColumn> Columns;
         public long NextColumnId;
         public IReadOnlyList<DuckLakePartitionKey> PartitionKeys = [];
+        public IReadOnlyList<DuckLakeSortKey> SortKeys = [];
         public bool Created, Dropped, Altered, PartitionChanged, Inserted, Deleted, Compacted;
         public Guid Uuid = Guid.NewGuid();
         public long? BaseTableId => Created ? null : TableId;
@@ -160,6 +161,7 @@ public sealed partial class DuckLakeTransaction : IAsyncDisposable
             Columns = [.. loaded.Columns],
             NextColumnId = (maxColumn ?? 0) + 1,
             PartitionKeys = loaded.PartitionKeys,
+            SortKeys = loaded.SortKeys,
             Uuid = loaded.TableUuid,
         };
         return _tables[(sc.Name, loaded.Name)] = _tables[(sc.Name, table)] = pending;
@@ -217,8 +219,14 @@ public sealed partial class DuckLakeTransaction : IAsyncDisposable
             .Where(t => !(_tables.TryGetValue((schema.Name, t.Name), out var pt) && pt.Dropped)).ToList();
         var children = (await _catalog.SchemasAsync(db, _base!.Value, ct)).Where(s => s.ParentId == schema.SchemaId)
             .Where(s => !(_schemas.TryGetValue(s.Name, out var ps) && ps.Dropped)).ToList();
-        if (tables.Count > 0 || children.Count > 0 || _tables.Values.Any(t => t.Schema == schema && !t.Dropped)
-            || _schemas.Values.Any(s => s.Parent == schema && !s.Dropped))
+        var views = (await DuckLakeCatalog.ViewsAsync(db, _base!.Value, ct)).Count(v => v.SchemaId == schema.SchemaId
+                                                                                       && !(_views.TryGetValue((schema.Name, v.Name), out var pv) && pv.Dropped));
+        var schemaId = schema.SchemaId;
+        var macros = (await db.Macros.LiveAt(_base!.Value).Where(m => m.SchemaId == schemaId).Select(m => m.MacroName ?? "").ToListAsync(ct))
+            .Count(n => !(_macros.TryGetValue((schema.Name, n), out var pm) && pm.Dropped));
+        if (tables.Count > 0 || children.Count > 0 || views > 0 || macros > 0 || _tables.Values.Any(t => t.Schema == schema && !t.Dropped)
+            || _schemas.Values.Any(s => s.Parent == schema && !s.Dropped) || _views.Values.Any(v => v.Schema == schema && !v.Dropped)
+            || _macros.Values.Any(m => m.Schema == schema && !m.Dropped))
             throw new InvalidOperationException($"Schema {name} is not empty");
         schema.Dropped = true;
         _ops.Add(new DropSchemaOp(schema));
@@ -236,6 +244,10 @@ public sealed partial class DuckLakeTransaction : IAsyncDisposable
                                                                                               && !(_tables.TryGetValue((sc.Name, t.Name), out var dropped) && dropped.Dropped))
             || _tables.TryGetValue((sc.Name, name), out var existing) && !existing.Dropped)
             throw new InvalidOperationException($"Table {schema}.{name} already exists");
+        if (_views.TryGetValue((sc.Name, name), out var pendingView) && !pendingView.Dropped
+            || !sc.Created && (await DuckLakeCatalog.ViewsAsync(db, _base!.Value, ct)).Any(v => v.SchemaId == sc.SchemaId && string.Equals(v.Name, name, StringComparison.OrdinalIgnoreCase)
+                                                                                                && !(_views.TryGetValue((sc.Name, v.Name), out var pv) && (pv.Dropped || pv.Name != v.Name))))
+            throw new InvalidOperationException($"{schema}.{name} already exists (a view)");
         long next = 1;
         var assigned = columns.Select(d => DuckLakeColumn.Assign(d.Name, d.Type, d.Nullable, ref next)).ToList();
         var table = new PendingTable
@@ -426,6 +438,7 @@ public sealed partial class DuckLakeTransaction : IAsyncDisposable
         }
         if (normalized.Count == 0) return;
         if (keepsRowIds && normalized.Any(v => v.Length == columns.Count)) throw new ArgumentException("Either every row keeps a row ID or none does");
+        normalized = Sorted(t, normalized);
         // Data inlining: a small insert goes into the catalog database (not into partitioned tables: their rows belong in partition files).
         if (t.PartitionKeys.Count == 0 && normalized.Count <= await InliningLimitAsync(t, ct) && DuckLakeInlinedData.CanInline(_catalog.Store.Dialect, columns))
         {
@@ -443,6 +456,9 @@ public sealed partial class DuckLakeTransaction : IAsyncDisposable
                 NestedField.Optional(DuckLakeCatalog.RowIdFieldId, "_ducklake_internal_row_id", PrimitiveType.Long)));
             stored.Add((null!, columns.Count)); // the row ID, after the values
         }
+        var storedColumns = stored.Where(x => x.c is not null).Select(x => x.c).ToList();
+        var toFile = DuckLakeValues.FileRowConverter(storedColumns, toFile: true);
+        var parquet = _catalog.Options.Parquet with { Metrics = false, Annotations = DuckLakeTypes.Annotations(storedColumns) };
         var groups = t.PartitionKeys.Count == 0
             ? [(Values: (IReadOnlyList<string?>)[], Rows: normalized)]
             : DuckLakePartitioning.Split(columns, t.PartitionKeys, normalized);
@@ -453,8 +469,9 @@ public sealed partial class DuckLakeTransaction : IAsyncDisposable
             var location = t.Location + relative;
             _written.Add(location);
             var fileRows = allStored ? part : part.Select(r => stored.Select(x => r[x.i]).ToArray()).ToList();
+            if (toFile is not null) fileRows = fileRows.Select(toFile).ToList();
             // DuckLake keeps its own statistics (StatsCollector), so the Iceberg metrics pass is skipped.
-            var written = await ParquetFiles.WriteFileAsync(_catalog.IO, location, fileSchema, 0, [], fileRows, _catalog.Options.Parquet with { Metrics = false }, ct);
+            var written = await ParquetFiles.WriteFileAsync(_catalog.IO, location, fileSchema, 0, [], fileRows, parquet, ct);
             var stats = new StatsCollector(columns);
             foreach (var row in part) stats.Add(row);
             _ops.Add(new InsertOp(t, new WrittenFile(relative, part.Count, written.File.FileSizeInBytes, written.FooterSize, written.RowGroups,
@@ -694,6 +711,7 @@ public sealed partial class DuckLakeTransaction : IAsyncDisposable
                 case MergeOp m: set.MergedTables.Add(m.Table.TableId!.Value); break;
                 case RewriteOp r: set.RewrittenTables.Add(r.Table.TableId!.Value); break;
                 case FlushOp f: set.FlushedTables.Add(f.Table.TableId!.Value); break;
+                case var o when IsObjectOp(o): ObjectChanges(set, o); break;
             }
         }
         return set;
@@ -724,7 +742,8 @@ public sealed partial class DuckLakeTransaction : IAsyncDisposable
         _attemptedSnapshot = snapshotId;
         var nextCatalogId = latest.NextCatalogId;
         var nextFileId = latest.NextFileId;
-        var schemaChanged = _ops.Any(o => o is CreateSchemaOp or DropSchemaOp or CreateTableOp or DropTableOp or AddColumnOp or EndColumnsOp or ReplaceColumnOp or SetPartitionOp);
+        var schemaChanged = _ops.Any(o => o is CreateSchemaOp or DropSchemaOp or CreateTableOp or DropTableOp or AddColumnOp or EndColumnsOp or ReplaceColumnOp or SetPartitionOp
+                                          || IsObjectOp(o));
         var schemaVersion = latest.SchemaVersion + (schemaChanged ? 1 : 0);
         var v11 = _catalog.Is11;
         var rows = new CatalogRows();
@@ -736,7 +755,7 @@ public sealed partial class DuckLakeTransaction : IAsyncDisposable
         var snapshotRow = new SnapshotEntity
         {
             SnapshotId = snapshotId, SnapshotTime = time, SchemaVersion = schemaVersion,
-            NextCatalogId = latest.NextCatalogId + _ops.Count(o => o is CreateSchemaOp or CreateTableOp or SetPartitionOp { Keys.Count: > 0 }),
+            NextCatalogId = latest.NextCatalogId + _ops.Count(o => o is CreateSchemaOp or CreateTableOp or SetPartitionOp { Keys.Count: > 0 }) + ObjectCatalogIds(),
             NextFileId = latest.NextFileId + _ops.Sum(o => o switch
             {
                 InsertOp or MergeOp => 1,
@@ -814,6 +833,7 @@ public sealed partial class DuckLakeTransaction : IAsyncDisposable
                     await db.DeleteFiles.Current().Where(x => x.TableId == id).ExecuteUpdateAsync(u => u.SetProperty(x => x.EndSnapshot, snapshotId), ct);
                     await Raw($"UPDATE ducklake_column_tag SET end_snapshot = @p0 WHERE table_id = @p1 AND end_snapshot IS NULL", snapshotId, id);
                     await Raw($"UPDATE ducklake_tag SET end_snapshot = @p0 WHERE object_id = @p1 AND end_snapshot IS NULL", snapshotId, id);
+                    await db.SortInfos.Current().Where(x => x.TableId == id).ExecuteUpdateAsync(u => u.SetProperty(x => x.EndSnapshot, snapshotId), ct);
                     break;
                 }
                 case AddColumnOp a:
@@ -825,6 +845,9 @@ public sealed partial class DuckLakeTransaction : IAsyncDisposable
                     var tableId = e.Table.TableId!.Value;
                     var ids = e.ColumnIds.ToList();
                     await db.Columns.Current().Where(x => x.TableId == tableId && ids.Contains(x.ColumnId))
+                        .ExecuteUpdateAsync(u => u.SetProperty(x => x.EndSnapshot, snapshotId), ct);
+                    // Spec ducklake_column_tag: "Dropping a column ends its active tag versions, including tags on child fields."
+                    await db.ColumnTags.Current().Where(x => x.TableId == tableId && ids.Contains(x.ColumnId))
                         .ExecuteUpdateAsync(u => u.SetProperty(x => x.EndSnapshot, snapshotId), ct);
                     versionedTables.Add(e.Table);
                     break;
@@ -858,6 +881,9 @@ public sealed partial class DuckLakeTransaction : IAsyncDisposable
                     versionedTables.Add(p.Table);
                     break;
                 }
+                case var o when IsObjectOp(o):
+                    nextCatalogId = await ApplyObjectAsync(db, o, snapshotId, latest.SnapshotId, nextCatalogId, rows, versionedTables, ct);
+                    break;
             }
         }
 
@@ -1309,6 +1335,15 @@ public sealed partial class DuckLakeTransaction : IAsyncDisposable
         public readonly List<SnapshotChangesEntity> SnapshotChanges = [];
         public readonly List<FileScheduledForDeletionEntity> FilesScheduled = [];
         public readonly List<InlinedDataTableEntity> InlinedDataTables = [];
+        public readonly List<TagEntity> Tags = [];
+        public readonly List<ColumnTagEntity> ColumnTags = [];
+        public readonly List<ViewColumnTagEntity> ViewColumnTags = [];
+        public readonly List<ViewEntity> Views = [];
+        public readonly List<MacroEntity> Macros = [];
+        public readonly List<MacroImplEntity> MacroImpls = [];
+        public readonly List<MacroParameterEntity> MacroParameters = [];
+        public readonly List<SortInfoEntity> SortInfos = [];
+        public readonly List<SortExpressionEntity> SortExpressions = [];
 
         /// <summary>A file no snapshot reads any more, recorded as DuckDB does: relative to <c>data_path</c> when under it.</summary>
         public void ScheduleDeletion(DuckLakeCatalog catalog, long fileId, string location) =>
@@ -1331,6 +1366,15 @@ public sealed partial class DuckLakeTransaction : IAsyncDisposable
             await BulkInsert.InsertAsync(db, SnapshotChanges, ct);
             await BulkInsert.InsertAsync(db, FilesScheduled, ct);
             await BulkInsert.InsertAsync(db, InlinedDataTables, ct);
+            await BulkInsert.InsertAsync(db, Tags, ct);
+            await BulkInsert.InsertAsync(db, ColumnTags, ct);
+            await BulkInsert.InsertAsync(db, ViewColumnTags, ct);
+            await BulkInsert.InsertAsync(db, Views, ct);
+            await BulkInsert.InsertAsync(db, Macros, ct);
+            await BulkInsert.InsertAsync(db, MacroImpls, ct);
+            await BulkInsert.InsertAsync(db, MacroParameters, ct);
+            await BulkInsert.InsertAsync(db, SortInfos, ct);
+            await BulkInsert.InsertAsync(db, SortExpressions, ct);
         }
     }
 

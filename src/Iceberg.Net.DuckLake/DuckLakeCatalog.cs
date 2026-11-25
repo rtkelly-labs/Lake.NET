@@ -68,6 +68,17 @@ public sealed class DuckLakeTable
     public required string Location { get; init; }
     public long? PartitionId { get; init; }
     public IReadOnlyList<DuckLakePartitionKey> PartitionKeys { get; init; } = [];
+    /// <summary>The table's tags (<c>ducklake_tag</c>); SQL comments are the <c>comment</c> key.</summary>
+    public IReadOnlyDictionary<string, string?> Tags { get; init; } = new Dictionary<string, string?>();
+    /// <summary>Tags of the table's columns, by column ID (<c>ducklake_column_tag</c>).</summary>
+    public IReadOnlyDictionary<long, IReadOnlyDictionary<string, string?>> ColumnTags { get; init; } = new Dictionary<long, IReadOnlyDictionary<string, string?>>();
+    /// <summary>The sort order new data is written in (<c>ducklake_sort_info</c>), empty when none is set.</summary>
+    public IReadOnlyList<DuckLakeSortKey> SortKeys { get; init; } = [];
+
+    public string? Comment => Tags.GetValueOrDefault("comment");
+
+    public string? ColumnComment(string column) =>
+        ColumnTags.TryGetValue(Column(column).Id, out var tags) ? tags.GetValueOrDefault("comment") : null;
 
     public DuckLakeColumn Column(string name) =>
         Columns.FirstOrDefault(c => c.Name == name) ?? throw new KeyNotFoundException($"Table {SchemaName}.{Name} has no column '{name}'");
@@ -343,6 +354,9 @@ public sealed partial class DuckLakeCatalog
             Location = Resolve(sc.Location, t.Path, t.Relative),
             PartitionId = partitions.Count == 1 ? partitions[0] : null,
             PartitionKeys = keys,
+            Tags = await TagsAsync(db, t.TableId, snapshot, ct),
+            ColumnTags = await ColumnTagsAsync(db, t.TableId, snapshot, ct),
+            SortKeys = await SortKeysAsync(db, t.TableId, snapshot, ct),
         };
     }
 
@@ -405,6 +419,13 @@ public sealed partial class DuckLakeCatalog
             .OrderBy(f => f.FileOrder).ThenBy(f => f.DataFileId).ToListAsync(ct));
         var deletes = await DeleteFilesAsync(db, table.TableId, table.SnapshotId, ct);
         var bound = filter is null or AlwaysTrue ? null : Binder.Bind(table.Schema, filter);
+        if (bound is not null)
+        {
+            // timetz and interval values have no order this reader shares with their Parquet form: filter them after reading.
+            var ids = FieldIds(bound);
+            if (table.Columns.SelectMany(c => c.SelfAndDescendants()).FirstOrDefault(c => ids.Contains((int)c.Id) && DuckLakeTypes.HasFileForm(c.Type)) is { } unfiltered)
+                throw new NotSupportedException($"Column {unfiltered.Name} ({unfiltered.Type}) cannot be filtered on; filter the rows read instead");
+        }
         Dictionary<long, Dictionary<long, FileColumnStatsEntity>>? stats = null;
         if (bound is not null)
         {
@@ -643,6 +664,7 @@ public sealed partial class DuckLakeCatalog
         var residual = bound is null ? null : RowEvaluator.Compile(bound);
         var width = table.Columns.Count;
         var projection = FileProjection(table);
+        var fromFile = DuckLakeValues.FileRowConverter(table.Columns, toFile: false);
         // Up to MaxParallelFileReads files are read ahead, each into a queue of two batches (row groups): decoding
         // overlaps, memory stays bounded, and rows come out in file order.
         var parallelism = Math.Max(1, Options.MaxParallelFileReads);
@@ -673,7 +695,7 @@ public sealed partial class DuckLakeCatalog
                         var rowId = full[width] is long stored ? stored
                             : file.RowIdStart is { } start ? start + pos
                             : throw new InvalidDataException($"Data file {file.DataFileId} has no row_id_start and no stored row IDs");
-                        yield return new ScannedRow(rowId, row, file.DataFileId, pos, null);
+                        yield return new ScannedRow(rowId, fromFile is null ? row : fromFile(row), file.DataFileId, pos, null);
                     }
                 }
                 await read.Producer; // rethrows a read failure (the queue only ends early)

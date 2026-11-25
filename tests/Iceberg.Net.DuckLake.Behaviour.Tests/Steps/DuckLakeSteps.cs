@@ -251,8 +251,55 @@ public sealed class DuckLakeSteps(DuckLakeWorld world)
     public async Task DuckDbAnswers(string sql, string expected)
     {
         world.Oracle.Require();
-        Assert.Equal([$"[{expected}]"], await world.Oracle.RowsAsync(world.L, sql));
+        // The expected value is JSON (strings quoted), compared in the same canonical form as DuckDB's rows.
+        Assert.Equal([LakeJson.Canonical(System.Text.Json.Nodes.JsonNode.Parse($"[{expected}]"))!.ToJsonString()], await world.Oracle.RowsAsync(world.L, sql));
     }
+
+    // ---- catalog objects -------------------------------------------------------------------------------------------
+
+    [When(@"I comment on ""(.*)"" with ""(.*)""")]
+    public async Task CommentOnTable(string name, string comment)
+    {
+        var (schema, table) = Split(name);
+        await Commit(tx => tx.SetCommentAsync(schema, table, comment));
+    }
+
+    [When(@"I comment on the column ""(.*)"" of ""(.*)"" with ""(.*)""")]
+    public async Task CommentOnColumn(string column, string name, string comment)
+    {
+        var (schema, table) = Split(name);
+        await Commit(tx => tx.SetColumnCommentAsync(schema, table, column, comment));
+    }
+
+    [When(@"I create the view ""(.*)"" as ""(.*)""")]
+    public async Task CreateView(string name, string sql)
+    {
+        var (schema, view) = Split(name);
+        await Commit(tx => tx.CreateViewAsync(schema, view, sql));
+    }
+
+    [When(@"I rename the table ""(.*)"" to ""(.*)""")]
+    public async Task RenameTable(string name, string newName)
+    {
+        var (schema, table) = Split(name);
+        await Commit(tx => tx.RenameTableAsync(schema, table, newName));
+    }
+
+    [When(@"I sort ""(.*)"" by ""(.*)""( descending)?")]
+    public async Task SortBy(string name, string column, string descending)
+    {
+        var (schema, table) = Split(name);
+        await Commit(tx => tx.SetSortOrderAsync(schema, table, [new DuckLakeSortKey(column, Descending: !string.IsNullOrEmpty(descending))]));
+    }
+
+    [Then(@"the comment of ""(.*)"" is ""(.*)""")]
+    public async Task CommentIs(string name, string comment) => Assert.Equal(comment, (await LoadAsync(name)).Comment);
+
+    [Then(@"the comment of the column ""(.*)"" of ""(.*)"" is ""(.*)""")]
+    public async Task ColumnCommentIs(string column, string name, string comment) => Assert.Equal(comment, (await LoadAsync(name)).ColumnComment(column));
+
+    [Then(@"the views of ""(.*)"" are ""(.*)""")]
+    public async Task ViewsAre(string schema, string names) => Assert.Equal(names.Split(", "), await world.C.ListViewsAsync(schema));
 
     // ---- maintenance -----------------------------------------------------------------------------------------------
 

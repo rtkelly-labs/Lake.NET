@@ -55,6 +55,9 @@ public static class LakeJson
             "date" => IcebergTime.DateFromDays((int)v).ToString("yyyy-MM-dd", CultureInfo.InvariantCulture),
             "time" => TimeOnly.FromTimeSpan(TimeSpan.FromTicks((long)v * 10)).ToString(((long)v % 1_000_000) == 0 ? "HH:mm:ss" : "HH:mm:ss.ffffff", CultureInfo.InvariantCulture),
             "blob" => Convert.ToHexString((byte[])v).ToLowerInvariant(),
+            // DuckDB's text: tests read these columns cast to VARCHAR (Python has no lossless form for either).
+            "timetz" or "interval" => v.ToString(),
+            "uint64" => JsonNode.Parse(((IcebergDecimal)v).Unscaled.ToString(CultureInfo.InvariantCulture)),
             "uuid" => ((Guid)v).ToString("D"),
             "float32" when float.IsNaN((float)v) => "NaN",
             "float64" when double.IsNaN((double)v) => "NaN",

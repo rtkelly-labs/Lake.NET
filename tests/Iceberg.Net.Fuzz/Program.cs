@@ -49,7 +49,9 @@ internal static class Targets
         ("a", DuckLakeType.Int32), ("b", DuckLakeType.List(DuckLakeType.Varchar)),
         ("c", DuckLakeType.Map(DuckLakeType.Varchar, DuckLakeType.List(DuckLakeType.Float64))),
         ("d", DuckLakeType.Struct(("x", DuckLakeType.Date), ("t", DuckLakeType.TimestampTz), ("n", DuckLakeType.Decimal(9, 2)),
-            ("u", DuckLakeType.Uuid), ("z", DuckLakeType.Blob)))));
+            ("u", DuckLakeType.Uuid), ("z", DuckLakeType.Blob))),
+        ("w", DuckLakeType.Struct(("i", DuckLakeType.List(DuckLakeType.Interval)), ("tz", DuckLakeType.TimeTz), ("u", DuckLakeType.UInt64),
+            ("ms", DuckLakeType.TimestampMs)))));
 
     public static readonly Dictionary<string, Action<byte[]>> All = new()
     {

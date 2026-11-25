@@ -210,6 +210,7 @@ dotnet run --project examples/DuckLake.Quickstart [directory] [postgres connecti
 | `DuckLakeNestedText.cs` | DuckDB's text form of nested inlined values |
 | `DuckLakePartitioning.cs` | Partitioned writes (`identity`, `year`/`month`/`day`/`hour`, 1.1's `epoch_*`, `bucket(N)`) |
 | `DuckLakeValidator.cs` | Whole-lake consistency check: snapshot and ID counters, versioned ranges, delete files, row IDs, files in storage |
+| `DuckLakeObjects.cs`, `DuckLakeTransaction.Objects.cs` | Tags and comments, table renames, views, macros, sort orders: reading and writing |
 | `DuckLakeTransaction.Inlining.cs` | Data inlining limits and flushing inlined data |
 | `DuckLakeMaintenance.cs`, `DuckLakeTransaction.Maintenance.cs` | Expiry, cleanup and orphan removal; merging and rewriting files (staged and committed like other operations) |
 | `DuckLakeTelemetry.cs` | Spans and metrics (`Iceberg.Net.DuckLake`), with the catalog commands each operation ran |
@@ -222,8 +223,9 @@ dotnet run --project examples/DuckLake.Quickstart [directory] [postgres connecti
 | Reads | Snapshot-scoped catalog queries (spec "Queries"), relative/absolute path chains, nested schemas (1.1), delete files, inlined rows (primitive and nested), inlined deletions, DuckDB's partial (merged/flushed) data and delete files with per-row snapshots, row IDs, time travel by snapshot or timestamp |
 | Pruning | File statistics through the Iceberg metrics evaluator; Parquet row groups through footer statistics; exact residual filter |
 | Writes | CREATE/DROP SCHEMA (nested in 1.1), CREATE/DROP TABLE, INSERT (file, file and table statistics, row IDs), DELETE (merge-on-read; a replacement delete file per data file, emptied files removed), UPDATE (delete + insert in one snapshot; the new versions keep their row IDs in `_ducklake_internal_row_id`, as the spec allows and DuckDB does), ADD/DROP/RENAME COLUMN, type widening (and `null` promotion), partitioned inserts, author/message/extra info |
-| Types | `boolean`, `int8`–`int64`, `float32/64`, `decimal(p,s)`, `date`, `time`, `timestamp`, `timestamptz`, `timestamp_ns`, `varchar`, `json`, `blob`, `uuid`, `list`, `struct`, `map`, and 1.1's `null` |
+| Types | `boolean`, `int8`–`int64`, `uint8`–`uint64`, `float32/64`, `decimal(p,s)`, `date`, `time`, `timetz`, `timestamp`, `timestamp_s`, `timestamp_ms`, `timestamptz`, `timestamp_ns`, `interval`, `varchar`, `json`, `blob`, `uuid`, `list`, `struct`, `map`, and 1.1's `null` (see [Types](#types)) |
 | Concurrency | Optimistic commits: on a lost race for the snapshot ID, the `changes_made` of every snapshot since the base are checked against the spec's logical conflicts, then the metadata is retried without rewriting files; delete-vs-delete is decided per data file. Tested with concurrent writers on both databases, and with DuckDB writing in between |
+| Catalog objects | Tags and comments (tables, columns and nested fields, views; view columns in 1.1), table renames, views, scalar and table macros, sort orders (written files follow the leading column keys); DuckDB uses each, and this library reads DuckDB's (see [Catalog objects](#catalog-objects)) |
 | Maintenance | Merging adjacent small files into partial files, rewriting files with many deleted rows, expiring snapshots, deleting scheduled and orphaned files; DuckDB reads the results and cleans up after them, and the reverse (see [Maintenance](#maintenance)) |
 | Validation | `DuckLakeValidator` checks a whole lake (any writer's) and reports problems; `Deep` also reads every live file |
 
@@ -260,14 +262,18 @@ below was observed with DuckDB 1.5.5 (`ducklake` extension `d8a1881e`) and is wh
 | Inlined deletions vs delete files | Not specified | A row deleted from a file while its deletions are inlined is recorded in `ducklake_inlined_delete_{table}`, not in the file's delete file; the two are combined on read | A replacement delete file holds the previous delete file's positions plus the new ones, never the inlined deletions (merging them made DuckDB count the rows twice) |
 | Expiry and `ducklake_snapshot_changes` | "Snapshot expiration keeps rows in `ducklake_snapshot_changes`" (1.1) | 1.5.5 deletes them with the snapshots | Kept, as the spec says: a commit whose base snapshot was expired still sees every change since it |
 | A `DELETE` that matches no rows | "still records a delete attempt for conflict checking" | Nothing is written for it (no snapshot on its own; only the insert alongside it) | The same: it counts in this transaction's conflict check only |
+| Renames | `created_table`/`created_view` with the new name are not described for renames | Records a rename as `created_table`/`created_view` with the new name | The same; for conflicts a rename counts as altering the table or view |
+| `{DUCKLAKE_CATALOG}` | Resolved when loading a view | DuckDB 1.5.5 qualifies view SQL with it, DuckDB 2.0 stores names unqualified; resolved in views; a macro body holding it fails to load; DuckDB stores macro bodies with the catalog name they were attached under | Stored as given; `DuckLakeView.SqlFor(catalog)` resolves it |
 | `changes_made` kinds | 11 kinds | Also `inlined_insert`, `inlined_delete`, `inline_flush` | Treated as insert, delete and compaction for conflict checks; unknown kinds conflict only with tables this transaction touches |
+| `timetz` and `interval` in Parquet | "Data Types" lists them; their Parquet form is not described | `timetz` as a UTC-adjusted TIME (the offset is lost, the time wraps into one day); `interval` as Parquet INTERVAL (milliseconds; negative intervals refused); no statistics for either | The same, so a file round trip loses what DuckDB's does; inlined rows keep offsets and microseconds |
+| Inlined structs holding `timetz` | Not specified | Stored as `{'t': CAST('…' AS TIME WITH TIME ZONE)}`, which DuckDB 1.5.5 cannot read back | Written as quoted text, which both read |
 | Statistics encodings | `boolean` as `0`/`1`, `blob` as hex | Inlined rows' table statistics hold `true`, `nan`, `\x00\xFF` | Write the spec's encodings (no bounds for blobs); parse all of these, and treat anything unparseable as "no bound" |
 
 ## What is not implemented
 
-Views, macros, tags and comments, sort orders, encryption, name-mapped files (`ducklake_add_data_files` without
-field IDs), `variant` and `geometry`, unsigned/128-bit integers, `interval`, `timetz`, second/millisecond timestamps,
-the experimental Puffin deletion vectors, inlining into partitioned tables (their small inserts go to files), and
+Encryption, name-mapped files (`ducklake_add_data_files` without
+field IDs), `variant` and `geometry`, `int128`/`uint128` (DuckDB writes them to Parquet as DOUBLE and cannot read
+them back), `time_ns` (DuckDB cannot write it to Parquet), the experimental Puffin deletion vectors, inlining into partitioned tables (their small inserts go to files), and
 catalog migration (1.0 → 1.1 is DuckDB's). Each fails with `NotSupportedException` when met in a catalog
 or file rather than reading wrong values. The same list is in `tools/spec_trace.py` (`NOT_IMPLEMENTED`).
 
@@ -278,7 +284,7 @@ cannot be altered in it (define its columns at creation).
 
 | Suite | Needs | Command |
 |---|---|---|
-| `Iceberg.Net.DuckLake.Tests`: `EncodingTests`, `ConflictRuleTests`, `CatalogTests`, `FormatVersionTests`, `ValidatorTests`, `ModelBasedTests` | nothing (PostgreSQL variants skip without a server) | `dotnet test tests/Iceberg.Net.DuckLake.Tests --filter "FullyQualifiedName!~CrossEngine"` |
+| `Iceberg.Net.DuckLake.Tests`: `EncodingTests`, `TypeTests`, `TemporalPropertyTests`, `ConflictRuleTests`, `CatalogTests`, `FormatVersionTests`, `ValidatorTests`, `ModelBasedTests`, and the inlining, maintenance, catalog object and performance tests | nothing (PostgreSQL variants skip without a server) | `dotnet test tests/Iceberg.Net.DuckLake.Tests --filter "FullyQualifiedName!~CrossEngine"` |
 | `CrossEngineTests` | a Python with the interop `duckdb` group (1.0); DuckDB 2.0 (1.1) | `ICEBERG_DUCKDB_PYTHON=<python> dotnet test tests/Iceberg.Net.DuckLake.Tests` |
 | `Iceberg.Net.DuckLake.Behaviour.Tests` (BDD) | as above for the DuckDB scenarios (`CrossEngine.feature` and the 1.1 ones in `FormatVersions.feature`) | `ICEBERG_DUCKDB_PYTHON=<python> dotnet test tests/Iceberg.Net.DuckLake.Behaviour.Tests` |
 
@@ -294,8 +300,8 @@ dropped afterwards, and validates the lake when the test ends. Environment:
 | `ICEBERG_DUCKLAKE11_PYTHON` / `ICEBERG_DUCKLAKE11_REQUIRED=1` | The 1.1 oracle: a Python with `duckdb==2.0.0` (downloads the extension) |
 | `ICEBERG_PBT_RUNS` / `ICEBERG_PBT_SEED` | Model-based test: number of cases, and a replay seed printed by a failure |
 
-In CI (both databases, both oracles): all 256 tests and all 76 BDD scenarios pass, none skipped. Locally without
-the 1.1 oracle: 234 and 70 pass, the 22 and 6 DuckDB 2.0 cases skip. The projects are in the `cross-engine` CI suite, which starts the emulation stack's
+In CI (both databases, both oracles): all 515 tests and all 109 BDD scenarios pass, none skipped. Locally without
+the 1.1 oracle: 477 and 93 pass, the 38 and 16 DuckDB 2.0 cases skip. The projects are in the `cross-engine` CI suite, which starts the emulation stack's
 PostgreSQL, installs both oracles and requires all three. The oracle is `interop/ducklake_oracle.py`: it attaches the
 test's catalog (SQLite or PostgreSQL) in DuckDB and runs SQL against it.
 
@@ -303,6 +309,51 @@ Shared pieces changed for this: `SpecAttribute` accepts the `ducklake:` prefix; 
 checks the DuckLake spec (`snapshot --ducklake`, `drift --ducklake`, a DuckLake line in the matrix);
 `tests/Iceberg.Net.Fuzz` and `tools/fuzz.sh` gained two targets; the interop `duckdb` dependency group gained the
 extension wheels (including `postgres_scanner`) and `pytz` (DuckDB's client needs it for `timestamptz` values); the emulation stack gained a PostgreSQL.
+
+## Types
+
+Every type is held in rows as the physical value of its Iceberg column type, so the Iceberg Parquet reader and writer
+serve DuckLake unchanged; Parquet annotations make the files match DuckDB's byte for byte in layout.
+
+| DuckLake type | Value in rows | Parquet column (as DuckDB writes it) | Statistics text |
+|---|---|---|---|
+| `int8`, `int16` | `int` | INT32, INT(8/16, signed) | decimal |
+| `uint8`, `uint16` | `int` | INT32, INT(8/16, unsigned) | decimal |
+| `uint32` | `long` | INT32, INT(32, unsigned) | decimal |
+| `uint64` | `IcebergDecimal` with scale 0 (0 to 2⁶⁴−1) | INT64, INT(64, unsigned) | decimal |
+| `timestamp_s`, `timestamp_ms` | `long` microseconds, truncated to the unit | INT64 TIMESTAMP(MICROS) / TIMESTAMP(MILLIS) | `2024-01-02 03:04:05[.678]` |
+| `timetz` | `DuckLakeTimeTz` (microseconds of the day, offset in seconds) | INT64 TIME(MICROS, UTC-adjusted): the instant only | none |
+| `interval` | `DuckLakeInterval` (months, days, microseconds) | FIXED_LEN_BYTE_ARRAY(12) INTERVAL: months, days, milliseconds | none |
+
+Inserts accept the CLR forms too (`byte`…`ulong`, `DateTime`, `DateTimeOffset` for `timetz`, `TimeSpan` for `interval`,
+and DuckDB's text for both), range-checked. A file keeps a `timetz` at offset `+00` and an interval's milliseconds, as
+DuckDB's files do; inlined rows keep both exactly (DuckDB's text on SQLite, native `TIME WITH TIME ZONE` and `INTERVAL`
+on PostgreSQL). Negative intervals can be inlined but not written to a file, so DuckDB and this library both refuse to
+flush them. `timetz` and `interval` have no order shared with their Parquet form, so they cannot be filtered on or
+partitioned by; unsigned and second/millisecond timestamp columns can be filtered on and partitioned by identity (and
+by calendar transforms for the timestamps), not bucketed. The reader decodes unsigned and millisecond columns from the
+file's own annotations, so Iceberg tables written by other engines with them read correctly too.
+
+## Catalog objects
+
+Metadata besides tables, written as DuckDB 1.5.5 writes it (probed with the oracle). Each change bumps the snapshot's
+`schema_version`; renames also add a `ducklake_schema_versions` row, comments and sort orders do not.
+
+| Call | Catalog rows | Change recorded |
+|---|---|---|
+| `SetTagAsync`, `SetCommentAsync` (key `comment`); `SetColumnTagAsync`/`SetColumnCommentAsync` (nested fields as `a.b`) | `ducklake_tag` / `ducklake_column_tag`: a new version, the old one ended; null removes | `altered_table:{id}` |
+| `SetViewTagAsync`/`SetViewCommentAsync`; `SetViewColumnTagAsync` (1.1) | `ducklake_tag` with the view's ID; `ducklake_view_column_tag` | `altered_view:{id}` |
+| `RenameTableAsync` / `RenameViewAsync` | A new version of the row, same ID (and, for a table, files and directory) | `created_table` / `created_view` with the new name |
+| `CreateViewAsync(sql, columnAliases, dialect)`, `DropViewAsync` | `ducklake_view` (ID from `next_catalog_id`; aliases as `"a","b"`); dropping ends its tags | `created_view`, `dropped_view` |
+| `CreateMacroAsync` (one or more implementations, parameters with types and defaults), `DropMacroAsync` | `ducklake_macro`, `ducklake_macro_impl`, `ducklake_macro_parameters` | `created_scalar_macro`/`created_table_macro`, `dropped_*_macro` |
+| `SetSortOrderAsync(keys)` (empty removes) | `ducklake_sort_info`, `ducklake_sort_expression` (`ASC`/`DESC`, `NULLS_FIRST`/`NULLS_LAST`) | `altered_table:{id}` |
+
+`LoadTableAsync` returns tags, column tags and sort keys; `ListViewsAsync`/`LoadViewAsync` and `ListMacrosAsync`/
+`LoadMacroAsync` read views and macros, at any snapshot. Views and macros are stored and returned, not executed: this
+library has no SQL engine. Tables and views share a schema's names, and a schema holding views or macros is not empty
+for `DropSchemaAsync`. Dropping a column ends its tags (its fields' too, as the spec says); dropping a table ends its
+tags and sort order. Conflicts follow the spec: two creates of one view or macro name, a create in a schema dropped
+meanwhile, two drops of one macro, an alteration of a view altered or dropped meanwhile, two renames of one table.
 
 ## Data inlining
 

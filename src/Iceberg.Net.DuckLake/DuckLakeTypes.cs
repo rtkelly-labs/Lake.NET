@@ -1,4 +1,5 @@
 using Iceberg.Net.Types;
+using Iceberg.Net.Data;
 
 namespace Iceberg.Net.DuckLake;
 
@@ -21,6 +22,14 @@ public abstract record DuckLakeType
     public static readonly DuckLakePrimitive Timestamp = new("timestamp");
     public static readonly DuckLakePrimitive TimestampTz = new("timestamptz");
     public static readonly DuckLakePrimitive TimestampNs = new("timestamp_ns");
+    public static readonly DuckLakePrimitive UInt8 = new("uint8");
+    public static readonly DuckLakePrimitive UInt16 = new("uint16");
+    public static readonly DuckLakePrimitive UInt32 = new("uint32");
+    public static readonly DuckLakePrimitive UInt64 = new("uint64");
+    public static readonly DuckLakePrimitive TimestampS = new("timestamp_s");
+    public static readonly DuckLakePrimitive TimestampMs = new("timestamp_ms");
+    public static readonly DuckLakePrimitive TimeTz = new("timetz");
+    public static readonly DuckLakePrimitive Interval = new("interval");
     public static readonly DuckLakePrimitive Varchar = new("varchar");
     public static readonly DuckLakePrimitive Json = new("json");
     public static readonly DuckLakePrimitive Blob = new("blob");
@@ -112,21 +121,28 @@ public sealed record DuckLakeColumn(long Id, string Name, DuckLakeType Type, boo
 public static class DuckLakeTypes
 {
     /// <summary>
-    /// Types this implementation reads and writes. The rest of the spec's list (unsigned and 128-bit integers,
-    /// <c>timetz</c>, <c>interval</c>, second/millisecond timestamps, <c>variant</c>, <c>geometry</c>) is rejected with
-    /// <see cref="NotSupportedException"/>, so a table using one fails loudly instead of reading wrong values.
+    /// Types this implementation reads and writes, as the Iceberg type of their Parquet column (the physical value
+    /// type rows hold). The rest of the spec's list (<c>int128</c>/<c>uint128</c>, which DuckDB itself stores as
+    /// DOUBLE and cannot read back, <c>time_ns</c>, which DuckDB cannot write, <c>variant</c> and <c>geometry</c>) is
+    /// rejected with <see cref="NotSupportedException"/>, so a table using one fails loudly instead of reading wrong values.
     /// </summary>
     public static PrimitiveType ToIceberg(DuckLakePrimitive type) => type.Name switch
     {
         "boolean" => PrimitiveType.Boolean,
-        // int8/int16 are widened to Iceberg int (INT32 in Parquet); the DuckLake type is kept in the catalog.
-        "int8" or "int16" or "int32" => PrimitiveType.Int,
-        "int64" => PrimitiveType.Long,
+        // Narrow integers are Iceberg int, stored as INT32 annotated with their width and sign (as DuckDB writes them).
+        "int8" or "int16" or "int32" or "uint8" or "uint16" => PrimitiveType.Int,
+        "int64" or "uint32" => PrimitiveType.Long,
+        // 0 to 2^64 - 1 fits decimal(20, 0); stored as INT64 annotated unsigned.
+        "uint64" => UInt64Decimal,
         "float32" => PrimitiveType.Float,
         "float64" => PrimitiveType.Double,
         "date" => PrimitiveType.Date,
-        "time" => PrimitiveType.Time,
-        "timestamp" => PrimitiveType.Timestamp,
+        // timetz values are DuckLakeTimeTz; their Parquet column is a UTC time (micros), as DuckDB writes it.
+        "time" or "timetz" => PrimitiveType.Time,
+        // Second and millisecond timestamps are microseconds truncated to their unit.
+        "timestamp" or "timestamp_s" or "timestamp_ms" => PrimitiveType.Timestamp,
+        // interval values are DuckLakeInterval; their Parquet column is the 12-byte INTERVAL.
+        "interval" => IntervalFixed,
         "timestamptz" => PrimitiveType.TimestampTz,
         "timestamp_ns" => PrimitiveType.TimestampNs,
         "varchar" or "json" => PrimitiveType.String,
@@ -136,6 +152,44 @@ public static class DuckLakeTypes
         "null" => PrimitiveType.Unknown,
         var d when d.StartsWith("decimal(", StringComparison.Ordinal) => ParseDecimal(d),
         var other => throw new NotSupportedException($"DuckLake type '{other}' is not supported by Iceberg.Net.DuckLake"),
+    };
+
+    private static readonly DecimalType UInt64Decimal = new(20, 0);
+    private static readonly FixedType IntervalFixed = new(12);
+
+    /// <summary>The Parquet annotation a column of this type is written with, as DuckDB writes it; null for the Iceberg default.</summary>
+    public static ParquetAnnotation? Annotation(DuckLakePrimitive type) => type.Name switch
+    {
+        "int8" => ParquetAnnotation.Int8,
+        "int16" => ParquetAnnotation.Int16,
+        "uint8" => ParquetAnnotation.UInt8,
+        "uint16" => ParquetAnnotation.UInt16,
+        "uint32" => ParquetAnnotation.UInt32,
+        "uint64" => ParquetAnnotation.UInt64,
+        "timestamp_ms" => ParquetAnnotation.TimestampMillis,
+        "timetz" => ParquetAnnotation.TimeUtc,
+        "interval" => ParquetAnnotation.Interval,
+        _ => null,
+    };
+
+    /// <summary>The annotations of every column (nested ones too) that has one, by column ID: what a data file is written with.</summary>
+    public static IReadOnlyDictionary<int, ParquetAnnotation>? Annotations(IEnumerable<DuckLakeColumn> columns)
+    {
+        Dictionary<int, ParquetAnnotation>? result = null;
+        foreach (var c in columns.SelectMany(c => c.SelfAndDescendants()))
+            if (c.Type is DuckLakePrimitive p && Annotation(p) is { } a)
+                (result ??= [])[FieldId(c.Id)] = a;
+        return result;
+    }
+
+    /// <summary>Whether a value of this type is held in another form in Parquet (<c>timetz</c>, <c>interval</c>).</summary>
+    internal static bool HasFileForm(DuckLakeType type) => type switch
+    {
+        DuckLakePrimitive p => p.Name is "timetz" or "interval",
+        DuckLakeList l => HasFileForm(l.Element),
+        DuckLakeMap m => HasFileForm(m.Key) || HasFileForm(m.Value),
+        DuckLakeStruct s => s.Fields.Any(f => HasFileForm(f.Type)),
+        _ => false,
     };
 
     private static DecimalType ParseDecimal(string text)
@@ -162,7 +216,7 @@ public static class DuckLakeTypes
         object? initial = null;
         if (column.InitialDefault is { } text && type is PrimitiveType pt && column.Type is DuckLakePrimitive dp
             && DuckLakeValues.TryParse(dp, text, out var value) && value is not null)
-            initial = Json.SingleValueJson.ToJson(pt, value);
+            initial = Json.SingleValueJson.ToJson(pt, DuckLakeValues.ToFile(dp, value)!);
         return new NestedField(id, column.Name, type, !column.Nullable, InitialDefault: initial);
     }
 

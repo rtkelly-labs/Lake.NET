@@ -83,7 +83,7 @@ internal static class DuckLakeNestedText
                 break;
             case DuckLakePrimitive p:
                 var text = DuckLakeValues.InlineText(p, value);
-                if (p.Name is "boolean" or "int8" or "int16" or "int32" or "int64" or "float32" or "float64" || p.Name.StartsWith("decimal", StringComparison.Ordinal))
+                if (p.Name is "boolean" or "int8" or "int16" or "int32" or "int64" or "uint8" or "uint16" or "uint32" or "uint64" or "float32" or "float64" || p.Name.StartsWith("decimal", StringComparison.Ordinal))
                     sb.Append(text);
                 else Quote(sb, text);
                 break;

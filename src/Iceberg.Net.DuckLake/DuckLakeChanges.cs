@@ -73,13 +73,18 @@ public sealed record DuckLakeChange(string Kind, string Target)
     }
 
     /// <summary>Split a quoted qualified name (<c>"main"."t"</c>) into its parts.</summary>
-    public static IReadOnlyList<string> SplitName(string target)
+    public static IReadOnlyList<string> SplitName(string target) => Split(target, '.');
+
+    /// <summary>Split a comma-separated list of quoted names (<c>"a","b"</c>, as in view column aliases).</summary>
+    public static IReadOnlyList<string> SplitList(string text) => Split(text, ',');
+
+    private static IReadOnlyList<string> Split(string target, char separator)
     {
         var parts = new List<string>();
         var i = 0;
         while (i < target.Length)
         {
-            if (target[i] == '.') { i++; continue; }
+            if (target[i] == separator || target[i] == ' ') { i++; continue; }
             if (target[i] != '"') throw new FormatException($"Expected a quoted name in '{target}'");
             var sb = new StringBuilder();
             i++;
@@ -120,13 +125,31 @@ internal sealed class ChangeSet
     public HashSet<long> InlinedInsertTables { get; } = [];
     public HashSet<long> InlinedDeleteTables { get; } = [];
     public HashSet<long> FlushedTables { get; } = [];
+    /// <summary>Renamed tables: written as <c>created_table</c> with the new name (as DuckDB writes them), altered for conflicts.</summary>
+    public List<(long Id, string Schema, string Name)> RenamedTables { get; } = [];
+    public List<(string Schema, long? SchemaId, string Name)> CreatedViews { get; } = [];
+    public List<(long Id, string Schema, string Name)> RenamedViews { get; } = [];
+    public HashSet<long> AlteredViews { get; } = [];
+    public HashSet<long> DroppedViews { get; } = [];
+    public List<(string Schema, long? SchemaId, string Name, bool IsTable)> CreatedMacros { get; } = [];
+    public List<(long Id, bool IsTable)> DroppedMacros { get; } = [];
 
     public bool IsEmpty => CreatedSchemas.Count + DroppedSchemas.Count + CreatedTables.Count + DroppedTables.Count
         + AlteredTables.Count + InsertedTables.Count + DeletedTables.Count + MergedTables.Count + RewrittenTables.Count
-        + InlinedInsertTables.Count + InlinedDeleteTables.Count + FlushedTables.Count == 0;
+        + InlinedInsertTables.Count + InlinedDeleteTables.Count + FlushedTables.Count + RenamedTables.Count + CreatedViews.Count + RenamedViews.Count
+        + AlteredViews.Count + DroppedViews.Count + CreatedMacros.Count + DroppedMacros.Count == 0;
 
     private IEnumerable<long> Touched =>
-        DroppedTables.Concat(AlteredTables).Concat(Inserted).Concat(Deleted).Concat(MergedTables).Concat(RewrittenTables).Concat(FlushedTables);
+        DroppedTables.Concat(AlteredTables).Concat(Inserted).Concat(Deleted).Concat(MergedTables).Concat(RewrittenTables).Concat(FlushedTables)
+            .Concat(RenamedTables.Select(r => r.Id));
+
+    /// <summary>Views this transaction alters, renames or drops.</summary>
+    private IEnumerable<long> TouchedViews => AlteredViews.Concat(DroppedViews).Concat(RenamedViews.Select(r => r.Id));
+
+    /// <summary>Names this transaction gives to tables and views (they share a schema's names).</summary>
+    private IEnumerable<(string Schema, string Name)> NewNames =>
+        CreatedTables.Select(t => (t.Schema, t.Name)).Concat(CreatedViews.Select(v => (v.Schema, v.Name)))
+            .Concat(RenamedTables.Select(r => (r.Schema, r.Name))).Concat(RenamedViews.Select(r => (r.Schema, r.Name)));
 
     /// <summary>Inserts and deletes for conflict purposes, whether to files or inlined.</summary>
     private IEnumerable<long> Inserted => InsertedTables.Concat(InlinedInsertTables);
@@ -148,10 +171,17 @@ internal sealed class ChangeSet
             {
                 DuckLakeChange.CreatedSchema when CreatedSchemas.Contains(Single(c.Target)) => "both created schema " + c.Target,
                 DuckLakeChange.DroppedSchema when id is { } s && DroppedSchemas.ContainsKey(s) => $"both dropped schema {s}",
-                DuckLakeChange.DroppedSchema when id is { } s && CreatedTables.Any(t => t.SchemaId == s) => $"schema {s} was dropped while creating a table in it",
+                DuckLakeChange.DroppedSchema when id is { } s && (CreatedTables.Any(t => t.SchemaId == s) || CreatedViews.Any(v => v.SchemaId == s)
+                                                                  || CreatedMacros.Any(m => m.SchemaId == s))
+                    => $"schema {s} was dropped while creating in it",
                 DuckLakeChange.CreatedTable or DuckLakeChange.CreatedView when Qualified(c.Target) is var (schema, name) && schema is not null
-                    && (CreatedTables.Any(t => t.Schema == schema && t.Name == name) || DroppedSchemas.ContainsValue(schema))
+                    && (NewNames.Any(n => n.Schema == schema && string.Equals(n.Name, name, StringComparison.OrdinalIgnoreCase)) || DroppedSchemas.ContainsValue(schema))
                     => $"concurrent {c}",
+                DuckLakeChange.DroppedView or DuckLakeChange.AlteredView when id is { } v && TouchedViews.Contains(v) => $"view {v} was altered or dropped",
+                DuckLakeChange.CreatedScalarMacro or DuckLakeChange.CreatedTableMacro when Qualified(c.Target) is var (schema, name) && schema is not null
+                    && (CreatedMacros.Any(m => m.Schema == schema && m.Name == name) || DroppedSchemas.ContainsValue(schema))
+                    => $"concurrent {c}",
+                DuckLakeChange.DroppedScalarMacro or DuckLakeChange.DroppedTableMacro when id is { } m && DroppedMacros.Any(d => d.Id == m) => $"both dropped macro {m}",
                 DuckLakeChange.DroppedTable when id is { } t && Touched.Contains(t) => $"table {t} was dropped",
                 DuckLakeChange.AlteredTable when id is { } t && (AlteredTables.Contains(t) || Inserted.Contains(t) || Deleted.Contains(t)) => $"table {t} was altered",
                 DuckLakeChange.InsertedIntoTable or DuckLakeChange.InlinedInsert when id is { } t && Deleted.Contains(t) => $"table {t} was inserted into while deleting from it",
@@ -198,6 +228,15 @@ internal sealed class ChangeSet
         foreach (var t in FlushedTables) yield return DuckLakeChange.Of(DuckLakeChange.InlineFlush, t);
         foreach (var t in MergedTables) yield return DuckLakeChange.Of(DuckLakeChange.MergeAdjacent, t);
         foreach (var t in RewrittenTables) yield return DuckLakeChange.Of(DuckLakeChange.RewriteDelete, t);
+        foreach (var (_, schema, name) in RenamedTables)
+            yield return new(DuckLakeChange.CreatedTable, QuotePath(schema) + "." + DuckLakeChange.QuoteName(name));
+        foreach (var (schema, _, name) in CreatedViews.Select(v => (v.Schema, v.SchemaId, v.Name)).Concat(RenamedViews.Select(r => (r.Schema, (long?)null, r.Name))))
+            yield return new(DuckLakeChange.CreatedView, QuotePath(schema) + "." + DuckLakeChange.QuoteName(name));
+        foreach (var v in AlteredViews) yield return DuckLakeChange.Of(DuckLakeChange.AlteredView, v);
+        foreach (var v in DroppedViews) yield return DuckLakeChange.Of(DuckLakeChange.DroppedView, v);
+        foreach (var (schema, _, name, isTable) in CreatedMacros)
+            yield return new(isTable ? DuckLakeChange.CreatedTableMacro : DuckLakeChange.CreatedScalarMacro, QuotePath(schema) + "." + DuckLakeChange.QuoteName(name));
+        foreach (var (m, isTable) in DroppedMacros) yield return DuckLakeChange.Of(isTable ? DuckLakeChange.DroppedTableMacro : DuckLakeChange.DroppedScalarMacro, m);
         foreach (var t in DroppedTables) yield return DuckLakeChange.Of(DuckLakeChange.DroppedTable, t);
         foreach (var s in DroppedSchemas.Keys) yield return DuckLakeChange.Of(DuckLakeChange.DroppedSchema, s);
     }
