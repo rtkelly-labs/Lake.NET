@@ -1,6 +1,7 @@
 using System.Globalization;
 using Iceberg.Net.Avro;
 using Iceberg.Net.Catalog;
+using Iceberg.Net.Diagnostics;
 using Iceberg.Net.Manifests;
 using Iceberg.Net.Metadata;
 
@@ -225,31 +226,43 @@ public sealed class SnapshotManager
 
         var policy = CommitRetryPolicy.From(_table.Metadata);
         if (_retries is { } r) policy = policy with { NumRetries = r };
-        for (var attempt = 0; ; attempt++)
+        using var telemetry = IcebergTelemetry.StartCommit(_table.Identifier.ToString(), "manage-snapshots");
+        try
         {
-            var @base = _table.Metadata;
-            foreach (var name in _pinned)
+            for (var attempt = 0; ; attempt++)
             {
-                var then = _observed.Refs.GetValueOrDefault(name)?.SnapshotId;
-                var now = @base.Refs.GetValueOrDefault(name)?.SnapshotId;
-                if (then != now)
-                    throw new CommitFailedException($"Ref {name} moved from {Show(then)} to {Show(now)} since these snapshot changes were planned; re-plan against the current table state");
-            }
-            var state = new RefState(@base);
-            foreach (var op in _ops) await op(state);
-            var (requirements, updates) = state.ToCommit();
-            if (updates.Count == 0) return @base;
-            try
-            {
-                return await _table.CommitAsync(requirements, updates, ct);
-            }
-            catch (CommitFailedException) when (attempt < policy.NumRetries)
-            {
-                var wait = Math.Min(policy.MaxWaitMs, policy.MinWaitMs * (1 << Math.Min(attempt, 20)));
-                await Task.Delay(wait + Random.Shared.Next(wait / 10 + 1), ct);
-                await _table.RefreshAsync(ct);
+                var @base = _table.Metadata;
+                foreach (var name in _pinned)
+                {
+                    var then = _observed.Refs.GetValueOrDefault(name)?.SnapshotId;
+                    var now = @base.Refs.GetValueOrDefault(name)?.SnapshotId;
+                    if (then != now)
+                        throw new CommitFailedException($"Ref {name} moved from {Show(then)} to {Show(now)} since these snapshot changes were planned; re-plan against the current table state");
+                }
+                var state = new RefState(@base);
+                foreach (var op in _ops) await op(state);
+                var (requirements, updates) = state.ToCommit();
+                if (updates.Count == 0)
+                {
+                    telemetry.NothingToCommit();
+                    return @base;
+                }
+                try
+                {
+                    var committed = await _table.CommitAsync(requirements, updates, ct);
+                    telemetry.Committed();
+                    return committed;
+                }
+                catch (CommitFailedException e) when (attempt < policy.NumRetries)
+                {
+                    var wait = Math.Min(policy.MaxWaitMs, policy.MinWaitMs * (1 << Math.Min(attempt, 20)));
+                    telemetry.Retrying(attempt + 1, e, TimeSpan.FromMilliseconds(wait));
+                    await Task.Delay(wait + Random.Shared.Next(wait / 10 + 1), ct);
+                    await _table.RefreshAsync(ct);
+                }
             }
         }
+        catch (Exception e) when (telemetry.FailedWith(e)) { throw; }
     }
 
     private static string Show(long? id) => id?.ToString(CultureInfo.InvariantCulture) ?? "(none)";

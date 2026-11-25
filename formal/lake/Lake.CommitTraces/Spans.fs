@@ -36,7 +36,7 @@ type CommitKey =
 /// The projected events, plus what the projection saw and could not place.
 type Projection =
     { Events: Keyed<CommitKey, CommitEvent> list
-      /// Catalog commits outside any iceberg.commit span (ref and maintenance operations commit directly).
+      /// Catalog commits outside any iceberg.commit span (one-shot property, sort-order and statistics commits).
       OrphanCatalogCommits: int }
 
 /// The projection from Iceberg.Net's spans onto <see cref="CommitEvent"/>: each <c>iceberg.commit</c> span is one
@@ -44,7 +44,7 @@ type Projection =
 [<RequireQualifiedAccess>]
 module Spans =
 
-    /// Span and event names this projection reads. The first four are emitted today.
+    /// Span and event names this projection reads.
     [<RequireQualifiedAccess>]
     module Names =
         let commit = "iceberg.commit"
@@ -52,12 +52,16 @@ module Spans =
         let loadTable = "iceberg.catalog.load_table"
         let retry = "iceberg.commit.retry"
 
-        /// Proposed: an event on the commit span when an unknown outcome is resolved, with
-        /// <see cref="resolutionTag"/> set to <c>found</c> or <c>absent</c>.
+        /// An event on the commit span when an unknown outcome is resolved, with <see cref="resolutionTag"/> set to
+        /// <c>found</c> or <c>absent</c>.
         let resolution = "iceberg.commit.resolution"
 
-        /// Proposed tag on <see cref="resolution"/>.
+        /// The tag on <see cref="resolution"/>.
         let resolutionTag = "iceberg.commit.resolution"
+
+        /// An event on a catalog span each time the REST client resends the request with the same idempotency key: the
+        /// model's Resend. Not yet projected (see the README).
+        let resend = "iceberg.catalog.resend"
 
     let private text (value: obj) =
         match value with
@@ -86,15 +90,16 @@ module Spans =
 
     let private tag key (span: SpanRecord) = span.Tags |> Map.tryFind key
 
-    /// A catalog span's outcome. Catalog spans tag only failures; a success is status Ok with no outcome tag.
+    /// A catalog span's outcome. Catalog spans tag every outcome; spans from releases that tagged only failures have
+    /// status Ok and no tag on success.
     let catalogOutcome (span: SpanRecord) =
         match tag IcebergTelemetry.Tags.Outcome span with
         | Some outcome -> outcome
         | None when span.Status = "Ok" -> IcebergTelemetry.Outcomes.Success
         | None -> IcebergTelemetry.Outcomes.Error
 
-    /// <c>iceberg.catalog.commit_table</c> by outcome. Today every failure is "error" (the catalog's commit does not
-    /// classify what it throws), which projects to <see cref="SwapFailed"/>.
+    /// <c>iceberg.catalog.commit_table</c> by outcome. A failure the span does not classify ("error", as every failure
+    /// was before the catalogs called FailedWith) projects to <see cref="SwapFailed"/>.
     let swap (span: SpanRecord) =
         match catalogOutcome span with
         | o when o = IcebergTelemetry.Outcomes.Success -> SwapApplied
@@ -157,6 +162,49 @@ module Spans =
                         yield (c.End, 2), finish c ]
                   for _, event in List.sortBy fst timed -> { Key = key; Event = event } ]
         { Events = events; OrphanCatalogCommits = orphans }
+
+    /// What the grammar cannot check, because it has no data: that each catalog commit is tagged with the attempt it
+    /// belongs to (one more than the retries before it), that a found resolution names the snapshot the swap before it
+    /// attempted, and that a committed snapshot is the one its last applied swap, or its found resolution, attempted.
+    /// Checked only where the tags are present. Returns one message per mismatch.
+    let snapshots (spans: SpanRecord seq) : string list =
+        let spans = List.ofSeq spans
+        let swaps =
+            spans
+            |> List.filter (fun s -> s.Name = Names.commitTable)
+            |> List.groupBy _.ParentSpanId
+            |> Map.ofList
+        let snapshotOf (tags: Map<string, string>) = tags |> Map.tryFind IcebergTelemetry.Tags.SnapshotId
+        [ for c in spans |> List.filter (fun s -> s.Name = Names.commit) do
+              let mine = swaps |> Map.tryFind c.SpanId |> Option.defaultValue [] |> List.sortBy _.Start
+              let retriesBefore (t: DateTime) = c.Events |> List.filter (fun e -> e.Name = Names.retry && e.Time <= t) |> List.length
+              for s in mine do
+                  match tag IcebergTelemetry.Tags.CommitAttempt s with
+                  | Some attempt when attempt <> string (retriesBefore s.Start + 1) ->
+                      yield $"commit span %s{c.SpanId}: catalog commit %s{s.SpanId} is tagged attempt %s{attempt} after %d{retriesBefore s.Start} retries"
+                  | _ -> ()
+              let found =
+                  [ for e in c.Events do
+                        if e.Name = Names.resolution && Map.tryFind Names.resolutionTag e.Tags = Some "found" then
+                            match snapshotOf e.Tags with
+                            | Some id -> yield e.Time, id, mine |> List.filter (fun s -> s.Start <= e.Time) |> List.tryLast
+                            | None -> () ]
+              for _, id, before in found do
+                  match before |> Option.bind (fun s -> snapshotOf s.Tags) with
+                  | Some attempted when attempted <> id ->
+                      yield $"commit span %s{c.SpanId}: resolution found snapshot %s{id}, but the swap before it attempted %s{attempted}"
+                  | _ -> ()
+              // The snapshot that each applied swap and each found resolution settled on, in time order.
+              let settled =
+                  [ for s in mine do
+                        match swap s, snapshotOf s.Tags with
+                        | SwapApplied, Some id -> yield s.End, id
+                        | _ -> ()
+                    for t, id, _ in found -> t, id ]
+              match finish c, snapshotOf c.Tags, settled |> List.sortBy fst |> List.tryLast with
+              | Committed, Some committed, Some(_, last) when committed <> last ->
+                  yield $"commit span %s{c.SpanId}: committed snapshot %s{committed}, but the last swap applied or found %s{last}"
+              | _ -> () ]
 
     /// Project and check a recorded run.
     let check (spans: SpanRecord seq) : TraceReport<CommitKey, CommitEvent> * Projection =

@@ -39,24 +39,27 @@ observe them), as does `dotnet-counters monitor --counters Iceberg.Net`.
 |---|---|---|---|
 | `iceberg.scan` | internal | every row read (`TableScan.ReadRowsAsync`, `ReadBatchesAsync`, `ReadAsync`, `CountAsync` when it scans, the LINQ provider); open while rows are enumerated | `iceberg.table`, `iceberg.snapshot.id`, `iceberg.scan.files.read`, `iceberg.scan.bytes`, `iceberg.scan.rows.returned`, `iceberg.scan.rows.deleted` |
 | `iceberg.scan.plan` | internal | every scan plan (child of `iceberg.scan` when part of a read; also `PlanAsync`/`PlanFilesAsync` and the planning inside mutations) | `iceberg.table`, `iceberg.snapshot.id`, `iceberg.scan.manifests.read`, `iceberg.scan.manifests.skipped`, `iceberg.scan.files.planned`, `iceberg.scan.files.pruned.partition`, `iceberg.scan.files.pruned.metrics` |
-| `iceberg.commit` | internal | one logical snapshot commit: a `SnapshotProducer.CommitAsync`, or a whole insert / upsert / delete / UPDATE / MERGE with its re-plans | `iceberg.table`, `iceberg.operation` (`append`, `overwrite`, `delete`, `replace`), `iceberg.snapshot.id`, `iceberg.commit.attempts`, `iceberg.commit.retries`, `iceberg.outcome`, `error.type`; an `iceberg.commit.retry` event per lost race (`iceberg.commit.attempt`, `iceberg.commit.backoff_ms`, `error.type`) |
-| `iceberg.catalog.{operation}` | client | `load_table`, `create_table`, `commit_table`, `commit_transaction`, `drop_table` on the metastore catalogs (Glue, JDBC, in-memory) and the REST catalog | `iceberg.catalog.name`, `iceberg.catalog.type` (e.g. `GlueCatalog`, `RestCatalog`), `iceberg.catalog.operation`, `iceberg.table`, `iceberg.outcome` |
+| `iceberg.commit` | internal | one logical commit: a `SnapshotProducer.CommitAsync`, a whole insert / upsert / delete / UPDATE / MERGE with its re-plans, or a ref change, snapshot expiry, or schema or spec evolution with its retries | `iceberg.table`, `iceberg.operation` (`append`, `overwrite`, `delete`, `replace`; for commits that add no snapshot, `manage-snapshots`, `expire-snapshots`, `update-schema`, `update-spec`), `iceberg.snapshot.id`, `iceberg.commit.attempts`, `iceberg.commit.retries`, `iceberg.outcome`, `error.type`; an `iceberg.commit.retry` event per lost race (`iceberg.commit.attempt`, `iceberg.commit.backoff_ms`, `error.type`); an `iceberg.commit.resolution` event when an unknown outcome the catalog answered is resolved by reloading (`iceberg.commit.resolution`: `found` or `absent`; `iceberg.snapshot.id`: the snapshot it looked for) |
+| `iceberg.catalog.{operation}` | client | `load_table`, `create_table`, `commit_table`, `commit_transaction`, `drop_table` on the metastore catalogs (Glue, JDBC, in-memory) and the REST catalog | `iceberg.catalog.name`, `iceberg.catalog.type` (e.g. `GlueCatalog`, `RestCatalog`), `iceberg.catalog.operation`, `iceberg.table`, `iceberg.outcome`; on a `commit_table` inside a commit, `iceberg.commit.attempt` (1-based) and the attempted `iceberg.snapshot.id`; on the REST catalog, an `iceberg.catalog.resend` event each time the client resends the request with the same idempotency key (`iceberg.catalog.resend`: 1-based, `http.response.status_code` or `error.type`) |
 
 A commit's catalog calls are its children: a commit that lost one race shows two `iceberg.catalog.commit_table`
-spans (the first with error status), the `load_table` of the refresh between them, and `iceberg.commit.attempts = 2`.
+spans (the first with outcome `conflict`), the `load_table` of the refresh between them, and `iceberg.commit.attempts = 2`.
 
 **Outcomes** (`iceberg.outcome`): `success`; `noop` (nothing to commit); `conflict` (a `CommitFailedException` that
 retries did not resolve); `unknown` (`CommitStateUnknownException`: the catalog may have applied it); `cancelled`;
-`error`. Failed spans have status `Error`, `error.type` set to the exception type and an `exception` event. Catalog
-spans classify only success vs `error`: a lost race at the catalog level is expected, and the enclosing commit span
-says whether it was resolved.
+`error`. Failed spans have status `Error`, `error.type` set to the exception type and an `exception` event. Every
+catalog span carries an outcome, `success` included. `commit_table` classifies its failures like a commit does: a lost
+race is `conflict` and a swap whose result is unknown is `unknown`, so a trace shows what each attempt met. Whether the
+enclosing commit resolved it is on the commit span. `commit_transaction` classifies the same way; the other catalog
+operations record `success` or `error`.
 
 **Nesting of commits.** Row-level mutations re-plan on conflict around a `SnapshotProducer` with no retries of its own.
 A commit scope opened while another is open for the same table on the same async flow reports into the outer one,
 so a mutation is one `iceberg.commit` span however its retries are layered.
 
-**Not traced yet**: maintenance (`ExpireSnapshotsAsync`, orphan cleanup) and ref operations commit through
-`Table.CommitAsync` and so appear as `iceberg.catalog.commit_table` spans, not `iceberg.commit`; `IFileIO` reads and
+**Not traced yet**: orphan cleanup; one-shot metadata commits (`SetPropertiesAsync`, `ReplaceSortOrderAsync`,
+statistics, name mapping) commit through `Table.CommitAsync` and so appear as `iceberg.catalog.commit_table` spans,
+not `iceberg.commit`; `IFileIO` reads and
 writes (use the HTTP/AWS instrumentation above); namespace and view calls.
 
 ## Metrics
