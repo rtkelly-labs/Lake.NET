@@ -27,6 +27,12 @@ public sealed record DataFileReadOptions
     /// <see cref="Manifests.DataFile"/> set it.
     /// </summary>
     public long? FileSize { get; init; }
+    /// <summary>
+    /// Parquet: match the projection's columns to the file's by name (nested struct fields too), ignoring any field IDs
+    /// the file has, for files registered under a name mapping whose IDs (if any) mean something else. The projection
+    /// carries the file's names.
+    /// </summary>
+    public bool MatchByName { get; init; }
 }
 
 /// <summary>

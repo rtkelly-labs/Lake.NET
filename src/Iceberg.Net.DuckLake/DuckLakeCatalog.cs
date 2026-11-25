@@ -36,6 +36,12 @@ public sealed record DuckLakeOptions
     /// </summary>
     public int DataInliningRowLimit { get; init; }
 
+    /// <summary>
+    /// Write deletes as Iceberg <c>deletion-vector-v1</c> blobs (format 1.1's experimental <c>puffin</c> delete files)
+    /// instead of Parquet delete files. The lake's persisted <c>write_deletion_vectors</c> option takes precedence.
+    /// </summary>
+    public bool WriteDeletionVectors { get; init; }
+
     public const int DefaultRowGroupRows = 122_880;
 }
 
@@ -91,6 +97,8 @@ public sealed record DuckLakeFileTask(long DataFileId, string Location, long Rec
 {
     /// <summary>Parquet row groups in the file, when the catalog records it (1.1).</summary>
     public long? RowGroupCount { get; init; }
+    /// <summary>The file's name mapping, for files registered without (or with other) field IDs.</summary>
+    internal DuckLakeNameMap? Mapping { get; init; }
 }
 
 /// <summary>Which files a scan reads and how many the file statistics ruled out.</summary>
@@ -443,13 +451,13 @@ public sealed partial class DuckLakeCatalog
             .ToDictionary(col => col.Id, col => (DuckLakePrimitive)col.Type);
         var evaluator = bound is null ? null : new MetricsEvaluator(bound);
         var tasks = new List<DuckLakeFileTask>();
+        var mapped = new List<(int Index, long MappingId)>();
         var pruned = 0;
         foreach (var f in files)
         {
             if (f.EncryptionKey is not null) throw new NotSupportedException($"Data file {f.DataFileId} is encrypted");
             if (!string.Equals(f.FileFormat ?? "parquet", "parquet", StringComparison.OrdinalIgnoreCase))
                 throw new NotSupportedException($"Data file {f.DataFileId} has format {f.FileFormat}");
-            if (f.MappingId is not null) throw new NotSupportedException($"Data file {f.DataFileId} needs name mapping {f.MappingId} (files added without field IDs)");
             if (evaluator is not null && !evaluator.MightMatch(f.RecordCount, (fieldId, type) => Stats(stats!, f.DataFileId, fieldId, type, types)))
             {
                 pruned++;
@@ -460,11 +468,17 @@ public sealed partial class DuckLakeCatalog
             if (deletes.TryGetValue(f.DataFileId, out var d))
             {
                 if (d.EncryptionKey is not null) throw new NotSupportedException($"Delete file {d.DeleteFileId} is encrypted");
-                if (!string.Equals(d.Format ?? "parquet", "parquet", StringComparison.OrdinalIgnoreCase))
-                    throw new NotSupportedException($"Delete file {d.DeleteFileId} has format {d.Format} (deletion vectors are not read yet)");
+                if (d.Format is { } format && !format.Equals("parquet", StringComparison.OrdinalIgnoreCase) && !format.Equals("puffin", StringComparison.OrdinalIgnoreCase))
+                    throw new NotSupportedException($"Delete file {d.DeleteFileId} has format {d.Format}");
                 deleteLocation = Resolve(table.Location, d.Path ?? throw new InvalidDataException($"Delete file {d.DeleteFileId} has no path"), d.PathIsRelative ?? true);
             }
             tasks.Add(new DuckLakeFileTask(f.DataFileId, location, f.RecordCount, f.FileSizeBytes, deleteLocation, f.RowIdStart) { RowGroupCount = f.RowGroupCount });
+            if (f.MappingId is { } m) mapped.Add((tasks.Count - 1, m));
+        }
+        if (mapped.Count > 0)
+        {
+            var maps = await DuckLakeNameMap.LoadAsync(db, mapped.Select(x => x.MappingId).Distinct().ToList(), ct);
+            foreach (var (index, id) in mapped) tasks[index] = tasks[index] with { Mapping = maps[id] };
         }
         var inlined = await db.InlinedDataTables.Where(i => i.TableId == table.TableId).OrderBy(i => i.SchemaVersion).Select(i => i.TableName).ToListAsync(ct);
         db.Scope?.Planned(tasks.Count, pruned);
@@ -567,6 +581,25 @@ public sealed partial class DuckLakeCatalog
         return rows;
     }
 
+    /// <summary>
+    /// The rows as <typeparamref name="T"/>, bound by column name (see <see cref="DuckLakeClr.Binder{T}"/>): a record
+    /// such as <c>record Order(long Id, string? Name, DateOnly Day)</c> for a table <c>(id, name, day)</c>.
+    /// </summary>
+    public async IAsyncEnumerable<T> ReadAsync<T>(DuckLakeTable table, Expression? filter = null, [EnumeratorCancellation] CancellationToken ct = default)
+    {
+        var bind = DuckLakeClr.Binder<T>(table.Columns);
+        await foreach (var r in ScanAsync(table, filter, ct)) yield return bind(r.Values);
+    }
+
+    /// <summary>As <see cref="ReadAsync"/>, with values as natural CLR types (see <see cref="DuckLakeClr"/>).</summary>
+    public async Task<List<object?[]>> ReadClrAsync(DuckLakeTable table, Expression? filter = null, CancellationToken ct = default)
+    {
+        var rows = new List<object?[]>();
+        var convert = DuckLakeClr.RowConverter(table.Columns);
+        await foreach (var r in ScanAsync(table, filter, ct)) rows.Add(convert(r.Values));
+        return rows;
+    }
+
     /// <summary>As <see cref="ReadAsync"/>, with row IDs.</summary>
     public async IAsyncEnumerable<DuckLakeRow> ReadRowsAsync(DuckLakeTable table, Expression? filter = null, [EnumeratorCancellation] CancellationToken ct = default)
     {
@@ -596,6 +629,25 @@ public sealed partial class DuckLakeCatalog
         new(0, table.Schema.Columns.Select((f, i) => f.Type.TypeId == TypeId.Unknown ? f with { Id = NullColumnFieldId - i, Type = PrimitiveType.Int } : f)
             .Concat(InternalColumns));
 
+    /// <summary>
+    /// A data file's batches in <paramref name="projection"/>: by field ID, or for a file registered under a name
+    /// mapping, by the mapped names, with its Hive partition columns filled in from its path.
+    /// </summary>
+    internal IAsyncEnumerable<DataFileBatch> ReadDataFileAsync(DuckLakeTable table, string location, DuckLakeNameMap? mapping, Schema projection,
+        DataFileReadOptions options, CancellationToken ct)
+    {
+        if (mapping is null) return ParquetFiles.ReadBatchesAsync(IO, location, projection, null, options, ct);
+        var (mappedProjection, mappedOptions) = mapping.Projection(projection, options);
+        var partition = mapping.PartitionValues(table.Columns, location);
+        var batches = ParquetFiles.ReadBatchesAsync(IO, location, mappedProjection, null, mappedOptions, ct);
+        return partition.Count == 0 ? batches : batches.Select(b =>
+        {
+            foreach (var row in b.Rows)
+                foreach (var (index, value) in partition) row[index] = value;
+            return b;
+        });
+    }
+
     /// <summary>A data file being read ahead: its deleted positions and its row groups, decoded on the thread pool into a bounded queue.</summary>
     private sealed record FileRead(DuckLakeFileTask File, Task<HashSet<long>?> Deleted, ChannelReader<DataFileBatch> Batches, Task Producer);
 
@@ -608,7 +660,7 @@ public sealed partial class DuckLakeCatalog
             try
             {
                 var options = new DataFileReadOptions { FileSize = file.FileSizeBytes, Filter = bound };
-                await foreach (var batch in ParquetFiles.ReadBatchesAsync(IO, file.Location, projection, null, options, ct))
+                await foreach (var batch in ReadDataFileAsync(table, file.Location, file.Mapping, projection, options, ct))
                     await queue.Writer.WriteAsync(batch, ct);
             }
             finally

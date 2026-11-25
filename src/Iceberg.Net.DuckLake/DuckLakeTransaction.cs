@@ -109,7 +109,16 @@ public sealed partial class DuckLakeTransaction : IAsyncDisposable
     private sealed record DeleteOp(PendingTable Table, IReadOnlyList<FileDelete> Files, IReadOnlyDictionary<string, IReadOnlyList<long>> Inlined, long Count) : Op;
 
     private sealed record WrittenFile(string RelativePath, long RecordCount, long Size, long FooterSize, long RowGroups, IReadOnlyList<DuckLakeColumnStats> Stats,
-        IReadOnlyList<string?> PartitionValues);
+        IReadOnlyList<string?> PartitionValues)
+    {
+        /// <summary>A registered existing file: <see cref="RelativePath"/> is its absolute location.</summary>
+        public bool Absolute { get; init; }
+        /// <summary>A registered file's name mapping rows (without <c>mapping_id</c>), in DuckDB's order.</summary>
+        public IReadOnlyList<NameMappingEntity>? Mapping { get; init; }
+        /// <summary>The mapping's identity: files of one table with the same mapping share one <c>mapping_id</c>.</summary>
+        public string? MappingKey => Mapping is null ? null
+            : string.Join("\u0001", Mapping.Select(m => $"{m.ColumnId}\u0002{m.SourceName}\u0002{m.TargetFieldId}\u0002{m.ParentColumn}\u0002{m.IsPartition}"));
+    }
 
     /// <summary>A data file's new delete state: a replacement delete file, or the whole file removed.</summary>
     /// <summary>
@@ -122,7 +131,10 @@ public sealed partial class DuckLakeTransaction : IAsyncDisposable
     /// <summary>Rows written into the table's inlined data table (data inlining), each with the row ID it keeps or a new one.</summary>
     private sealed record InlineInsertOp(PendingTable Table, IReadOnlyList<(object?[] Values, long? RowId)> Rows) : Op;
 
-    private sealed record WrittenDelete(string RelativePath, long Count, long Size, long FooterSize);
+    private sealed record WrittenDelete(string RelativePath, long Count, long Size, long FooterSize)
+    {
+        public string Format { get; init; } = "parquet";
+    }
 
     private async Task<DuckLakeDbContext> BeginAsync(CancellationToken ct)
     {
@@ -530,11 +542,26 @@ public sealed partial class DuckLakeTransaction : IAsyncDisposable
             WrittenDelete? written = null;
             if (all.Count + inlinedDeleted < task.RecordCount)
             {
-                var relative = $"ducklake-{Guid.CreateVersion7()}-delete.parquet";
-                var location = t.Location + relative;
-                _written.Add(location);
-                var (size, footer) = await DuckLakeDeleteFiles.WriteAsync(_catalog.IO, location, task.Location, all, ct);
-                written = new WrittenDelete(relative, all.Count, size, footer);
+                if (await WritesDeletionVectorsAsync(t, ct))
+                {
+                    // A bare vector: its snapshot is the delete file's begin_snapshot (spec ducklake_delete_file).
+                    var relative = $"ducklake-{Guid.CreateVersion7()}-delete.puffin";
+                    var location = t.Location + relative;
+                    _written.Add(location);
+                    var bitmap = new Puffin.RoaringPositionBitmap();
+                    bitmap.AddRange(all);
+                    var bytes = Puffin.DeletionVector.Encode(bitmap);
+                    await _catalog.IO.WriteAsync(location, bytes, overwrite: false, ct);
+                    written = new WrittenDelete(relative, all.Count, bytes.Length, 0) { Format = "puffin" };
+                }
+                else
+                {
+                    var relative = $"ducklake-{Guid.CreateVersion7()}-delete.parquet";
+                    var location = t.Location + relative;
+                    _written.Add(location);
+                    var (size, footer) = await DuckLakeDeleteFiles.WriteAsync(_catalog.IO, location, task.Location, all, ct);
+                    written = new WrittenDelete(relative, all.Count, size, footer);
+                }
             }
             files.Add(new FileDelete(fileId, oldDeleteFile, positions.Count, task.RecordCount, written));
         }
@@ -763,7 +790,8 @@ public sealed partial class DuckLakeTransaction : IAsyncDisposable
                 RewriteOp r => r.Files.Count,
                 FlushOp f => f.Files.Count + f.Files.Count(x => x.Deletes is not null) + f.Deletions.Count,
                 _ => 0,
-            }) + _ops.OfType<InlineInsertOp>().Select(i => i.Table).Distinct().Count(),
+            }) + _ops.OfType<InlineInsertOp>().Select(i => i.Table).Distinct().Count()
+              + _ops.OfType<InsertOp>().Where(i => i.File.Mapping is not null).Select(i => (i.Table, i.File.MappingKey)).Distinct().Count(),
         };
         await BulkInsert.InsertAsync(db, [snapshotRow], ct);
 
@@ -930,17 +958,33 @@ public sealed partial class DuckLakeTransaction : IAsyncDisposable
             statsDelta[tableId] = (d.Records + records, d.Rows + rowIds, d.Bytes + bytes);
         }
 
+        var mappingIds = new Dictionary<(PendingTable, string), long>();
         foreach (var i in inserts)
         {
             var t = i.Table;
             var f = i.File;
             var tableId = t.TableId!.Value;
+            long? mappingId = null;
+            if (f.Mapping is not null)
+            {
+                // As DuckDB: the mapping takes the next file ID, before its file's.
+                if (!mappingIds.TryGetValue((t, f.MappingKey!), out var id))
+                {
+                    mappingIds[(t, f.MappingKey!)] = id = nextFileId++;
+                    rows.ColumnMappings.Add(new ColumnMappingEntity { MappingId = id, TableId = tableId, Type = "map_by_name" });
+                    rows.NameMappings.AddRange(f.Mapping.Select(m => new NameMappingEntity
+                    {
+                        MappingId = id, ColumnId = m.ColumnId, SourceName = m.SourceName, TargetFieldId = m.TargetFieldId, ParentColumn = m.ParentColumn, IsPartition = m.IsPartition,
+                    }));
+                }
+                mappingId = id;
+            }
             var fileId = nextFileId++;
             var rowIdStart = NextRowId(tableId);
             AddDelta(tableId, f.RecordCount, f.RecordCount, f.Size);
             rows.DataFiles.Add(new DataFileEntity
             {
-                DataFileId = fileId, TableId = tableId, BeginSnapshot = snapshotId, FileOrder = fileId, Path = f.RelativePath, PathIsRelative = true,
+                DataFileId = fileId, TableId = tableId, BeginSnapshot = snapshotId, FileOrder = fileId, Path = f.RelativePath, PathIsRelative = !f.Absolute, MappingId = mappingId,
                 FileFormat = "parquet", RecordCount = f.RecordCount, FileSizeBytes = f.Size, FooterSize = f.FooterSize, RowIdStart = rowIdStart,
                 PartitionId = t.PartitionKeys.Count == 0 ? null : _partitionIds.GetValueOrDefault(t), RowGroupCount = v11 ? f.RowGroups : null,
             });
@@ -1139,8 +1183,8 @@ public sealed partial class DuckLakeTransaction : IAsyncDisposable
                     rows.DeleteFiles.Add(new DeleteFileEntity
                     {
                         DeleteFileId = fileId++, TableId = tableId, BeginSnapshot = snapshotId, DataFileId = f.DataFileId, Path = f.NewFile.RelativePath,
-                        PathIsRelative = true, Format = "parquet", DeleteCount = f.NewFile.Count, FileSizeBytes = f.NewFile.Size, FooterSize = f.NewFile.FooterSize,
-                        RowGroupCount = v11 ? 1 : null,
+                        PathIsRelative = true, Format = f.NewFile.Format, DeleteCount = f.NewFile.Count, FileSizeBytes = f.NewFile.Size, FooterSize = f.NewFile.FooterSize,
+                        RowGroupCount = v11 && f.NewFile.Format == "parquet" ? 1 : null,
                     });
                 }
                 var (rowIdColumn, beginColumn, endColumn) = DuckLakeInlinedData.SystemColumns(v11);
@@ -1344,6 +1388,8 @@ public sealed partial class DuckLakeTransaction : IAsyncDisposable
         public readonly List<MacroParameterEntity> MacroParameters = [];
         public readonly List<SortInfoEntity> SortInfos = [];
         public readonly List<SortExpressionEntity> SortExpressions = [];
+        public readonly List<ColumnMappingEntity> ColumnMappings = [];
+        public readonly List<NameMappingEntity> NameMappings = [];
 
         /// <summary>A file no snapshot reads any more, recorded as DuckDB does: relative to <c>data_path</c> when under it.</summary>
         public void ScheduleDeletion(DuckLakeCatalog catalog, long fileId, string location) =>
@@ -1356,6 +1402,8 @@ public sealed partial class DuckLakeTransaction : IAsyncDisposable
             await BulkInsert.InsertAsync(db, Columns, ct);
             await BulkInsert.InsertAsync(db, PartitionInfos, ct);
             await BulkInsert.InsertAsync(db, PartitionColumns, ct);
+            await BulkInsert.InsertAsync(db, ColumnMappings, ct);
+            await BulkInsert.InsertAsync(db, NameMappings, ct);
             await BulkInsert.InsertAsync(db, DataFiles, ct);
             await BulkInsert.InsertAsync(db, FileColumnStats, ct);
             await BulkInsert.InsertAsync(db, FilePartitionValues, ct);

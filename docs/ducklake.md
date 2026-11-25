@@ -184,8 +184,14 @@ await using (var tx = lake.BeginTransaction())
 }
 var table = await lake.LoadTableAsync("main", "events");                 // latest, or snapshotId: n
 var rows = await lake.ReadAsync(table, Expr.GreaterThan("id", 0L));      // pruned by file statistics, filtered exactly
+await foreach (var e in lake.ReadAsync<Event>(table)) { }                 // record Event(long Id, List<object?>? Tags)
 await DuckLakeValidator.AssertValidAsync(lake);                         // the catalog's invariants hold
 ```
+
+`ReadAsync` returns each type's physical value (an `int` of days for a date, `long` microseconds for a timestamp, as
+the Iceberg data plane holds them); `ReadClrAsync` and `ReadAsync<T>` give natural CLR values (`DateOnly`,
+`DateTime`, `DateTimeOffset`, `decimal`, `ulong`, …; see `DuckLakeClr`), the latter bound to a record or class by
+column name (`customer_name` ↔ `CustomerName`). Inserts accept either form.
 
 DuckDB opens the same lake with `ATTACH '<store.DuckDbAttach()>' AS lake` (`ducklake:sqlite:lake/catalog.sqlite` or
 `ducklake:postgres:dbname=… host=…`). A longer walk-through (nested types, partitioning, UPDATE, schema evolution,
@@ -227,6 +233,8 @@ dotnet run --project examples/DuckLake.Quickstart [directory] [postgres connecti
 | Concurrency | Optimistic commits: on a lost race for the snapshot ID, the `changes_made` of every snapshot since the base are checked against the spec's logical conflicts, then the metadata is retried without rewriting files; delete-vs-delete is decided per data file. Tested with concurrent writers on both databases, and with DuckDB writing in between |
 | Catalog objects | Tags and comments (tables, columns and nested fields, views; view columns in 1.1), table renames, views, scalar and table macros, sort orders (written files follow the leading column keys); DuckDB uses each, and this library reads DuckDB's (see [Catalog objects](#catalog-objects)) |
 | Maintenance | Merging adjacent small files into partial files, rewriting files with many deleted rows, expiring snapshots, deleting scheduled and orphaned files; DuckDB reads the results and cleans up after them, and the reverse (see [Maintenance](#maintenance)) |
+| Existing files | `AddDataFilesAsync` registers Parquet files written elsewhere, in place, under a `map_by_name` column mapping with footer statistics, as `ducklake_add_data_files` does (Hive partition columns, missing and extra columns); files DuckDB added are read through their mapping (see [Adding existing files](#adding-existing-files)) |
+| Deletion vectors (1.1) | Puffin delete files read (bare `deletion-vector-v1` blobs, and containers of cumulative vectors keyed by `ducklake-snapshot-id`, the latest not after the scanned snapshot); written as bare vectors when `write_deletion_vectors` is set in the lake or `DuckLakeOptions.WriteDeletionVectors` is on |
 | Validation | `DuckLakeValidator` checks a whole lake (any writer's) and reports problems; `Deep` also reads every live file |
 
 ## The same constraints
@@ -271,9 +279,8 @@ below was observed with DuckDB 1.5.5 (`ducklake` extension `d8a1881e`) and is wh
 
 ## What is not implemented
 
-Encryption, name-mapped files (`ducklake_add_data_files` without
-field IDs), `variant` and `geometry`, `int128`/`uint128` (DuckDB writes them to Parquet as DOUBLE and cannot read
-them back), `time_ns` (DuckDB cannot write it to Parquet), the experimental Puffin deletion vectors, inlining into partitioned tables (their small inserts go to files), and
+Encryption, `variant` and `geometry`, `int128`/`uint128` (DuckDB writes them to Parquet as DOUBLE and cannot read
+them back), `time_ns` (DuckDB cannot write it to Parquet), inlining into partitioned tables (their small inserts go to files), and
 catalog migration (1.0 → 1.1 is DuckDB's). Each fails with `NotSupportedException` when met in a catalog
 or file rather than reading wrong values. The same list is in `tools/spec_trace.py` (`NOT_IMPLEMENTED`).
 
@@ -284,7 +291,7 @@ cannot be altered in it (define its columns at creation).
 
 | Suite | Needs | Command |
 |---|---|---|
-| `Iceberg.Net.DuckLake.Tests`: `EncodingTests`, `TypeTests`, `TemporalPropertyTests`, `ConflictRuleTests`, `CatalogTests`, `FormatVersionTests`, `ValidatorTests`, `ModelBasedTests`, and the inlining, maintenance, catalog object and performance tests | nothing (PostgreSQL variants skip without a server) | `dotnet test tests/Iceberg.Net.DuckLake.Tests --filter "FullyQualifiedName!~CrossEngine"` |
+| `Iceberg.Net.DuckLake.Tests`: `EncodingTests`, `TypeTests`, `TemporalPropertyTests`, `AddFilesTests`, `ClrTests`, `DeletionVectorTests`, `ConflictRuleTests`, `CatalogTests`, `FormatVersionTests`, `ValidatorTests`, `ModelBasedTests`, and the inlining, maintenance, catalog object and performance tests | nothing (PostgreSQL variants skip without a server) | `dotnet test tests/Iceberg.Net.DuckLake.Tests --filter "FullyQualifiedName!~CrossEngine"` |
 | `CrossEngineTests` | a Python with the interop `duckdb` group (1.0); DuckDB 2.0 (1.1) | `ICEBERG_DUCKDB_PYTHON=<python> dotnet test tests/Iceberg.Net.DuckLake.Tests` |
 | `Iceberg.Net.DuckLake.Behaviour.Tests` (BDD) | as above for the DuckDB scenarios (`CrossEngine.feature` and the 1.1 ones in `FormatVersions.feature`) | `ICEBERG_DUCKDB_PYTHON=<python> dotnet test tests/Iceberg.Net.DuckLake.Behaviour.Tests` |
 
@@ -300,8 +307,8 @@ dropped afterwards, and validates the lake when the test ends. Environment:
 | `ICEBERG_DUCKLAKE11_PYTHON` / `ICEBERG_DUCKLAKE11_REQUIRED=1` | The 1.1 oracle: a Python with `duckdb==2.0.0` (downloads the extension) |
 | `ICEBERG_PBT_RUNS` / `ICEBERG_PBT_SEED` | Model-based test: number of cases, and a replay seed printed by a failure |
 
-In CI (both databases, both oracles): all 515 tests and all 109 BDD scenarios pass, none skipped. Locally without
-the 1.1 oracle: 477 and 93 pass, the 38 and 16 DuckDB 2.0 cases skip. The projects are in the `cross-engine` CI suite, which starts the emulation stack's
+In CI (both databases, both oracles): 572 of the 574 tests (the two format-1.0 runs of the deletion-vector cross-engine test skip by design) and all 111 BDD scenarios pass. Locally without
+the 1.1 oracle: 530 and 95 pass, the 44 and 16 others skip. The projects are in the `cross-engine` CI suite, which starts the emulation stack's
 PostgreSQL, installs both oracles and requires all three. The oracle is `interop/ducklake_oracle.py`: it attaches the
 test's catalog (SQLite or PostgreSQL) in DuckDB and runs SQL against it.
 
@@ -333,6 +340,27 @@ flush them. `timetz` and `interval` have no order shared with their Parquet form
 partitioned by; unsigned and second/millisecond timestamp columns can be filtered on and partitioned by identity (and
 by calendar transforms for the timestamps), not bucketed. The reader decodes unsigned and millisecond columns from the
 file's own annotations, so Iceberg tables written by other engines with them read correctly too.
+
+## Adding existing files
+
+```csharp
+await using var tx = lake.BeginTransaction();
+await tx.AddDataFilesAsync("main", "events", ["s3://bucket/exports/region=eu/part-0.parquet"],
+    new DuckLakeAddFileOptions { HivePartitioning = true, AllowMissing = true });
+await tx.CommitAsync();
+```
+
+Each file's footer is read (not its data): columns are matched to the table's by name (struct fields by name, list
+elements and map keys and values by position), whatever field IDs the file has, and each must be readable as its
+column's type (a narrower integer into a wider one, millisecond into microsecond timestamps; not text into numbers).
+Missing columns read as their default and extra columns are ignored only when allowed; with `HivePartitioning`,
+columns the file lacks take their value from `name=value` segments of its path. The catalog gets what DuckDB 1.5.5
+writes for the same file, row for row: a `ducklake_column_mapping` of type `map_by_name` (its ID taken from
+`next_file_id` before the file's; files of one layout added in one commit share it), `ducklake_name_mapping` rows
+in the file's field order (a list's element under its repeated group's name, `list`), the data file by absolute path
+with `mapping_id`, and per-column statistics from the footer. Reads of any mapped file (DuckDB's or this library's)
+match by those names; deletes, updates and file rewrites work on them as on any other file. Adjacent-file merging
+leaves them alone, as their partition values live in their paths.
 
 ## Catalog objects
 
@@ -419,6 +447,20 @@ string>"]`) on a 4-core container, local disk, a 5-column table (bigint, varchar
 | Full scan of 1,000,000 rows (10 files) | 1.26 s (790,000 rows/s) | 1.74 s |
 | Delete 10% of 500,000 rows across 20 files | 0.55 s | 0.70 s |
 | 4 writers, 25 one-row commits each, at once | 100 commits in 1.1 s, none lost | 100 commits in 1.1 s, none lost |
+
+Features added later, SQLite catalog, same container:
+
+| Scenario | Result |
+|---|---|
+| Full scan of 1,000,000 rows as records (`ReadAsync<T>`) | 1.86 s (537,000 rows/s; 765,000 rows/s as physical values) |
+| Delete 10% of 500,000 rows across 20 files as deletion vectors (1.1) | 0.65 s (0.56 s as Parquet delete files); reading what is left 0.54 s |
+| Register 100 existing files of 1,000,000 rows (`AddDataFilesAsync`) | 0.22 s (footers only); reading them through the name mapping 0.63 s |
+| Insert 500,000 rows of `uint64`, `timestamp_ms`, `timetz`, `interval` | 2.05 s (244,000 rows/s); reading them 0.53 s |
+
+`ReadAsync<T>` compiles its binder once per read (a constructor and property setters as an expression tree, each
+column's conversion chosen once); binding by reflection per row ran at 336,000 rows/s. Name-mapped files are read
+by the same reader, matching by name instead of field ID, so they cost what other files do; registering a file
+reads only its footer (ranged reads for the last 64 KiB).
 
 What decides these numbers, and what was changed for them:
 
