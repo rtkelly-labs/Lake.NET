@@ -42,7 +42,7 @@ public abstract class EncryptionTests : IAsyncLifetime
     private static async Task<List<string>> RowsAsync(DuckLakeCatalog catalog) =>
         (await catalog.ReadAsync(await catalog.LoadTableAsync("main", "t"))).Select(r => $"{r[0]}:{r[1]}").Order(StringComparer.Ordinal).ToList();
 
-    [Fact]
+    [SkippableFact]
     [Spec("ducklake: ducklake_metadata")]
     [Spec("ducklake: ducklake_data_file")]
     [Spec("ducklake: ducklake_delete_file")]
@@ -77,7 +77,7 @@ public abstract class EncryptionTests : IAsyncLifetime
         Assert.Equal(await RowsAsync(catalog), await RowsAsync(reopened));
     }
 
-    [Fact]
+    [SkippableFact]
     public async Task Maintenance_and_flushes_write_encrypted_files_too()
     {
         var catalog = await LakeAsync(inlining: 5);
@@ -92,7 +92,7 @@ public abstract class EncryptionTests : IAsyncLifetime
         Assert.Empty(await _lake.SqlAsync("SELECT delete_file_id FROM ducklake_delete_file WHERE encryption_key IS NULL"));
     }
 
-    [Fact]
+    [SkippableFact]
     public async Task Existing_files_cannot_be_added_to_an_encrypted_lake()
     {
         var catalog = await LakeAsync();

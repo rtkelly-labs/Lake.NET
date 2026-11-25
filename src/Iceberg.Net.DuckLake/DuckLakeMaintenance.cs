@@ -9,7 +9,7 @@ public sealed record DuckLakeExpiry(IReadOnlyList<long> ExpiredSnapshots, IReadO
 /// <summary>
 /// Maintenance (DuckDB's <c>ducklake_expire_snapshots</c>, <c>ducklake_cleanup_old_files</c>,
 /// <c>ducklake_delete_orphaned_files</c>, <c>ducklake_merge_adjacent_files</c> and <c>ducklake_rewrite_data_files</c>),
-/// with the catalog effects DuckDB has (docs/ducklake.md, "Maintenance"). Nothing here deletes a file a retained
+/// with the catalog effects DuckDB has (docs/ducklake/operations.md, "Maintenance"). Nothing here deletes a file a retained
 /// snapshot can still read: expiry and compaction only schedule files (<c>ducklake_files_scheduled_for_deletion</c>),
 /// and cleanup deletes what was scheduled.
 /// </summary>

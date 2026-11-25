@@ -3,7 +3,7 @@
     <OutputType>Exe</OutputType>
     <IsPackable>false</IsPackable>
     <RootNamespace>Iceberg.Net.Tools.DuckLakeBench</RootNamespace>
-    <Description>Wall-clock benchmarks of Iceberg.Net.DuckLake on a SQLite or PostgreSQL catalog (docs/ducklake.md, Performance).</Description>
+    <Description>Wall-clock benchmarks of Iceberg.Net.DuckLake on a SQLite or PostgreSQL catalog (docs/ducklake/performance.md).</Description>
   </PropertyGroup>
   <ItemGroup>
     <ProjectReference Include="../../src/Iceberg.Net.DuckLake/Iceberg.Net.DuckLake.csproj" />

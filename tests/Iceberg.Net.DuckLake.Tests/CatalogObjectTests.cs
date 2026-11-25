@@ -46,6 +46,29 @@ public abstract class CatalogObjectTests : IAsyncLifetime
     }
 
     [SkippableFact]
+    [Spec("ducklake: ducklake_table")]
+    [Spec("ducklake: ducklake_view")]
+    public async Task Repeated_table_and_view_renames_keep_only_the_final_version()
+    {
+        var catalog = await LakeAsync();
+        var before = await CommitAsync(catalog, tx => tx.CreateViewAsync("main", "v", "SELECT 1"));
+        await CommitAsync(catalog, async tx =>
+        {
+            await tx.RenameTableAsync("main", "t", "a");
+            await tx.RenameTableAsync("main", "a", "b");
+            await tx.RenameViewAsync("main", "v", "va");
+            await tx.RenameViewAsync("main", "va", "vb");
+        });
+        Assert.Equal(["b"], await catalog.ListTablesAsync("main"));
+        Assert.Equal(["vb"], await catalog.ListViewsAsync("main"));
+        Assert.Single(await catalog.ReadAsync(await catalog.LoadTableAsync("main", "b")));
+        Assert.Single(await catalog.ReadAsync(await catalog.LoadTableAsync("main", "t", before.SnapshotId)));
+        Assert.Equal("SELECT 1", (await catalog.LoadViewAsync("main", "v", before.SnapshotId)).Sql);
+        Assert.Equal(2, (await SqlAsync("SELECT table_id FROM ducklake_table")).Count);
+        Assert.Equal(2, (await SqlAsync("SELECT view_id FROM ducklake_view")).Count);
+    }
+
+    [SkippableFact]
     [Spec("ducklake: ducklake_tag")]
     [Spec("ducklake: ducklake_column_tag")]
     public async Task Comments_and_tags_are_versioned_like_DuckDBs()

@@ -106,7 +106,12 @@ public sealed partial class DuckLakeTransaction
         _tables[(t.Schema.Name, newName)] = t;
         // A table created here has not written anything yet (AlterableAsync): its directory follows its name.
         if (t.Created) t.Location = t.Schema.Location + PathSegment(newName);
-        else _ops.Add(new RenameTableOp(t, old, newName));
+        else
+        {
+            var index = _ops.FindIndex(o => o is RenameTableOp r && r.Table == t);
+            if (index >= 0) _ops[index] = ((RenameTableOp)_ops[index]) with { NewName = newName };
+            else _ops.Add(new RenameTableOp(t, old, newName));
+        }
     }
 
     /// <summary>
@@ -178,7 +183,9 @@ public sealed partial class DuckLakeTransaction
         var old = view.Name;
         view.Name = newName;
         _views[(view.Schema.Name, newName)] = view;
-        _ops.Add(new RenameViewOp(view, old, newName));
+        var index = _ops.FindIndex(o => o is RenameViewOp r && r.View == view);
+        if (index >= 0) _ops[index] = ((RenameViewOp)_ops[index]) with { NewName = newName };
+        else _ops.Add(new RenameViewOp(view, old, newName));
     }
 
     public async Task DropViewAsync(string schema, string name, CancellationToken ct = default)

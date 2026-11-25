@@ -44,7 +44,7 @@ public abstract class DeletionVectorTests : IAsyncLifetime
     private static async Task<long[]> IdsAsync(DuckLakeCatalog catalog, long? snapshot = null) =>
         (await catalog.ReadAsync(await catalog.LoadTableAsync("main", "t", snapshot))).Select(r => (long)r[0]!).Order().ToArray();
 
-    [Fact]
+    [SkippableFact]
     [Spec("ducklake: ducklake_delete_file")]
     public async Task Deletes_are_written_as_bare_deletion_vectors_and_read_at_every_snapshot()
     {
@@ -61,7 +61,7 @@ public abstract class DeletionVectorTests : IAsyncLifetime
         Assert.Equal([1L, 2, 5], latest.Positions());
     }
 
-    [Fact]
+    [SkippableFact]
     public async Task The_lakes_option_decides_whether_vectors_are_written()
     {
         var catalog = await LakeAsync(vectors: false);
@@ -73,7 +73,7 @@ public abstract class DeletionVectorTests : IAsyncLifetime
         Assert.Equal(new long[] { 0, 3, 4, 5, 6, 7, 8, 9 }, await IdsAsync(catalog));
     }
 
-    [Fact]
+    [SkippableFact]
     public async Task A_Puffin_container_of_cumulative_vectors_reads_the_latest_vector_not_after_the_snapshot()
     {
         var catalog = await LakeAsync();
@@ -101,7 +101,7 @@ public abstract class DeletionVectorTests : IAsyncLifetime
         Assert.Equal(new long[] { 0, 2, 3, 4, 5, 6, 8, 9 }, await IdsAsync(catalog));
     }
 
-    [Fact]
+    [SkippableFact]
     public async Task Format_10_lakes_never_write_vectors()
     {
         var lake = new TestLake(_lake.Backend, DuckLakeCatalog.FormatVersion10);

@@ -5,7 +5,7 @@ using Iceberg.Net.TestSupport;
 namespace Iceberg.Net.DuckLake.Tests;
 
 /// <summary>
-/// Writing inlined data (docs/ducklake.md, "Data inlining"): small inserts and deletes kept in the catalog database, as
+/// Writing inlined data (docs/ducklake/operations.md, "Data inlining"): small inserts and deletes kept in the catalog database, as
 /// DuckDB 1.5.5 writes them (table and column types per database, system columns per format version, change kinds,
 /// counters), and flushing them to Parquet without changing what any snapshot reads. On every database and version.
 /// </summary>

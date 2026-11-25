@@ -1,4 +1,4 @@
-// Wall-clock benchmarks of Iceberg.Net.DuckLake (docs/ducklake.md, "Performance").
+// Wall-clock benchmarks of Iceberg.Net.DuckLake (docs/ducklake/performance.md).
 //
 //   dotnet run -c Release --project tools/DuckLakeBench [--postgres "<npgsql connection string to a server>"] [--scale n]
 //

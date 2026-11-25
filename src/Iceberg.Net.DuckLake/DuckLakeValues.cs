@@ -466,7 +466,7 @@ public sealed record DuckLakeColumnStats(long ColumnId, long ValueCount, long Nu
 /// <summary>
 /// Collects <see cref="DuckLakeColumnStats"/> for every primitive (leaf) column of the rows written to a file.
 /// <c>value_count</c> counts non-null values, as DuckDB writes and reads it; the spec's prose says "including NULL
-/// values", which DuckDB does not do (docs/ducklake.md, "Where the reference implementation and the spec differ").
+/// values", which DuckDB does not do (docs/ducklake/compatibility.md).
 /// A null parent (or an empty list or map) counts as one null of each leaf beneath it, as Parquet's definition levels do.
 /// </summary>
 internal sealed class StatsCollector

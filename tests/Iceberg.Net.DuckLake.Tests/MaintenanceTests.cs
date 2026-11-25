@@ -5,7 +5,7 @@ using Iceberg.Net.TestSupport;
 namespace Iceberg.Net.DuckLake.Tests;
 
 /// <summary>
-/// Maintenance (docs/ducklake.md, "Maintenance"): merging and rewriting files, expiring snapshots, deleting scheduled
+/// Maintenance (docs/ducklake/operations.md, "Maintenance"): merging and rewriting files, expiring snapshots, deleting scheduled
 /// and orphaned files. The invariant throughout: every snapshot that is kept reads exactly what it read before, with
 /// the same row IDs, and no file a kept snapshot reads is deleted. On every catalog database and format version.
 /// </summary>
