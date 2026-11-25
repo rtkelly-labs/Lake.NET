@@ -264,6 +264,122 @@ internal sealed class InlinedDataTableEntity
     public long SchemaVersion { get; set; }
 }
 
+internal sealed class FileScheduledForDeletionEntity
+{
+    public long DataFileId { get; set; }
+    public string Path { get; set; } = "";
+    public bool? PathIsRelative { get; set; }
+    public DateTimeOffset ScheduleStart { get; set; }
+}
+
+internal sealed class TagEntity : IVersioned
+{
+    public long ObjectId { get; set; }
+    public long BeginSnapshot { get; set; }
+    public long? EndSnapshot { get; set; }
+    public string Key { get; set; } = "";
+    public string? Value { get; set; }
+}
+
+internal sealed class ColumnTagEntity : IVersioned
+{
+    public long TableId { get; set; }
+    public long ColumnId { get; set; }
+    public long BeginSnapshot { get; set; }
+    public long? EndSnapshot { get; set; }
+    public string Key { get; set; } = "";
+    public string? Value { get; set; }
+}
+
+internal sealed class ViewEntity : IVersioned
+{
+    public long ViewId { get; set; }
+    public Guid? ViewUuid { get; set; }
+    public long BeginSnapshot { get; set; }
+    public long? EndSnapshot { get; set; }
+    public long SchemaId { get; set; }
+    public string? ViewName { get; set; }
+    public string? Dialect { get; set; }
+    public string? Sql { get; set; }
+    public string? ColumnAliases { get; set; }
+}
+
+/// <summary>1.1.</summary>
+internal sealed class ViewColumnTagEntity : IVersioned
+{
+    public long ViewId { get; set; }
+    public string ColumnName { get; set; } = "";
+    public long BeginSnapshot { get; set; }
+    public long? EndSnapshot { get; set; }
+    public string Key { get; set; } = "";
+    public string? Value { get; set; }
+}
+
+internal sealed class MacroEntity : IVersioned
+{
+    public long SchemaId { get; set; }
+    public long MacroId { get; set; }
+    public string? MacroName { get; set; }
+    public long BeginSnapshot { get; set; }
+    public long? EndSnapshot { get; set; }
+}
+
+internal sealed class MacroImplEntity
+{
+    public long MacroId { get; set; }
+    public long ImplId { get; set; }
+    public string? Dialect { get; set; }
+    public string? Sql { get; set; }
+    public string? Type { get; set; }
+}
+
+internal sealed class MacroParameterEntity
+{
+    public long MacroId { get; set; }
+    public long ImplId { get; set; }
+    public long ColumnId { get; set; }
+    public string? ParameterName { get; set; }
+    public string? ParameterType { get; set; }
+    public string? DefaultValue { get; set; }
+    public string? DefaultValueType { get; set; }
+}
+
+internal sealed class SortInfoEntity : IVersioned
+{
+    public long SortId { get; set; }
+    public long TableId { get; set; }
+    public long BeginSnapshot { get; set; }
+    public long? EndSnapshot { get; set; }
+}
+
+internal sealed class SortExpressionEntity
+{
+    public long SortId { get; set; }
+    public long TableId { get; set; }
+    public long SortKeyIndex { get; set; }
+    public string? Expression { get; set; }
+    public string? Dialect { get; set; }
+    public string? SortDirection { get; set; }
+    public string? NullOrder { get; set; }
+}
+
+internal sealed class ColumnMappingEntity
+{
+    public long MappingId { get; set; }
+    public long TableId { get; set; }
+    public string? Type { get; set; }
+}
+
+internal sealed class NameMappingEntity
+{
+    public long MappingId { get; set; }
+    public long ColumnId { get; set; }
+    public string? SourceName { get; set; }
+    public long TargetFieldId { get; set; }
+    public long? ParentColumn { get; set; }
+    public bool? IsPartition { get; set; }
+}
+
 internal sealed class MetadataEntity
 {
     public string Key { get; set; } = "";
@@ -296,6 +412,19 @@ internal sealed class DuckLakeDbContext(DbContextOptions<DuckLakeDbContext> opti
     public DbSet<SchemaVersionEntity> SchemaVersions => Set<SchemaVersionEntity>();
     public DbSet<InlinedDataTableEntity> InlinedDataTables => Set<InlinedDataTableEntity>();
     public DbSet<MetadataEntity> Metadata => Set<MetadataEntity>();
+    public DbSet<FileScheduledForDeletionEntity> FilesScheduledForDeletion => Set<FileScheduledForDeletionEntity>();
+    public DbSet<TagEntity> Tags => Set<TagEntity>();
+    public DbSet<ColumnTagEntity> ColumnTags => Set<ColumnTagEntity>();
+    public DbSet<ViewEntity> Views => Set<ViewEntity>();
+    /// <summary>1.1 catalogs only.</summary>
+    public DbSet<ViewColumnTagEntity> ViewColumnTags => Is11 ? Set<ViewColumnTagEntity>() : throw new NotSupportedException("ducklake_view_column_tag needs format 1.1");
+    public DbSet<MacroEntity> Macros => Set<MacroEntity>();
+    public DbSet<MacroImplEntity> MacroImpls => Set<MacroImplEntity>();
+    public DbSet<MacroParameterEntity> MacroParameters => Set<MacroParameterEntity>();
+    public DbSet<SortInfoEntity> SortInfos => Set<SortInfoEntity>();
+    public DbSet<SortExpressionEntity> SortExpressions => Set<SortExpressionEntity>();
+    public DbSet<ColumnMappingEntity> ColumnMappings => Set<ColumnMappingEntity>();
+    public DbSet<NameMappingEntity> NameMappings => Set<NameMappingEntity>();
 
     /// <summary>
     /// The connection and the transaction EF is using, for a statement EF cannot model (inlined tables, DDL). Take it
@@ -377,6 +506,28 @@ internal sealed class DuckLakeDbContext(DbContextOptions<DuckLakeDbContext> opti
         Table<SchemaVersionEntity>("ducklake_schema_versions", e => e.HasKey(x => new { x.TableId, x.BeginSnapshot }));
         Table<InlinedDataTableEntity>("ducklake_inlined_data_tables", e => e.HasKey(x => new { x.TableId, x.SchemaVersion }));
         Table<MetadataEntity>("ducklake_metadata", e => e.HasKey(x => new { x.Key, x.Value }));
+        Table<FileScheduledForDeletionEntity>("ducklake_files_scheduled_for_deletion", e =>
+        {
+            e.HasKey(x => new { x.DataFileId, x.Path });
+            if (sqlite) e.Property(x => x.ScheduleStart).HasConversion(time);
+            else e.Property(x => x.ScheduleStart).HasConversion(utc);
+        });
+        Table<TagEntity>("ducklake_tag", e => e.HasKey(x => new { x.ObjectId, x.Key, x.BeginSnapshot }));
+        Table<ColumnTagEntity>("ducklake_column_tag", e => e.HasKey(x => new { x.TableId, x.ColumnId, x.Key, x.BeginSnapshot }));
+        Table<ViewEntity>("ducklake_view", e =>
+        {
+            e.HasKey(x => new { x.ViewId, x.BeginSnapshot });
+            if (sqlite) e.Property(x => x.ViewUuid).HasConversion(uuid);
+        });
+        if (Is11) Table<ViewColumnTagEntity>("ducklake_view_column_tag", e => e.HasKey(x => new { x.ViewId, x.ColumnName, x.Key, x.BeginSnapshot }));
+        else m.Ignore<ViewColumnTagEntity>();
+        Table<MacroEntity>("ducklake_macro", e => e.HasKey(x => new { x.MacroId, x.BeginSnapshot }));
+        Table<MacroImplEntity>("ducklake_macro_impl", e => e.HasKey(x => new { x.MacroId, x.ImplId }));
+        Table<MacroParameterEntity>("ducklake_macro_parameters", e => e.HasKey(x => new { x.MacroId, x.ImplId, x.ColumnId }));
+        Table<SortInfoEntity>("ducklake_sort_info", e => { e.HasKey(x => x.SortId); e.Property(x => x.SortId).ValueGeneratedNever(); });
+        Table<SortExpressionEntity>("ducklake_sort_expression", e => e.HasKey(x => new { x.SortId, x.SortKeyIndex }));
+        Table<ColumnMappingEntity>("ducklake_column_mapping", e => { e.HasKey(x => x.MappingId); e.Property(x => x.MappingId).ValueGeneratedNever(); });
+        Table<NameMappingEntity>("ducklake_name_mapping", e => e.HasKey(x => new { x.MappingId, x.ColumnId }));
     }
 
     internal static string Snake(string pascal)

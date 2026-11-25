@@ -58,6 +58,8 @@ public static class LakeJson
             "uuid" => ((Guid)v).ToString("D"),
             "float32" when float.IsNaN((float)v) => "NaN",
             "float64" when double.IsNaN((double)v) => "NaN",
+            "float32" when float.IsInfinity((float)v) => (float)v > 0 ? "Infinity" : "-Infinity",
+            "float64" when double.IsInfinity((double)v) => (double)v > 0 ? "Infinity" : "-Infinity",
             "float32" => JsonValue.Create((double)(float)v),
             _ when v is IcebergDecimal d => d.ToString(),
             _ => JsonValue.Create(v),

@@ -28,6 +28,13 @@ public sealed record DuckLakeOptions
     /// latency-bound). Rows still come out in file order. 1 reads one file at a time.
     /// </summary>
     public int MaxParallelFileReads { get; init; } = 4;
+    /// <summary>
+    /// Data inlining (DuckDB's <c>data_inlining_row_limit</c>): an insert of at most this many rows is written into the
+    /// catalog database instead of a Parquet file, and a delete of at most this many rows from one data file is recorded
+    /// there instead of in a delete file. 0 (the default) turns it off; DuckDB's default is 10. A limit persisted in the
+    /// lake (<c>ducklake_metadata</c>, per table, schema or catalog) takes precedence, as in DuckDB.
+    /// </summary>
+    public int DataInliningRowLimit { get; init; }
 
     public const int DefaultRowGroupRows = 122_880;
 }
@@ -93,7 +100,7 @@ public sealed class DuckLakeNotFoundException(string message) : KeyNotFoundExcep
 /// exactly the catalog rows valid in it; writes go through <see cref="DuckLakeTransaction"/>, one snapshot per commit.
 /// Format versions 1.0 and 1.1 are both read and written; a new catalog is 1.1.
 /// </summary>
-public sealed class DuckLakeCatalog
+public sealed partial class DuckLakeCatalog
 {
     public const string FormatVersion10 = "1.0";
     public const string FormatVersion11 = "1.1";
@@ -454,7 +461,7 @@ public sealed class DuckLakeCatalog
     }
 
     /// <summary>Rows of a data file (<c>file_id</c>, position <c>row_id</c>) deleted in or before <paramref name="snapshot"/>.</summary>
-    private static async Task<Dictionary<long, HashSet<long>>> InlinedDeletionsAsync(DuckLakeDbContext db, long tableId, long snapshot, CancellationToken ct)
+    internal static async Task<Dictionary<long, HashSet<long>>> InlinedDeletionsAsync(DuckLakeDbContext db, long tableId, long snapshot, CancellationToken ct)
     {
         var result = new Dictionary<long, HashSet<long>>();
         var name = InlinedDeleteTable(tableId);

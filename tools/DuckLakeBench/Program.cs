@@ -61,6 +61,27 @@ await Scenario("small commits", async lake =>
     }
     return $"{commits} one-row commits: {Percentiles(latencies)}";
 });
+await Scenario("small commits, inlined (limit 10)", async lake =>
+{
+    await Create(lake, "t");
+    const int commits = 200;
+    var latencies = new List<double>();
+    for (var i = 0; i < commits; i++)
+    {
+        var sw = Stopwatch.StartNew();
+        await using var tx = lake.BeginTransaction();
+        await tx.InsertAsync("main", "t", [Row(i)]);
+        await tx.CommitAsync();
+        latencies.Add(sw.Elapsed.TotalMilliseconds);
+    }
+    var table = await lake.LoadTableAsync("main", "t");
+    var sw2 = Stopwatch.StartNew();
+    var count = (await lake.ReadAsync(table)).Count;
+    var read = sw2.Elapsed.TotalMilliseconds;
+    sw2.Restart();
+    await lake.FlushInlinedDataAsync();
+    return $"{commits} one-row commits: {Percentiles(latencies)}; reading the {count} inlined rows {read:F0} ms; flushing them {sw2.Elapsed.TotalMilliseconds:F0} ms";
+}, new DuckLakeOptions { DataInliningRowLimit = 10 });
 await Scenario("scan planning after 1,000 commits", async lake =>
 {
     await Create(lake, "t");
@@ -136,7 +157,7 @@ foreach (var (scenario, result) in results) Console.WriteLine($"| {scenario} | {
 Directory.Delete(root, recursive: true);
 return;
 
-async Task Scenario(string name, Func<DuckLakeCatalog, Task<string>> run)
+async Task Scenario(string name, Func<DuckLakeCatalog, Task<string>> run, DuckLakeOptions? options = null)
 {
     var dir = Path.Combine(root, results.Count.ToString(System.Globalization.CultureInfo.InvariantCulture));
     Directory.CreateDirectory(dir);
@@ -156,7 +177,7 @@ async Task Scenario(string name, Func<DuckLakeCatalog, Task<string>> run)
     }
     try
     {
-        var lake = await DuckLakeCatalog.CreateAsync(store, new LocalFileIO(), Path.Combine(dir, "data") + "/");
+        var lake = await DuckLakeCatalog.CreateAsync(store, new LocalFileIO(), Path.Combine(dir, "data") + "/", options);
         Console.Error.WriteLine($"{name}...");
         results.Add((name, await run(lake)));
     }

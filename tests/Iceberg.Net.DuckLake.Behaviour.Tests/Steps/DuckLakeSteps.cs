@@ -19,6 +19,10 @@ public sealed class DuckLakeWorld : IDisposable
     public long? Affected { get; set; }
     /// <summary>Transactions started but not yet committed, by writer name ("A", "B").</summary>
     public Dictionary<string, DuckLakeTransaction> Writers { get; } = [];
+    /// <summary>Rows (with row IDs) of every snapshot of a table, as remembered before maintenance.</summary>
+    public Dictionary<long, List<string>> History { get; } = [];
+    public IReadOnlyList<DuckLakeCompaction> Compactions { get; set; } = [];
+    public IReadOnlyList<string> CleanedUp { get; set; } = [];
 
     public TestLake L => Lake ?? throw new InvalidOperationException("No lake yet: start with 'Given a DuckLake on ...'");
     public DuckLakeCatalog C => Catalog ?? throw new InvalidOperationException("No catalog yet");
@@ -55,6 +59,13 @@ public sealed class DuckLakeSteps(DuckLakeWorld world)
     {
         world.Use(catalog == "SQLite" ? CatalogBackend.Sqlite : CatalogBackend.Postgres, version);
         world.Catalog = await world.L.CreateAsync();
+    }
+
+    [Given(@"a DuckLake on (SQLite|PostgreSQL) in format (1\.0|1\.1) that inlines inserts of up to (\d+) rows?")]
+    public async Task GivenAnInliningLake(string catalog, string version, int limit)
+    {
+        world.Use(catalog == "SQLite" ? CatalogBackend.Sqlite : CatalogBackend.Postgres, version);
+        world.Catalog = await world.L.CreateAsync(new DuckLakeOptions { DataInliningRowLimit = limit });
     }
 
     [Given(@"a DuckLake that DuckDB created on (SQLite|PostgreSQL) in format (1\.0|1\.1)")]
@@ -95,6 +106,7 @@ public sealed class DuckLakeSteps(DuckLakeWorld world)
     }
 
     [When(@"I delete from ""(.*)"" where (.*)")]
+    [Given(@"I deleted from ""(.*)"" where (.*)")]
     public async Task Delete(string name, string condition)
     {
         var (schema, table) = Split(name);
@@ -240,6 +252,92 @@ public sealed class DuckLakeSteps(DuckLakeWorld world)
     {
         world.Oracle.Require();
         Assert.Equal([$"[{expected}]"], await world.Oracle.RowsAsync(world.L, sql));
+    }
+
+    // ---- maintenance -----------------------------------------------------------------------------------------------
+
+    [Given(@"I remember every snapshot of ""(.*)""")]
+    [When(@"I remember every snapshot of ""(.*)""")]
+    public async Task Remember(string name)
+    {
+        world.History.Clear();
+        foreach (var (id, rows) in await HistoryAsync(name)) world.History[id] = rows;
+    }
+
+    private async Task<Dictionary<long, List<string>>> HistoryAsync(string name)
+    {
+        var (schema, table) = Split(name);
+        var result = new Dictionary<long, List<string>>();
+        foreach (var s in await world.C.ListSnapshotsAsync())
+        {
+            DuckLakeTable t;
+            try { t = await world.C.LoadTableAsync(schema, table, s.SnapshotId); }
+            catch (DuckLakeNotFoundException) { continue; }
+            var rows = new List<string>();
+            await foreach (var r in world.C.ReadRowsAsync(t)) rows.Add($"{r.RowId}: {string.Join(", ", r.Values)}");
+            result[s.SnapshotId] = rows.Order(StringComparer.Ordinal).ToList();
+        }
+        return result;
+    }
+
+    [When(@"I merge adjacent files")]
+    public async Task Merge() => world.Compactions = await world.C.MergeAdjacentFilesAsync();
+
+    [When(@"I rewrite files with at least (\d+)% deleted rows")]
+    public async Task Rewrite(int percent) => world.Compactions = await world.C.RewriteDataFilesAsync(deleteThreshold: percent / 100.0);
+
+    [When(@"I expire snapshots (.*)")]
+    public async Task Expire(string ids) =>
+        await world.C.ExpireSnapshotsAsync(ids.Split(',', StringSplitOptions.TrimEntries).Select(x => long.Parse(x, CultureInfo.InvariantCulture)).ToList());
+
+    [When(@"I flush the inlined data")]
+    public async Task FlushInlined() => world.Affected = (await world.C.FlushInlinedDataAsync()).Sum(f => f.RowsFlushed);
+
+    [Then(@"there (?:is|are) (\d+) data files? in storage")]
+    public void FilesInStorage(int n) => Assert.Equal(n, world.L.Files().Count(f => !f.EndsWith("-delete.parquet", StringComparison.Ordinal)));
+
+    [Then(@"""(.*)"" has (\d+) inlined rows?")]
+    public async Task InlinedRows(string name, int n)
+    {
+        var t = await LoadAsync(name);
+        long total = 0;
+        foreach (var r in await world.L.SqlAsync($"SELECT table_name FROM ducklake_inlined_data_tables WHERE table_id = {t.TableId}"))
+            total += (long)(await world.L.SqlAsync($"SELECT count(*) FROM {r[0]}"))[0][0]!;
+        Assert.Equal(n, total);
+    }
+
+    [When(@"I clean up old files")]
+    public async Task CleanUp() => world.CleanedUp = await world.C.CleanupOldFilesAsync();
+
+    [Then(@"(\d+) files? (?:was|were) compacted into (\d+)")]
+    public void Compacted(int processed, int created)
+    {
+        Assert.Equal(processed, world.Compactions.Sum(c => c.FilesProcessed));
+        Assert.Equal(created, world.Compactions.Sum(c => c.FilesCreated));
+    }
+
+    [Then(@"(\d+) files? (?:is|are) scheduled for deletion")]
+    public async Task Scheduled(int n) => Assert.Equal(n, (await world.L.SqlAsync("SELECT path FROM ducklake_files_scheduled_for_deletion")).Count);
+
+    [Then(@"(\d+) files? (?:was|were) deleted from storage")]
+    public void Deleted(int n)
+    {
+        Assert.Equal(n, world.CleanedUp.Count);
+        Assert.All(world.CleanedUp, f => Assert.False(File.Exists(f), f));
+    }
+
+    [Then(@"the snapshots are ""(.*)""")]
+    public async Task SnapshotsAre(string ids) =>
+        Assert.Equal(ids.Split(", ").Select(x => long.Parse(x, CultureInfo.InvariantCulture)), (await world.C.ListSnapshotsAsync()).Select(s => s.SnapshotId));
+
+    [Then(@"every remaining snapshot of ""(.*)"" reads as it did, row IDs included")]
+    public async Task SameHistory(string name)
+    {
+        var now = await HistoryAsync(name);
+        Assert.NotEmpty(now);
+        foreach (var (id, rows) in now)
+            if (world.History.TryGetValue(id, out var before)) Assert.Equal(before, rows);
+            else Assert.Equal(world.History[world.History.Keys.Max()], rows); // a maintenance snapshot reads as the latest did
     }
 
     // ---- outcomes --------------------------------------------------------------------------------------------------

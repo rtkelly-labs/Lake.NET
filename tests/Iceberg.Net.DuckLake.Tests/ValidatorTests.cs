@@ -51,8 +51,13 @@ public abstract class ValidatorTests : IDisposable
 
     [SkippableFact]
     [Spec("ducklake: ducklake_snapshot")]
-    public async Task A_gap_in_snapshot_ids() =>
-        Assert.Contains("consecutive", await ProblemsAfterAsync(await HealthyAsync(), "UPDATE ducklake_snapshot SET snapshot_id = 40 WHERE snapshot_id = (SELECT max(snapshot_id) FROM ducklake_snapshot)"));
+    public async Task A_row_no_retained_snapshot_can_see()
+    {
+        // Snapshot 1 removed by hand, without what expiry does: data file 0, ended at 2, is now visible nowhere.
+        var catalog = await HealthyAsync();
+        await _lake.ExecAsync("UPDATE ducklake_data_file SET end_snapshot = 2 WHERE data_file_id = 0");
+        Assert.Contains("visible in no retained snapshot", await ProblemsAfterAsync(catalog, "DELETE FROM ducklake_snapshot WHERE snapshot_id = 1"));
+    }
 
     [SkippableFact]
     [Spec("ducklake: ducklake_delete_file")]

@@ -173,24 +173,18 @@ NOT_IMPLEMENTED = {
             "ducklake_column_mapping": "files added without field IDs (name mapping) are rejected",
             "ducklake_name_mapping": "files added without field IDs (name mapping) are rejected",
             "ducklake_file_variant_stats": "variant type not implemented",
-            "ducklake_files_scheduled_for_deletion": "no maintenance (expiry, cleanup) yet",
             "semi-structured-types": "variant type not implemented",
             "geometry-types": "geometry type not implemented",
             "extra-statistics": "geometry and variant statistics not implemented",
             "geometry": "geometry type not implemented",
             "variant": "variant type not implemented",
-            "type-encoding-for-data-inlining": "inlined rows are read, never written",
-            "postgresql-catalog": "tested on SQLite catalogs only",
             # DuckDB's own inlining settings and maintenance calls: extension behaviour, not format.
             **{
                 k: "DuckDB extension setting or function, not part of the format"
                 for k in (
-                    "configuring-data-inlining",
                     "global-default",
                     "per-connection-override",
                     "per-attach-override",
-                    "persistent-override",
-                    "flushing-inlined-data",
                     "return-values",
                     "sorted-flush",
                     "interaction-with-auto_compact",
@@ -457,7 +451,7 @@ def cmd_matrix(check: bool) -> int:
         "spec": "Table spec (format/spec.md)",
         "puffin": "Puffin (format/puffin-spec.md)",
         "rest": "REST catalog operations (OpenAPI)",
-        "ducklake": "DuckLake 1.0 (duckdb/ducklake-web docs/stable/specification, conflict resolution, data inlining)",
+        "ducklake": "DuckLake 1.1 (duckdb/ducklake-web docs/stable/specification, conflict resolution, data inlining)",
     }
     for doc, secs in snap["sections"].items():
         out += [

@@ -14,7 +14,9 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 - `Iceberg.Net.DuckLake` (not yet packed): the DuckLake 1.0 and 1.1 table formats on the Iceberg data plane — an
   EF Core catalog on SQLite or PostgreSQL (the databases DuckDB attaches), nested schemas and the `null` type (1.1), snapshots and time travel, schema/table DDL, inserts with file and table statistics,
   merge-on-read deletes, UPDATE, schema evolution, partitioned writes, DuckDB's inlined rows and partial files on
-  read, the spec's conflict resolution on commit, and `DuckLakeValidator` for whole-lake consistency checks. DuckDB's `ducklake` extension is the cross-engine oracle in both
+  read, the spec's conflict resolution on commit, `DuckLakeValidator` for whole-lake consistency checks, and maintenance
+  (merging and rewriting files, snapshot expiry, scheduled and orphaned file cleanup) interoperable with DuckDB's.
+  Data inlining (small inserts and deletes kept in the catalog database, as DuckDB writes them) and flushing it to Parquet. DuckDB's `ducklake` extension is the cross-engine oracle in both
   directions on both databases, with a BDD specification and model-based property tests; DuckLake spec sections are
   pinned and traced like Iceberg's ([docs/ducklake.md](docs/ducklake.md)).
 

@@ -29,13 +29,14 @@ public static class DuckLakeValidator
         void Problem(string where, string what) => problems.Add(new DuckLakeProblem(where, what));
         await using var db = catalog.Context();
 
-        // ducklake_snapshot: IDs 0..n without gaps, counters never going back, changes that parse.
+        // ducklake_snapshot: counters never going back, changes that parse. Expiry leaves gaps (any snapshot but the
+        // latest can go), but every snapshot ID that ever existed has a changes row (the spec keeps them on expiry;
+        // DuckDB 1.5.5 does not, so a missing one is not a problem).
         var snapshots = await db.Snapshots.OrderBy(s => s.SnapshotId).ToListAsync(ct);
-        if (snapshots.Count == 0 || snapshots[0].SnapshotId != 0) Problem("ducklake_snapshot", "snapshot 0 is missing");
+        if (snapshots.Count == 0) Problem("ducklake_snapshot", "there are no snapshots");
         for (var i = 1; i < snapshots.Count; i++)
         {
             var (prev, s) = (snapshots[i - 1], snapshots[i]);
-            if (s.SnapshotId != prev.SnapshotId + 1) Problem($"snapshot {s.SnapshotId}", $"follows snapshot {prev.SnapshotId} (snapshot IDs are consecutive)");
             if (s.SchemaVersion < prev.SchemaVersion) Problem($"snapshot {s.SnapshotId}", "schema_version went back");
             if (s.NextCatalogId < prev.NextCatalogId) Problem($"snapshot {s.SnapshotId}", "next_catalog_id went back");
             if (s.NextFileId < prev.NextFileId) Problem($"snapshot {s.SnapshotId}", "next_file_id went back");
@@ -60,13 +61,17 @@ public static class DuckLakeValidator
         if (Math.Max(maxData, maxDelete) >= latest.NextFileId)
             Problem("ducklake_snapshot", $"next_file_id {latest.NextFileId} is not above every data and delete file ID");
 
-        // Versioned rows: begin before end, both naming existing snapshots.
+        // Versioned rows: begin before end, neither after the latest snapshot, and (expiry's rule) visible in at least
+        // one retained snapshot.
         var ids = snapshots.Select(s => s.SnapshotId).ToHashSet();
+        var retained = snapshots.Select(s => s.SnapshotId).ToArray();
         void Range(string where, long begin, long? end)
         {
-            if (!ids.Contains(begin)) Problem(where, $"begin_snapshot {begin} is not a snapshot");
+            if (begin > latest.SnapshotId) Problem(where, $"begin_snapshot {begin} is after the latest snapshot {latest.SnapshotId}");
             if (end is { } e && e <= begin) Problem(where, $"end_snapshot {e} is not after begin_snapshot {begin}");
-            if (end is { } e2 && !ids.Contains(e2)) Problem(where, $"end_snapshot {e2} is not a snapshot");
+            if (end is { } e2 && e2 > latest.SnapshotId) Problem(where, $"end_snapshot {e2} is after the latest snapshot {latest.SnapshotId}");
+            if (end is { } e3 && e3 > begin && !retained.Any(s => s >= begin && s < e3))
+                Problem(where, $"is visible in no retained snapshot ({begin} to {e3}) but was not expired");
         }
         var dataFiles = await db.DataFiles.ToListAsync(ct);
         var deleteFiles = await db.DeleteFiles.ToListAsync(ct);
@@ -85,6 +90,12 @@ public static class DuckLakeValidator
                 Problem($"delete file {d.DeleteFileId}", $"is live outside the life of data file {f.DataFileId}");
             if (d.DeleteCount is { } n && n > f.RecordCount) Problem($"delete file {d.DeleteFileId}", $"deletes {n} of {f.RecordCount} rows");
         }
+
+        // Nothing scheduled for deletion is still referenced.
+        var scheduled = (await db.FilesScheduledForDeletion.ToListAsync(ct)).Select(f => (f.DataFileId, f.Path)).ToList();
+        foreach (var (id, path) in scheduled)
+            if (dataById.ContainsKey(id) || deleteFiles.Any(d => d.DeleteFileId == id))
+                Problem($"scheduled file {id}", $"{path} is scheduled for deletion but still in the catalog");
 
         // Per snapshot: at most one delete file per data file; live tables have a valid column tree; row IDs do not overlap.
         foreach (var s in ids)
