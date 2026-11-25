@@ -26,8 +26,12 @@ namespace Iceberg.Net.Regression.Tests;
 ///   each partitioned case also runs one equality filter on a partition source through both scans: the full-table
 ///   fingerprint reads every file, so a wrong partition value only shows once a filter prunes by it. Half of them also
 ///   evolve the schema after the first batch (add, drop, rename, promote, and re-add a dropped name with a new field ID),
-///   so later batches and every read meet files written under an older schema.</item>
-///   <item>PyIceberg writes (oracle <c>write-arrow</c>, from an Arrow IPC file of the same rows), both read.</item>
+///   so later batches and every read meet files written under an older schema. Half of them evolve the partition spec
+///   as well (add, remove, rename, and re-add a removed field), one change per batch boundary, so one table holds files
+///   written under several specs and the filter is projected through each of them.</item>
+///   <item>PyIceberg writes (oracle <c>write-arrow</c>, from Arrow IPC files of the same rows and a plan of the same
+///   partitioning, schema changes and spec changes, applied through PyIceberg's own API), both read; the filter runs
+///   here too, now pruning in .NET by the partition values and metrics PyIceberg wrote. No deletes in this direction.</item>
 /// </list>
 /// A disagreement is shrunk (drop columns, drop the delete, merge batches, drop rows) and the smallest failing table
 /// is kept under ICEBERG_DIFFERENTIAL_OUT. Off unless ICEBERG_DIFFERENTIAL_SECONDS is set (the <c>differential</c>
@@ -38,6 +42,7 @@ namespace Iceberg.Net.Regression.Tests;
 [Spec("Scan Planning")]
 [Spec("Nested Types")]
 [Spec("Partition Transforms")]
+[Spec("Partition Evolution")]
 public sealed class GeneratedDifferentialTests(ITestOutputHelper output) : IDisposable
 {
     private static string? Env(string name) => Environment.GetEnvironmentVariable(name) is { Length: > 0 } v ? v : null;
@@ -76,13 +81,14 @@ public sealed class GeneratedDifferentialTests(ITestOutputHelper output) : IDisp
         var oracleTime = TimeSpan.Zero;
         var rawSeen = new HashSet<string>(StringComparer.Ordinal);
         var repeats = 0;
-        var (partitioned, filtered, evolved) = (0, 0, 0);
+        var (partitioned, filtered, evolved, specEvolved) = (0, 0, 0, 0);
         for (var seed = BaseSeed; budget.Elapsed < TimeSpan.FromSeconds(Seconds!.Value); seed++)
         {
-            var c = Case.Generate(seed, maxFormatVersion, partitioned: direction == "dotnet-writes");
+            var c = Case.Generate(seed, maxFormatVersion, deletes: direction == "dotnet-writes");
             if (c.Partition is { Count: > 0 }) partitioned++;
             if (c.Filter is not null) filtered++;
             if (c.Evolution is { Count: > 0 }) evolved++;
+            if (c.SpecEvolution is { Count: > 0 }) specEvolved++;
             var started = Stopwatch.StartNew();
             var outcome = await run(c, Path.Combine(_root, $"s{seed}"));
             oracleTime += started.Elapsed;
@@ -117,6 +123,7 @@ public sealed class GeneratedDifferentialTests(ITestOutputHelper output) : IDisp
                 ["partition"] = shrunk.PartitionText,
                 ["filter"] = shrunk.Filter?.ToString(),
                 ["evolution"] = shrunk.EvolutionText,
+                ["spec_evolution"] = shrunk.SpecEvolutionText,
                 ["original_schema"] = c.Schema.ToString(),
             });
             output.WriteLine($"seed {seed}: {last.Category}: {Truncate(last.Detail, 300)} (shrunk to {shrunk.Schema.Columns.Count} columns, {shrunk.Rows.Count} rows)");
@@ -132,6 +139,7 @@ public sealed class GeneratedDifferentialTests(ITestOutputHelper output) : IDisp
             ["partitioned_cases"] = partitioned,
             ["filtered_cases"] = filtered,
             ["evolved_cases"] = evolved,
+            ["spec_evolved_cases"] = specEvolved,
             ["outcomes"] = new JsonObject(byCategory.Select(kv => KeyValuePair.Create(kv.Key, (JsonNode?)kv.Value))),
             ["distinct_disagreements"] = signatures.Count,
             ["repeated_symptoms_not_shrunk"] = repeats,
@@ -258,25 +266,63 @@ public sealed class GeneratedDifferentialTests(ITestOutputHelper output) : IDisp
 
     /// <summary>truncate[W] of an int or long within W of the type's minimum: v - (((v % W) + W) % W) overflows. Java's
     /// reference implementation and .NET wrap; PyIceberg's Python integers do not, so its projected literal never
-    /// matches the written partition value.</summary>
+    /// matches the written partition value. Any spec the table ever had counts: files written under it are still read.</summary>
     private static bool TruncateOverflows(Case c, FilterPick f) =>
-        c.Partition?.Any(p => p.Column == f.Column && p.Transform is TruncateTransform t && f.Value switch
+        c.EveryPartitionField.Any(p => p.Column == f.Column && p.Transform is TruncateTransform t && f.Value switch
         {
             int i => i < int.MinValue + t.Width,
             long l => l < long.MinValue + t.Width,
             _ => false,
-        }) == true;
+        });
 
     private static async Task<Outcome> PyIcebergWritesAsync(Case c, string dir)
     {
         Directory.CreateDirectory(dir);
-        var ipc = Path.Combine(dir, "rows.arrow");
+        // The same sequence WriteWithDotnetAsync runs, as a plan for the oracle: batches as Arrow IPC files (the first in
+        // the original schema, the rest in the evolved one), with the schema and spec changes between them. Partition
+        // fields get explicit names, so a later removal or rename can name them.
+        var steps = new JsonArray();
+        var names = new Dictionary<PartitionPick, string>();
+        JsonNode SpecOp(SpecChange change)
+        {
+            switch (change)
+            {
+                case SpecAdd add:
+                    names[add.Field] = add.Name;
+                    return new JsonObject { ["op"] = "add", ["column"] = add.Column, ["transform"] = add.Transform.ToString(), ["name"] = add.Name };
+                case SpecRename rename:
+                    var old = names[rename.Field];
+                    names[rename.Field] = rename.NewName;
+                    return new JsonObject { ["op"] = "rename", ["name"] = old, ["to"] = rename.NewName };
+                default:
+                    var gone = names[change.Field];
+                    names.Remove(change.Field);
+                    return new JsonObject { ["op"] = "remove", ["name"] = gone };
+            }
+        }
+        if (c.Partition is { Count: > 0 } partition)
+            steps.Add(new JsonObject { ["spec"] = new JsonArray(partition.Select((p, i) => SpecOp(new SpecAdd(p.Column, p.Transform, $"{p.Column}_p{i}"))).ToArray()) });
+        var chunks = c.Chunks();
+        var evolved = c.EvolvedSchema();
+        var first = Path.Combine(dir, "rows0.arrow");
         try
         {
-            await using var stream = File.Create(ipc);
-            using var writer = new ArrowFileWriter(stream, ArrowInterop.ToArrow(c.Schema));
-            await writer.WriteRecordBatchAsync(ArrowInterop.ToRecordBatch(c.Schema, c.Rows));
-            await writer.WriteEndAsync();
+            for (var i = 0; i < chunks.Count; i++)
+            {
+                var ipc = Path.Combine(dir, $"rows{i}.arrow");
+                var schema = i == 0 ? c.Schema : evolved;
+                await using (var stream = File.Create(ipc))
+                using (var writer = new ArrowFileWriter(stream, ArrowInterop.ToArrow(schema)))
+                {
+                    await writer.WriteRecordBatchAsync(ArrowInterop.ToRecordBatch(schema, chunks[i]));
+                    await writer.WriteEndAsync();
+                }
+                steps.Add(new JsonObject { ["append"] = ipc });
+                if (i == 0 && c.Evolution is { Count: > 0 } evolution)
+                    steps.Add(new JsonObject { ["schema"] = new JsonArray(evolution.Select(e => e.Json()).ToArray()) });
+                foreach (var change in c.SpecChangesAfter(i, chunks.Count))
+                    steps.Add(new JsonObject { ["spec"] = new JsonArray(SpecOp(change)) });
+            }
         }
         catch (Exception e)
         {
@@ -285,7 +331,9 @@ public sealed class GeneratedDifferentialTests(ITestOutputHelper output) : IDisp
         string location;
         try
         {
-            var written = await TestEnvironment.Current.OracleAsync("write-arrow", Path.Combine(dir, "warehouse"), ipc, c.FormatVersion.ToString(System.Globalization.CultureInfo.InvariantCulture));
+            var plan = Path.Combine(dir, "plan.json");
+            await File.WriteAllTextAsync(plan, new JsonObject { ["steps"] = steps }.ToJsonString());
+            var written = await TestEnvironment.Current.OracleAsync("write-arrow", Path.Combine(dir, "warehouse"), first, c.FormatVersion.ToString(System.Globalization.CultureInfo.InvariantCulture), plan);
             location = written["metadata_location"]!.GetValue<string>();
         }
         catch (Exception e)
@@ -295,6 +343,16 @@ public sealed class GeneratedDifferentialTests(ITestOutputHelper output) : IDisp
             if (e.Message.Contains("cannot be viewed as non-nullable", StringComparison.Ordinal)
                 || e.Message.Contains("non-nullable but contains nulls", StringComparison.Ordinal))
                 return new(KnownLimitation, "");
+            // PyIceberg 0.12 cannot append to a spec with two fields on one source column (PartitionKey.partition
+            // insists on one field per source); the spec allows it, and .NET and Java write such tables.
+            if (e.Message.Contains("Cannot have redundant partitions", StringComparison.Ordinal)
+                && c.EveryPartitionField.GroupBy(p => p.Column).Any(g => g.Count() > 1))
+                return new("known-pyiceberg-two-fields-one-source", "");
+            // Nor to a bucket over a time column: its partition value conversion for time takes a datetime.time and
+            // is handed the bucket number.
+            if (e.Message.Contains("'int' object has no attribute 'hour'", StringComparison.Ordinal)
+                && c.EveryPartitionField.Any(p => p.Transform is BucketTransform && c.Schema.Columns.Any(col => col.Name == p.Column && col.Type.TypeId == TypeId.Time)))
+                return new("known-pyiceberg-bucket-over-time", "");
             return new("pyiceberg-write-failed", LastLine(e.Message));
         }
         Table t;
@@ -308,7 +366,8 @@ public sealed class GeneratedDifferentialTests(ITestOutputHelper output) : IDisp
         {
             return new("dotnet-load-failed", e.GetType().Name + ": " + e.Message);
         }
-        return await CompareAsync(t, c.Rows.Count);
+        var outcome = await CompareAsync(t, c.ExpectedRows);
+        return outcome != Outcome.Agree || c.Filter is null ? outcome : await CompareFilteredAsync(t, c);
     }
 
     private static async Task<Outcome> CompareAsync(Table t, int expectedRows)
@@ -392,6 +451,12 @@ public sealed class GeneratedDifferentialTests(ITestOutputHelper output) : IDisp
 
         /// <summary>Reshape a row of the old schema (column names in <paramref name="names"/>, updated in place).</summary>
         public abstract object?[] Reshape(object?[] row, List<string> names);
+
+        /// <summary>The same change to a column list. Field IDs only need to be distinct: the oracle resolves by name.</summary>
+        public abstract void Evolve(List<NestedField> columns);
+
+        /// <summary>The change as a schema op of the oracle's write plan.</summary>
+        public abstract JsonNode Json();
     }
 
     /// <summary>An optional long, filled from the row id; reuses a dropped column's name when one precedes it, which a
@@ -407,6 +472,11 @@ public sealed class GeneratedDifferentialTests(ITestOutputHelper output) : IDisp
             return [.. row, id % 3 == 0 ? null : id * 7 - 11];
         }
 
+        public override void Evolve(List<NestedField> columns) =>
+            columns.Add(NestedField.Optional(new Schema(0, columns).HighestFieldId + 1, Column, PrimitiveType.Long));
+
+        public override JsonNode Json() => new JsonObject { ["op"] = "add", ["column"] = Column };
+
         public override string ToString() => $"add {Column} long";
     }
 
@@ -421,6 +491,10 @@ public sealed class GeneratedDifferentialTests(ITestOutputHelper output) : IDisp
             return row.Where((_, j) => j != i).ToArray();
         }
 
+        public override void Evolve(List<NestedField> columns) => columns.RemoveAt(columns.FindIndex(c => c.Name == Column));
+
+        public override JsonNode Json() => new JsonObject { ["op"] = "drop", ["column"] = Column };
+
         public override string ToString() => $"drop {Column}";
     }
 
@@ -433,6 +507,14 @@ public sealed class GeneratedDifferentialTests(ITestOutputHelper output) : IDisp
             names[names.IndexOf(Column)] = NewName;
             return row;
         }
+
+        public override void Evolve(List<NestedField> columns)
+        {
+            var i = columns.FindIndex(c => c.Name == Column);
+            columns[i] = columns[i] with { Name = NewName };
+        }
+
+        public override JsonNode Json() => new JsonObject { ["op"] = "rename", ["column"] = Column, ["to"] = NewName };
 
         public override string ToString() => $"rename {Column} to {NewName}";
     }
@@ -455,13 +537,65 @@ public sealed class GeneratedDifferentialTests(ITestOutputHelper output) : IDisp
             return copy;
         }
 
+        public override void Evolve(List<NestedField> columns)
+        {
+            var i = columns.FindIndex(c => c.Name == Column);
+            columns[i] = columns[i] with { Type = To };
+        }
+
+        public override JsonNode Json() => new JsonObject { ["op"] = "promote", ["column"] = Column, ["to"] = To.TypeId == TypeId.Long ? "long" : "double" };
+
         public override string ToString() => $"promote {Column} to {To}";
     }
 
+    /// <summary>One partition spec change, committed on its own. The field it concerns is named by source column and
+    /// transform; its partition field name is looked up in the table's default spec when the change is applied.</summary>
+    private abstract record SpecChange(string Column, Transform Transform)
+    {
+        public PartitionPick Field => new(Column, Transform);
+
+        public abstract void Apply(PartitionSpecUpdate update, Table t);
+
+        protected string FieldName(Table t)
+        {
+            var source = t.Schema.FindField(Column)!.Id;
+            return t.Spec.Fields.First(f => f.SourceId == source && f.Transform.Equals(Transform)).Name;
+        }
+    }
+
+    /// <summary>A new field, or a removed one again (which gets its old field ID back under a new name).</summary>
+    private sealed record SpecAdd(string Column, Transform Transform, string Name) : SpecChange(Column, Transform)
+    {
+        public override void Apply(PartitionSpecUpdate update, Table t) => update.AddField(Column, Transform, Name);
+
+        public override string ToString() => $"add {Transform}({Column}) as {Name}";
+    }
+
+    private sealed record SpecRemove(string Column, Transform Transform) : SpecChange(Column, Transform)
+    {
+        public override void Apply(PartitionSpecUpdate update, Table t) => update.RemoveField(FieldName(t));
+
+        public override string ToString() => $"remove {Transform}({Column})";
+    }
+
+    private sealed record SpecRename(string Column, Transform Transform, string NewName) : SpecChange(Column, Transform)
+    {
+        public override void Apply(PartitionSpecUpdate update, Table t) => update.RenameField(FieldName(t), NewName);
+
+        public override string ToString() => $"rename {Transform}({Column}) to {NewName}";
+    }
+
     private sealed record Case(int Seed, int FormatVersion, Schema Schema, List<object?[]> Rows, int Batches, DeleteSpec? Delete,
-        IReadOnlyList<PartitionPick>? Partition = null, FilterPick? Filter = null, IReadOnlyList<SchemaChange>? Evolution = null)
+        IReadOnlyList<PartitionPick>? Partition = null, FilterPick? Filter = null, IReadOnlyList<SchemaChange>? Evolution = null,
+        IReadOnlyList<SpecChange>? SpecEvolution = null)
     {
         public string? EvolutionText => Evolution is { Count: > 0 } e ? string.Join("; ", e) : null;
+
+        public string? SpecEvolutionText => SpecEvolution is { Count: > 0 } e ? string.Join("; ", e) : null;
+
+        /// <summary>Every partition field some spec of the table has had.</summary>
+        public IEnumerable<PartitionPick> EveryPartitionField =>
+            (Partition ?? []).Concat((SpecEvolution ?? []).OfType<SpecAdd>().Select(a => a.Field)).Distinct();
 
         public int ExpectedRows => Delete is null ? Rows.Count : Rows.Count(r => !Delete.Deletes((long)r[0]!));
 
@@ -486,19 +620,45 @@ public sealed class GeneratedDifferentialTests(ITestOutputHelper output) : IDisp
                 spec = builder.Build();
             }
             var t = await catalog.CreateTableAsync(new CreateTableRequest(TableIdentifier.Of("gen", "t"), Schema, Spec: spec, FormatVersion: FormatVersion));
-            var size = Math.Max(1, (Rows.Count + Batches - 1) / Batches);
-            var chunks = Rows.Chunk(size).ToList();
-            await TableMutations.InsertAsync(t, chunks[0]);
-            if (Evolution is { Count: > 0 } evolution)
+            var chunks = Chunks();
+            for (var i = 0; i < chunks.Count; i++)
             {
-                await t.UpdateSchemaAsync(update =>
+                await TableMutations.InsertAsync(t, chunks[i]);
+                if (i == 0 && Evolution is { Count: > 0 } evolution)
                 {
-                    foreach (var change in evolution) change.Apply(update);
-                });
+                    await t.UpdateSchemaAsync(update =>
+                    {
+                        foreach (var change in evolution) change.Apply(update);
+                    });
+                }
+                foreach (var change in SpecChangesAfter(i, chunks.Count)) await t.UpdateSpecAsync(update => change.Apply(update, t));
             }
-            foreach (var chunk in chunks.Skip(1)) await TableMutations.InsertAsync(t, chunk.Select(Reshape).ToList());
             if (Delete is { } d) await TableMutations.DeleteWhereAsync(t, r => d.Deletes((long)r[0]!), d.Strategy);
             return t;
+        }
+
+        /// <summary>The rows in batches: the first in the original schema's shape, the rest in the evolved schema's.</summary>
+        public List<IReadOnlyList<object?[]>> Chunks()
+        {
+            var size = Math.Max(1, (Rows.Count + Batches - 1) / Batches);
+            return Rows.Chunk(size).Select((chunk, i) => i == 0 ? (IReadOnlyList<object?[]>)chunk : chunk.Select(Reshape).ToList()).ToList();
+        }
+
+        /// <summary>One spec change after each batch, each its own commit; the last batch is followed by all that remain.</summary>
+        public IEnumerable<SpecChange> SpecChangesAfter(int batch, int batches)
+        {
+            var changes = SpecEvolution ?? [];
+            var from = Math.Min(batch, changes.Count);
+            var until = batch == batches - 1 ? changes.Count : Math.Min(batch + 1, changes.Count);
+            return changes.Skip(from).Take(until - from);
+        }
+
+        /// <summary>The schema after <see cref="Evolution"/>, for the Arrow files of later batches.</summary>
+        public Schema EvolvedSchema()
+        {
+            var columns = Schema.Columns.ToList();
+            foreach (var change in Evolution ?? []) change.Evolve(columns);
+            return new Schema(0, columns);
         }
 
         /// <summary>A generated row in the evolved schema's shape.</summary>
@@ -517,9 +677,19 @@ public sealed class GeneratedDifferentialTests(ITestOutputHelper output) : IDisp
             if (Rows.Count > 1) yield return this with { Rows = Rows.Skip(Rows.Count / 2).ToList() };
             for (var c = Schema.Columns.Count - 1; c >= 1; c--) yield return WithoutColumn(c);
             if (Delete is not null) yield return this with { Delete = null };
-            if (Partition is { Count: > 0 }) yield return this with { Partition = null };
+            if (Partition is { Count: > 0 }) yield return WithSpecs(null, SpecEvolution);
             if (Partition is { Count: > 1 })
-                foreach (var p in Partition) yield return this with { Partition = [p] };
+                foreach (var p in Partition) yield return WithSpecs([p], SpecEvolution);
+            if (SpecEvolution is { Count: > 0 } specEvolution)
+            {
+                yield return this with { SpecEvolution = null };
+                if (specEvolution.Count > 1)
+                    for (var e = 0; e < specEvolution.Count; e++)
+                    {
+                        var skip = e;
+                        yield return WithSpecs(Partition, specEvolution.Where((_, i) => i != skip));
+                    }
+            }
             if (Evolution is { Count: > 0 } evolution)
             {
                 yield return this with { Evolution = null };
@@ -539,15 +709,31 @@ public sealed class GeneratedDifferentialTests(ITestOutputHelper output) : IDisp
                 }
         }
 
-        private Case WithoutColumn(int c) => this with
+        private Case WithoutColumn(int c) => (this with
         {
             Schema = new Schema(0, Schema.Columns.Where((_, i) => i != c)),
             Rows = Rows.Select(r => r.Where((_, i) => i != c).ToArray()).ToList(),
-            Partition = Partition?.Where(p => p.Column != Schema.Columns[c].Name).ToList(),
             Filter = Filter?.Column == Schema.Columns[c].Name ? null : Filter,
             // A change to the removed column goes with it; so does an add that reused its name.
             Evolution = Evolution?.Where(e => e.Column != Schema.Columns[c].Name).ToList(),
-        };
+        }).WithSpecs(Partition?.Where(p => p.Column != Schema.Columns[c].Name).ToList(), SpecEvolution?.Where(e => e.Column != Schema.Columns[c].Name));
+
+        /// <summary>A smaller initial spec or change list, keeping only the changes that still apply: a removal or
+        /// rename needs its field to be there, an add needs it not to be.</summary>
+        private Case WithSpecs(IReadOnlyList<PartitionPick>? partition, IEnumerable<SpecChange>? changes)
+        {
+            if (changes is null) return this with { Partition = partition };
+            var current = (partition ?? []).ToList();
+            var kept = new List<SpecChange>();
+            foreach (var change in changes)
+            {
+                if ((change is SpecAdd) == current.Contains(change.Field)) continue;
+                if (change is SpecAdd) current.Add(change.Field);
+                else if (change is SpecRemove) current.Remove(change.Field);
+                kept.Add(change);
+            }
+            return this with { Partition = partition, SpecEvolution = kept };
+        }
 
         /// <summary>Half the cases get one to three schema changes after the first batch, over top-level columns other
         /// than the id, the filter column and partition sources; each column changes at most once. A separate Random,
@@ -599,6 +785,73 @@ public sealed class GeneratedDifferentialTests(ITestOutputHelper output) : IDisp
             return changes;
         }
 
+        /// <summary>Half the cases get one to three partition spec changes: add a field (preferring a second transform on
+        /// the filter column), remove one (preferring the filter column's), rename one, or re-add a removed one. Sources
+        /// are columns no schema change touches, so every change resolves against the evolved schema too. A case with no
+        /// filter gets one on an added field's source. A separate Random, so everything else about a seed stays as before.</summary>
+        private static (List<SpecChange>?, FilterPick?) SpecEvolutionFor(int seed, Schema schema, List<object?[]> rows,
+            IReadOnlyList<PartitionPick>? partition, FilterPick? filter, IReadOnlyList<SchemaChange>? evolution)
+        {
+            var r = new Random(seed ^ 0x51A7E5EC);
+            if (r.Next(2) == 0) return (null, null);
+            var touched = (evolution ?? []).Select(e => e.Column).ToHashSet(StringComparer.Ordinal);
+            var sources = schema.Columns.Where(c => PartitionSource(c.Type) && !touched.Contains(c.Name)).ToList();
+            var current = (partition ?? []).ToList();
+            var removed = new List<PartitionPick>();
+            var changes = new List<SpecChange>();
+            for (var n = 1 + r.Next(3); n > 0; n--)
+            {
+                var kind = r.Next(4);
+                var onFilter = filter is not null && r.Next(2) == 0;
+                if (kind == 3 && removed.Count > 0)
+                {
+                    var back = removed[0];
+                    removed.RemoveAt(0);
+                    current.Add(back);
+                    changes.Add(new SpecAdd(back.Column, back.Transform, $"{back.Column}_spec{changes.Count}"));
+                    continue;
+                }
+                if (kind is (1 or 2) && current.Count > 0)
+                {
+                    var preferred = onFilter ? current.FindIndex(p => p.Column == filter!.Column) : -1;
+                    var pick = current[preferred >= 0 ? preferred : r.Next(current.Count)];
+                    if (kind == 2)
+                    {
+                        changes.Add(new SpecRename(pick.Column, pick.Transform, $"{pick.Column}_part{changes.Count}"));
+                        continue;
+                    }
+                    current.Remove(pick);
+                    removed.Add(pick);
+                    changes.Add(new SpecRemove(pick.Column, pick.Transform));
+                    continue;
+                }
+                var pool = onFilter ? sources.Where(c => c.Name == filter!.Column).ToList() : sources;
+                if (pool.Count == 0) continue;
+                var column = pool[r.Next(pool.Count)];
+                // Not a transform the column already has, and not a second time transform: Java rejects year + month
+                // on one source as redundant.
+                var valid = Transforms.Where(t => t.CanTransform(column.Type)
+                    && !current.Any(p => p.Column == column.Name && (p.Transform.Equals(t) || (p.Transform is TimeTransform && t is TimeTransform)))).ToList();
+                if (valid.Count == 0) continue;
+                var added = new PartitionPick(column.Name, valid[r.Next(valid.Count)]);
+                current.Add(added);
+                removed.Remove(added);
+                changes.Add(new SpecAdd(added.Column, added.Transform, $"{added.Column}_spec{changes.Count}"));
+            }
+            if (changes.Count == 0) return (null, null);
+            if (filter is not null) return (changes, null);
+            var columns = schema.Columns.ToList();
+            var filterable = changes.OfType<SpecAdd>().Select(a => columns.FindIndex(c => c.Name == a.Column)).Where(i => Filterable(columns[i].Type)).Distinct().ToList();
+            if (filterable.Count == 0) return (changes, null);
+            var index = filterable[r.Next(filterable.Count)];
+            var values = rows.Select(row => row[index]).Where(v => v is not null).ToList();
+            return (changes, values.Count == 0 ? null : new FilterPick(columns[index].Name, columns[index].Type, values[r.Next(values.Count)]!));
+        }
+
+        /// <summary>Top-level primitives a partition field may read; floats, doubles and nanosecond timestamps are left out.</summary>
+        private static bool PartitionSource(IcebergType t) =>
+            t.IsPrimitive && t.TypeId is not (TypeId.Float or TypeId.Double or TypeId.TimestampNs or TypeId.TimestampTzNs);
+
         private static readonly Transform[] Transforms =
         [
             Transform.Identity, Transform.Bucket(1), Transform.Bucket(4), Transform.Bucket(7), Transform.Bucket(16),
@@ -617,7 +870,7 @@ public sealed class GeneratedDifferentialTests(ITestOutputHelper output) : IDisp
             var r = new Random(seed ^ 0x2C1B3C6D);
             if (r.Next(2) == 0) return (null, null);
             var sources = schema.Columns
-                .Where(c => c.Type.IsPrimitive && c.Type.TypeId is not (TypeId.Float or TypeId.Double or TypeId.TimestampNs or TypeId.TimestampTzNs))
+                .Where(c => PartitionSource(c.Type))
                 .OrderBy(_ => r.Next()).Take(1 + r.Next(2)).ToList();
             var picks = new List<PartitionPick>();
             foreach (var c in sources)
@@ -634,7 +887,8 @@ public sealed class GeneratedDifferentialTests(ITestOutputHelper output) : IDisp
             return (picks, values.Count == 0 ? null : new FilterPick(columns[index].Name, columns[index].Type, values[r.Next(values.Count)]!));
         }
 
-        public static Case Generate(int seed, int maxFormatVersion, bool partitioned = false)
+        /// <summary>Without <paramref name="deletes"/> the delete is still drawn, so the seed's other choices do not move.</summary>
+        public static Case Generate(int seed, int maxFormatVersion, bool deletes)
         {
             var g = new Gen(new Random(seed));
             var formatVersion = g.R.Next(2) == 0 ? 2 : maxFormatVersion;
@@ -656,9 +910,10 @@ public sealed class GeneratedDifferentialTests(ITestOutputHelper output) : IDisp
             DeleteSpec? delete = g.R.Next(2) == 0 ? null
                 : new DeleteSpec(2 + g.R.Next(5), 0, g.R.Next(2) == 0 ? DeleteStrategy.CopyOnWrite : DeleteStrategy.PositionDeletes);
             var batches = 1 + g.R.Next(3);
-            var (partition, filter) = partitioned ? PartitionAndFilter(seed, schema, rows) : (null, null);
-            var evolution = partitioned ? EvolutionFor(seed, schema, partition, filter) : null;
-            return new Case(seed, formatVersion, schema, rows, batches, delete, partition, filter, evolution);
+            var (partition, filter) = PartitionAndFilter(seed, schema, rows);
+            var evolution = EvolutionFor(seed, schema, partition, filter);
+            var (specEvolution, specFilter) = SpecEvolutionFor(seed, schema, rows, partition, filter, evolution);
+            return new Case(seed, formatVersion, schema, rows, batches, deletes ? delete : null, partition, filter ?? specFilter, evolution, specEvolution);
         }
     }
 

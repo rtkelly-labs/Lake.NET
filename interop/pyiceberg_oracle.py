@@ -17,9 +17,11 @@ Commands (all output is JSON on stdout so the C# suite can assert on it):
                                      number of files it planned; the expression format is in _expression()
     puffin-fixtures <out_dir>        reference Theta sketches (datasketches) and deletion vectors (pyroaring)
     inspect-puffin <file.puffin>     decode a Puffin file with PyIceberg + datasketches and report contents
-    write-arrow <warehouse> <file.arrow> <format-version>
+    write-arrow <warehouse> <file.arrow> <format-version> [<plan.json>]
                                      create a table in a local SQLite catalog under <warehouse> from an Arrow IPC
-                                     file's schema and append its rows (the generated-table differential campaign)
+                                     file's schema and append its rows (the generated-table differential campaign);
+                                     with a plan, run its steps instead of the one append: appends of Arrow IPC files,
+                                     partition spec changes and schema changes (the format is in _run_plan_step())
 
 <catalog> is "glue" or "rest". Endpoints and credentials come from the same environment
 variables the C# regression suite reads (see docs/regression-suite.md), so both sides
@@ -704,15 +706,56 @@ def _without_field_ids(field: pa.Field) -> pa.Field:
     return pa.field(field.name, t, nullable=field.nullable)
 
 
-def cmd_write_arrow(
-    warehouse: Path, ipc_path: str, format_version: int
-) -> dict[str, Any]:
+def _read_arrow_by_name(ipc_path: str) -> pa.Table:
     data = pa.ipc.open_file(ipc_path).read_all()
     # The writer's field IDs travel as PARQUET:field_id metadata; PyIceberg resolves an appended table by those IDs when
     # present, but create_table assigns fresh ones. Drop them so the append resolves by name, as a user's table would.
     # A schema swap, not a cast: pyarrow refuses to cast a struct whose required child holds nulls under null parents.
     schema = pa.schema([_without_field_ids(f) for f in data.schema])
-    data = pa.Table.from_arrays(data.columns, schema=schema)
+    return pa.Table.from_arrays(data.columns, schema=schema)
+
+
+def _run_plan_step(table: Table, step: dict[str, Any]) -> None:
+    """{"append": file.arrow} | {"spec": [op, ...]} (one commit) | {"schema": [op, ...]} (one commit per op).
+
+    Spec ops: {"op": "add", "column", "transform", "name"} | {"op": "remove", "name"} | {"op": "rename", "name", "to"}.
+    Schema ops: {"op": "add", "column"} (an optional long) | {"op": "drop", "column"} |
+    {"op": "rename", "column", "to"} | {"op": "promote", "column", "to": "long"|"double"}."""
+    if "append" in step:
+        table.append(_read_arrow_by_name(step["append"]))
+    elif "spec" in step:
+        with table.update_spec() as spec:
+            for op in step["spec"]:
+                match op["op"]:
+                    case "add":
+                        spec.add_field(op["column"], op["transform"], op["name"])
+                    case "remove":
+                        spec.remove_field(op["name"])
+                    case "rename":
+                        spec.rename_field(op["name"], op["to"])
+                    case other:
+                        raise SystemExit(f"unknown spec op {other!r}")
+    else:
+        for op in step["schema"]:
+            with table.update_schema() as schema:
+                match op["op"]:
+                    case "add":
+                        schema.add_column(op["column"], LongType())
+                    case "drop":
+                        schema.delete_column(op["column"])
+                    case "rename":
+                        schema.rename_column(op["column"], op["to"])
+                    case "promote":
+                        promoted = LongType() if op["to"] == "long" else DoubleType()
+                        schema.update_column(op["column"], field_type=promoted)
+                    case other:
+                        raise SystemExit(f"unknown schema op {other!r}")
+
+
+def cmd_write_arrow(
+    warehouse: Path, ipc_path: str, format_version: int, plan_path: str | None = None
+) -> dict[str, Any]:
+    data = _read_arrow_by_name(ipc_path)
     warehouse.mkdir(parents=True, exist_ok=True)
     catalog = load_catalog(
         "generated",
@@ -726,7 +769,11 @@ def cmd_write_arrow(
         schema=data.schema,
         properties={"format-version": str(format_version)},
     )
-    table.append(data)
+    if plan_path is None:
+        table.append(data)
+    else:
+        for step in json.loads(Path(plan_path).read_text())["steps"]:
+            _run_plan_step(table, step)
     return {"metadata_location": table.metadata_location}
 
 
@@ -754,6 +801,10 @@ def main(argv: list[str]) -> None:
             result = cmd_inspect_puffin(location)
         case ["write-arrow", warehouse, ipc_path, format_version]:
             result = cmd_write_arrow(Path(warehouse), ipc_path, int(format_version))
+        case ["write-arrow", warehouse, ipc_path, format_version, plan_path]:
+            result = cmd_write_arrow(
+                Path(warehouse), ipc_path, int(format_version), plan_path
+            )
         case _:
             raise SystemExit(__doc__)
     json.dump(result, sys.stdout)
