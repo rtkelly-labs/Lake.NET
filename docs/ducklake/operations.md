@@ -11,8 +11,10 @@ await tx.AddDataFilesAsync("main", "events", ["s3://bucket/exports/region=eu/par
 await tx.CommitAsync();
 ```
 
-Registering a file transfers ownership to the lake: rewriting, snapshot expiry and cleanup can delete it, even
-when its absolute path is outside `data_path`, as [DuckDB documents](https://ducklake.select/docs/stable/duckdb/metadata/adding_files).
+Registering a file transfers ownership to the lake, as [DuckDB documents](https://ducklake.select/docs/stable/duckdb/metadata/adding_files):
+rewriting and snapshot expiry can schedule it for deletion. Cleanup deletes a scheduled file outside `data_path` only
+when `DuckLakeOptions.CleanupOutsideDataPath` is set (DuckDB deletes it unconditionally); otherwise its row stays
+scheduled, because a catalog row is not trusted to name arbitrary files (see [Security](testing.md#security)).
 
 Each file's footer is read (not its data): columns are matched to the table's by name (struct fields by name, list
 elements and map keys and values by position), whatever field IDs the file has, and each must be readable as its
@@ -85,9 +87,9 @@ DuckDB's maintenance functions are extension behaviour, not format; these do wha
 |---|---|---|
 | `MergeAdjacentFilesAsync(schema?, table?, DuckLakeMergeOptions)` | `ducklake_merge_adjacent_files` | One snapshot (`merge_adjacent:{table}`). Files of one partition, in commit order, grouped towards `TargetFileSize`, become one *partial* file holding each row's row ID and writing snapshot (`_ducklake_internal_row_id`, `_ducklake_internal_snapshot_id`); it begins at the earliest input's snapshot, with `partial_max` the latest. The inputs leave `ducklake_data_file` and are scheduled for deletion. Files with deletes, and files from before the table's last schema change, are skipped |
 | `RewriteDataFilesAsync(schema?, table?, deleteThreshold = 0.95)` | `ducklake_rewrite_data_files` | One snapshot (`rewrite_delete:{table}`). A file whose deleted share (delete file plus inlined deletions) reaches the threshold is replaced by its survivors, row IDs stored (`row_id_start` NULL); the old file and its delete file end, so older snapshots still read them |
-| `ExpireSnapshotsAsync(versions)` / `ExpireSnapshotsAsync(olderThan)` | `ducklake_expire_snapshots` | No snapshot. Every catalog row no retained snapshot can see (`begin <= s < end` for none) is removed: files, delete files, dropped tables and their columns, statistics and inlined tables, tags, partition and sort specs, deleted inlined rows. Files among them are scheduled. The latest snapshot is never expired. `dryRun` reports without changing anything |
-| `CleanupOldFilesAsync(olderThan?)` | `ducklake_cleanup_old_files` | Deletes scheduled files (relative paths resolve against `data_path`, as DuckDB writes them) and their rows |
-| `DeleteOrphanedFilesAsync(olderThan = 3 days)` | `ducklake_delete_orphaned_files` | Deletes `.parquet`/`.puffin` files under `data_path` that no row refers to, older than the age given (at least an hour: younger ones may belong to a commit in flight). Needs an `IFileIO` that lists |
+| `ExpireSnapshotsAsync(versions)` / `ExpireSnapshotsAsync(olderThan)` | `ducklake_expire_snapshots` | No snapshot. Every catalog row no retained snapshot can see (`begin <= s < end` for none) is removed: files, delete files, dropped tables and their columns, statistics and inlined tables, tags, partition and sort specs, deleted inlined rows. Files among them are scheduled. The latest snapshot is never expired. `dryRun` reports without changing anything. Transient database failures are retried; a failure at `COMMIT` counts as done when none of the chosen snapshots is left, else `DuckLakeCommitStateUnknownException` (rerunning is safe) |
+| `CleanupOldFilesAsync(olderThan?)` | `ducklake_cleanup_old_files` | Deletes files scheduled strictly before `olderThan` (every scheduled file when null) and their rows. Relative paths resolve against `data_path`, as DuckDB writes them; only files under `data_path` are deleted (rows that climb out with `..`, or name absolute paths elsewhere, stay scheduled), unless `CleanupOutsideDataPath` allows absolute ones |
+| `DeleteOrphanedFilesAsync(olderThan = 3 days)` | `ducklake_delete_orphaned_files` | Deletes `.parquet`/`.puffin` files under `data_path` that no row refers to, older than the age given (at least an hour: younger ones may belong to a commit in flight). Needs an `IFileIO` that lists; listed locations outside `data_path` are never deleted. Paths compare with doubled slashes collapsed and a scheme's `://` kept |
 
 Compactions take part in conflict resolution per data file, as the spec's Compaction rules say: a delete and a merge or
 rewrite of the same file conflict (whichever commits second loses), compactions of different files of one table

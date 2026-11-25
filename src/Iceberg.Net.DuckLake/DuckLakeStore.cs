@@ -52,17 +52,28 @@ public sealed class DuckLakeStore
     }
 
     /// <summary>
-    /// The <c>ATTACH</c> string DuckDB uses for this catalog (handy for handing a lake written here to DuckDB).
+    /// The <c>ATTACH</c> string DuckDB uses for this catalog (handy for handing a lake written here to DuckDB). The
+    /// PostgreSQL part is a libpq keyword/value string: values with spaces, quotes, backslashes or <c>=</c> are
+    /// single-quoted with <c>\'</c> and <c>\\</c> escapes, so a password such as <c>a b';c</c> survives. Embedded in SQL
+    /// (<c>ATTACH '…'</c>) the string is a literal like any other: double its single quotes.
     /// </summary>
     public string DuckDbAttach()
     {
         if (Dialect == DuckLakeDialect.Sqlite)
             return "ducklake:sqlite:" + new Microsoft.Data.Sqlite.SqliteConnectionStringBuilder(ConnectionString).DataSource;
         var b = new NpgsqlConnectionStringBuilder(ConnectionString);
-        var parts = new List<string> { $"dbname={b.Database}", $"host={b.Host}", $"port={b.Port.ToString(CultureInfo.InvariantCulture)}" };
-        if (b.Username is { } user) parts.Add($"user={user}");
-        if (b.Password is { } password) parts.Add($"password={password}");
+        var parts = new List<string> { Libpq("dbname", b.Database), Libpq("host", b.Host), Libpq("port", b.Port.ToString(CultureInfo.InvariantCulture)) };
+        if (b.Username is { } user) parts.Add(Libpq("user", user));
+        if (b.Password is { } password) parts.Add(Libpq("password", password));
         return "ducklake:postgres:" + string.Join(' ', parts);
+    }
+
+    /// <summary>One libpq <c>keyword=value</c> pair (libpq "Keyword/Value Connection Strings"), quoted when the value needs it.</summary>
+    internal static string Libpq(string keyword, string? value)
+    {
+        value ??= "";
+        var plain = value.Length > 0 && value.All(c => !char.IsWhiteSpace(c) && c is not ('\'' or '\\' or '='));
+        return keyword + "=" + (plain ? value : "'" + value.Replace("\\", "\\\\", StringComparison.Ordinal).Replace("'", "\\'", StringComparison.Ordinal) + "'");
     }
 }
 

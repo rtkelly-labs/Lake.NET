@@ -51,9 +51,9 @@ public abstract class AddFilesTests : IAsyncLifetime
         return path;
     }
 
-    private async Task<DuckLakeCatalog> LakeAsync()
+    private async Task<DuckLakeCatalog> LakeAsync(DuckLakeOptions? options = null)
     {
-        var catalog = await _lake.CreateAsync();
+        var catalog = await _lake.CreateAsync(options);
         await using var tx = catalog.BeginTransaction();
         await tx.CreateTableAsync("main", "t", [new("id", DuckLakeType.Int64), new("name", DuckLakeType.Varchar)]);
         await tx.CommitAsync();
@@ -96,7 +96,8 @@ public abstract class AddFilesTests : IAsyncLifetime
     [Spec("ducklake: ducklake_files_scheduled_for_deletion")]
     public async Task Registered_files_transfer_ownership_and_are_cleaned_up_after_expiry()
     {
-        var catalog = await LakeAsync();
+        // Files outside data_path are deleted only when the options say so (the catalog is not trusted to name them).
+        var catalog = await LakeAsync(new DuckLakeOptions { CleanupOutsideDataPath = true });
         var external = Plain("owned.parquet", [1, 2], ["a", "b"]);
         await AddAsync(catalog, [external]);
         await using (var tx = catalog.BeginTransaction())
@@ -107,12 +108,16 @@ public abstract class AddFilesTests : IAsyncLifetime
         await catalog.RewriteDataFilesAsync(deleteThreshold: 0.1);
         Assert.True(File.Exists(external)); // older snapshots still own the original
         await catalog.ExpireSnapshotsAsync(DateTimeOffset.UtcNow.AddMinutes(1));
-        Assert.Contains(external, await catalog.CleanupOldFilesAsync());
+        var cautious = await _lake.OpenAsync();
+        Assert.DoesNotContain(external, await cautious.CleanupOldFilesAsync(dryRun: true));
+        Assert.DoesNotContain(external, await cautious.CleanupOldFilesAsync()); // the lake's own files go
+        Assert.True(File.Exists(external));
+        Assert.Equal([external], await catalog.CleanupOldFilesAsync());
         Assert.False(File.Exists(external));
         Assert.Equal(["2:b"], await RowsAsync(catalog));
     }
 
-    [Fact]
+    [SkippableFact]
     [Spec("ducklake: ducklake_column_mapping")]
     [Spec("ducklake: ducklake_name_mapping")]
     [Spec("ducklake: ducklake_data_file")]
@@ -139,7 +144,7 @@ public abstract class AddFilesTests : IAsyncLifetime
         Assert.Empty((await catalog.PlanScanAsync(await catalog.LoadTableAsync("main", "t"), Expr.GreaterThan("id", 3L))).Files);
     }
 
-    [Fact]
+    [SkippableFact]
     public async Task Columns_are_matched_by_name_whatever_their_order_or_field_ids()
     {
         var catalog = await LakeAsync();
@@ -158,7 +163,7 @@ public abstract class AddFilesTests : IAsyncLifetime
         Assert.Equal("name", mappings[0][2]);
     }
 
-    [Fact]
+    [SkippableFact]
     public async Task Files_with_one_layout_share_one_mapping_within_a_commit()
     {
         var catalog = await LakeAsync();
@@ -168,7 +173,7 @@ public abstract class AddFilesTests : IAsyncLifetime
         Assert.Equal([1L, 2L], (await _lake.SqlAsync("SELECT data_file_id FROM ducklake_data_file ORDER BY data_file_id")).Select(r => Convert.ToInt64(r[0])));
     }
 
-    [Fact]
+    [SkippableFact]
     public async Task Missing_extra_and_unreadable_columns_are_refused_unless_allowed()
     {
         var catalog = await LakeAsync();
@@ -197,7 +202,7 @@ public abstract class AddFilesTests : IAsyncLifetime
         Assert.Equal(["1:a"], await RowsAsync(catalog));
     }
 
-    [Fact]
+    [SkippableFact]
     public async Task Hive_partition_columns_come_from_the_path()
     {
         var catalog = await _lake.CreateAsync();
@@ -217,7 +222,7 @@ public abstract class AddFilesTests : IAsyncLifetime
         Assert.Single((await catalog.PlanScanAsync(table, Expr.IsNull("year"))).Files); // pruned by the path value's statistics
     }
 
-    [Fact]
+    [SkippableFact]
     public async Task Added_rows_take_row_ids_and_can_be_deleted_updated_and_compacted()
     {
         var catalog = await LakeAsync();
@@ -243,6 +248,10 @@ public abstract class AddFilesTests : IAsyncLifetime
         Assert.Equal([0L, 1L, 3L], ids.Order());
         await catalog.RewriteDataFilesAsync(deleteThreshold: 0.1);
         Assert.Equal(["100:written", "1:a", "3:C"], await RowsAsync(catalog));
+        // The rewrite of the file registered in place is written in the table's directory, under a relative path (not
+        // under the registered file's absolute directory, appended to the table's).
+        Assert.All(await _lake.SqlAsync("SELECT path FROM ducklake_data_file WHERE path_is_relative = " + (_lake.Backend == CatalogBackend.Sqlite ? "1" : "TRUE")),
+            r => Assert.StartsWith("ducklake-", (string)r[0]!));
     }
 }
 
